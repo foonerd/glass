@@ -74,6 +74,10 @@ pub struct SkinDesc {
     pub right_at: Option<(u32, u32)>,
     /// `indicator.filename` from the selected meter.
     pub indicator: String,
+    /// Circular needle sweep in degrees, start then stop.
+    pub needle: Option<(f32, f32)>,
+    pub title_at: Option<(u32, u32)>,
+    pub artist_at: Option<(u32, u32)>,
 }
 
 impl Default for SkinDesc {
@@ -95,6 +99,9 @@ impl SkinDesc {
             left_at: None,
             right_at: None,
             indicator: String::new(),
+            needle: None,
+            title_at: None,
+            artist_at: None,
         }
     }
 }
@@ -419,6 +426,87 @@ pub fn meter_indicator(meters_txt: &str, meter: &str) -> Option<String> {
         .or_else(|| sections.first())
         .map(|(_, file)| file.clone())
         .filter(|file| !file.is_empty())
+}
+
+/// `start.angle` and `stop.angle` for the selected meter.
+pub fn meter_needle(meters_txt: &str, meter: &str) -> Option<(f32, f32)> {
+    let mut current = String::new();
+    let mut found_start = None;
+    let mut found_stop = None;
+    let named = meter != "random" && meter != "list" && !meter.is_empty();
+    let mut take = !named;
+    for line in meters_txt.lines() {
+        let line = line.trim();
+        if let Some(title) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            if take && found_start.is_some() && found_stop.is_some() {
+                return Some((found_start.unwrap(), found_stop.unwrap()));
+            }
+            current = title.trim().to_string();
+            take = !named || current == meter;
+            if take {
+                found_start = None;
+                found_stop = None;
+            }
+            continue;
+        }
+        if !take {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let parsed = value.trim().parse::<f32>().ok();
+        match key.trim() {
+            "start.angle" => found_start = parsed,
+            "stop.angle" => found_stop = parsed,
+            _ => {}
+        }
+    }
+    match (found_start, found_stop) {
+        (Some(a), Some(b)) => Some((a, b)),
+        _ => None,
+    }
+}
+
+fn pair_pos(value: &str) -> Option<(u32, u32)> {
+    let mut parts = value.split(',');
+    let x = parts.next()?.trim().parse().ok()?;
+    let y = parts.next()?.trim().parse().ok()?;
+    Some((x, y))
+}
+
+/// `playinfo.title.pos` and `playinfo.artist.pos` as x,y. The style word is ignored.
+pub fn meter_text_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Option<(u32, u32)>) {
+    let mut title = None;
+    let mut artist = None;
+    let named = meter != "random" && meter != "list" && !meter.is_empty();
+    let mut take = !named;
+    for line in meters_txt.lines() {
+        let line = line.trim();
+        if let Some(title_name) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            if take && (title.is_some() || artist.is_some()) && named {
+                break;
+            }
+            take = !named || title_name.trim() == meter;
+            if take && named {
+                title = None;
+                artist = None;
+            }
+            continue;
+        }
+        if !take {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "playinfo.title.pos" => title = pair_pos(value),
+            "playinfo.artist.pos" => artist = pair_pos(value),
+            _ => {}
+        }
+    }
+    (title, artist)
 }
 
 /// Sleep between steps for a frame rate in frames per second.

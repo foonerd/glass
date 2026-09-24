@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.3] - 2026-09-24
+
+The window covers the display. Needles rotate with the meter level. Title and artist come from Volumio while a track is playing.
+
 ## [0.4.2] - 2026-09-24
 
 The window is borderless. The unrotated needle image is not drawn. That image was the thick black bar on each meter.

@@ -14,6 +14,7 @@ pub struct Scene {
     pub bars: Vec<f32>,
     pub left_at: Option<(u32, u32)>,
     pub right_at: Option<(u32, u32)>,
+    pub needle: Option<(f32, f32)>,
 }
 
 impl Default for Scene {
@@ -27,6 +28,7 @@ impl Default for Scene {
             bars: Vec::new(),
             left_at: None,
             right_at: None,
+            needle: None,
         }
     }
 }
@@ -49,6 +51,7 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
             .collect(),
         left_at: skin.left_at,
         right_at: skin.right_at,
+        needle: skin.needle,
     }
 }
 

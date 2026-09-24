@@ -8,7 +8,7 @@ use std::env;
 use std::process::ExitCode;
 use std::thread;
 
-use expose::{raster_over, read_png};
+use expose::{draw_text, raster_over, read_png};
 use intake::{PipeSource, Source};
 use lead::frame_period;
 use pane::{publish, write_ppm, Surface};
@@ -100,7 +100,16 @@ fn main() -> ExitCode {
             );
         }
         if surface.is_some() || write_file {
-            let frame = raster_over(&scene, background.as_ref(), indicator.as_ref());
+            let mut frame = raster_over(&scene, background.as_ref(), indicator.as_ref());
+            let playing = intake::now_playing();
+            let title_at = skin.title_at.unwrap_or((48, frame.height.saturating_sub(72)));
+            let artist_at = skin.artist_at.unwrap_or((48, frame.height.saturating_sub(40)));
+            if !playing.title.is_empty() {
+                draw_text(&mut frame, title_at.0, title_at.1, &playing.title);
+            }
+            if !playing.artist.is_empty() {
+                draw_text(&mut frame, artist_at.0, artist_at.1, &playing.artist);
+            }
             if let Some(window) = surface.as_mut() {
                 match window.show(&frame) {
                     Ok(true) => {}
