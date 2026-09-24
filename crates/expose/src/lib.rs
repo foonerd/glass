@@ -82,7 +82,6 @@ pub fn raster(scene: &Scene) -> Frame {
 /// `background` is the theme picture. It is copied in place. It is not scaled.
 /// A theme is authored at its own resolution, so a mismatch leaves the dark fill.
 pub fn raster_over(scene: &Scene, background: Option<&Frame>, indicator: Option<&Frame>) -> Frame {
-    let _ = indicator;
     let width = scene.width.max(1);
     let height = scene.height.max(1);
     let mut rgba = vec![0u8; (width * height * 4) as usize];
@@ -91,6 +90,16 @@ pub fn raster_over(scene: &Scene, background: Option<&Frame>, indicator: Option<
     }
     if let Some(background) = background {
         blit(&mut rgba, width, height, background);
+        if let (Some(sprite), Some((start, stop))) = (indicator, scene.needle) {
+            if let Some(at) = scene.left_at {
+                let angle = start + (stop - start) * scene.left;
+                blit_rotated(&mut rgba, width, height, sprite, at, angle);
+            }
+            if let Some(at) = scene.right_at {
+                let angle = start + (stop - start) * scene.right;
+                blit_rotated(&mut rgba, width, height, sprite, at, angle);
+            }
+        }
     } else {
         let layout = layout(width, height);
         let left_meter = place(layout.left_meter, scene.left_at, width, height);
@@ -155,6 +164,36 @@ fn fill_bars(rgba: &mut [u8], stride: u32, rect: &Rect, bars: &[f32], color: [u8
     }
 }
 
+fn blit_rotated(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (u32, u32), degrees: f32) {
+    let rad = degrees.to_radians();
+    let (sin, cos) = rad.sin_cos();
+    let pivot_x = src.width as f32 / 2.0;
+    let pivot_y = src.height as f32;
+    let span = (src.width.max(src.height) as i32) * 2;
+    for dy in -span..span {
+        for dx in -span..span {
+            let sx = pivot_x + dx as f32 * cos - dy as f32 * sin;
+            let sy = pivot_y + dx as f32 * sin + dy as f32 * cos;
+            let ix = sx.floor() as i32;
+            let iy = sy.floor() as i32;
+            if ix < 0 || iy < 0 || ix >= src.width as i32 || iy >= src.height as i32 {
+                continue;
+            }
+            let s = (iy as usize * src.width as usize + ix as usize) * 4;
+            if src.rgba[s + 3] == 0 {
+                continue;
+            }
+            let ox = at.0 as i32 + dx;
+            let oy = at.1 as i32 + dy;
+            if ox < 0 || oy < 0 || ox >= dst_w as i32 || oy >= dst_h as i32 {
+                continue;
+            }
+            let d = (oy as usize * dst_w as usize + ox as usize) * 4;
+            dst[d..d + 4].copy_from_slice(&src.rgba[s..s + 4]);
+        }
+    }
+}
+
 fn place(fallback: Rect, at: Option<(u32, u32)>, width: u32, height: u32) -> Rect {
     let Some((x, y)) = at else {
         return fallback;
@@ -192,6 +231,36 @@ pub fn read_png(path: &Path) -> Option<Frame> {
     })
 }
 
+pub fn draw_text(frame: &mut Frame, x: u32, y: u32, text: &str) {
+    use font8x8::UnicodeFonts;
+    let scale = 2u32;
+    for (index, ch) in text.chars().enumerate() {
+        let Some(glyph) = font8x8::BASIC_FONTS.get(ch) else {
+            continue;
+        };
+        for (row, bits) in glyph.iter().enumerate() {
+            for col in 0..8u32 {
+                if bits & (1 << col) == 0 {
+                    continue;
+                }
+                let px = x + index as u32 * 8 * scale + col * scale;
+                let py = y + row as u32 * scale;
+                for sy in 0..scale {
+                    for sx in 0..scale {
+                        put(
+                            &mut frame.rgba,
+                            frame.width,
+                            px + sx,
+                            py + sy,
+                            [240, 240, 240, 255],
+                        );
+                    }
+                }
+            }
+        }
+    }
+}
+
 fn put(rgba: &mut [u8], stride: u32, x: u32, y: u32, color: [u8; 4]) {
     let i = ((y * stride + x) * 4) as usize;
     if i + 3 < rgba.len() {
@@ -215,6 +284,7 @@ mod tests {
             bars: vec![1.0, 0.0],
             left_at: None,
             right_at: None,
+            needle: None,
         };
         let frame = raster(&scene);
         let layout = layout(frame.width, frame.height);

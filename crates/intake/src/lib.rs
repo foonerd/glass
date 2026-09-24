@@ -2,13 +2,15 @@
 //! This station does not parse skin geometry or draw.
 
 use std::fs::{File, OpenOptions};
-use std::io::{self, Read};
+use std::io::{self, Read, Write};
+use std::net::TcpStream;
+use std::time::Duration;
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use lead::{
     decode_meter, decode_spectrum, frame_rate_from_config, meter_at, meter_background,
-    meter_indicator, mono_average,
+    meter_indicator, meter_needle, meter_text_at, mono_average,
     scale_level, screen_from_config, Bins, Input, Levels, SkinDesc, CONFIG_TXT, DEFAULT_FRAME_RATE,
     DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO, current_value,
 };
@@ -222,11 +224,69 @@ pub fn installed_skin() -> SkinDesc {
         if let Some(file) = meter_indicator(&meters, &skin.name) {
             skin.indicator = file;
         }
+        skin.needle = meter_needle(&meters, &skin.name);
+        let (title_at, artist_at) = meter_text_at(&meters, &skin.name);
+        skin.title_at = title_at;
+        skin.artist_at = artist_at;
     }
     skin
 }
 
-/// Build an input from one meter record and one spectrum record.
+pub struct NowPlaying {
+    pub title: String,
+    pub artist: String,
+}
+
+/// Current track from Volumio. Empty strings when the player does not answer.
+pub fn now_playing() -> NowPlaying {
+    let mut playing = NowPlaying {
+        title: String::new(),
+        artist: String::new(),
+    };
+    let address = std::net::SocketAddr::from(([127, 0, 0, 1], 3000));
+    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(200)) else {
+        return playing;
+    };
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+    let _ = stream.write_all(
+        b"GET /api/v1/getState HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+    );
+    let mut buf = String::new();
+    if stream.read_to_string(&mut buf).is_err() {
+        return playing;
+    }
+    let body = buf.split_once("\r\n\r\n").map(|(_, body)| body).unwrap_or(&buf);
+    playing.title = json_string(body, "title");
+    playing.artist = json_string(body, "artist");
+    playing
+}
+
+fn json_string(body: &str, key: &str) -> String {
+    let pattern = format!("\"{key}\"");
+    let Some(start) = body.find(&pattern) else {
+        return String::new();
+    };
+    let rest = body[start + pattern.len()..].trim_start();
+    let rest = rest.trim_start_matches(':').trim_start();
+    let Some(rest) = rest.strip_prefix('"') else {
+        return String::new();
+    };
+    let mut out = String::new();
+    let mut chars = rest.chars();
+    while let Some(ch) = chars.next() {
+        if ch == '\\' {
+            if let Some(next) = chars.next() {
+                out.push(next);
+            }
+            continue;
+        }
+        if ch == '"' {
+            break;
+        }
+        out.push(ch);
+    }
+    out
+}
 pub fn input_from_records(
     meter: &[u8],
     spectrum: &[u8],
