@@ -7,6 +7,11 @@ use std::path::PathBuf;
 use std::process::Command;
 
 fn main() {
+    let target = std::env::var("TARGET").unwrap_or_default();
+    let host = std::env::var("HOST").unwrap_or_default();
+    if target != host {
+        return;
+    }
     let out = PathBuf::from(std::env::var("OUT_DIR").unwrap()).join("sdl-link");
     let _ = fs::create_dir_all(&out);
     if let Some(runtime) = runtime_library() {

@@ -11,17 +11,32 @@ ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 
 if [ -n "$GLASS_BIN" ]; then
   BIN=$GLASS_BIN
-elif [ -x "$ROOT/target/release/glass" ]; then
-  BIN=$ROOT/target/release/glass
-elif [ -x "$ROOT/target/debug/glass" ]; then
-  BIN=$ROOT/target/debug/glass
 else
-  BIN=$(command -v glass || true)
+  ARCH_DIR=$(sed -n 's/^VOLUMIO_ARCH="\(.*\)"/\1/p' /etc/os-release 2>/dev/null | head -n1)
+  if [ -z "$ARCH_DIR" ]; then
+    case $(uname -m) in
+      x86_64) ARCH_DIR=x64 ;;
+      aarch64) ARCH_DIR=armv8 ;;
+      armv7l|armv6l) ARCH_DIR=armv7 ;;
+      *) ARCH_DIR=$(uname -m) ;;
+    esac
+  fi
+  if [ -x "$ROOT/bin/$ARCH_DIR/glass" ]; then
+    BIN=$ROOT/bin/$ARCH_DIR/glass
+  else
+    BIN=$(command -v glass || true)
+  fi
 fi
 
 if [ -z "$BIN" ] || [ ! -x "$BIN" ]; then
   echo "glass-launcher: glass binary not found" >&2
   exit 1
+fi
+
+if ! "$BIN" --help >/dev/null 2>&1; then
+  echo "glass-launcher: the shipped binary for this machine is missing or is the wrong CPU." >&2
+  echo "glass-launcher: expected $ROOT/bin/$ARCH_DIR/glass" >&2
+  exit 126
 fi
 
 ARCH=$(sed -n 's/^VOLUMIO_ARCH="\(.*\)"/\1/p' /etc/os-release 2>/dev/null | head -n1)
