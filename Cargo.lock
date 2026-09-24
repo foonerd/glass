@@ -4,14 +4,14 @@ version = 4
 
 [[package]]
 name = "expose"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "plot",
 ]
 
 [[package]]
 name = "glass"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "expose",
  "intake",
@@ -22,7 +22,7 @@ dependencies = [
 
 [[package]]
 name = "glass-remote"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "expose",
  "intake",
@@ -33,18 +33,18 @@ dependencies = [
 
 [[package]]
 name = "intake"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "lead",
 ]
 
 [[package]]
 name = "lead"
-version = "0.0.1"
+version = "0.1.0"
 
 [[package]]
 name = "pane"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "expose",
  "plot",
@@ -52,7 +52,7 @@ dependencies = [
 
 [[package]]
 name = "plot"
-version = "0.0.1"
+version = "0.1.0"
 dependencies = [
  "lead",
 ]
