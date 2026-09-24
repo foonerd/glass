@@ -1,6 +1,8 @@
 //! Raster a [`plot::Scene`] into one RGBA frame.
 //! This station does not poll a FIFO or talk to the player.
 
+use std::path::Path;
+
 use plot::Scene;
 
 const BG: [u8; 4] = [12, 12, 16, 255];
@@ -72,13 +74,22 @@ pub fn layout(width: u32, height: u32) -> Layout {
     }
 }
 
-/// Build the frame from the scene fractions.
+/// Build the frame from the scene fractions, over an optional theme image.
 pub fn raster(scene: &Scene) -> Frame {
+    raster_over(scene, None)
+}
+
+/// `background` is the theme picture. It is copied in place. It is not scaled.
+/// A theme is authored at its own resolution, so a mismatch leaves the dark fill.
+pub fn raster_over(scene: &Scene, background: Option<&Frame>) -> Frame {
     let width = scene.width.max(1);
     let height = scene.height.max(1);
     let mut rgba = vec![0u8; (width * height * 4) as usize];
     for px in rgba.chunks_exact_mut(4) {
         px.copy_from_slice(&BG);
+    }
+    if let Some(background) = background {
+        blit(&mut rgba, width, height, background);
     }
     let layout = layout(width, height);
     fill_column(&mut rgba, width, &layout.left_meter, scene.left, METER);
@@ -138,6 +149,28 @@ fn fill_bars(rgba: &mut [u8], stride: u32, rect: &Rect, bars: &[f32], color: [u8
             color,
         );
     }
+}
+
+fn blit(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame) {
+    let copy_w = dst_w.min(src.width) as usize;
+    let copy_h = dst_h.min(src.height) as usize;
+    for y in 0..copy_h {
+        let from = y * src.width as usize * 4;
+        let to = y * dst_w as usize * 4;
+        dst[to..to + copy_w * 4].copy_from_slice(&src.rgba[from..from + copy_w * 4]);
+    }
+}
+
+/// Load a theme PNG. The alpha channel is kept.
+pub fn read_png(path: &Path) -> Option<Frame> {
+    let image = image::open(path).ok()?.into_rgba8();
+    let width = image.width();
+    let height = image.height();
+    Some(Frame {
+        width,
+        height,
+        rgba: image.into_raw(),
+    })
 }
 
 fn put(rgba: &mut [u8], stride: u32, x: u32, y: u32, color: [u8; 4]) {

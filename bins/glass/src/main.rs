@@ -8,9 +8,9 @@ use std::env;
 use std::process::ExitCode;
 use std::thread;
 
-use expose::raster;
+use expose::{raster_over, read_png};
 use intake::{PipeSource, Source};
-use lead::{frame_period, SkinDesc};
+use lead::frame_period;
 use pane::{publish, write_ppm, Surface};
 use plot::step;
 
@@ -51,10 +51,24 @@ fn main() -> ExitCode {
     }
 
     let mut source = PipeSource::installed();
-    let skin = SkinDesc::basic();
+    let skin = intake::installed_skin();
     let frame_rate = intake::installed_frame_rate();
     let period = frame_period(frame_rate);
-    println!("glass: frame.rate={frame_rate}");
+    println!(
+        "glass: frame.rate={frame_rate} size={}x{} theme={}",
+        skin.width,
+        skin.height,
+        if skin.theme_dir.is_empty() {
+            "none"
+        } else {
+            &skin.theme_dir
+        }
+    );
+    let background = if skin.background.is_empty() {
+        None
+    } else {
+        read_png(std::path::Path::new(&skin.theme_dir).join(&skin.background).as_path())
+    };
     let show_window = env::var_os("DISPLAY").is_some() && !headless;
     let write_file = output.is_some();
     let serving_remote = false;
@@ -82,7 +96,7 @@ fn main() -> ExitCode {
             );
         }
         if surface.is_some() || write_file {
-            let frame = raster(&scene);
+            let frame = raster_over(&scene, background.as_ref());
             if let Some(window) = surface.as_mut() {
                 match window.show(&frame) {
                     Ok(true) => {}

@@ -4,12 +4,12 @@
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read};
 use std::os::unix::fs::OpenOptionsExt;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use lead::{
-    decode_meter, decode_spectrum, frame_rate_from_config, mono_average, scale_level, Bins, Input,
-    Levels, CONFIG_TXT, DEFAULT_FRAME_RATE, DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO,
-    SPECTRUM_FIFO,
+    decode_meter, decode_spectrum, frame_rate_from_config, meter_background, mono_average,
+    scale_level, screen_from_config, Bins, Input, Levels, SkinDesc, CONFIG_TXT, DEFAULT_FRAME_RATE,
+    DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO, current_value,
 };
 
 /// Linux `O_NONBLOCK`. A blocking open on a FIFO waits for the writer.
@@ -178,6 +178,45 @@ pub fn installed_frame_rate() -> u32 {
         Ok(text) => frame_rate_from_config(&text),
         Err(_) => DEFAULT_FRAME_RATE,
     }
+}
+
+/// Skin from the installed `config.txt`. Size and background come from the
+/// selected theme. With no config file the size stays 800×480 and there is
+/// no theme background.
+pub fn installed_skin() -> SkinDesc {
+    let path = std::env::var("GLASS_CONFIG").unwrap_or_else(|_| CONFIG_TXT.to_string());
+    let mut skin = SkinDesc::basic();
+    let Ok(text) = std::fs::read_to_string(&path) else {
+        return skin;
+    };
+    let (width, height) = screen_from_config(&text);
+    skin.width = width;
+    skin.height = height;
+    let folder = current_value(&text, "meter.folder").unwrap_or_default();
+    let base = current_value(&text, "base.folder").unwrap_or_default();
+    let meter = current_value(&text, "meter").unwrap_or_default();
+    if !meter.is_empty() {
+        skin.name = meter;
+    }
+    if folder.is_empty() {
+        return skin;
+    }
+    let root = if base.is_empty() {
+        Path::new(&path)
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
+    } else {
+        PathBuf::from(base)
+    };
+    let theme = root.join(&folder);
+    skin.theme_dir = theme.to_string_lossy().into_owned();
+    if let Ok(meters) = std::fs::read_to_string(theme.join("meters.txt")) {
+        if let Some(file) = meter_background(&meters, &skin.name) {
+            skin.background = file;
+        }
+    }
+    skin
 }
 
 /// Build an input from one meter record and one spectrum record.
