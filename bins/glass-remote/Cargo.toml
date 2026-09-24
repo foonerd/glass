@@ -1,0 +1,18 @@
+[package]
+name = "glass-remote"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Glass on a network display"
+
+[[bin]]
+name = "glass-remote"
+path = "src/main.rs"
+
+[dependencies]
+expose = { path = "../../crates/expose" }
+intake = { path = "../../crates/intake" }
+lead = { path = "../../crates/lead" }
+pane = { path = "../../crates/pane" }
+plot = { path = "../../crates/plot" }

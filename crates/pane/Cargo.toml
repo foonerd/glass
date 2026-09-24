@@ -1,0 +1,11 @@
+[package]
+name = "pane"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Put a frame on the glass, or publish a Scene"
+
+[dependencies]
+expose = { path = "../expose" }
+plot = { path = "../plot" }
