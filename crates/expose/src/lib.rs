@@ -76,31 +76,56 @@ pub fn layout(width: u32, height: u32) -> Layout {
 
 /// Build the frame from the scene fractions, over an optional theme image.
 pub fn raster(scene: &Scene) -> Frame {
-    raster_over(scene, None, None)
+    raster_over(
+        scene,
+        Stack {
+            screen: None,
+            face: None,
+            front: None,
+            needle: None,
+            face_at: (0, 0),
+        },
+    )
 }
 
 /// `background` is the theme picture. It is copied in place. It is not scaled.
 /// A theme is authored at its own resolution, so a mismatch leaves the dark fill.
-pub fn raster_over(scene: &Scene, background: Option<&Frame>, indicator: Option<&Frame>) -> Frame {
+pub struct Stack<'a> {
+    pub screen: Option<&'a Frame>,
+    pub face: Option<&'a Frame>,
+    pub front: Option<&'a Frame>,
+    pub needle: Option<&'a Frame>,
+    pub face_at: (u32, u32),
+}
+
+/// Theme order: full-screen picture, meter face, needles, meter foreground.
+pub fn raster_over(scene: &Scene, stack: Stack<'_>) -> Frame {
     let width = scene.width.max(1);
     let height = scene.height.max(1);
     let mut rgba = vec![0u8; (width * height * 4) as usize];
     for px in rgba.chunks_exact_mut(4) {
         px.copy_from_slice(&BG);
     }
-    if let Some(background) = background {
-        blit(&mut rgba, width, height, background);
-        if let (Some(sprite), Some((start, stop))) = (indicator, scene.needle) {
-            if let Some(at) = scene.left_at {
-                let angle = start + (stop - start) * scene.left;
-                blit_rotated(&mut rgba, width, height, sprite, at, angle);
-            }
-            if let Some(at) = scene.right_at {
-                let angle = start + (stop - start) * scene.right;
-                blit_rotated(&mut rgba, width, height, sprite, at, angle);
-            }
+    if let Some(screen) = stack.screen {
+        blit(&mut rgba, width, height, screen);
+    }
+    if let Some(face) = stack.face {
+        blit_at(&mut rgba, width, height, face, stack.face_at);
+    }
+    if let (Some(sprite), Some((start, stop, distance))) = (stack.needle, scene.needle) {
+        if let Some(at) = scene.left_at {
+            let angle = start + (stop - start) * scene.left;
+            blit_rotated(&mut rgba, width, height, sprite, at, angle, distance);
         }
-    } else {
+        if let Some(at) = scene.right_at {
+            let angle = start + (stop - start) * scene.right;
+            blit_rotated(&mut rgba, width, height, sprite, at, angle, distance);
+        }
+    }
+    if let Some(front) = stack.front {
+        blit_at(&mut rgba, width, height, front, stack.face_at);
+    }
+    if stack.screen.is_none() && stack.face.is_none() {
         let layout = layout(width, height);
         let left_meter = place(layout.left_meter, scene.left_at, width, height);
         let right_meter = place(layout.right_meter, scene.right_at, width, height);
@@ -164,31 +189,58 @@ fn fill_bars(rgba: &mut [u8], stride: u32, rect: &Rect, bars: &[f32], color: [u8
     }
 }
 
-fn blit_rotated(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (u32, u32), degrees: f32) {
-    let rad = degrees.to_radians();
-    let (sin, cos) = rad.sin_cos();
-    let pivot_x = src.width as f32 / 2.0;
-    let pivot_y = src.height as f32;
-    let span = (src.width.max(src.height) as i32) * 2;
-    for dy in -span..span {
-        for dx in -span..span {
-            let sx = pivot_x + dx as f32 * cos - dy as f32 * sin;
-            let sy = pivot_y + dx as f32 * sin + dy as f32 * cos;
-            let ix = sx.floor() as i32;
-            let iy = sy.floor() as i32;
-            if ix < 0 || iy < 0 || ix >= src.width as i32 || iy >= src.height as i32 {
-                continue;
+fn blit_at(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (u32, u32)) {
+    for y in 0..src.height {
+        let dy = at.1 + y;
+        if dy >= dst_h {
+            break;
+        }
+        for x in 0..src.width {
+            let dx = at.0 + x;
+            if dx >= dst_w {
+                break;
             }
-            let s = (iy as usize * src.width as usize + ix as usize) * 4;
+            let s = (y as usize * src.width as usize + x as usize) * 4;
             if src.rgba[s + 3] == 0 {
                 continue;
             }
-            let ox = at.0 as i32 + dx;
-            let oy = at.1 as i32 + dy;
-            if ox < 0 || oy < 0 || ox >= dst_w as i32 || oy >= dst_h as i32 {
+            let d = (dy as usize * dst_w as usize + dx as usize) * 4;
+            dst[d..d + 4].copy_from_slice(&src.rgba[s..s + 4]);
+        }
+    }
+}
+
+fn blit_rotated(
+    dst: &mut [u8],
+    dst_w: u32,
+    dst_h: u32,
+    src: &Frame,
+    at: (u32, u32),
+    degrees: f32,
+    distance: f32,
+) {
+    let rad = degrees.to_radians();
+    let (sin, cos) = rad.sin_cos();
+    let pivot_x = src.width as f32 / 2.0;
+    let pivot_y = src.height as f32 / 2.0;
+    let center_x = at.0 as f32 - distance * sin;
+    let center_y = at.1 as f32 - distance * cos;
+    for y in 0..src.height {
+        for x in 0..src.width {
+            let s = (y as usize * src.width as usize + x as usize) * 4;
+            if src.rgba[s + 3] == 0 {
                 continue;
             }
-            let d = (oy as usize * dst_w as usize + ox as usize) * 4;
+            let vx = x as f32 - pivot_x;
+            let vy = y as f32 - pivot_y;
+            let rx = vx * cos + vy * sin;
+            let ry = -vx * sin + vy * cos;
+            let dx = (center_x + rx).round() as i32;
+            let dy = (center_y + ry).round() as i32;
+            if dx < 0 || dy < 0 || dx >= dst_w as i32 || dy >= dst_h as i32 {
+                continue;
+            }
+            let d = (dy as usize * dst_w as usize + dx as usize) * 4;
             dst[d..d + 4].copy_from_slice(&src.rgba[s..s + 4]);
         }
     }

@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use lead::{
     decode_meter, decode_spectrum, frame_rate_from_config, meter_at, meter_background,
-    meter_indicator, meter_needle, meter_text_at, mono_average,
+    meter_indicator, meter_layers, meter_needle, meter_text_at, mono_average,
     scale_level, screen_from_config, Bins, Input, Levels, SkinDesc, CONFIG_TXT, DEFAULT_FRAME_RATE,
     DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO, current_value,
 };
@@ -224,6 +224,13 @@ pub fn installed_skin() -> SkinDesc {
         if let Some(file) = meter_indicator(&meters, &skin.name) {
             skin.indicator = file;
         }
+        let (screen, face, front, face_at) = meter_layers(&meters, &skin.name);
+        if !screen.is_empty() {
+            skin.background = screen;
+        }
+        skin.face = face;
+        skin.front = front;
+        skin.face_at = face_at;
         skin.needle = meter_needle(&meters, &skin.name);
         let (title_at, artist_at) = meter_text_at(&meters, &skin.name);
         skin.title_at = title_at;

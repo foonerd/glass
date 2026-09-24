@@ -57,8 +57,17 @@ impl Surface {
                 }
             })
             .map_err(|err| err.to_string())?;
+        self.canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
+        self.canvas.clear();
+        let (window_w, window_h) = self.canvas.output_size().unwrap_or((frame.width, frame.height));
+        let dest = sdl2::rect::Rect::new(
+            (window_w as i32 - frame.width as i32) / 2,
+            (window_h as i32 - frame.height as i32) / 2,
+            frame.width,
+            frame.height,
+        );
         self.canvas
-            .copy(&texture, None, None)
+            .copy(&texture, None, dest)
             .map_err(|err| err.to_string())?;
         self.canvas.present();
         Ok(true)

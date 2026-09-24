@@ -14,7 +14,7 @@ pub struct Scene {
     pub bars: Vec<f32>,
     pub left_at: Option<(u32, u32)>,
     pub right_at: Option<(u32, u32)>,
-    pub needle: Option<(f32, f32)>,
+    pub needle: Option<(f32, f32, f32)>,
 }
 
 impl Default for Scene {
