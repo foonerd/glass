@@ -4,7 +4,7 @@ Glass is the surface a player shows, and later the surface you touch. It paints 
 
 This file is the blueprint: the agreed shape of the project. Procedures, protocols, skin keys, and measurements live in the wiki.
 
-The workspace version is **0.4.1**. The player reads the installed meter and spectrum FIFOs, rasters one frame, and uploads it when `DISPLAY` is set. `--headless` skips the window. `--output` writes a PPM. Commits use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). Versions use [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The rules are in the wiki under Standards.
+The workspace version is **0.4.2**. The player reads the installed meter and spectrum FIFOs, rasters one frame, and uploads it when `DISPLAY` is set. `--headless` skips the window. `--output` writes a PPM. Commits use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). Versions use [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The rules are in the wiki under Standards.
 
 ## Where the words live
 

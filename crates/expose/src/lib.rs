@@ -82,6 +82,7 @@ pub fn raster(scene: &Scene) -> Frame {
 /// `background` is the theme picture. It is copied in place. It is not scaled.
 /// A theme is authored at its own resolution, so a mismatch leaves the dark fill.
 pub fn raster_over(scene: &Scene, background: Option<&Frame>, indicator: Option<&Frame>) -> Frame {
+    let _ = indicator;
     let width = scene.width.max(1);
     let height = scene.height.max(1);
     let mut rgba = vec![0u8; (width * height * 4) as usize];
@@ -90,14 +91,6 @@ pub fn raster_over(scene: &Scene, background: Option<&Frame>, indicator: Option<
     }
     if let Some(background) = background {
         blit(&mut rgba, width, height, background);
-        if let Some(sprite) = indicator {
-            if let Some(at) = scene.left_at {
-                blit_pivot(&mut rgba, width, height, sprite, at);
-            }
-            if let Some(at) = scene.right_at {
-                blit_pivot(&mut rgba, width, height, sprite, at);
-            }
-        }
     } else {
         let layout = layout(width, height);
         let left_meter = place(layout.left_meter, scene.left_at, width, height);
@@ -174,26 +167,6 @@ fn place(fallback: Rect, at: Option<(u32, u32)>, width: u32, height: u32) -> Rec
         y,
         w: fallback.w.min(width - x).max(1),
         h: fallback.h.min(height - y).max(1),
-    }
-}
-
-fn blit_pivot(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (u32, u32)) {
-    let x0 = at.0 as i32 - src.width as i32 / 2;
-    let y0 = at.1 as i32 - src.height as i32;
-    for y in 0..src.height as i32 {
-        for x in 0..src.width as i32 {
-            let dx = x0 + x;
-            let dy = y0 + y;
-            if dx < 0 || dy < 0 || dx >= dst_w as i32 || dy >= dst_h as i32 {
-                continue;
-            }
-            let s = (y as usize * src.width as usize + x as usize) * 4;
-            if src.rgba[s + 3] == 0 {
-                continue;
-            }
-            let d = (dy as usize * dst_w as usize + dx as usize) * 4;
-            dst[d..d + 4].copy_from_slice(&src.rgba[s..s + 4]);
-        }
     }
 }
 
