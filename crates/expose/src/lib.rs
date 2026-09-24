@@ -76,12 +76,12 @@ pub fn layout(width: u32, height: u32) -> Layout {
 
 /// Build the frame from the scene fractions, over an optional theme image.
 pub fn raster(scene: &Scene) -> Frame {
-    raster_over(scene, None)
+    raster_over(scene, None, None)
 }
 
 /// `background` is the theme picture. It is copied in place. It is not scaled.
 /// A theme is authored at its own resolution, so a mismatch leaves the dark fill.
-pub fn raster_over(scene: &Scene, background: Option<&Frame>) -> Frame {
+pub fn raster_over(scene: &Scene, background: Option<&Frame>, indicator: Option<&Frame>) -> Frame {
     let width = scene.width.max(1);
     let height = scene.height.max(1);
     let mut rgba = vec![0u8; (width * height * 4) as usize];
@@ -92,8 +92,19 @@ pub fn raster_over(scene: &Scene, background: Option<&Frame>) -> Frame {
         blit(&mut rgba, width, height, background);
     }
     let layout = layout(width, height);
-    fill_column(&mut rgba, width, &layout.left_meter, scene.left, METER);
-    fill_column(&mut rgba, width, &layout.right_meter, scene.right, METER);
+    if indicator.is_some() && (scene.left_at.is_some() || scene.right_at.is_some()) {
+        if let (Some(sprite), Some(at)) = (indicator, scene.left_at) {
+            blit_level(&mut rgba, width, height, sprite, at, scene.left);
+        }
+        if let (Some(sprite), Some(at)) = (indicator, scene.right_at) {
+            blit_level(&mut rgba, width, height, sprite, at, scene.right);
+        }
+    } else {
+        let left_meter = place(layout.left_meter, scene.left_at, width, height);
+        let right_meter = place(layout.right_meter, scene.right_at, width, height);
+        fill_column(&mut rgba, width, &left_meter, scene.left, METER);
+        fill_column(&mut rgba, width, &right_meter, scene.right, METER);
+    }
     fill_bars(&mut rgba, width, &layout.spectrum, &scene.bars, BAR);
     Frame {
         width,
@@ -151,6 +162,47 @@ fn fill_bars(rgba: &mut [u8], stride: u32, rect: &Rect, bars: &[f32], color: [u8
     }
 }
 
+fn place(fallback: Rect, at: Option<(u32, u32)>, width: u32, height: u32) -> Rect {
+    let Some((x, y)) = at else {
+        return fallback;
+    };
+    if x >= width || y >= height {
+        return fallback;
+    }
+    Rect {
+        x,
+        y,
+        w: fallback.w.min(width - x).max(1),
+        h: fallback.h.min(height - y).max(1),
+    }
+}
+
+fn blit_level(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (u32, u32), level: f32) {
+    let visible = ((src.width as f32) * level.clamp(0.0, 1.0)).round() as usize;
+    if visible == 0 {
+        return;
+    }
+    let visible = visible.min(src.width as usize);
+    for y in 0..src.height as usize {
+        let dy = at.1 as usize + y;
+        if dy >= dst_h as usize {
+            break;
+        }
+        for x in 0..visible {
+            let dx = at.0 as usize + x;
+            if dx >= dst_w as usize {
+                break;
+            }
+            let s = (y * src.width as usize + x) * 4;
+            if src.rgba[s + 3] == 0 {
+                continue;
+            }
+            let d = (dy * dst_w as usize + dx) * 4;
+            dst[d..d + 4].copy_from_slice(&src.rgba[s..s + 4]);
+        }
+    }
+}
+
 fn blit(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame) {
     let copy_w = dst_w.min(src.width) as usize;
     let copy_h = dst_h.min(src.height) as usize;
@@ -194,6 +246,8 @@ mod tests {
             left: 1.0,
             right: 0.0,
             bars: vec![1.0, 0.0],
+            left_at: None,
+            right_at: None,
         };
         let frame = raster(&scene);
         let layout = layout(frame.width, frame.height);
