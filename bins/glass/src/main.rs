@@ -7,22 +7,23 @@
 use std::env;
 use std::process::ExitCode;
 use std::thread;
-use std::time::Duration;
 
 use expose::raster;
 use intake::{PipeSource, Source};
-use lead::SkinDesc;
-use pane::{publish, show, write_ppm};
+use lead::{frame_period, SkinDesc};
+use pane::{publish, write_ppm, Surface};
 use plot::step;
 
 fn main() -> ExitCode {
     let mut once = false;
+    let mut headless = false;
     let mut print_scene = false;
     let mut output: Option<String> = None;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--once" => once = true,
+            "--headless" => headless = true,
             "--print" => print_scene = true,
             "--output" => match args.next() {
                 Some(path) => output = Some(path),
@@ -33,8 +34,10 @@ fn main() -> ExitCode {
             },
             "--help" => {
                 println!(
-                    "glass [--once] [--print] [--output frame.ppm]\n\
-                     Reads {meter} and {spectrum}.",
+                    "glass [--once] [--headless] [--print] [--output frame.ppm]\n\
+                     Reads {meter} and {spectrum}.\n\
+                     A window opens when DISPLAY is set. --headless skips it.\n\
+                     --output writes a PPM and still rasters.",
                     meter = lead::METER_FIFO,
                     spectrum = lead::SPECTRUM_FIFO
                 );
@@ -49,8 +52,23 @@ fn main() -> ExitCode {
 
     let mut source = PipeSource::installed();
     let skin = SkinDesc::basic();
-    let window_open = output.is_some();
+    let frame_rate = intake::installed_frame_rate();
+    let period = frame_period(frame_rate);
+    println!("glass: frame.rate={frame_rate}");
+    let show_window = env::var_os("DISPLAY").is_some() && !headless;
+    let write_file = output.is_some();
     let serving_remote = false;
+    let mut surface = if show_window {
+        match Surface::open(skin.width, skin.height) {
+            Ok(surface) => Some(surface),
+            Err(err) => {
+                eprintln!("glass: {err}");
+                return ExitCode::from(1);
+            }
+        }
+    } else {
+        None
+    };
 
     loop {
         let input = source.poll();
@@ -63,9 +81,18 @@ fn main() -> ExitCode {
                 scene.bars.len()
             );
         }
-        if window_open {
+        if surface.is_some() || write_file {
             let frame = raster(&scene);
-            show(&frame);
+            if let Some(window) = surface.as_mut() {
+                match window.show(&frame) {
+                    Ok(true) => {}
+                    Ok(false) => break,
+                    Err(err) => {
+                        eprintln!("glass: {err}");
+                        return ExitCode::from(1);
+                    }
+                }
+            }
             if let Some(path) = &output {
                 if let Err(err) = write_ppm(path, &frame) {
                     eprintln!("glass: {err}");
@@ -79,7 +106,7 @@ fn main() -> ExitCode {
         if once {
             break;
         }
-        thread::sleep(Duration::from_millis(33));
+        thread::sleep(period);
     }
     ExitCode::SUCCESS
 }
