@@ -1,0 +1,10 @@
+[package]
+name = "plot"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Input and a skin become a Scene"
+
+[dependencies]
+lead = { path = "../lead" }

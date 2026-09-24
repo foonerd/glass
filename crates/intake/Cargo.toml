@@ -1,0 +1,10 @@
+[package]
+name = "intake"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "FIFO, socket.io, and UDP become one Input"
+
+[dependencies]
+lead = { path = "../lead" }

@@ -1,0 +1,18 @@
+[package]
+name = "glass"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "Glass on the player, including headless"
+
+[[bin]]
+name = "glass"
+path = "src/main.rs"
+
+[dependencies]
+expose = { path = "../../crates/expose" }
+intake = { path = "../../crates/intake" }
+lead = { path = "../../crates/lead" }
+pane = { path = "../../crates/pane" }
+plot = { path = "../../crates/plot" }
