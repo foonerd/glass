@@ -27,6 +27,7 @@ impl Surface {
         let window = video
             .window("Glass", width.max(1), height.max(1))
             .position_centered()
+            .borderless()
             .build()
             .map_err(|err| err.to_string())?;
         let canvas = window.into_canvas().build().map_err(|err| err.to_string())?;
