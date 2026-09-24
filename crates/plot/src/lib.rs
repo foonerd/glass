@@ -12,6 +12,8 @@ pub struct Scene {
     pub left: f32,
     pub right: f32,
     pub bars: Vec<f32>,
+    pub left_at: Option<(u32, u32)>,
+    pub right_at: Option<(u32, u32)>,
 }
 
 impl Default for Scene {
@@ -23,6 +25,8 @@ impl Default for Scene {
             left: 0.0,
             right: 0.0,
             bars: Vec::new(),
+            left_at: None,
+            right_at: None,
         }
     }
 }
@@ -43,6 +47,8 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
             .iter()
             .map(|bin| (bin / spectrum_max).clamp(0.0, 1.0))
             .collect(),
+        left_at: skin.left_at,
+        right_at: skin.right_at,
     }
 }
 

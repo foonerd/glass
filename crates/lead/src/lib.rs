@@ -68,6 +68,12 @@ pub struct SkinDesc {
     pub theme_dir: String,
     /// Background file name inside `theme_dir`, from the theme's `meters.txt`.
     pub background: String,
+    /// `left.x` and `left.y` from the selected meter. Absent on a theme-less frame.
+    pub left_at: Option<(u32, u32)>,
+    /// `right.x` and `right.y` from the selected meter.
+    pub right_at: Option<(u32, u32)>,
+    /// `indicator.filename` from the selected meter.
+    pub indicator: String,
 }
 
 impl Default for SkinDesc {
@@ -86,6 +92,9 @@ impl SkinDesc {
             spectrum_max: DEFAULT_SPECTRUM_MAX,
             theme_dir: String::new(),
             background: String::new(),
+            left_at: None,
+            right_at: None,
+            indicator: String::new(),
         }
     }
 }
@@ -274,6 +283,132 @@ pub fn meter_background(meters_txt: &str, meter: &str) -> Option<String> {
     None
 }
 
+/// Channel origins from the selected meter. `random` and `list` use the first meter.
+pub fn meter_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Option<(u32, u32)>) {
+    let mut sections: Vec<(String, Option<(u32, u32)>, Option<(u32, u32)>)> = Vec::new();
+    let mut name = String::new();
+    let mut left_x = None;
+    let mut left_y = None;
+    let mut right_x = None;
+    let mut right_y = None;
+    let mut in_section = false;
+    let flush = |sections: &mut Vec<(String, Option<(u32, u32)>, Option<(u32, u32)>)>,
+                 name: &mut String,
+                 left_x: &mut Option<u32>,
+                 left_y: &mut Option<u32>,
+                 right_x: &mut Option<u32>,
+                 right_y: &mut Option<u32>,
+                 in_section: &mut bool| {
+        if *in_section && !name.is_empty() {
+            let left = match (*left_x, *left_y) {
+                (Some(x), Some(y)) => Some((x, y)),
+                _ => None,
+            };
+            let right = match (*right_x, *right_y) {
+                (Some(x), Some(y)) => Some((x, y)),
+                _ => None,
+            };
+            sections.push((std::mem::take(name), left, right));
+        }
+        *left_x = None;
+        *left_y = None;
+        *right_x = None;
+        *right_y = None;
+        *in_section = false;
+    };
+    for line in meters_txt.lines() {
+        let line = line.trim();
+        if let Some(title) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            flush(
+                &mut sections,
+                &mut name,
+                &mut left_x,
+                &mut left_y,
+                &mut right_x,
+                &mut right_y,
+                &mut in_section,
+            );
+            name = title.trim().to_string();
+            in_section = true;
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let parsed = value.trim().parse::<u32>().ok();
+        match key.trim() {
+            "left.x" => left_x = parsed,
+            "left.y" => left_y = parsed,
+            "right.x" => right_x = parsed,
+            "right.y" => right_y = parsed,
+            _ => {}
+        }
+    }
+    flush(
+        &mut sections,
+        &mut name,
+        &mut left_x,
+        &mut left_y,
+        &mut right_x,
+        &mut right_y,
+        &mut in_section,
+    );
+    let named = meter != "random" && meter != "list" && !meter.is_empty();
+    let section = if named {
+        sections.iter().find(|(n, _, _)| n == meter)
+    } else {
+        None
+    };
+    section
+        .or_else(|| sections.first())
+        .map(|(_, left, right)| (*left, *right))
+        .unwrap_or((None, None))
+}
+
+/// `indicator.filename` for the selected meter. `random` and `list` use the first meter.
+pub fn meter_indicator(meters_txt: &str, meter: &str) -> Option<String> {
+    let mut sections: Vec<(String, String)> = Vec::new();
+    let mut name = String::new();
+    let mut indicator = String::new();
+    let mut in_section = false;
+    for line in meters_txt.lines() {
+        let line = line.trim();
+        if let Some(title) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            if in_section && !name.is_empty() {
+                sections.push((std::mem::take(&mut name), std::mem::take(&mut indicator)));
+            }
+            name = title.trim().to_string();
+            in_section = true;
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() == "indicator.filename" {
+            indicator = value.trim().to_string();
+        }
+    }
+    if in_section && !name.is_empty() {
+        sections.push((name, indicator));
+    }
+    let named = meter != "random" && meter != "list" && !meter.is_empty();
+    let section = if named {
+        sections.iter().find(|(n, _)| n == meter)
+    } else {
+        None
+    };
+    section
+        .or_else(|| sections.first())
+        .map(|(_, file)| file.clone())
+        .filter(|file| !file.is_empty())
+}
+
 /// Sleep between steps for a frame rate in frames per second.
 pub fn frame_period(rate: u32) -> std::time::Duration {
     let rate = rate.clamp(MIN_FRAME_RATE, MAX_FRAME_RATE);
@@ -325,5 +460,15 @@ mod tests {
         assert_eq!(meter_background(text, "bar").as_deref(), Some("bar-bgr.png"));
         assert_eq!(meter_background(text, "blue").as_deref(), Some("blue-screen.png"));
         assert_eq!(meter_background(text, "random").as_deref(), Some("bar-bgr.png"));
+    }
+
+    #[test]
+    fn meter_positions_come_from_the_named_section() {
+        let text = "[bar]\nleft.x = 130\nleft.y = 113\nright.x = 130\nright.y = 178\n";
+        assert_eq!(meter_at(text, "bar"), (Some((130, 113)), Some((130, 178))));
+        assert_eq!(
+            meter_indicator("[bar]\nindicator.filename = bar-indicator.png\n", "bar").as_deref(),
+            Some("bar-indicator.png")
+        );
     }
 }

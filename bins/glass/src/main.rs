@@ -14,6 +14,13 @@ use lead::frame_period;
 use pane::{publish, write_ppm, Surface};
 use plot::step;
 
+fn load_theme(dir: &str, file: &str) -> Option<expose::Frame> {
+    if dir.is_empty() || file.is_empty() {
+        return None;
+    }
+    read_png(std::path::Path::new(dir).join(file).as_path())
+}
+
 fn main() -> ExitCode {
     let mut once = false;
     let mut headless = false;
@@ -64,11 +71,8 @@ fn main() -> ExitCode {
             &skin.theme_dir
         }
     );
-    let background = if skin.background.is_empty() {
-        None
-    } else {
-        read_png(std::path::Path::new(&skin.theme_dir).join(&skin.background).as_path())
-    };
+    let background = load_theme(&skin.theme_dir, &skin.background);
+    let indicator = load_theme(&skin.theme_dir, &skin.indicator);
     let show_window = env::var_os("DISPLAY").is_some() && !headless;
     let write_file = output.is_some();
     let serving_remote = false;
@@ -96,7 +100,7 @@ fn main() -> ExitCode {
             );
         }
         if surface.is_some() || write_file {
-            let frame = raster_over(&scene, background.as_ref());
+            let frame = raster_over(&scene, background.as_ref(), indicator.as_ref());
             if let Some(window) = surface.as_mut() {
                 match window.show(&frame) {
                     Ok(true) => {}

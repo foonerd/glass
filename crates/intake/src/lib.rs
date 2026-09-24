@@ -7,7 +7,8 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use lead::{
-    decode_meter, decode_spectrum, frame_rate_from_config, meter_background, mono_average,
+    decode_meter, decode_spectrum, frame_rate_from_config, meter_at, meter_background,
+    meter_indicator, mono_average,
     scale_level, screen_from_config, Bins, Input, Levels, SkinDesc, CONFIG_TXT, DEFAULT_FRAME_RATE,
     DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO, current_value,
 };
@@ -214,6 +215,12 @@ pub fn installed_skin() -> SkinDesc {
     if let Ok(meters) = std::fs::read_to_string(theme.join("meters.txt")) {
         if let Some(file) = meter_background(&meters, &skin.name) {
             skin.background = file;
+        }
+        let (left_at, right_at) = meter_at(&meters, &skin.name);
+        skin.left_at = left_at;
+        skin.right_at = right_at;
+        if let Some(file) = meter_indicator(&meters, &skin.name) {
+            skin.indicator = file;
         }
     }
     skin
