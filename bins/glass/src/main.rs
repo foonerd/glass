@@ -8,7 +8,7 @@ use std::env;
 use std::process::ExitCode;
 use std::thread;
 
-use expose::{draw_text, raster_over, read_png};
+use expose::{draw_text, raster_over, read_png, Stack};
 use intake::{PipeSource, Source};
 use lead::frame_period;
 use pane::{publish, write_ppm, Surface};
@@ -72,6 +72,8 @@ fn main() -> ExitCode {
         }
     );
     let background = load_theme(&skin.theme_dir, &skin.background);
+    let face = load_theme(&skin.theme_dir, &skin.face);
+    let front = load_theme(&skin.theme_dir, &skin.front);
     let indicator = load_theme(&skin.theme_dir, &skin.indicator);
     let show_window = env::var_os("DISPLAY").is_some() && !headless;
     let write_file = output.is_some();
@@ -100,7 +102,16 @@ fn main() -> ExitCode {
             );
         }
         if surface.is_some() || write_file {
-            let mut frame = raster_over(&scene, background.as_ref(), indicator.as_ref());
+            let mut frame = raster_over(
+                &scene,
+                Stack {
+                    screen: background.as_ref(),
+                    face: face.as_ref(),
+                    front: front.as_ref(),
+                    needle: indicator.as_ref(),
+                    face_at: skin.face_at,
+                },
+            );
             let playing = intake::now_playing();
             let title_at = skin.title_at.unwrap_or((48, frame.height.saturating_sub(72)));
             let artist_at = skin.artist_at.unwrap_or((48, frame.height.saturating_sub(40)));

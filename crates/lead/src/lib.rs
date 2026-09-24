@@ -74,8 +74,11 @@ pub struct SkinDesc {
     pub right_at: Option<(u32, u32)>,
     /// `indicator.filename` from the selected meter.
     pub indicator: String,
-    /// Circular needle sweep in degrees, start then stop.
-    pub needle: Option<(f32, f32)>,
+    pub face: String,
+    pub front: String,
+    pub face_at: (u32, u32),
+    /// Circular needle: start angle, stop angle, distance from origin to sprite center.
+    pub needle: Option<(f32, f32, f32)>,
     pub title_at: Option<(u32, u32)>,
     pub artist_at: Option<(u32, u32)>,
 }
@@ -99,6 +102,9 @@ impl SkinDesc {
             left_at: None,
             right_at: None,
             indicator: String::new(),
+            face: String::new(),
+            front: String::new(),
+            face_at: (0, 0),
             needle: None,
             title_at: None,
             artist_at: None,
@@ -428,24 +434,66 @@ pub fn meter_indicator(meters_txt: &str, meter: &str) -> Option<String> {
         .filter(|file| !file.is_empty())
 }
 
+/// Screen picture, meter face, and meter foreground for the selected meter.
+pub fn meter_layers(meters_txt: &str, meter: &str) -> (String, String, String, (u32, u32)) {
+    let mut found_screen = String::new();
+    let mut found_face = String::new();
+    let mut found_front = String::new();
+    let mut found_at = (0u32, 0u32);
+    let named = meter != "random" && meter != "list" && !meter.is_empty();
+    let mut take = !named;
+    for line in meters_txt.lines() {
+        let line = line.trim();
+        if let Some(title) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            if take && (!found_face.is_empty() || !found_screen.is_empty()) {
+                return (found_screen, found_face, found_front, found_at);
+            }
+            take = !named || title.trim() == meter;
+            if take {
+                found_screen.clear();
+                found_face.clear();
+                found_front.clear();
+                found_at = (0, 0);
+            }
+            continue;
+        }
+        if !take {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let value = value.trim();
+        match key.trim() {
+            "screen.bgr" => found_screen = value.to_string(),
+            "bgr.filename" => found_face = value.to_string(),
+            "fgr.filename" => found_front = value.to_string(),
+            "meter.x" => found_at.0 = value.parse().unwrap_or(0),
+            "meter.y" => found_at.1 = value.parse().unwrap_or(0),
+            _ => {}
+        }
+    }
+    (found_screen, found_face, found_front, found_at)
+}
+
 /// `start.angle` and `stop.angle` for the selected meter.
-pub fn meter_needle(meters_txt: &str, meter: &str) -> Option<(f32, f32)> {
-    let mut current = String::new();
+pub fn meter_needle(meters_txt: &str, meter: &str) -> Option<(f32, f32, f32)> {
     let mut found_start = None;
     let mut found_stop = None;
+    let mut found_distance = 0.0;
     let named = meter != "random" && meter != "list" && !meter.is_empty();
     let mut take = !named;
     for line in meters_txt.lines() {
         let line = line.trim();
         if let Some(title) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
             if take && found_start.is_some() && found_stop.is_some() {
-                return Some((found_start.unwrap(), found_stop.unwrap()));
+                return Some((found_start.unwrap(), found_stop.unwrap(), found_distance));
             }
-            current = title.trim().to_string();
-            take = !named || current == meter;
+            take = !named || title.trim() == meter;
             if take {
                 found_start = None;
                 found_stop = None;
+                found_distance = 0.0;
             }
             continue;
         }
@@ -459,11 +507,12 @@ pub fn meter_needle(meters_txt: &str, meter: &str) -> Option<(f32, f32)> {
         match key.trim() {
             "start.angle" => found_start = parsed,
             "stop.angle" => found_stop = parsed,
+            "distance" => found_distance = parsed.unwrap_or(0.0),
             _ => {}
         }
     }
     match (found_start, found_stop) {
-        (Some(a), Some(b)) => Some((a, b)),
+        (Some(a), Some(b)) => Some((a, b, found_distance)),
         _ => None,
     }
 }
