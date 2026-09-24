@@ -90,22 +90,22 @@ pub fn raster_over(scene: &Scene, background: Option<&Frame>, indicator: Option<
     }
     if let Some(background) = background {
         blit(&mut rgba, width, height, background);
-    }
-    let layout = layout(width, height);
-    if indicator.is_some() && (scene.left_at.is_some() || scene.right_at.is_some()) {
-        if let (Some(sprite), Some(at)) = (indicator, scene.left_at) {
-            blit_level(&mut rgba, width, height, sprite, at, scene.left);
-        }
-        if let (Some(sprite), Some(at)) = (indicator, scene.right_at) {
-            blit_level(&mut rgba, width, height, sprite, at, scene.right);
+        if let Some(sprite) = indicator {
+            if let Some(at) = scene.left_at {
+                blit_pivot(&mut rgba, width, height, sprite, at);
+            }
+            if let Some(at) = scene.right_at {
+                blit_pivot(&mut rgba, width, height, sprite, at);
+            }
         }
     } else {
+        let layout = layout(width, height);
         let left_meter = place(layout.left_meter, scene.left_at, width, height);
         let right_meter = place(layout.right_meter, scene.right_at, width, height);
         fill_column(&mut rgba, width, &left_meter, scene.left, METER);
         fill_column(&mut rgba, width, &right_meter, scene.right, METER);
+        fill_bars(&mut rgba, width, &layout.spectrum, &scene.bars, BAR);
     }
-    fill_bars(&mut rgba, width, &layout.spectrum, &scene.bars, BAR);
     Frame {
         width,
         height,
@@ -177,27 +177,21 @@ fn place(fallback: Rect, at: Option<(u32, u32)>, width: u32, height: u32) -> Rec
     }
 }
 
-fn blit_level(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (u32, u32), level: f32) {
-    let visible = ((src.width as f32) * level.clamp(0.0, 1.0)).round() as usize;
-    if visible == 0 {
-        return;
-    }
-    let visible = visible.min(src.width as usize);
-    for y in 0..src.height as usize {
-        let dy = at.1 as usize + y;
-        if dy >= dst_h as usize {
-            break;
-        }
-        for x in 0..visible {
-            let dx = at.0 as usize + x;
-            if dx >= dst_w as usize {
-                break;
+fn blit_pivot(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (u32, u32)) {
+    let x0 = at.0 as i32 - src.width as i32 / 2;
+    let y0 = at.1 as i32 - src.height as i32;
+    for y in 0..src.height as i32 {
+        for x in 0..src.width as i32 {
+            let dx = x0 + x;
+            let dy = y0 + y;
+            if dx < 0 || dy < 0 || dx >= dst_w as i32 || dy >= dst_h as i32 {
+                continue;
             }
-            let s = (y * src.width as usize + x) * 4;
+            let s = (y as usize * src.width as usize + x as usize) * 4;
             if src.rgba[s + 3] == 0 {
                 continue;
             }
-            let d = (dy * dst_w as usize + dx) * 4;
+            let d = (dy as usize * dst_w as usize + dx as usize) * 4;
             dst[d..d + 4].copy_from_slice(&src.rgba[s..s + 4]);
         }
     }

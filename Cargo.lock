@@ -55,7 +55,7 @@ dependencies = [
 
 [[package]]
 name = "expose"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "image",
  "plot",
@@ -83,7 +83,7 @@ dependencies = [
 
 [[package]]
 name = "glass"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "expose",
  "intake",
@@ -94,7 +94,7 @@ dependencies = [
 
 [[package]]
 name = "glass-remote"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "expose",
  "intake",
@@ -114,11 +114,13 @@ dependencies = [
  "moxcms",
  "num-traits",
  "png",
+ "zune-core",
+ "zune-jpeg",
 ]
 
 [[package]]
 name = "intake"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "lead",
 ]
@@ -131,7 +133,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lead"
-version = "0.4.0"
+version = "0.4.1"
 
 [[package]]
 name = "libc"
@@ -180,7 +182,7 @@ dependencies = [
 
 [[package]]
 name = "pane"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "expose",
  "plot",
@@ -189,7 +191,7 @@ dependencies = [
 
 [[package]]
 name = "plot"
-version = "0.4.0"
+version = "0.4.1"
 dependencies = [
  "lead",
 ]
@@ -253,3 +255,18 @@ name = "zlib-rs"
 version = "0.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b268e58e7c693d7c271f93ffc4ba3b380412554231c85bf61ca7af91042a4112"
+
+[[package]]
+name = "zune-core"
+version = "0.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d56377fd46368984a170bc5aac5567e52ca5da874caa60bea39fcbca78fb658b"
+
+[[package]]
+name = "zune-jpeg"
+version = "0.5.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27bc9d5b815bc103f142aa054f561d9187d191692ec7c2d1e2b4737f8dbd7296"
+dependencies = [
+ "zune-core",
+]

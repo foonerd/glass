@@ -8,4 +8,4 @@ description = "A Scene and assets become one RGBA frame"
 
 [dependencies]
 plot = { path = "../plot" }
-image = { version = "0.25", default-features = false, features = ["png"] }
+image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }

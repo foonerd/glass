@@ -291,6 +291,8 @@ pub fn meter_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Option<(u
     let mut left_y = None;
     let mut right_x = None;
     let mut right_y = None;
+    let mut meter_x = 0u32;
+    let mut meter_y = 0u32;
     let mut in_section = false;
     let flush = |sections: &mut Vec<(String, Option<(u32, u32)>, Option<(u32, u32)>)>,
                  name: &mut String,
@@ -298,14 +300,16 @@ pub fn meter_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Option<(u
                  left_y: &mut Option<u32>,
                  right_x: &mut Option<u32>,
                  right_y: &mut Option<u32>,
+                 meter_x: &mut u32,
+                 meter_y: &mut u32,
                  in_section: &mut bool| {
         if *in_section && !name.is_empty() {
             let left = match (*left_x, *left_y) {
-                (Some(x), Some(y)) => Some((x, y)),
+                (Some(x), Some(y)) => Some((x + *meter_x, y + *meter_y)),
                 _ => None,
             };
             let right = match (*right_x, *right_y) {
-                (Some(x), Some(y)) => Some((x, y)),
+                (Some(x), Some(y)) => Some((x + *meter_x, y + *meter_y)),
                 _ => None,
             };
             sections.push((std::mem::take(name), left, right));
@@ -314,6 +318,8 @@ pub fn meter_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Option<(u
         *left_y = None;
         *right_x = None;
         *right_y = None;
+        *meter_x = 0;
+        *meter_y = 0;
         *in_section = false;
     };
     for line in meters_txt.lines() {
@@ -326,6 +332,8 @@ pub fn meter_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Option<(u
                 &mut left_y,
                 &mut right_x,
                 &mut right_y,
+                &mut meter_x,
+                &mut meter_y,
                 &mut in_section,
             );
             name = title.trim().to_string();
@@ -340,10 +348,12 @@ pub fn meter_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Option<(u
         };
         let parsed = value.trim().parse::<u32>().ok();
         match key.trim() {
-            "left.x" => left_x = parsed,
-            "left.y" => left_y = parsed,
-            "right.x" => right_x = parsed,
-            "right.y" => right_y = parsed,
+            "left.x" | "left.origin.x" => left_x = parsed,
+            "left.y" | "left.origin.y" => left_y = parsed,
+            "right.x" | "right.origin.x" => right_x = parsed,
+            "right.y" | "right.origin.y" => right_y = parsed,
+            "meter.x" => meter_x = parsed.unwrap_or(0),
+            "meter.y" => meter_y = parsed.unwrap_or(0),
             _ => {}
         }
     }
@@ -354,6 +364,8 @@ pub fn meter_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Option<(u
         &mut left_y,
         &mut right_x,
         &mut right_y,
+        &mut meter_x,
+        &mut meter_y,
         &mut in_section,
     );
     let named = meter != "random" && meter != "list" && !meter.is_empty();
@@ -466,6 +478,8 @@ mod tests {
     fn meter_positions_come_from_the_named_section() {
         let text = "[bar]\nleft.x = 130\nleft.y = 113\nright.x = 130\nright.y = 178\n";
         assert_eq!(meter_at(text, "bar"), (Some((130, 113)), Some((130, 178))));
+        let needle = "[gold]\nleft.origin.x = 333\nleft.origin.y = 305\nmeter.x = 0\nmeter.y = 124\n";
+        assert_eq!(meter_at(needle, "gold").0, Some((333, 429)));
         assert_eq!(
             meter_indicator("[bar]\nindicator.filename = bar-indicator.png\n", "bar").as_deref(),
             Some("bar-indicator.png")
