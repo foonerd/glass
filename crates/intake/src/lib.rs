@@ -7,8 +7,9 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::Path;
 
 use lead::{
-    decode_meter, decode_spectrum, mono_average, scale_level, Bins, Input, Levels,
-    DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO,
+    decode_meter, decode_spectrum, frame_rate_from_config, mono_average, scale_level, Bins, Input,
+    Levels, CONFIG_TXT, DEFAULT_FRAME_RATE, DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO,
+    SPECTRUM_FIFO,
 };
 
 /// Linux `O_NONBLOCK`. A blocking open on a FIFO waits for the writer.
@@ -167,6 +168,15 @@ impl Source for PipeSource {
             },
             metadata: lead::Metadata::default(),
         }
+    }
+}
+
+/// `frame.rate` from the installed `config.txt`, or 30 when that file is absent.
+pub fn installed_frame_rate() -> u32 {
+    let path = std::env::var("GLASS_CONFIG").unwrap_or_else(|_| CONFIG_TXT.to_string());
+    match std::fs::read_to_string(&path) {
+        Ok(text) => frame_rate_from_config(&text),
+        Err(_) => DEFAULT_FRAME_RATE,
     }
 }
 

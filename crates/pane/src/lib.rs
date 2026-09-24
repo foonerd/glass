@@ -7,10 +7,60 @@ use std::path::Path;
 
 use expose::Frame;
 use plot::Scene;
+use sdl2::event::Event;
+use sdl2::pixels::PixelFormatEnum;
+use sdl2::render::Canvas;
+use sdl2::video::Window;
+use sdl2::EventPump;
 
-/// Show one frame. A display upload lands here when a window library is linked.
-pub fn show(frame: &Frame) {
-    let _ = frame;
+/// One window. The binary keeps it for the life of the player.
+pub struct Surface {
+    canvas: Canvas<Window>,
+    pump: EventPump,
+}
+
+impl Surface {
+    /// Open a window on the current display. Fails when SDL cannot start.
+    pub fn open(width: u32, height: u32) -> Result<Self, String> {
+        let sdl = sdl2::init()?;
+        let video = sdl.video()?;
+        let window = video
+            .window("Glass", width.max(1), height.max(1))
+            .position_centered()
+            .build()
+            .map_err(|err| err.to_string())?;
+        let canvas = window.into_canvas().build().map_err(|err| err.to_string())?;
+        let pump = sdl.event_pump()?;
+        Ok(Self { canvas, pump })
+    }
+
+    /// Upload one frame. `false` means the window was closed.
+    pub fn show(&mut self, frame: &Frame) -> Result<bool, String> {
+        for event in self.pump.poll_iter() {
+            if let Event::Quit { .. } = event {
+                return Ok(false);
+            }
+        }
+        let creator = self.canvas.texture_creator();
+        let mut texture = creator
+            .create_texture_streaming(PixelFormatEnum::RGBA32, frame.width, frame.height)
+            .map_err(|err| err.to_string())?;
+        texture
+            .with_lock(None, |buffer, pitch| {
+                let row = frame.width as usize * 4;
+                for y in 0..frame.height as usize {
+                    let src = y * row;
+                    let dst = y * pitch;
+                    buffer[dst..dst + row].copy_from_slice(&frame.rgba[src..src + row]);
+                }
+            })
+            .map_err(|err| err.to_string())?;
+        self.canvas
+            .copy(&texture, None, None)
+            .map_err(|err| err.to_string())?;
+        self.canvas.present();
+        Ok(true)
+    }
 }
 
 /// Publish a scene to a remote glass. No pixels cross this call.

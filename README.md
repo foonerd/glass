@@ -4,7 +4,7 @@ Glass is the surface a player shows, and later the surface you touch. It paints 
 
 This file is the blueprint: the agreed shape of the project. Procedures, protocols, skin keys, and measurements live in the wiki.
 
-The workspace version is **0.1.0**. The player reads the installed meter and spectrum FIFOs and rasters one frame. A display upload is not linked yet; `--output` writes a PPM. Commits use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). Versions use [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The rules are in the wiki under Standards.
+The workspace version is **0.2.0**. The player reads the installed meter and spectrum FIFOs, rasters one frame, and uploads it when `DISPLAY` is set. `--headless` skips the window. `--output` writes a PPM. Commits use [Conventional Commits](https://www.conventionalcommits.org/en/v1.0.0/). Versions use [Semantic Versioning](https://semver.org/spec/v2.0.0.html). The rules are in the wiki under Standards.
 
 ## Where the words live
 
@@ -13,7 +13,7 @@ The workspace version is **0.1.0**. The player reads the installed meter and spe
 | This README | The design we agreed. Names, stations, and what must stay still. |
 | [Wiki](https://github.com/foonerd/glass/wiki) | Technical detail. Clone it as `glass.wiki` once the first page exists. |
 
-The wiki is enabled on the GitHub repo and has no pages yet, so there is nothing to clone until the first page is saved.
+The wiki is cloned beside this repo as `glass.wiki`.
 
 ## The line
 

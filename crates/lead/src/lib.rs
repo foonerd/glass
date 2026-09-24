@@ -9,11 +9,22 @@ pub const SPECTRUM_FIFO: &str = "/tmp/myfifosa";
 /// Bin count in the Volumio ALSA template.
 pub const DEFAULT_SPECTRUM_BINS: usize = 20;
 
-/// `meter_max` written by the scope, and the UI full-scale that matches it.
+/// UI full-scale that matches `meter_max`.
 pub const DEFAULT_METER_MAX: f32 = 100.0;
 
 /// `spectrum_max` written by the scope.
 pub const DEFAULT_SPECTRUM_MAX: f32 = 100.0;
+
+/// `[current] frame.rate` when the file or the key is missing.
+pub const DEFAULT_FRAME_RATE: u32 = 30;
+
+/// Inclusive range of the Volumio frame-rate control.
+pub const MIN_FRAME_RATE: u32 = 10;
+pub const MAX_FRAME_RATE: u32 = 60;
+
+/// Plugin `config.txt`. The UI writes `frame.rate` into `[current]`.
+pub const CONFIG_TXT: &str =
+    "/data/plugins/user_interface/peppy_screensaver/screensaver/peppymeter/config.txt";
 
 /// Left and right in UI units, plus mono derived from them.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
@@ -111,6 +122,40 @@ pub fn mono_average(left: f32, right: f32) -> f32 {
     (left + right) / 2.0
 }
 
+/// Read `frame.rate` from `[current]`. Missing or invalid text is 30.
+/// Values are clamped to the UI range, 10 through 60.
+pub fn frame_rate_from_config(text: &str) -> u32 {
+    let mut in_current = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_current = line.eq_ignore_ascii_case("[current]");
+            continue;
+        }
+        if !in_current || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() != "frame.rate" {
+            continue;
+        }
+        return value
+            .trim()
+            .parse::<u32>()
+            .unwrap_or(DEFAULT_FRAME_RATE)
+            .clamp(MIN_FRAME_RATE, MAX_FRAME_RATE);
+    }
+    DEFAULT_FRAME_RATE
+}
+
+/// Sleep between steps for a frame rate in frames per second.
+pub fn frame_period(rate: u32) -> std::time::Duration {
+    let rate = rate.clamp(MIN_FRAME_RATE, MAX_FRAME_RATE);
+    std::time::Duration::from_nanos(1_000_000_000 / u64::from(rate))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -131,5 +176,13 @@ mod tests {
     fn scale_clamps_at_full() {
         assert_eq!(scale_level(150, 100.0, 100.0), 100.0);
         assert_eq!(scale_level(50, 100.0, 100.0), 50.0);
+    }
+
+    #[test]
+    fn frame_rate_comes_from_current_and_clamps() {
+        let text = "[sdl.env]\nframe.rate = 10\n\n[current]\nframe.rate = 15\n";
+        assert_eq!(frame_rate_from_config(text), 15);
+        assert_eq!(frame_rate_from_config("[current]\nframe.rate = 99\n"), 60);
+        assert_eq!(frame_rate_from_config(""), DEFAULT_FRAME_RATE);
     }
 }
