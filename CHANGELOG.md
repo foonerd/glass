@@ -4,7 +4,7 @@ All notable changes to Glass are recorded here. The format follows [Keep a Chang
 
 ## [0.4.0] - 2026-09-24
 
-The selected meter's indicator image is drawn at `left.x`/`left.y` and `right.x`/`right.y`. The visible width follows the channel level.
+The selected meter's indicator image is drawn at `left.x`/`left.y` and `right.x`/`right.y`. The visible width follows the channel level. `testdata/show-theme.sh` leaves that frame on the display until Ctrl-C.
 
 ## [0.3.0] - 2026-09-24
 
