@@ -64,6 +64,10 @@ pub struct SkinDesc {
     pub height: u32,
     pub meter_max: f32,
     pub spectrum_max: f32,
+    /// Directory of the selected theme, empty when no config is loaded.
+    pub theme_dir: String,
+    /// Background file name inside `theme_dir`, from the theme's `meters.txt`.
+    pub background: String,
 }
 
 impl Default for SkinDesc {
@@ -80,6 +84,8 @@ impl SkinDesc {
             height: 480,
             meter_max: DEFAULT_METER_MAX,
             spectrum_max: DEFAULT_SPECTRUM_MAX,
+            theme_dir: String::new(),
+            background: String::new(),
         }
     }
 }
@@ -150,6 +156,124 @@ pub fn frame_rate_from_config(text: &str) -> u32 {
     DEFAULT_FRAME_RATE
 }
 
+/// Screen size from `[current]`. `meter.folder` names it as `480x320` or
+/// `480x320-text`. `screen.width` and `screen.height` override that pair
+/// when both are set. Missing text is 800×480.
+pub fn screen_from_config(text: &str) -> (u32, u32) {
+    let mut folder = String::new();
+    let mut width = None;
+    let mut height = None;
+    let mut in_current = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_current = line.eq_ignore_ascii_case("[current]");
+            continue;
+        }
+        if !in_current || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "meter.folder" => folder = value.trim().to_string(),
+            "screen.width" => width = value.trim().parse::<u32>().ok().filter(|n| *n > 0),
+            "screen.height" => height = value.trim().parse::<u32>().ok().filter(|n| *n > 0),
+            _ => {}
+        }
+    }
+    let (folder_w, folder_h) = size_from_folder(&folder).unwrap_or((800, 480));
+    match (width, height) {
+        (Some(w), Some(h)) => (w, h),
+        _ => (folder_w, folder_h),
+    }
+}
+
+fn size_from_folder(name: &str) -> Option<(u32, u32)> {
+    let (width, rest) = name.split_once('x')?;
+    let width: u32 = width.parse().ok()?;
+    let height: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let height: u32 = height.parse().ok()?;
+    if width == 0 || height == 0 {
+        return None;
+    }
+    Some((width, height))
+}
+
+/// Value of one key in `[current]`.
+pub fn current_value(text: &str, wanted: &str) -> Option<String> {
+    let mut in_current = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_current = line.eq_ignore_ascii_case("[current]");
+            continue;
+        }
+        if !in_current || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() == wanted {
+            return Some(value.trim().to_string());
+        }
+    }
+    None
+}
+
+/// Background file for the meter named in config. `random` and `list` use the
+/// first meter in the file. `screen.bgr` wins when that meter sets it.
+pub fn meter_background(meters_txt: &str, meter: &str) -> Option<String> {
+    let mut sections: Vec<(String, String, String)> = Vec::new();
+    let mut name = String::new();
+    let mut bgr = String::new();
+    let mut screen = String::new();
+    let mut in_section = false;
+    let flush = |sections: &mut Vec<(String, String, String)>, name: &mut String, bgr: &mut String, screen: &mut String, in_section: &mut bool| {
+        if *in_section && !name.is_empty() {
+            sections.push((std::mem::take(name), std::mem::take(bgr), std::mem::take(screen)));
+        }
+        *in_section = false;
+    };
+    for line in meters_txt.lines() {
+        let line = line.trim();
+        if let Some(title) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            flush(&mut sections, &mut name, &mut bgr, &mut screen, &mut in_section);
+            name = title.trim().to_string();
+            in_section = true;
+            continue;
+        }
+        if !in_section {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        match key.trim() {
+            "bgr.filename" => bgr = value.trim().to_string(),
+            "screen.bgr" => screen = value.trim().to_string(),
+            _ => {}
+        }
+    }
+    flush(&mut sections, &mut name, &mut bgr, &mut screen, &mut in_section);
+    let named = meter != "random" && meter != "list" && !meter.is_empty();
+    let section = if named {
+        sections.iter().find(|(n, _, _)| n == meter)
+    } else {
+        None
+    };
+    let (_, bgr, screen) = section.or_else(|| sections.first())?;
+    if !screen.is_empty() {
+        return Some(screen.clone());
+    }
+    if !bgr.is_empty() {
+        return Some(bgr.clone());
+    }
+    None
+}
+
 /// Sleep between steps for a frame rate in frames per second.
 pub fn frame_period(rate: u32) -> std::time::Duration {
     let rate = rate.clamp(MIN_FRAME_RATE, MAX_FRAME_RATE);
@@ -184,5 +308,22 @@ mod tests {
         assert_eq!(frame_rate_from_config(text), 15);
         assert_eq!(frame_rate_from_config("[current]\nframe.rate = 99\n"), 60);
         assert_eq!(frame_rate_from_config(""), DEFAULT_FRAME_RATE);
+    }
+
+    #[test]
+    fn screen_size_follows_the_folder_then_the_override() {
+        let folder = "[current]\nmeter.folder = 480x320-wide\nscreen.width =\nscreen.height =\n";
+        assert_eq!(screen_from_config(folder), (480, 320));
+        let override_size = "[current]\nmeter.folder = 480x320\nscreen.width = 1920\nscreen.height = 1080\n";
+        assert_eq!(screen_from_config(override_size), (1920, 1080));
+        assert_eq!(screen_from_config(""), (800, 480));
+    }
+
+    #[test]
+    fn a_named_meter_uses_its_background() {
+        let text = "[bar]\nbgr.filename = bar-bgr.png\nscreen.bgr =\n\n[blue]\nbgr.filename = blue-bgr.png\nscreen.bgr = blue-screen.png\n";
+        assert_eq!(meter_background(text, "bar").as_deref(), Some("bar-bgr.png"));
+        assert_eq!(meter_background(text, "blue").as_deref(), Some("blue-screen.png"));
+        assert_eq!(meter_background(text, "random").as_deref(), Some("bar-bgr.png"));
     }
 }
