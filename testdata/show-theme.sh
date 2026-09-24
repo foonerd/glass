@@ -47,15 +47,16 @@ make_fifo /tmp/myfifosa
 python3 - <<'PY' &
 import os, struct, time
 meter = os.open("/tmp/myfifo", os.O_RDWR)
-os.write(meter, bytes([80, 0, 40, 0]))
 spec = os.open("/tmp/myfifosa", os.O_RDWR)
-os.write(spec, b"".join(struct.pack("<i", i * 5) for i in range(20)))
-time.sleep(3)
+meter_bytes = bytes([80, 0, 40, 0])
+spec_bytes = b"".join(struct.pack("<i", i * 5) for i in range(20))
+while True:
+    os.write(meter, meter_bytes)
+    os.write(spec, spec_bytes)
+    time.sleep(0.2)
 PY
 HOLDER=$!
+trap 'kill "$HOLDER" 2>/dev/null || true; wait "$HOLDER" 2>/dev/null || true' EXIT
 
-"$ROOT/plugin/run_glass.sh" --headless --once --output "$OUT"
-STATUS=$?
-kill "$HOLDER" 2>/dev/null || true
-wait "$HOLDER" 2>/dev/null || true
-exit $STATUS
+echo "show-theme: frame is on the display. Ctrl-C to stop. Also writing $OUT"
+"$ROOT/plugin/run_glass.sh" --output "$OUT"
