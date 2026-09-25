@@ -127,6 +127,17 @@ pub struct Metadata {
     pub queue_before_s: f32,
     #[serde(default)]
     pub queue_total_s: f32,
+    /// The player's controls: volume 0 to 100, mute, random, repeat all, repeat single.
+    #[serde(default)]
+    pub volume: u32,
+    #[serde(default)]
+    pub mute: bool,
+    #[serde(default)]
+    pub random: bool,
+    #[serde(default)]
+    pub repeat: bool,
+    #[serde(default)]
+    pub repeat_single: bool,
 }
 
 /// Where a text sits inside its box when it fits.
@@ -968,6 +979,248 @@ pub fn meter_fanart(meters_txt: &str, meter: &str) -> Option<FanartSpec> {
     })
 }
 
+/// A state indicator's look: a coloured LED shape, or one picture per state,
+/// either with an optional glow behind it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum StateLook {
+    Led {
+        w: u32,
+        h: u32,
+        circle: bool,
+        /// One colour per state, in state order; a state past the end takes the last.
+        colors: Vec<[u8; 3]>,
+    },
+    Icons {
+        /// One picture path per state; an empty path is a state with no picture.
+        files: Vec<String>,
+    },
+}
+
+/// A mute, shuffle, repeat or play-state indicator.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct StateIndicator {
+    pub x: i32,
+    pub y: i32,
+    pub look: StateLook,
+    /// Glow blur radius in pixels, its opacity, and its colour per state
+    /// (empty: the LED colour, or white behind a picture).
+    pub glow: u32,
+    pub glow_intensity: f32,
+    pub glow_colors: Vec<[u8; 3]>,
+}
+
+impl StateIndicator {
+    /// How many states the look provides.
+    pub fn states(&self) -> usize {
+        match &self.look {
+            StateLook::Led { colors, .. } => colors.len(),
+            StateLook::Icons { files } => files.len(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum GaugeStyle {
+    #[default]
+    Numeric,
+    Slider,
+    Knob,
+    Arc,
+}
+
+/// A marker along a progress gauge: a picture or a label at a percentage.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Marker {
+    pub pos: f32,
+    pub image: String,
+    pub label: String,
+    pub font_size: Option<u32>,
+}
+
+/// A value from 0 to 100 shown as a number, a bar, a knob or an arc: the
+/// volume and the progress indicators.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct GaugeSpec {
+    pub x: i32,
+    pub y: i32,
+    pub w: u32,
+    pub h: u32,
+    pub style: GaugeStyle,
+    pub color: [u8; 3],
+    pub bg_color: Option<[u8; 3]>,
+    pub font_size: u32,
+    pub knob_image: String,
+    pub knob_start: f32,
+    pub knob_end: f32,
+    pub arc_width: u32,
+    pub arc_start: f32,
+    pub arc_end: f32,
+    pub track: String,
+    pub tip: String,
+    /// `vertical`, `horizontal`, or another word for detection from the box.
+    pub orientation: String,
+    pub travel: Option<(i32, i32)>,
+    pub tip_offset: (i32, i32),
+    pub fill_color: Option<[u8; 3]>,
+    pub fill_width: Option<u32>,
+    pub fill_offset: (i32, i32),
+    pub fill_radius: u32,
+    /// Progress only: a border of this width in `border_color` around the bar.
+    pub border: u32,
+    pub border_color: [u8; 3],
+    pub markers: Vec<Marker>,
+    pub head_image: String,
+    pub head_offset: (i32, i32),
+}
+
+impl GaugeSpec {
+    /// Whether the bar fills bottom to top.
+    pub fn vertical(&self) -> bool {
+        self.orientation == "vertical" || (self.orientation != "horizontal" && self.h > self.w)
+    }
+}
+
+/// The indicators a meter declares under `config.extend`.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct IndicatorsSpec {
+    pub volume: Option<GaugeSpec>,
+    pub mute: Option<StateIndicator>,
+    pub shuffle: Option<StateIndicator>,
+    pub repeat: Option<StateIndicator>,
+    pub playstate: Option<StateIndicator>,
+    pub progress: Option<GaugeSpec>,
+}
+
+impl IndicatorsSpec {
+    pub fn is_empty(&self) -> bool {
+        self.volume.is_none() && self.mute.is_none() && self.shuffle.is_none() && self.repeat.is_none() && self.playstate.is_none() && self.progress.is_none()
+    }
+}
+
+fn color_list(value: &str) -> Vec<[u8; 3]> {
+    let numbers: Vec<u8> = value.split(',').filter_map(|p| p.trim().parse::<u8>().ok()).collect();
+    numbers.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect()
+}
+
+/// The indicators of a meter: `volume.*`, `mute.*`, `shuffle.*`, `repeat.*`,
+/// `playstate.*` and `progress.*`, as the player's parser reads them.
+pub fn meter_indicators(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<IndicatorsSpec> {
+    let values = section_values(meters_txt, meter);
+    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str()).map(str::trim).filter(|v| !v.is_empty());
+    if !truthy(get("config.extend")) {
+        return None;
+    }
+    let ipair = |key: &str| -> Option<(i32, i32)> {
+        let mut parts = get(key)?.split(',');
+        Some((parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
+    };
+    let upair = |key: &str| -> Option<(u32, u32)> {
+        let mut parts = get(key)?.split(',');
+        Some((parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
+    };
+    let number = |key: &str, default: f32| get(key).and_then(|v| v.parse::<f32>().ok()).unwrap_or(default);
+    let path = |file: &str| if theme_dir.is_empty() { file.to_string() } else { format!("{}/{}", theme_dir.trim_end_matches('/'), file) };
+    // LED colour lists as the player reads them: mute and play state take
+    // the listed triples; shuffle takes nine values as off, shuffle, infinity
+    // and six legacy values as on, off (so off comes second); repeat takes
+    // three or four triples.
+    let state = |name: &str, default_colors: Vec<[u8; 3]>, legacy_swap: bool| -> Option<StateIndicator> {
+        let (x, y) = ipair(&format!("{name}.pos"))?;
+        let (look, glow, glow_intensity, glow_colors) = if let Some((w, h)) = upair(&format!("{name}.led")) {
+            let mut colors = get(&format!("{name}.led.color")).map(color_list).unwrap_or_default();
+            if legacy_swap && colors.len() == 2 {
+                colors = vec![colors[1], colors[0], colors[0]];
+            }
+            if colors.len() < 2 {
+                colors = default_colors.clone();
+            }
+            let mut glow_colors = get(&format!("{name}.led.glow.color")).map(color_list).unwrap_or_default();
+            if legacy_swap && glow_colors.len() == 2 {
+                glow_colors = vec![glow_colors[1], glow_colors[0], glow_colors[0]];
+            }
+            (
+                StateLook::Led { w, h, circle: get(&format!("{name}.led.shape")).map_or(true, |s| !s.eq_ignore_ascii_case("rect")), colors },
+                number(&format!("{name}.led.glow"), 0.0).max(0.0) as u32,
+                number(&format!("{name}.led.glow.intensity"), 0.5).clamp(0.0, 1.0),
+                glow_colors,
+            )
+        } else {
+            let files: Vec<String> = get(&format!("{name}.icon"))?.split(',').map(|f| f.trim()).map(|f| if f.is_empty() { String::new() } else { path(f) }).collect();
+            let mut glow_colors = get(&format!("{name}.icon.glow.color")).map(color_list).unwrap_or_default();
+            if legacy_swap && glow_colors.len() == 2 {
+                glow_colors = vec![glow_colors[1], glow_colors[0], glow_colors[0]];
+            }
+            (
+                StateLook::Icons { files },
+                number(&format!("{name}.icon.glow"), 0.0).max(0.0) as u32,
+                number(&format!("{name}.icon.glow.intensity"), 0.5).clamp(0.0, 1.0),
+                glow_colors,
+            )
+        };
+        Some(StateIndicator { x, y, look, glow, glow_intensity, glow_colors })
+    };
+    let gauge = |name: &str, default_style: GaugeStyle, default_orientation: &str, default_bg: Option<[u8; 3]>, default_color: [u8; 3]| -> Option<GaugeSpec> {
+        let (x, y) = ipair(&format!("{name}.pos"))?;
+        let (w, h) = upair(&format!("{name}.dim")).or(if name == "volume" { Some((100, 20)) } else { None })?;
+        let style = match get(&format!("{name}.style")).map(|s| s.to_ascii_lowercase()).as_deref() {
+            Some("slider") => GaugeStyle::Slider,
+            Some("knob") => GaugeStyle::Knob,
+            Some("arc") => GaugeStyle::Arc,
+            Some("numeric") => GaugeStyle::Numeric,
+            _ => default_style,
+        };
+        let mut markers = Vec::new();
+        for n in 1..=10 {
+            let Some(pos) = get(&format!("{name}.marker.{n}.pos")).and_then(|v| v.parse::<f32>().ok()) else { break };
+            let image = get(&format!("{name}.marker.{n}.image")).map(path).unwrap_or_default();
+            let label = get(&format!("{name}.marker.{n}.label")).unwrap_or("").to_string();
+            if image.is_empty() && label.is_empty() {
+                continue;
+            }
+            markers.push(Marker { pos: pos.clamp(0.0, 100.0), image, label, font_size: get(&format!("{name}.marker.{n}.fontsize")).and_then(|v| v.parse().ok()) });
+        }
+        Some(GaugeSpec {
+            x,
+            y,
+            w,
+            h,
+            style,
+            color: get(&format!("{name}.color")).and_then(color_triplet).unwrap_or(default_color),
+            bg_color: get(&format!("{name}.bg.color")).and_then(color_triplet).or(default_bg),
+            font_size: number(&format!("{name}.font.size"), 24.0).max(1.0) as u32,
+            knob_image: get(&format!("{name}.knob.image")).map(path).unwrap_or_else(|| path("volume_knob.png")),
+            knob_start: number(&format!("{name}.knob.angle.start"), 225.0),
+            knob_end: number(&format!("{name}.knob.angle.end"), -45.0),
+            arc_width: number(&format!("{name}.arc.width"), 6.0).max(1.0) as u32,
+            arc_start: number(&format!("{name}.arc.angle.start"), 225.0),
+            arc_end: number(&format!("{name}.arc.angle.end"), -45.0),
+            track: get(&format!("{name}.slider.track")).map(path).unwrap_or_default(),
+            tip: get(&format!("{name}.slider.tip")).map(path).unwrap_or_default(),
+            orientation: get(&format!("{name}.slider.orientation")).map(|s| s.to_ascii_lowercase()).unwrap_or_else(|| default_orientation.to_string()),
+            travel: ipair(&format!("{name}.slider.travel")),
+            tip_offset: ipair(&format!("{name}.slider.tip.offset")).unwrap_or((0, 0)),
+            fill_color: get(&format!("{name}.fill.color")).and_then(color_triplet),
+            fill_width: get(&format!("{name}.fill.width")).and_then(|v| v.parse().ok()),
+            fill_offset: ipair(&format!("{name}.fill.offset")).unwrap_or((0, 0)),
+            fill_radius: number(&format!("{name}.fill.radius"), 0.0).max(0.0) as u32,
+            border: if name == "progress" { number("progress.border", 0.0).max(0.0) as u32 } else { 0 },
+            border_color: get("progress.border.color").and_then(color_triplet).unwrap_or([100, 100, 100]),
+            markers,
+            head_image: get(&format!("{name}.head.image")).map(path).unwrap_or_default(),
+            head_offset: ipair(&format!("{name}.head.offset")).unwrap_or((0, 0)),
+        })
+    };
+    let spec = IndicatorsSpec {
+        volume: gauge("volume", GaugeStyle::Numeric, "vertical", None, [255, 255, 255]),
+        mute: state("mute", vec![[255, 0, 0], [64, 64, 64]], false),
+        shuffle: state("shuffle", vec![[64, 64, 64], [0, 200, 255], [200, 0, 200]], true),
+        repeat: state("repeat", vec![[64, 64, 64], [0, 255, 0], [255, 200, 0]], false),
+        playstate: state("playstate", vec![[64, 64, 64], [255, 200, 0], [0, 255, 0]], false),
+        progress: gauge("progress", GaugeStyle::Slider, "horizontal", Some([40, 40, 40]), [0, 200, 255]),
+    };
+    (!spec.is_empty()).then_some(spec)
+}
+
 /// `[data.source]` from the player configuration, with the engine's defaults.
 pub fn data_source_from_config(text: &str) -> DataSourceSpec {
     let number = |key: &str, default: f32| {
@@ -1107,6 +1360,8 @@ pub struct SkinDesc {
     pub rotation: RotationSettings,
     #[serde(default)]
     pub reels: Option<ReelsSpec>,
+    #[serde(default)]
+    pub indicators: Option<IndicatorsSpec>,
 }
 
 impl Default for SkinDesc {
@@ -1159,6 +1414,7 @@ impl SkinDesc {
             tonearm: None,
             rotation: RotationSettings::default(),
             reels: None,
+            indicators: None,
         }
     }
 }
@@ -2433,6 +2689,34 @@ mod tests {
         assert_eq!((reels.right.unwrap().theme_file.as_str(), reels.clockwise, reels.adaptive, reels.spool_left), ("/th/right.png", false, false, 1.5), "the meter's spool.adaptive overrides the player's");
         assert_eq!(meter_reels(m, "r", "", &settings), None, "a reel with a tonearm is the record, not a reel");
         assert_eq!(meter_vinyl("[x]\nvinyl.filename = a.png\n", "x", "", &settings), None, "no centre, no record");
+    }
+
+    #[test]
+    fn indicators_read_leds_icons_gauges_and_markers() {
+        let m = "[i]\nconfig.extend = True\nmute.pos = 50,680\nmute.led = 16,16\nmute.led.shape = rect\nmute.led.color = 64,64,64,255,0,0,255,128,0\nmute.led.glow = 8\nmute.led.glow.intensity = 0.7\n\
+            shuffle.pos = 1,2\nshuffle.led = 10,10\nshuffle.led.color = 0,200,255,64,64,64\nrepeat.pos = 3,4\nrepeat.icon = r_off.png,r_all.png,r_single.png,r_inf.png\nrepeat.icon.glow = 6\n\
+            playstate.pos = 5,6\nplaystate.icon = stop.png,,play.png\nvolume.pos = 843,425\nvolume.dim = 55,41\nvolume.style = slider\nvolume.slider.tip = tip.png\nvolume.slider.travel = 3,202\nvolume.slider.tip.offset = -7,0\n\
+            progress.pos = 947,466\nprogress.dim = 315,17\nprogress.color = 22,22,22\nprogress.bg.color = 173,143,99\nprogress.border = 1\nprogress.border.color = 173,143,99\n\
+            progress.marker.1.pos = 0\nprogress.marker.1.label = |\nprogress.marker.2.pos = 50\nprogress.marker.2.image = m.png\nprogress.marker.2.fontsize = 12\nprogress.marker.3.pos = 100\nprogress.marker.4.pos = 75\nprogress.marker.4.label = x\nprogress.head.image = head.png\n\
+            [n]\nmute.pos = 1,1\nmute.icon = a.png\n";
+        let spec = meter_indicators(m, "i", "/th").unwrap();
+        let mute = spec.mute.unwrap();
+        assert_eq!((mute.x, mute.y, mute.glow, mute.glow_intensity, mute.states()), (50, 680, 8, 0.7, 3));
+        assert_eq!(mute.look, StateLook::Led { w: 16, h: 16, circle: false, colors: vec![[64, 64, 64], [255, 0, 0], [255, 128, 0]] });
+        let shuffle = spec.shuffle.unwrap();
+        assert_eq!(shuffle.look, StateLook::Led { w: 10, h: 10, circle: true, colors: vec![[64, 64, 64], [0, 200, 255], [0, 200, 255]] }, "six legacy values are on then off");
+        let repeat = spec.repeat.unwrap();
+        assert_eq!((repeat.states(), repeat.glow, repeat.glow_intensity), (4, 6, 0.5));
+        assert_eq!(repeat.look, StateLook::Icons { files: ["/th/r_off.png", "/th/r_all.png", "/th/r_single.png", "/th/r_inf.png"].map(String::from).to_vec() });
+        assert_eq!(spec.playstate.unwrap().look, StateLook::Icons { files: vec!["/th/stop.png".into(), String::new(), "/th/play.png".into()] });
+        let volume = spec.volume.unwrap();
+        assert_eq!((volume.style, volume.tip.as_str(), volume.travel, volume.tip_offset, volume.vertical(), volume.bg_color), (GaugeStyle::Slider, "/th/tip.png", Some((3, 202)), (-7, 0), true, None));
+        let progress = spec.progress.unwrap();
+        assert_eq!((progress.style, progress.color, progress.bg_color, progress.border, progress.border_color, progress.vertical()), (GaugeStyle::Slider, [22, 22, 22], Some([173, 143, 99]), 1, [173, 143, 99], false));
+        assert_eq!(progress.markers.len(), 3, "the third marker has neither picture nor label and is skipped; the fourth still counts");
+        assert_eq!((progress.markers[1].pos, progress.markers[1].image.as_str(), progress.markers[1].font_size), (50.0, "/th/m.png", Some(12)));
+        assert_eq!(progress.head_image.as_str(), "/th/head.png");
+        assert_eq!(meter_indicators(m, "n", ""), None, "indicators need config.extend");
     }
 
     #[test]

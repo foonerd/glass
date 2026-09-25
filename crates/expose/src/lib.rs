@@ -7,8 +7,8 @@ use std::collections::HashMap;
 
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
 use lead::{Direction, Fill, FolderLayerSpec, FontFiles, LinearSpec, MeterKind, Scale, ScrollDirection, SpectrumSpec, TextAlign, TextStyle, TypeAlign, TypeMode, ZOrder};
-use lead::TonearmSpec;
-use plot::{Fanart, Scene, Text, TypeArea};
+use lead::{GaugeSpec, GaugeStyle, StateIndicator, StateLook, TonearmSpec};
+use plot::{Fanart, Indicators, Scene, Text, TypeArea};
 
 const BG: [u8; 4] = [12, 12, 16, 255];
 
@@ -199,6 +199,7 @@ pub fn raster(scene: &Scene) -> Frame {
             vinyl: None,
             tonearm: None,
             reels: (None, None),
+            indicators: None,
         },
         &mut Motion::default(),
         0,
@@ -273,6 +274,8 @@ pub struct Stack<'a> {
     pub tonearm: Option<&'a Frame>,
     /// The reel pictures, the album's scaled to the theme's.
     pub reels: (Option<&'a Frame>, Option<&'a Frame>),
+    /// The indicators' prepared pictures, when the meter has indicators.
+    pub indicators: Option<&'a IndicatorAssets>,
 }
 
 /// Theme order: full-screen picture, meter face, album art, folder layers, needles, meter
@@ -425,6 +428,9 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
             (spec.pivot_screen.0 as f32, spec.pivot_screen.1 as f32),
             motion.tonearm.angle(),
         );
+    }
+    if let (Some(indicators), Some(assets)) = (&scene.indicators, stack.indicators) {
+        draw_indicators(&mut frame, indicators, assets, stack.fonts);
     }
     if let Some(area) = &scene.type_area {
         draw_type_area(&mut frame, area, stack.icon, stack.fonts);
@@ -1596,6 +1602,429 @@ fn draw_fanart(dst: &mut [u8], dst_w: u32, dst_h: u32, fanart: Option<&Fanart>, 
             (None, Some(new)) => blit_alpha(dst, dst_w, dst_h, &new.frame, new.at, level(p)),
             _ => {}
         },
+    }
+}
+
+/// A blurred copy of a picture, as a Gaussian blur of the given radius
+/// would leave it: three box blurs of that radius, close enough for a glow.
+pub fn blur(src: &Frame, radius: u32) -> Frame {
+    if radius == 0 {
+        return src.clone();
+    }
+    let (w, h) = (src.width as usize, src.height as usize);
+    let r = radius as usize;
+    let mut a: Vec<f32> = src.rgba.iter().map(|&v| v as f32).collect();
+    let mut b = vec![0f32; a.len()];
+    for _ in 0..3 {
+        // Horizontal pass.
+        for y in 0..h {
+            for c in 0..4 {
+                let mut sum = 0.0;
+                let row = y * w;
+                for x in 0..w.min(r + 1) {
+                    sum += a[(row + x) * 4 + c];
+                }
+                for x in 0..w {
+                    let count = (x.min(r) + (w - 1 - x).min(r) + 1) as f32;
+                    b[(row + x) * 4 + c] = sum / count;
+                    if x + r + 1 < w {
+                        sum += a[(row + x + r + 1) * 4 + c];
+                    }
+                    if x >= r {
+                        sum -= a[(row + x - r) * 4 + c];
+                    }
+                }
+            }
+        }
+        // Vertical pass.
+        for x in 0..w {
+            for c in 0..4 {
+                let mut sum = 0.0;
+                for y in 0..h.min(r + 1) {
+                    sum += b[(y * w + x) * 4 + c];
+                }
+                for y in 0..h {
+                    let count = (y.min(r) + (h - 1 - y).min(r) + 1) as f32;
+                    a[(y * w + x) * 4 + c] = sum / count;
+                    if y + r + 1 < h {
+                        sum += b[((y + r + 1) * w + x) * 4 + c];
+                    }
+                    if y >= r {
+                        sum -= b[((y - r) * w + x) * 4 + c];
+                    }
+                }
+            }
+        }
+    }
+    Frame {
+        width: src.width,
+        height: src.height,
+        rgba: a.iter().map(|v| v.round().clamp(0.0, 255.0) as u8).collect(),
+    }
+}
+
+fn empty_frame(w: u32, h: u32) -> Frame {
+    Frame {
+        width: w.max(1),
+        height: h.max(1),
+        rgba: vec![0u8; (w.max(1) * h.max(1) * 4) as usize],
+    }
+}
+
+/// Paint a filled ellipse or rectangle of the box into a frame.
+fn paint_shape(frame: &mut Frame, x: u32, y: u32, w: u32, h: u32, circle: bool, color: [u8; 4]) {
+    for py in y..(y + h).min(frame.height) {
+        for px in x..(x + w).min(frame.width) {
+            let inside = if circle {
+                let nx = (px as f32 + 0.5 - x as f32) / (w as f32 / 2.0) - 1.0;
+                let ny = (py as f32 + 0.5 - y as f32) / (h as f32 / 2.0) - 1.0;
+                nx * nx + ny * ny <= 1.0
+            } else {
+                true
+            };
+            if inside {
+                let i = ((py * frame.width + px) * 4) as usize;
+                frame.rgba[i..i + 4].copy_from_slice(&color);
+            }
+        }
+    }
+}
+
+/// One state of an LED indicator: the glow behind, the shape on top, in a
+/// canvas padded by twice the glow radius as the player pads it.
+pub fn led_state_frame(w: u32, h: u32, circle: bool, color: [u8; 3], glow: u32, intensity: f32, glow_color: [u8; 3]) -> Frame {
+    let pad = if glow > 0 { glow * 2 } else { 0 };
+    let mut frame = empty_frame(w + pad * 2, h + pad * 2);
+    if glow > 0 && intensity > 0.0 {
+        let mut halo = empty_frame(w + pad * 2, h + pad * 2);
+        let alpha = (255.0 * intensity.clamp(0.0, 1.0)) as u8;
+        paint_shape(&mut halo, pad, pad, w, h, circle, [glow_color[0], glow_color[1], glow_color[2], alpha]);
+        frame = blur(&halo, glow);
+    }
+    if circle {
+        let r = (w.min(h) / 2) as i32;
+        let (cx, cy) = ((pad + w / 2) as i32, (pad + h / 2) as i32);
+        let width = frame.width;
+        let height = frame.height;
+        fill_circle(&mut frame.rgba, width, height, cx, cy, r, [color[0], color[1], color[2], 255]);
+    } else {
+        paint_shape(&mut frame, pad, pad, w, h, false, [color[0], color[1], color[2], 255]);
+    }
+    frame
+}
+
+/// One state of a picture indicator: the picture's own alpha in the glow
+/// colour, blurred, behind the picture, in a canvas of the largest picture
+/// padded by twice the glow radius.
+pub fn icon_state_frame(icon: &Frame, canvas: (u32, u32), glow: u32, intensity: f32, glow_color: Option<[u8; 3]>) -> Frame {
+    let pad = if glow > 0 { glow * 2 } else { 0 };
+    let (cw, ch) = (canvas.0 + pad * 2, canvas.1 + pad * 2);
+    let mut frame = empty_frame(cw, ch);
+    if glow > 0 && intensity > 0.0 {
+        let mut halo = empty_frame(icon.width + pad * 2, icon.height + pad * 2);
+        let color = glow_color.unwrap_or([255, 255, 255]);
+        let level = 255.0 * intensity.clamp(0.0, 1.0);
+        for y in 0..icon.height {
+            for x in 0..icon.width {
+                let a = icon.rgba[((y * icon.width + x) * 4 + 3) as usize];
+                if a > 0 {
+                    let i = (((y + pad) * halo.width + x + pad) * 4) as usize;
+                    halo.rgba[i..i + 4].copy_from_slice(&[color[0], color[1], color[2], (a as f32 / 255.0 * level) as u8]);
+                }
+            }
+        }
+        let halo = blur(&halo, glow);
+        let gx = (cw as i32 - halo.width as i32) / 2;
+        let gy = (ch as i32 - halo.height as i32) / 2;
+        blit_part(&mut frame.rgba, cw, ch, &halo, (gx, gy), (0, 0, halo.width, halo.height));
+    }
+    let ix = (cw as i32 - icon.width as i32) / 2;
+    let iy = (ch as i32 - icon.height as i32) / 2;
+    blit_part(&mut frame.rgba, cw, ch, icon, (ix, iy), (0, 0, icon.width, icon.height));
+    frame
+}
+
+/// The pictures an indicator set needs, prepared once per meter.
+#[derive(Default)]
+pub struct IndicatorAssets {
+    /// One frame per state for mute, shuffle, repeat and play state.
+    pub mute: Vec<Option<Frame>>,
+    pub shuffle: Vec<Option<Frame>>,
+    pub repeat: Vec<Option<Frame>>,
+    pub playstate: Vec<Option<Frame>>,
+    pub volume: GaugeAssets,
+    pub progress: GaugeAssets,
+}
+
+#[derive(Default)]
+pub struct GaugeAssets {
+    pub knob: Option<Frame>,
+    pub track: Option<Frame>,
+    pub tip: Option<Frame>,
+    pub head: Option<Frame>,
+    /// One per marker, a picture when the marker has one.
+    pub markers: Vec<Option<Frame>>,
+}
+
+impl IndicatorAssets {
+    pub fn load(spec: &lead::IndicatorsSpec) -> Self {
+        let states = |indicator: &Option<StateIndicator>| -> Vec<Option<Frame>> {
+            let Some(indicator) = indicator else { return Vec::new() };
+            match &indicator.look {
+                StateLook::Led { w, h, circle, colors } => colors
+                    .iter()
+                    .enumerate()
+                    .map(|(i, &color)| {
+                        let glow_color = indicator.glow_colors.get(i).or(indicator.glow_colors.last()).copied().unwrap_or(color);
+                        Some(led_state_frame(*w, *h, *circle, color, indicator.glow, indicator.glow_intensity, glow_color))
+                    })
+                    .collect(),
+                StateLook::Icons { files } => {
+                    let icons: Vec<Option<Frame>> = files.iter().map(|f| if f.is_empty() { None } else { read_png(Path::new(f)) }).collect();
+                    let canvas = icons.iter().flatten().fold((0, 0), |(w, h), f| (w.max(f.width), h.max(f.height)));
+                    icons
+                        .iter()
+                        .enumerate()
+                        .map(|(i, icon)| icon.as_ref().map(|icon| icon_state_frame(icon, canvas, indicator.glow, indicator.glow_intensity, indicator.glow_colors.get(i).copied())))
+                        .collect()
+                }
+            }
+        };
+        let gauge = |gauge: &Option<GaugeSpec>| -> GaugeAssets {
+            let Some(g) = gauge else { return GaugeAssets::default() };
+            let picture = |file: &str| if file.is_empty() { None } else { read_png(Path::new(file)) };
+            GaugeAssets {
+                knob: if g.style == GaugeStyle::Knob { picture(&g.knob_image) } else { None },
+                track: picture(&g.track),
+                tip: picture(&g.tip),
+                head: picture(&g.head_image),
+                markers: g.markers.iter().map(|m| picture(&m.image)).collect(),
+            }
+        };
+        Self {
+            mute: states(&spec.mute),
+            shuffle: states(&spec.shuffle),
+            repeat: states(&spec.repeat),
+            playstate: states(&spec.playstate),
+            volume: gauge(&spec.volume),
+            progress: gauge(&spec.progress),
+        }
+    }
+}
+
+/// A filled rectangle with rounded corners, the radius clamped to half the
+/// shorter side as the player's draw call clamps it.
+fn fill_round_rect(dst: &mut [u8], dst_w: u32, dst_h: u32, x: i32, y: i32, w: i32, h: i32, radius: i32, color: [u8; 4]) {
+    if w <= 0 || h <= 0 {
+        return;
+    }
+    let r = radius.clamp(0, w.min(h) / 2) as f32;
+    for py in y.max(0)..(y + h).min(dst_h as i32) {
+        for px in x.max(0)..(x + w).min(dst_w as i32) {
+            if r > 0.0 {
+                let fx = px as f32 + 0.5;
+                let fy = py as f32 + 0.5;
+                let cx = fx.clamp(x as f32 + r, (x + w) as f32 - r);
+                let cy = fy.clamp(y as f32 + r, (y + h) as f32 - r);
+                if (fx - cx).powi(2) + (fy - cy).powi(2) > r * r {
+                    continue;
+                }
+            }
+            blend(dst, (py as usize * dst_w as usize + px as usize) * 4, color);
+        }
+    }
+}
+
+/// A solid arc: the ring between the box's ellipse and the same ellipse
+/// `width` inside it, from `start` counter-clockwise to `stop` degrees with 0
+/// pointing right, sampled four times a pixel for a soft rim.
+fn fill_arc(dst: &mut [u8], dst_w: u32, dst_h: u32, x: i32, y: i32, w: u32, h: u32, start: f32, stop: f32, width: u32, color: [u8; 3]) {
+    if w == 0 || h == 0 {
+        return;
+    }
+    let mut span = (stop - start).rem_euclid(360.0);
+    if span == 0.0 && (stop - start).abs() > 0.0 {
+        span = 360.0;
+    }
+    if span <= 0.0 {
+        return;
+    }
+    let (cx, cy) = (x as f32 + w as f32 / 2.0, y as f32 + h as f32 / 2.0);
+    let (rx, ry) = (w as f32 / 2.0, h as f32 / 2.0);
+    let (rx_in, ry_in) = ((rx - width as f32).max(0.0), (ry - width as f32).max(0.0));
+    for py in y.max(0)..(y + h as i32).min(dst_h as i32) {
+        for px in x.max(0)..(x + w as i32).min(dst_w as i32) {
+            let mut hits = 0;
+            for (sx, sy) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
+                let dx = px as f32 + sx - cx;
+                let dy = py as f32 + sy - cy;
+                let outer = (dx / rx).powi(2) + (dy / ry).powi(2);
+                if outer > 1.0 {
+                    continue;
+                }
+                if rx_in > 0.5 && ry_in > 0.5 && (dx / rx_in).powi(2) + (dy / ry_in).powi(2) < 1.0 {
+                    continue;
+                }
+                let angle = (-dy).atan2(dx).to_degrees();
+                if (angle - start).rem_euclid(360.0) <= span {
+                    hits += 1;
+                }
+            }
+            if hits > 0 {
+                blend(dst, (py as usize * dst_w as usize + px as usize) * 4, [color[0], color[1], color[2], (255 * hits / 4) as u8]);
+            }
+        }
+    }
+}
+
+/// Where a percentage sits along a gauge: on the bar, or on the arc.
+fn gauge_point(g: &GaugeSpec, pct: f32) -> (i32, i32) {
+    let p = pct.clamp(0.0, 100.0) / 100.0;
+    match g.style {
+        GaugeStyle::Slider => {
+            if g.vertical() {
+                (g.x + g.w as i32 / 2, g.y + g.h as i32 - (p * g.h as f32) as i32)
+            } else {
+                (g.x + (p * g.w as f32) as i32, g.y + g.h as i32 / 2)
+            }
+        }
+        GaugeStyle::Arc | GaugeStyle::Knob => {
+            let cx = g.x + g.w as i32 / 2;
+            let cy = g.y + g.h as i32 / 2;
+            let r = ((g.w.min(g.h) / 2) as i32 - g.arc_width as i32).max(4) as f32;
+            let angle = (g.arc_start - p * (g.arc_start - g.arc_end)).to_radians();
+            (cx + (r * angle.cos()) as i32, cy - (r * angle.sin()) as i32)
+        }
+        GaugeStyle::Numeric => (g.x + (p * g.w as f32) as i32, g.y + g.h as i32 / 2),
+    }
+}
+
+/// One gauge at a value from 0 to 100, as the player's slider indicator draws it.
+fn draw_gauge(frame: &mut Frame, g: &GaugeSpec, value: u32, assets: &GaugeAssets, fonts: Option<&Fonts>) {
+    let (width, height) = (frame.width, frame.height);
+    let value = value.min(100);
+    let rgb = |c: [u8; 3]| [c[0], c[1], c[2], 255];
+    match g.style {
+        GaugeStyle::Numeric => {
+            if let Some(line) = render_text(fonts, TextStyle::Regular, g.font_size, g.color, &format!("{value}%"), 0) {
+                blit_at(&mut frame.rgba, width, height, &line, (g.x.max(0) as u32, g.y.max(0) as u32));
+            }
+        }
+        GaugeStyle::Slider => {
+            if let Some(tip) = &assets.tip {
+                if let Some(track) = &assets.track {
+                    blit_part(&mut frame.rgba, width, height, track, (g.x, g.y), (0, 0, track.width, track.height));
+                }
+                let (tw, th) = (tip.width as i32, tip.height as i32);
+                let (w, h) = (g.w as i32, g.h as i32);
+                let travel = g.travel.unwrap_or(if g.vertical() { (0, h - th) } else { (0, w - tw) });
+                let range = travel.1 - travel.0;
+                let (tip_x, tip_y) = if g.vertical() {
+                    (g.x + g.tip_offset.0 + (w - tw) / 2, g.y + travel.1 - (value as f32 / 100.0 * range as f32) as i32 + g.tip_offset.1)
+                } else {
+                    (g.x + travel.0 + (value as f32 / 100.0 * range as f32) as i32 + g.tip_offset.0, g.y + g.tip_offset.1 + (h - th) / 2)
+                };
+                if let Some(fill) = g.fill_color {
+                    let (dx, dy) = g.fill_offset;
+                    if g.vertical() {
+                        let thickness = g.fill_width.map_or(tw, |f| f as i32).max(1);
+                        let cx = tip_x + tw / 2 + dx;
+                        let current = tip_y + th / 2;
+                        let zero = g.y + travel.1 + g.tip_offset.1 + th / 2;
+                        let top = current.min(zero) + dy;
+                        let fill_h = (zero - current).abs();
+                        fill_round_rect(&mut frame.rgba, width, height, cx - thickness / 2, top, thickness, fill_h, g.fill_radius as i32, rgb(fill));
+                    } else {
+                        let thickness = g.fill_width.map_or(th, |f| f as i32).max(1);
+                        let cy = tip_y + th / 2 + dy;
+                        let current = tip_x + tw / 2;
+                        let zero = g.x + travel.0 + g.tip_offset.0 + tw / 2;
+                        let left = current.min(zero) + dx;
+                        let fill_w = (current - zero).abs();
+                        fill_round_rect(&mut frame.rgba, width, height, left, cy - thickness / 2, fill_w, thickness, g.fill_radius as i32, rgb(fill));
+                    }
+                }
+                blit_part(&mut frame.rgba, width, height, tip, (tip_x, tip_y), (0, 0, tip.width, tip.height));
+            } else {
+                let (w, h) = (g.w as i32, g.h as i32);
+                if let Some(bg) = g.bg_color {
+                    fill_round_rect(&mut frame.rgba, width, height, g.x, g.y, w, h, g.fill_radius as i32, rgb(bg));
+                }
+                if g.vertical() {
+                    let fill_h = (value as f32 / 100.0 * h as f32) as i32;
+                    if fill_h > 0 {
+                        fill_round_rect(&mut frame.rgba, width, height, g.x, g.y + h - fill_h, w, fill_h, g.fill_radius as i32, rgb(g.color));
+                    }
+                } else {
+                    let fill_w = (value as f32 / 100.0 * w as f32) as i32;
+                    if fill_w > 0 {
+                        fill_round_rect(&mut frame.rgba, width, height, g.x, g.y, fill_w, h, g.fill_radius as i32, rgb(g.color));
+                    }
+                }
+                if g.border > 0 && g.x >= 0 && g.y >= 0 {
+                    draw_border(&mut frame.rgba, width, height, (g.x as u32, g.y as u32, g.w, g.h), g.border, rgb(g.border_color));
+                }
+            }
+        }
+        GaugeStyle::Knob => {
+            if let Some(knob) = &assets.knob {
+                let angle = g.knob_start - value as f32 / 100.0 * (g.knob_start - g.knob_end);
+                let centre = (g.x as f32 + g.w as f32 / 2.0, g.y as f32 + g.h as f32 / 2.0);
+                blit_pivot(&mut frame.rgba, width, height, knob, (knob.width as f32 / 2.0, knob.height as f32 / 2.0), centre, angle);
+            } else {
+                draw_arc_gauge(frame, g, value);
+            }
+        }
+        GaugeStyle::Arc => draw_arc_gauge(frame, g, value),
+    }
+    for (marker, picture) in g.markers.iter().zip(assets.markers.iter()) {
+        let (px, py) = gauge_point(g, marker.pos);
+        if let Some(picture) = picture {
+            blit_part(&mut frame.rgba, width, height, picture, (px - picture.width as i32 / 2, py - picture.height as i32 / 2), (0, 0, picture.width, picture.height));
+        } else if !marker.label.is_empty() {
+            let size = marker.font_size.unwrap_or(g.font_size);
+            if let Some(line) = render_text(fonts, TextStyle::Regular, size, g.color, &marker.label, 0) {
+                blit_part(&mut frame.rgba, width, height, &line, (px - line.width as i32 / 2, py - line.height as i32 / 2), (0, 0, line.width, line.height));
+            }
+        }
+    }
+    if let Some(head) = &assets.head {
+        let (px, py) = gauge_point(g, value as f32);
+        blit_part(&mut frame.rgba, width, height, head, (px - head.width as i32 / 2 + g.head_offset.0, py - head.height as i32 / 2 + g.head_offset.1), (0, 0, head.width, head.height));
+    }
+}
+
+fn draw_arc_gauge(frame: &mut Frame, g: &GaugeSpec, value: u32) {
+    let (width, height) = (frame.width, frame.height);
+    if let Some(bg) = g.bg_color {
+        fill_arc(&mut frame.rgba, width, height, g.x, g.y, g.w, g.h, g.arc_end, g.arc_start, g.arc_width, bg);
+    }
+    if value > 0 {
+        let current = g.arc_start - value as f32 / 100.0 * (g.arc_start - g.arc_end);
+        fill_arc(&mut frame.rgba, width, height, g.x, g.y, g.w, g.h, current, g.arc_start, g.arc_width, g.color);
+    }
+}
+
+/// The indicators in their states: a state past a look's last state takes
+/// the last, as the player clamps it.
+fn draw_indicators(frame: &mut Frame, indicators: &Indicators, assets: &IndicatorAssets, fonts: Option<&Fonts>) {
+    let (width, height) = (frame.width, frame.height);
+    let mut state = |spec: &Option<StateIndicator>, frames: &[Option<Frame>], index: usize| {
+        let (Some(spec), false) = (spec, frames.is_empty()) else { return };
+        let index = index.min(frames.len() - 1);
+        if let Some(picture) = &frames[index] {
+            blit_part(&mut frame.rgba, width, height, picture, (spec.x, spec.y), (0, 0, picture.width, picture.height));
+        }
+    };
+    state(&indicators.spec.mute, &assets.mute, indicators.mute_state);
+    state(&indicators.spec.shuffle, &assets.shuffle, indicators.shuffle_state);
+    state(&indicators.spec.repeat, &assets.repeat, indicators.repeat_state);
+    state(&indicators.spec.playstate, &assets.playstate, indicators.play_state);
+    if let Some(volume) = &indicators.spec.volume {
+        draw_gauge(frame, volume, indicators.volume, &assets.volume, fonts);
+    }
+    if let Some(progress) = &indicators.spec.progress {
+        draw_gauge(frame, progress, indicators.progress, &assets.progress, fonts);
     }
 }
 
