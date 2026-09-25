@@ -6,12 +6,13 @@
 
 use std::env;
 use std::process::ExitCode;
+use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
 
 use expose::{flip_x, raster_over, read_art, read_icon, read_png, FolderPicture, Fonts, Motion, SpectrumAssets, Stack};
 use intake::{PipeSource, Selector, Source};
-use lead::{frame_period, Input, MeterKind, SkinDesc, TypeMode};
+use lead::{frame_period, FolderLayerSpec, Input, MeterKind, SkinDesc, TypeMode};
 use pane::{publish, write_ppm, Surface};
 use plot::{step, Scene};
 
@@ -71,6 +72,54 @@ impl Assets {
                 .and_then(|art| read_png(std::path::Path::new(&art.mask))),
             spectrum: skin.spectrum.as_ref().map(SpectrumAssets::load),
         }
+    }
+}
+
+/// A picture decoded and fitted off the frame loop: the slot keeps showing
+/// what it has until the next file is ready.
+#[derive(Default)]
+struct PictureSlot {
+    file: String,
+    picture: Option<FolderPicture>,
+    pending: Option<(String, mpsc::Receiver<Option<FolderPicture>>)>,
+}
+
+impl PictureSlot {
+    /// Ask for `file` in this box; `ready` is a picture of that file already
+    /// decoded elsewhere, taken over without decoding again.
+    fn want(&mut self, file: &str, spec: &FolderLayerSpec, ready: Option<&FolderPicture>) {
+        if let Some((wanted, rx)) = &self.pending {
+            match rx.try_recv() {
+                Ok(picture) => {
+                    self.file = wanted.clone();
+                    self.picture = picture;
+                    self.pending = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => self.pending = None,
+            }
+        }
+        if file == self.file || self.pending.as_ref().is_some_and(|(wanted, _)| wanted == file) {
+            return;
+        }
+        if file.is_empty() {
+            self.file.clear();
+            self.picture = None;
+            self.pending = None;
+            return;
+        }
+        if let Some(picture) = ready {
+            self.file = file.to_string();
+            self.picture = Some(picture.clone());
+            self.pending = None;
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let (path, spec) = (file.to_string(), spec.clone());
+        thread::spawn(move || {
+            let _ = tx.send(FolderPicture::load(std::path::Path::new(&path), &spec));
+        });
+        self.pending = Some((file.to_string(), rx));
     }
 }
 
@@ -160,7 +209,9 @@ fn main() -> ExitCode {
     // The type icon, decoded once per file, box and tint.
     let mut icon_cache: Option<((String, u32, u32, Option<[u8; 3]>), expose::Frame)> = None;
     // Folder layer pictures, decoded once per file and box, one slot per layer.
-    let mut folder_cache: Vec<(String, Option<FolderPicture>)> = Vec::new();
+    let mut folder_slots: Vec<PictureSlot> = Vec::new();
+    // The fanart on show and the one it replaces during a transition.
+    let mut fanart_slots: (PictureSlot, PictureSlot) = Default::default();
     let show_window = env::var_os("DISPLAY").is_some() && !headless;
     let write_file = output.is_some();
     let serving_remote = false;
@@ -196,7 +247,8 @@ fn main() -> ExitCode {
                     assets = Assets::load(&skin);
                     art_cache = None;
                     icon_cache = None;
-                    folder_cache.clear();
+                    folder_slots.clear();
+                    fanart_slots = Default::default();
                     motion = Motion::default();
                     switched_at = Instant::now();
                     println!("glass: meter={name}");
@@ -260,20 +312,32 @@ fn main() -> ExitCode {
                 }
                 None => icon_cache = None,
             }
-            if folder_cache.len() != scene.folder_layers.len() {
-                folder_cache = scene.folder_layers.iter().map(|_| (String::new(), None)).collect();
+            if folder_slots.len() != scene.folder_layers.len() {
+                folder_slots = scene.folder_layers.iter().map(|_| PictureSlot::default()).collect();
             }
-            for (slot, layer) in folder_cache.iter_mut().zip(scene.folder_layers.iter()) {
-                if slot.0 != layer.file {
-                    slot.1 = if layer.file.is_empty() {
-                        None
-                    } else {
-                        FolderPicture::load(std::path::Path::new(&layer.file), &layer.spec)
-                    };
-                    slot.0 = layer.file.clone();
-                }
+            for (slot, layer) in folder_slots.iter_mut().zip(scene.folder_layers.iter()) {
+                slot.want(&layer.file, &layer.spec, None);
             }
-            let folder_pictures: Vec<Option<FolderPicture>> = folder_cache.iter().map(|(_, p)| p.clone()).collect();
+            let folder_pictures: Vec<Option<FolderPicture>> = folder_slots.iter().map(|s| s.picture.clone()).collect();
+            if let Some(fanart) = &scene.fanart {
+                let spec = FolderLayerSpec {
+                    files: Vec::new(),
+                    x: fanart.spec.x,
+                    y: fanart.spec.y,
+                    w: fanart.spec.w,
+                    h: fanart.spec.h,
+                    scale: fanart.spec.scale,
+                    zorder: fanart.spec.zorder,
+                    border: 0,
+                    border_color: [0, 0, 0],
+                };
+                // The picture being replaced is the one the current slot held.
+                let handed_over = if fanart_slots.0.file == fanart.prev_file { fanart_slots.0.picture.clone() } else { None };
+                fanart_slots.1.want(&fanart.prev_file, &spec, handed_over.as_ref());
+                fanart_slots.0.want(&fanart.file, &spec, None);
+            } else {
+                fanart_slots = Default::default();
+            }
             let frame = raster_over(
                 &scene,
                 Stack {
@@ -288,6 +352,7 @@ fn main() -> ExitCode {
                     icon: icon_cache.as_ref().map(|(_, frame)| frame),
                     spectrum: assets.spectrum.as_ref(),
                     folder_pictures: &folder_pictures,
+                    fanart: (fanart_slots.0.picture.as_ref(), fanart_slots.1.picture.as_ref()),
                 },
                 &mut motion,
                 started.elapsed().as_millis() as u64,

@@ -2,8 +2,8 @@
 //! Pure: no files, no devices, no pixels.
 
 use lead::{
-    format_key, format_label, FolderLayerSpec, Input, Metadata, MeterSpec, ScrollDirection, SkinDesc,
-    SpectrumSpec, TextAlign, TextSpec, TextStyle, TypeAlign, TypeMode,
+    format_key, format_label, FanartSpec, FolderLayerSpec, Input, Metadata, MeterSpec, ScrollDirection,
+    SkinDesc, SpectrumSpec, TextAlign, TextSpec, TextStyle, TypeAlign, TypeMode,
 };
 use serde::{Deserialize, Serialize};
 
@@ -100,6 +100,21 @@ pub struct Scene {
     /// The skin's folder layers, each with the file found for this track, or empty.
     #[serde(default)]
     pub folder_layers: Vec<FolderLayer>,
+    /// The fanart slot with the picture on show and its transition, when the skin has one.
+    #[serde(default)]
+    pub fanart: Option<Fanart>,
+}
+
+/// The fanart slot of the scene: its box, the picture on show, the one it
+/// replaces while a transition runs, and where the transition stands.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Fanart {
+    pub spec: FanartSpec,
+    pub file: String,
+    pub prev_file: String,
+    pub transition: String,
+    pub transition_ms: u32,
+    pub elapsed_ms: u32,
 }
 
 /// One folder layer of the scene: its box and the picture file to show.
@@ -129,6 +144,7 @@ impl Default for Scene {
             spectrum: None,
             bar_heights: Vec::new(),
             folder_layers: Vec::new(),
+            fanart: None,
         }
     }
 }
@@ -362,6 +378,14 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
                 file: input.metadata.folder_files.get(i).cloned().unwrap_or_default(),
             })
             .collect(),
+        fanart: skin.fanart.as_ref().map(|spec| Fanart {
+            spec: spec.clone(),
+            file: input.metadata.fanart_file.clone(),
+            prev_file: input.metadata.fanart_prev_file.clone(),
+            transition: input.metadata.fanart_transition.clone(),
+            transition_ms: input.metadata.fanart_transition_ms,
+            elapsed_ms: input.metadata.fanart_elapsed_ms,
+        }),
     }
 }
 

@@ -10,12 +10,12 @@ use std::time::{Duration, Instant};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
-use std::collections::VecDeque;
+use std::collections::{HashMap, VecDeque};
 
 use lead::{
     data_source_from_config, decode_meter, decode_spectrum, fonts_from_config, format_key,
     frame_rate_from_config, meter_art, meter_at, meter_background, meter_indicator,
-    folder_candidates, meter_folder_layers, meter_layers, meter_needle, meter_sections, meter_spec, meter_spectrum, meter_text_at,
+    folder_candidates, meter_fanart, meter_folder_layers, meter_layers, meter_needle, meter_sections, meter_spec, meter_spectrum, meter_text_at,
     meter_texts, meter_type, random_change_title_from_config, random_interval_from_config,
     screen_from_config, scroll_speeds_from_config, selection_from_config, spectrum_from_theme,
     spectrum_settings, Bins, DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec, CONFIG_TXT,
@@ -148,6 +148,302 @@ pub fn installed_rotation() -> Rotation {
         random,
         interval: Duration::from_secs(u64::from(random_interval_from_config(&text))),
         on_title: random_change_title_from_config(&text),
+    }
+}
+
+/// Where the player keeps the fanart it resolves; a reference the player
+/// answers is a path under here.
+pub const PLUGINS_DIR: &str = "/data/plugins";
+
+/// What the player answers for an artist's fanart.
+#[derive(Debug, Clone, Default, PartialEq, serde::Deserialize)]
+pub struct FanartAnswer {
+    #[serde(default)]
+    pub success: bool,
+    #[serde(default)]
+    pub images: Vec<String>,
+    #[serde(default)]
+    pub interval_ms: u64,
+    #[serde(default)]
+    pub transition: String,
+    #[serde(default)]
+    pub transition_ms: u64,
+    #[serde(default)]
+    pub order: String,
+}
+
+/// Ask the player for an artist's fanart set and the slideshow settings.
+fn fanart_list(artist: &str, uri: &str) -> FanartAnswer {
+    #[derive(serde::Deserialize)]
+    struct Outer {
+        #[serde(default)]
+        success: bool,
+        #[serde(default)]
+        data: Option<FanartAnswer>,
+    }
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(20)))
+        .build()
+        .new_agent();
+    let body = serde_json::json!({
+        "endpoint": "peppy_screensaver_artistfanart",
+        "data": { "artist": artist, "uri": uri },
+    });
+    let Ok(mut response) = agent
+        .post("http://localhost:3000/api/v1/pluginEndpoint")
+        .header("Content-Type", "application/json")
+        .send(body.to_string().as_bytes())
+    else {
+        return FanartAnswer::default();
+    };
+    let Ok(text) = response.body_mut().read_to_string() else {
+        return FanartAnswer::default();
+    };
+    match serde_json::from_str::<Outer>(&text) {
+        Ok(Outer { success: true, data: Some(answer) }) if answer.success => answer,
+        Ok(Outer { data: Some(answer), .. }) => FanartAnswer {
+            images: Vec::new(),
+            ..answer
+        },
+        _ => FanartAnswer::default(),
+    }
+}
+
+/// The file for a fanart reference: the player's own copy when it is there,
+/// else fetched through the player and kept beside the album art.
+fn fanart_file(reference: &str) -> String {
+    let local = Path::new(PLUGINS_DIR).join(reference);
+    if local.is_file() {
+        return local.to_string_lossy().into_owned();
+    }
+    fetch_art(&format!("http://localhost:3000/albumart?sectionimage={reference}"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
+
+fn xorshift(seed: &mut u64) -> u64 {
+    let mut x = *seed | 1;
+    x ^= x >> 12;
+    x ^= x << 25;
+    x ^= x >> 27;
+    *seed = x;
+    x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Why {
+    Artist,
+    Track,
+    Interval,
+}
+
+/// The artist fanart slideshow as the player's own handler runs it: the set
+/// is asked of the player when the artist changes, asked again on every track
+/// and every timed interval, one picture forward per track and per interval,
+/// in order or at random, with the position remembered per artist and set.
+#[derive(Default)]
+pub struct Slideshow {
+    artist_key: String,
+    track_key: String,
+    refs: Vec<String>,
+    index: usize,
+    interval_ms: u64,
+    transition: String,
+    transition_ms: u64,
+    order: String,
+    last_advance: Option<Instant>,
+    file: String,
+    prev_file: String,
+    transition_started: Option<Instant>,
+    pending: Option<(Why, mpsc::Receiver<FanartAnswer>)>,
+    /// Position and last advance per artist and picture set.
+    memory: HashMap<String, (usize, Option<Instant>)>,
+    seed: u64,
+}
+
+impl Slideshow {
+    fn ask(&mut self, why: Why, artist: &str, uri: &str) {
+        if self.pending.is_some() {
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let (artist, uri) = (artist.to_string(), uri.to_string());
+        thread::spawn(move || {
+            let _ = tx.send(fanart_list(&artist, &uri));
+        });
+        self.pending = Some((why, rx));
+    }
+
+    fn memory_key(&self) -> String {
+        format!("{}\0{}", self.artist_key, self.refs.join("\0"))
+    }
+
+    fn begin_transition(&mut self) {
+        if matches!(self.transition.as_str(), "fade" | "merge") {
+            self.prev_file = std::mem::take(&mut self.file);
+            self.transition_started = Some(Instant::now());
+        } else {
+            self.prev_file.clear();
+            self.transition_started = None;
+        }
+    }
+
+    fn show(&mut self, index: usize) {
+        if index >= self.refs.len() {
+            self.file.clear();
+            self.index = 0;
+            return;
+        }
+        self.index = index;
+        self.file = fanart_file(&self.refs[index]);
+        let key = self.memory_key();
+        self.memory.insert(key, (index, self.last_advance));
+        while self.memory.len() > 20 {
+            let first = self.memory.keys().next().cloned().unwrap();
+            self.memory.remove(&first);
+        }
+    }
+
+    fn start_index(&mut self) -> usize {
+        let n = self.refs.len();
+        if n == 0 {
+            return 0;
+        }
+        if let Some((index, _)) = self.memory.get(&self.memory_key()) {
+            return (*index).min(n - 1);
+        }
+        if self.order == "random" && n > 1 {
+            (xorshift(&mut self.seed) % n as u64) as usize
+        } else {
+            0
+        }
+    }
+
+    fn advance(&mut self) {
+        let n = self.refs.len();
+        if n <= 1 {
+            return;
+        }
+        self.begin_transition();
+        let next = if self.order == "random" {
+            if n == 2 {
+                1 - self.index
+            } else {
+                let mut pick = (xorshift(&mut self.seed) % (n as u64 - 1)) as usize;
+                if pick >= self.index {
+                    pick += 1;
+                }
+                pick
+            }
+        } else {
+            (self.index + 1) % n
+        };
+        self.last_advance = Some(Instant::now());
+        self.show(next);
+    }
+
+    fn interval_elapsed(&self) -> bool {
+        self.interval_ms > 0
+            && self.last_advance.map_or(true, |at| at.elapsed().as_millis() as u64 >= self.interval_ms)
+    }
+
+    fn take_answer(&mut self) {
+        let Some((why, rx)) = &self.pending else {
+            return;
+        };
+        let answer = match rx.try_recv() {
+            Ok(answer) => answer,
+            Err(mpsc::TryRecvError::Empty) => return,
+            Err(mpsc::TryRecvError::Disconnected) => FanartAnswer::default(),
+        };
+        let why = *why;
+        self.pending = None;
+        self.interval_ms = answer.interval_ms;
+        self.transition = if matches!(answer.transition.as_str(), "fade" | "merge") { answer.transition.clone() } else { "none".into() };
+        self.transition_ms = answer.transition_ms.max(50);
+        self.order = if answer.order == "random" { "random".into() } else { "sequential".into() };
+        match why {
+            Why::Artist => {
+                self.refs = answer.images;
+                if self.refs.is_empty() {
+                    self.file.clear();
+                    return;
+                }
+                let remembered = self.memory.get(&self.memory_key()).map(|(_, at)| *at);
+                self.last_advance = remembered.unwrap_or(Some(Instant::now()));
+                self.prev_file.clear();
+                self.transition_started = matches!(self.transition.as_str(), "fade" | "merge").then(Instant::now);
+                let start = self.start_index();
+                self.show(start);
+                if self.refs.len() > 1 && self.interval_elapsed() {
+                    self.advance();
+                }
+            }
+            Why::Track | Why::Interval => {
+                if answer.images != self.refs {
+                    self.refs = answer.images;
+                    self.transition_started = None;
+                    self.prev_file.clear();
+                    if self.refs.is_empty() {
+                        self.file.clear();
+                        self.index = 0;
+                        return;
+                    }
+                    self.last_advance = Some(Instant::now());
+                    if !self.file.is_empty() {
+                        self.begin_transition();
+                    }
+                    let start = self.start_index();
+                    self.show(start);
+                } else if self.refs.len() > 1 {
+                    self.advance();
+                }
+            }
+        }
+    }
+
+    /// Once a second, with the player's artist and track location.
+    pub fn update(&mut self, artist: &str, uri: &str) {
+        self.take_answer();
+        let key = artist.trim().to_ascii_lowercase();
+        if key != self.artist_key {
+            self.artist_key = key;
+            self.track_key = uri.to_string();
+            self.refs.clear();
+            self.index = 0;
+            self.file.clear();
+            self.prev_file.clear();
+            self.transition_started = None;
+            self.pending = None;
+            if !self.artist_key.is_empty() {
+                self.ask(Why::Artist, artist, uri);
+            }
+            return;
+        }
+        if uri != self.track_key {
+            self.track_key = uri.to_string();
+            self.ask(Why::Track, artist, uri);
+            return;
+        }
+        if self.refs.len() > 1 && self.interval_elapsed() {
+            self.ask(Why::Interval, artist, uri);
+        }
+    }
+
+    /// The picture on show, the one it replaces, and the transition's mode,
+    /// length and progress in milliseconds. Every frame.
+    pub fn snapshot(&mut self) -> (String, String, String, u32, u32) {
+        self.take_answer();
+        let duration = self.transition_ms.max(50) as u32;
+        let elapsed = match self.transition_started {
+            Some(at) => at.elapsed().as_millis().min(u32::MAX as u128) as u32,
+            None => duration,
+        };
+        if elapsed >= duration {
+            self.transition_started = None;
+            self.prev_file.clear();
+        }
+        (self.file.clone(), self.prev_file.clone(), self.transition.clone(), duration, elapsed.min(duration))
     }
 }
 
@@ -546,6 +842,8 @@ pub struct PipeSource {
     folder_layers: Vec<Vec<String>>,
     folder_key: String,
     folder_files: Vec<String>,
+    /// The fanart slideshow, run only when the skin has a slot.
+    fanart: Option<Slideshow>,
 }
 
 impl PipeSource {
@@ -589,6 +887,7 @@ impl PipeSource {
             folder_layers: Vec::new(),
             folder_key: String::new(),
             folder_files: Vec::new(),
+            fanart: None,
             conditioner: Conditioner::new(DataSourceSpec {
                 max_ui: meter_max,
                 max_pipe: meter_max,
@@ -649,6 +948,10 @@ impl PipeSource {
         self.folder_layers = skin.folder_layers.iter().map(|l| l.files.clone()).collect();
         self.folder_key = String::new();
         self.folder_files = Vec::new();
+        self.fanart = skin.fanart.as_ref().map(|_| Slideshow {
+            seed: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1),
+            ..Slideshow::default()
+        });
         if let Some(bins) = skin.spectrum.as_ref().map(|s| s.bins.max(1)) {
             if bins != self.spectrum_bins {
                 self.spectrum_bins = bins;
@@ -719,6 +1022,9 @@ impl Source for PipeSource {
                     let icon = resolve_icon(&key, &self.skin_icons, &self.plugin_icons);
                     self.icon_cache = (key, icon);
                 }
+                if let Some(show) = self.fanart.as_mut() {
+                    show.update(&playing.artist, &playing.uri);
+                }
                 let (next_title, next_artist, next_album) = if self.wants_next {
                     queue_next(playing.position)
                 } else {
@@ -745,6 +1051,11 @@ impl Source for PipeSource {
                     persist_left: 0,
                     folder_files: self.folder_files_for(&playing.uri),
                     uri: playing.uri,
+                    fanart_file: String::new(),
+                    fanart_prev_file: String::new(),
+                    fanart_transition: String::new(),
+                    fanart_transition_ms: 0,
+                    fanart_elapsed_ms: 0,
                 };
                 self.metadata_at = Some(Instant::now());
             }
@@ -767,6 +1078,14 @@ impl Source for PipeSource {
             let (mode, left) = persist_state(PERSIST_FILE, now_epoch_ms);
             metadata.persist_mode = mode;
             metadata.persist_left = left;
+        }
+        if let Some(show) = self.fanart.as_mut() {
+            let (file, prev, mode, duration, elapsed) = show.snapshot();
+            metadata.fanart_file = file;
+            metadata.fanart_prev_file = prev;
+            metadata.fanart_transition = mode;
+            metadata.fanart_transition_ms = duration;
+            metadata.fanart_elapsed_ms = elapsed;
         }
 
         Input {
@@ -836,6 +1155,7 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         skin.needle = meter_needle(&meters, &skin.name);
         skin.meter = meter_spec(&meters, &skin.name);
         skin.folder_layers = meter_folder_layers(&meters, &skin.name);
+        skin.fanart = meter_fanart(&meters, &skin.name);
         let (title_at, artist_at) = meter_text_at(&meters, &skin.name);
         skin.title_at = title_at;
         skin.artist_at = artist_at;

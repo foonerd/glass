@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.15] - 2026-09-25
+
+Artist fanart. A meter with `fanart.pos` and `fanart.dimension` (plus `fanart.scale` and `fanart.zorder`, default `fit` and `background`) shows the pictures the player resolves for the playing artist through its `peppy_screensaver_artistfanart` endpoint, read from the player's own cache when it is there. The set is asked for when the artist changes and again on every track and every timed interval; the show moves one picture on per track and per interval, in order or at random as the player is set, remembering its place per artist and set. `fade` and `merge` transitions run over the player's duration; `none` cuts. Pictures for fanart and folder layers are now decoded off the frame loop, so a large picture never stalls a frame.
+
 ## [0.4.14] - 2026-09-25
 
 Folder layers. `folderlayer.1.*` to `folderlayer.5.*`, and the legacy `folderlayer.*` under `folderlayer.enabled`, each with `pos` and `dimension`, show the first of their `files` found in the playing track's folder under `/mnt`, kept in proportion and centred (`scale = fit`) or stretched, with an optional `border` in `font.color`. `zorder = background` draws the picture over the screen picture and meter face and under the needles; `overlay` draws it over the texts and under the meter foreground. The layers follow the track folder, looked up once per folder. The meter face is now composed before the album art, and the meter foreground is drawn last of all, as the meter engine orders them. GIF and WebP pictures decode.
