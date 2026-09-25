@@ -21,22 +21,36 @@ pub struct Fonts {
     bold: Option<FontVec>,
     italic: Option<FontVec>,
     digi: Option<FontVec>,
+    /// Fonts a field names by file, loaded once each.
+    files: HashMap<String, FontVec>,
+}
+
+fn read_font(path: &str) -> Option<FontVec> {
+    if path.is_empty() {
+        return None;
+    }
+    FontVec::try_from_vec(std::fs::read(path).ok()?).ok()
 }
 
 impl Fonts {
     pub fn load(files: &FontFiles) -> Self {
-        let read = |path: &str| -> Option<FontVec> {
-            if path.is_empty() {
-                return None;
-            }
-            FontVec::try_from_vec(std::fs::read(path).ok()?).ok()
-        };
         Self {
-            light: read(&files.light),
-            regular: read(&files.regular),
-            bold: read(&files.bold),
-            italic: read(&files.italic),
-            digi: read(&files.digi),
+            light: read_font(&files.light),
+            regular: read_font(&files.regular),
+            bold: read_font(&files.bold),
+            italic: read_font(&files.italic),
+            digi: read_font(&files.digi),
+            files: HashMap::new(),
+        }
+    }
+
+    /// Load a font a field names by file, so `get_for` can serve it.
+    pub fn add_file(&mut self, path: &str) {
+        if path.is_empty() || self.files.contains_key(path) {
+            return;
+        }
+        if let Some(font) = read_font(path) {
+            self.files.insert(path.to_string(), font);
         }
     }
 
@@ -48,6 +62,17 @@ impl Fonts {
             TextStyle::Italic => self.italic.as_ref().or(self.regular.as_ref()),
             TextStyle::Digi => self.digi.as_ref(),
         }
+    }
+
+    /// The font for a text: its own file when it names one and that file
+    /// loaded, else its style's font.
+    fn get_for(&self, style: TextStyle, font_file: &str) -> Option<&FontVec> {
+        if !font_file.is_empty() {
+            if let Some(font) = self.files.get(font_file) {
+                return Some(font);
+            }
+        }
+        self.get(style)
     }
 
     /// How many of the five styles have a font file of their own.
@@ -322,7 +347,8 @@ fn blit_window(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, draw_x: i32,
 /// with a pause, or, as a ticker, loops by one segment. The drawn position
 /// is the box left edge minus the offset, and the box clips.
 pub fn draw_text_moving(frame: &mut Frame, text: &Text, fonts: Option<&Fonts>, motion: &mut TextMotion, now_ms: u64) {
-    let Some(line) = render_text(fonts, text.style, text.size, text.color, &text.text, 0) else {
+    let font = fonts.and_then(|f| f.get_for(text.style, &text.font_file));
+    let Some(line) = render_line(font, text.size, text.color, &text.text, 0) else {
         draw_text(frame, text.x, text.y, &text.text);
         return;
     };
@@ -571,7 +597,11 @@ pub fn draw_text_styled(frame: &mut Frame, text: &Text, fonts: Option<&Fonts>) {
 /// width is the text's advance, or `max_width` when that is smaller and not
 /// zero. `None` when the style has no font or the text is empty.
 pub fn render_text(fonts: Option<&Fonts>, style: TextStyle, size: u32, color: [u8; 3], text: &str, max_width: u32) -> Option<Frame> {
-    let font = fonts.and_then(|f| f.get(style))?;
+    render_line(fonts.and_then(|f| f.get(style)), size, color, text, max_width)
+}
+
+fn render_line(font: Option<&FontVec>, size: u32, color: [u8; 3], text: &str, max_width: u32) -> Option<Frame> {
+    let font = font?;
     if text.is_empty() {
         return None;
     }
@@ -998,6 +1028,7 @@ mod tests {
             speed: 0.0,
             direction: ScrollDirection::Bounce,
             loop_thirds: false,
+            font_file: String::new(),
         };
         draw_text_styled(&mut frame, &text, Some(&fonts));
         let lit = |frame: &Frame, x0: u32, x1: u32| -> usize {
@@ -1049,6 +1080,7 @@ mod tests {
             speed: 100.0,
             direction: ScrollDirection::Bounce,
             loop_thirds: false,
+            font_file: String::new(),
         };
         draw_text_moving(&mut frame, &text, Some(&fonts), &mut motion, 0);
         assert_eq!(motion.offset(10, 2), Some(0.0), "starts at the left end");

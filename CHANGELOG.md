@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.11] - 2026-09-25
+
+Time fields and the data source. `time.remaining`, `time.elapsed` and `time.total` each take a position with an optional style word, a colour (elapsed and total default to the remaining colour), and for the clock style a font of their own through `time.*.font`, found as an absolute path, in the theme folder or under `font.path`, and `time.*.fontsize`. Elapsed and total show `mm:ss` of the position and the length. While the display persists after a pause, the plugin's persist file drives the remaining field: `countdown` counts the persist period down in orange, `freeze` keeps the track time. The pipe levels are conditioned as the meter engine conditions them, from `[data.source]`: full scales, `volume.gain.db` and the live `volume.gain.db.source` file, the stereo algorithm, the smoothing buffer and the mono algorithm.
+
+Meter selection. `meter = random` walks every section of the theme's meters file, each once before starting over; a comma list cycles in order. The next meter comes after `random.meter.interval` seconds, or with the next title when `random.change.title` is set. `meter.visible = False` under `config.extend` hides the needles.
+
+The remaining time counts whole seconds of position before subtracting, as the player does.
+
 ## [0.4.10] - 2026-09-25
 
 Text moves as the player moves it. Every title, artist, album and next line has a box: its own `maxwidth`, else `playinfo.maxwidth`, else the width left on screen minus a margin, or six tenths of the screen when `playinfo.align` (or the legacy `playinfo.center`) centres. A text that fits is placed by the alignment; a wider one bounces between its ends with a pause, at the speed the player's `scrolling.mode` selects: 40 everywhere, the player's custom values, or the meter's `playinfo.scrolling.speed.*`. The ticker (`playinfo.ticker.*`) composes one looping line from artist, title, album and the next track, in its direction, with its separator, spacing and end gap, capped to the visible width, and can replace the separate lines. `playinfo.next.title/artist/album.*` show the track after the current one, read from the player's queue. The `italic` style uses `font.italic` with `font.size.italic`, falling back to regular.

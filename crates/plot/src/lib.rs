@@ -44,6 +44,9 @@ pub struct Text {
     pub direction: ScrollDirection,
     #[serde(default)]
     pub loop_thirds: bool,
+    /// A font file of its own, or empty for the style's font.
+    #[serde(default)]
+    pub font_file: String,
 }
 
 /// The album art to show: the box from the skin and the file holding the picture.
@@ -161,7 +164,15 @@ fn text(spec: &TextSpec, content: String, color: [u8; 3]) -> Text {
         speed: spec.speed,
         direction: ScrollDirection::Bounce,
         loop_thirds: false,
+        font_file: spec.font_file.clone(),
     }
+}
+
+/// Persist countdown, as the player colours it.
+const PERSIST_COLOR: [u8; 3] = [242, 165, 0];
+
+fn clock(seconds: u32) -> String {
+    format!("{:02}:{:02}", seconds / 60, seconds % 60)
 }
 
 /// The ticker line as the player composes it: artist, title and album
@@ -205,7 +216,10 @@ pub fn seconds_remaining(meta: &Metadata) -> Option<u32> {
     if meta.duration <= 0.0 {
         return None;
     }
-    Some((meta.duration - meta.seek).max(0.0).floor() as u32)
+    // The player counts whole seconds of position first, then subtracts, so
+    // 218.051 with 4.356 played shows 214, not 213.
+    let played = meta.seek.max(0.0).floor();
+    Some((meta.duration - played).max(0.0).floor() as u32)
 }
 
 /// The texts a skin shows for this metadata. Artist and album share one line
@@ -259,14 +273,24 @@ pub fn texts(skin: &SkinDesc, meta: &Metadata) -> Vec<Text> {
         }
     }
     if let Some(spec) = &skin.time {
-        if let Some(left) = seconds_remaining(meta) {
+        // While the display persists after a pause in countdown mode, the
+        // remaining field counts the persist period down in orange.
+        if meta.status != "play" && meta.persist_mode == "countdown" {
+            out.push(text(spec, clock(meta.persist_left), PERSIST_COLOR));
+        } else if let Some(left) = seconds_remaining(meta) {
             let color = if (1..=10).contains(&left) {
                 LAST_SECONDS
             } else {
                 spec.color
             };
-            out.push(text(spec, format!("{:02}:{:02}", left / 60, left % 60), color));
+            out.push(text(spec, clock(left), color));
         }
+    }
+    if let Some(spec) = &skin.time_elapsed {
+        out.push(text(spec, clock(meta.seek.max(0.0) as u32), spec.color));
+    }
+    if let Some(spec) = &skin.time_total {
+        out.push(text(spec, clock(meta.duration.max(0.0) as u32), spec.color));
     }
     if let Some(line) = ticker_line(skin, meta) {
         out.push(line);
@@ -335,7 +359,24 @@ mod tests {
             max_width: 0,
             align: TextAlign::Left,
             speed: 40.0,
+            font_file: String::new(),
         }
+    }
+
+    #[test]
+    fn elapsed_total_and_the_persist_countdown_are_clocks() {
+        let mut skin = SkinDesc::basic();
+        skin.time = Some(spec(TextStyle::Digi, [180, 180, 180]));
+        skin.time_elapsed = Some(spec(TextStyle::Regular, [1, 1, 1]));
+        skin.time_total = Some(spec(TextStyle::Digi, [2, 2, 2]));
+        let playing = Metadata { status: "play".into(), duration: 218.0, seek: 65.4, ..Metadata::default() };
+        let lines: Vec<String> = texts(&skin, &playing).into_iter().map(|t| t.text).collect();
+        assert_eq!(lines, ["02:33", "01:05", "03:38"], "remaining counts whole seconds played");
+        let persisting = Metadata { status: "pause".into(), persist_mode: "countdown".into(), persist_left: 9, ..playing.clone() };
+        let first = texts(&skin, &persisting).remove(0);
+        assert_eq!((first.text.as_str(), first.color), ("00:09", PERSIST_COLOR));
+        let frozen = Metadata { persist_mode: "freeze".into(), ..persisting };
+        assert_eq!(texts(&skin, &frozen)[0].text, "02:33", "freeze keeps the track time");
     }
 
     #[test]
@@ -392,7 +433,7 @@ mod tests {
             ..Metadata::default()
         };
         let lines: Vec<String> = texts(&skin, &meta).into_iter().map(|t| t.text).collect();
-        assert_eq!(lines, ["Wonder", "Courtney Barnett - Creature of Habit", "44.1 kHz 16-bit", "03:36"]);
+        assert_eq!(lines, ["Wonder", "Courtney Barnett - Creature of Habit", "44.1 kHz 16-bit", "03:37"]);
 
         skin.album = Some(spec(TextStyle::Light, [0, 0, 0]));
         let lines: Vec<String> = texts(&skin, &meta).into_iter().map(|t| t.text).collect();

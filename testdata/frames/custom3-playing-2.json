@@ -54,7 +54,8 @@
       ],
       "max_width": 535,
       "align": "Left",
-      "speed": 8.0
+      "speed": 8.0,
+      "font_file": ""
     },
     "artist": {
       "x": 283,
@@ -68,7 +69,8 @@
       ],
       "max_width": 535,
       "align": "Left",
-      "speed": 10.0
+      "speed": 10.0,
+      "font_file": ""
     },
     "album": null,
     "sample": {
@@ -83,7 +85,8 @@
       ],
       "max_width": 0,
       "align": "Left",
-      "speed": 0.0
+      "speed": 0.0,
+      "font_file": ""
     },
     "time": {
       "x": 1100,
@@ -97,7 +100,8 @@
       ],
       "max_width": 0,
       "align": "Left",
-      "speed": 0.0
+      "speed": 0.0,
+      "font_file": ""
     },
     "art": {
       "x": 36,
@@ -134,84 +138,97 @@
     "next_title": null,
     "next_artist": null,
     "next_album": null,
-    "ticker": null
+    "ticker": null,
+    "time_elapsed": null,
+    "time_total": null,
+    "data_source": {
+      "max_ui": 100.0,
+      "max_pipe": 100.0,
+      "gain_db": 0.0,
+      "gain_source": "",
+      "smooth": 2,
+      "stereo": "new",
+      "mono": "average"
+    }
   },
   "input": {
     "levels": {
-      "left": 34.0,
-      "right": 29.0,
-      "mono": 31.5
+      "left": 17.0,
+      "right": 22.0,
+      "mono": 19.5
     },
     "bins": {
       "values": [
-        64.0,
-        61.0,
-        48.0,
-        40.0,
-        41.0,
-        39.0,
-        44.0,
-        52.0,
-        58.0,
         62.0,
-        60.0,
-        51.0,
-        52.0,
+        62.0,
+        58.0,
         53.0,
-        37.0,
-        31.0,
-        40.0,
-        37.0,
-        35.0,
-        25.0
+        50.0,
+        53.0,
+        53.0,
+        46.0,
+        52.0,
+        56.0,
+        53.0,
+        53.0,
+        51.0,
+        55.0,
+        55.0,
+        48.0,
+        48.0,
+        47.0,
+        46.0,
+        40.0
       ]
     },
     "metadata": {
-      "title": "Wonder",
-      "artist": "Courtney Barnett",
-      "album": "Creature of Habit",
+      "title": "Love Is For Love",
+      "artist": "Jeff Tweedy",
+      "album": "Twilight Override",
       "samplerate": "44.1 kHz",
       "bitdepth": "16-bit",
       "status": "play",
-      "duration": 218.051,
-      "seek": 4.355963,
-      "albumart": "https://img.radioparadise.com/covers/l/26906.jpg",
+      "duration": 297.914,
+      "seek": 131.50336,
+      "albumart": "https://img.radioparadise.com/covers/l/27666.jpg",
       "art_file": "",
       "track_type": "The Main Mix - ",
       "bitrate": "",
       "type_icon": "",
       "next_title": "",
       "next_artist": "",
-      "next_album": ""
+      "next_album": "",
+      "persist_mode": "",
+      "persist_left": 0
     }
   },
   "scene": {
     "skin": "black-white",
     "width": 1280,
     "height": 720,
-    "left": 0.34,
-    "right": 0.29,
+    "left": 0.17,
+    "right": 0.22,
     "bars": [
-      0.64,
-      0.61,
-      0.48,
-      0.4,
-      0.41,
-      0.39,
-      0.44,
-      0.52,
-      0.58,
       0.62,
-      0.6,
-      0.51,
-      0.52,
+      0.62,
+      0.58,
       0.53,
-      0.37,
-      0.31,
-      0.4,
-      0.37,
-      0.35,
-      0.25
+      0.5,
+      0.53,
+      0.53,
+      0.46,
+      0.52,
+      0.56,
+      0.53,
+      0.53,
+      0.51,
+      0.55,
+      0.55,
+      0.48,
+      0.48,
+      0.47,
+      0.46,
+      0.4
     ],
     "left_at": [
       342,
@@ -238,11 +255,12 @@
           76
         ],
         "max_width": 535,
-        "text": "Wonder",
+        "text": "Love Is For Love",
         "align": "Left",
         "speed": 8.0,
         "direction": "Bounce",
-        "loop_thirds": false
+        "loop_thirds": false,
+        "font_file": ""
       },
       {
         "x": 283,
@@ -255,11 +273,12 @@
           255
         ],
         "max_width": 535,
-        "text": "Courtney Barnett - Creature of Habit",
+        "text": "Jeff Tweedy - Twilight Override",
         "align": "Left",
         "speed": 10.0,
         "direction": "Bounce",
-        "loop_thirds": false
+        "loop_thirds": false,
+        "font_file": ""
       },
       {
         "x": 902,
@@ -276,7 +295,8 @@
         "align": "Left",
         "speed": 0.0,
         "direction": "Bounce",
-        "loop_thirds": false
+        "loop_thirds": false,
+        "font_file": ""
       },
       {
         "x": 1100,
@@ -289,11 +309,12 @@
           180
         ],
         "max_width": 0,
-        "text": "03:33",
+        "text": "02:46",
         "align": "Left",
         "speed": 0.0,
         "direction": "Bounce",
-        "loop_thirds": false
+        "loop_thirds": false,
+        "font_file": ""
       }
     ],
     "art": null,
