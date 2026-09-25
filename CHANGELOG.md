@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.25] - 2026-09-25
+
+Fixed: a picture kept turned (a needle or the tonearm) keeps the alpha of its soft edges. The kept copy was composed onto black, so a tonearm with a translucent glow or shadow drew a black surface around the arm since 0.4.23, and needles with soft edges carried a dark fringe since 0.4.20.
+
 ## [0.4.24] - 2026-09-25
 
 Fixed: the spectrum theme is taken from the folder that carries the meter theme's own name, falling back to the spectrum configuration's `spectrum.folder`. A meter shown through `--theme`, or before the player has mirrored a theme change into the spectrum configuration, drew no spectrum.
