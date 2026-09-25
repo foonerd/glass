@@ -4,7 +4,7 @@
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
@@ -74,10 +74,15 @@ pub struct PipeSource {
     meter_max: f32,
     spectrum_held: Vec<f32>,
     levels_held: Levels,
+    metadata_held: lead::Metadata,
+    metadata_at: Option<Instant>,
+    /// How often the player is asked for now-playing text. `None` never asks.
+    metadata_every: Option<Duration>,
 }
 
 impl PipeSource {
     /// Open the Volumio pipes. Missing files stay closed and are retried on poll.
+    /// Now-playing text is asked of the player once a second, not once a frame.
     pub fn installed() -> Self {
         Self::new(
             METER_FIFO,
@@ -105,7 +110,17 @@ impl PipeSource {
             meter_max,
             spectrum_held: Vec::new(),
             levels_held: Levels::default(),
+            metadata_held: lead::Metadata::default(),
+            metadata_at: None,
+            metadata_every: Some(Duration::from_secs(1)),
         }
+    }
+
+    /// Never ask the player for now-playing text. For tests and recordings on
+    /// a host without Volumio.
+    pub fn without_player(mut self) -> Self {
+        self.metadata_every = None;
+        self
     }
 
     fn try_open(slot: &mut Option<File>, path: &str) {
@@ -164,12 +179,25 @@ impl Source for PipeSource {
             }
         }
 
+        if let Some(every) = self.metadata_every {
+            let due = self.metadata_at.map_or(true, |at| at.elapsed() >= every);
+            if due {
+                let playing = now_playing();
+                self.metadata_held = lead::Metadata {
+                    title: playing.title,
+                    artist: playing.artist,
+                    album: playing.album,
+                };
+                self.metadata_at = Some(Instant::now());
+            }
+        }
+
         Input {
             levels: self.levels_held,
             bins: Bins {
                 values: self.spectrum_held.clone(),
             },
-            metadata: lead::Metadata::default(),
+            metadata: self.metadata_held.clone(),
         }
     }
 }
@@ -242,13 +270,16 @@ pub fn installed_skin() -> SkinDesc {
 pub struct NowPlaying {
     pub title: String,
     pub artist: String,
+    pub album: String,
 }
 
 /// Current track from Volumio. Empty strings when the player does not answer.
+/// One HTTP request; [`PipeSource`] calls this once a second.
 pub fn now_playing() -> NowPlaying {
     let mut playing = NowPlaying {
         title: String::new(),
         artist: String::new(),
+        album: String::new(),
     };
     let address = std::net::SocketAddr::from(([127, 0, 0, 1], 3000));
     let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(200)) else {
@@ -265,6 +296,7 @@ pub fn now_playing() -> NowPlaying {
     let body = buf.split_once("\r\n\r\n").map(|(_, body)| body).unwrap_or(&buf);
     playing.title = json_string(body, "title");
     playing.artist = json_string(body, "artist");
+    playing.album = json_string(body, "album");
     playing
 }
 

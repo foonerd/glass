@@ -26,8 +26,10 @@ pub const MAX_FRAME_RATE: u32 = 60;
 pub const CONFIG_TXT: &str =
     "/data/plugins/user_interface/peppy_screensaver/screensaver/peppymeter/config.txt";
 
+use serde::{Deserialize, Serialize};
+
 /// Left and right in UI units, plus mono derived from them.
-#[derive(Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Serialize, Deserialize)]
 pub struct Levels {
     pub left: f32,
     pub right: f32,
@@ -35,13 +37,13 @@ pub struct Levels {
 }
 
 /// Latest spectrum frame, raw scope units. Older frames are discarded upstream.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Bins {
     pub values: Vec<f32>,
 }
 
 /// Now-playing text for the surface.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Metadata {
     pub title: String,
     pub artist: String,
@@ -49,7 +51,7 @@ pub struct Metadata {
 }
 
 /// One snapshot of the outside world. `plot` turns it into a scene.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Input {
     pub levels: Levels,
     pub bins: Bins,
@@ -57,7 +59,7 @@ pub struct Input {
 }
 
 /// Geometry the scene is plotted into. Pixels stay in `expose`.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SkinDesc {
     pub name: String,
     pub width: u32,

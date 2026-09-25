@@ -10,9 +10,9 @@ use std::thread;
 
 use expose::{draw_text, raster_over, read_png, Stack};
 use intake::{PipeSource, Source};
-use lead::frame_period;
+use lead::{frame_period, Input, SkinDesc};
 use pane::{publish, write_ppm, Surface};
-use plot::step;
+use plot::{step, Scene};
 
 fn load_theme(dir: &str, file: &str) -> Option<expose::Frame> {
     if dir.is_empty() || file.is_empty() {
@@ -21,11 +21,20 @@ fn load_theme(dir: &str, file: &str) -> Option<expose::Frame> {
     read_png(std::path::Path::new(dir).join(file).as_path())
 }
 
+/// One recorded step, the form `plot` replays from `testdata/frames/`.
+#[derive(serde::Serialize)]
+struct Recorded<'a> {
+    skin: &'a SkinDesc,
+    input: &'a Input,
+    scene: &'a Scene,
+}
+
 fn main() -> ExitCode {
     let mut once = false;
     let mut headless = false;
     let mut print_scene = false;
     let mut output: Option<String> = None;
+    let mut record: Option<String> = None;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -39,12 +48,20 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
+            "--record" => match args.next() {
+                Some(path) => record = Some(path),
+                None => {
+                    eprintln!("glass: --record needs a path");
+                    return ExitCode::from(2);
+                }
+            },
             "--help" => {
                 println!(
-                    "glass [--once] [--headless] [--print] [--output frame.ppm]\n\
+                    "glass [--once] [--headless] [--print] [--output frame.ppm] [--record step.json]\n\
                      Reads {meter} and {spectrum}.\n\
                      A window opens when DISPLAY is set. --headless skips it.\n\
-                     --output writes a PPM and still rasters.",
+                     --output writes a PPM and still rasters.\n\
+                     --record writes the skin, input and scene of each step as JSON.",
                     meter = lead::METER_FIFO,
                     spectrum = lead::SPECTRUM_FIFO
                 );
@@ -93,6 +110,20 @@ fn main() -> ExitCode {
     loop {
         let input = source.poll();
         let scene = step(&skin, &input);
+        if let Some(path) = &record {
+            let recorded = Recorded {
+                skin: &skin,
+                input: &input,
+                scene: &scene,
+            };
+            let written = serde_json::to_string_pretty(&recorded)
+                .map_err(|err| err.to_string())
+                .and_then(|text| std::fs::write(path, text).map_err(|err| err.to_string()));
+            if let Err(err) = written {
+                eprintln!("glass: --record {path}: {err}");
+                return ExitCode::from(1);
+            }
+        }
         if print_scene {
             println!(
                 "left {:.2} right {:.2} bars {}",
@@ -112,7 +143,7 @@ fn main() -> ExitCode {
                     face_at: skin.face_at,
                 },
             );
-            let playing = intake::now_playing();
+            let playing = &input.metadata;
             let title_at = skin.title_at.unwrap_or((48, frame.height.saturating_sub(72)));
             let artist_at = skin.artist_at.unwrap_or((48, frame.height.saturating_sub(40)));
             if !playing.title.is_empty() {
