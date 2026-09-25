@@ -16,6 +16,7 @@ use lead::{
     data_source_from_config, decode_meter, decode_spectrum, fonts_from_config, format_key,
     frame_rate_from_config, meter_art, meter_at, meter_background, meter_indicator,
     folder_candidates, meter_fanart, meter_folder_layers, meter_layers, meter_needle, meter_sections, meter_spec, meter_spectrum, meter_text_at,
+    meter_tonearm, meter_vinyl, rotation_settings,
     meter_texts, meter_type, random_change_title_from_config, random_interval_from_config,
     screen_from_config, scroll_speeds_from_config, selection_from_config, spectrum_from_theme,
     spectrum_settings, Bins, DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec, CONFIG_TXT,
@@ -844,6 +845,10 @@ pub struct PipeSource {
     folder_files: Vec<String>,
     /// The fanart slideshow, run only when the skin has a slot.
     fanart: Option<Slideshow>,
+    /// The record's album file name to look for in the track folder, and the file found.
+    vinyl_album_file: String,
+    vinyl_key: String,
+    vinyl_file: String,
 }
 
 impl PipeSource {
@@ -888,6 +893,9 @@ impl PipeSource {
             folder_key: String::new(),
             folder_files: Vec::new(),
             fanart: None,
+            vinyl_album_file: String::new(),
+            vinyl_key: String::new(),
+            vinyl_file: String::new(),
             conditioner: Conditioner::new(DataSourceSpec {
                 max_ui: meter_max,
                 max_pipe: meter_max,
@@ -933,6 +941,23 @@ impl PipeSource {
         self.folder_files.clone()
     }
 
+    /// The record picture for a track: the album file named by the skin when
+    /// the track's folder has it, else empty for the theme's own.
+    fn vinyl_file_for(&mut self, uri: &str) -> String {
+        if self.vinyl_album_file.is_empty() {
+            return String::new();
+        }
+        let key = uri.rfind('/').map(|i| &uri[..i]).unwrap_or(uri).to_string();
+        if key != self.vinyl_key {
+            self.vinyl_key = key;
+            self.vinyl_file = folder_candidates(uri, std::slice::from_ref(&self.vinyl_album_file))
+                .into_iter()
+                .find(|candidate| Path::new(candidate).is_file())
+                .unwrap_or_default();
+        }
+        self.vinyl_file.clone()
+    }
+
     /// Follow another skin: its icon folders, whether it wants the next
     /// track, and its level conditioning. The type icon is resolved afresh.
     pub fn set_skin(&mut self, skin: &SkinDesc) {
@@ -948,6 +973,9 @@ impl PipeSource {
         self.folder_layers = skin.folder_layers.iter().map(|l| l.files.clone()).collect();
         self.folder_key = String::new();
         self.folder_files = Vec::new();
+        self.vinyl_album_file = skin.vinyl.as_ref().map(|v| v.album_file.clone()).unwrap_or_default();
+        self.vinyl_key = String::new();
+        self.vinyl_file = String::new();
         self.fanart = skin.fanart.as_ref().map(|_| Slideshow {
             seed: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1),
             ..Slideshow::default()
@@ -1050,6 +1078,8 @@ impl Source for PipeSource {
                     persist_mode: String::new(),
                     persist_left: 0,
                     folder_files: self.folder_files_for(&playing.uri),
+                    vinyl_file: self.vinyl_file_for(&playing.uri),
+                    volatile: playing.volatile,
                     uri: playing.uri,
                     fanart_file: String::new(),
                     fanart_prev_file: String::new(),
@@ -1156,6 +1186,9 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         skin.meter = meter_spec(&meters, &skin.name);
         skin.folder_layers = meter_folder_layers(&meters, &skin.name);
         skin.fanart = meter_fanart(&meters, &skin.name);
+        skin.rotation = rotation_settings(&text);
+        skin.vinyl = meter_vinyl(&meters, &skin.name, &skin.theme_dir, &skin.rotation);
+        skin.tonearm = meter_tonearm(&meters, &skin.name, &skin.theme_dir);
         let (title_at, artist_at) = meter_text_at(&meters, &skin.name);
         skin.title_at = title_at;
         skin.artist_at = artist_at;
@@ -1221,6 +1254,7 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
 
 #[derive(Debug, Default)]
 pub struct NowPlaying {
+    pub volatile: Option<bool>,
     pub uri: String,
     pub title: String,
     pub artist: String,
@@ -1267,6 +1301,7 @@ pub fn now_playing() -> NowPlaying {
     playing.seek = json_number(body, "seek").unwrap_or(0.0) / 1000.0;
     playing.albumart = json_string(body, "albumart");
     playing.uri = json_string(body, "uri");
+    playing.volatile = json_bool(body, "volatile");
     playing.track_type = json_string(body, "trackType");
     playing.bitrate = json_string(body, "bitrate");
     playing.position = json_number(body, "position").map(|p| p as i64).unwrap_or(0);
@@ -1284,6 +1319,20 @@ fn json_number(body: &str, key: &str) -> Option<f32> {
         .find(|c: char| !(c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | 'e' | 'E')))
         .unwrap_or(rest.len());
     rest[..end].parse().ok()
+}
+
+/// A boolean field of the state, `None` when absent or not a boolean.
+fn json_bool(body: &str, key: &str) -> Option<bool> {
+    let needle = format!("\"{key}\":");
+    let start = body.find(&needle)? + needle.len();
+    let rest = body[start..].trim_start();
+    if rest.starts_with("true") {
+        Some(true)
+    } else if rest.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 fn json_string(body: &str, key: &str) -> String {

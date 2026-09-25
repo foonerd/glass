@@ -3,7 +3,7 @@
 
 use lead::{
     format_key, format_label, FanartSpec, FolderLayerSpec, Input, Metadata, MeterSpec, ScrollDirection,
-    SkinDesc, SpectrumSpec, TextAlign, TextSpec, TextStyle, TypeAlign, TypeMode,
+    SkinDesc, SpectrumSpec, TextAlign, TextSpec, TextStyle, TonearmSpec, TypeAlign, TypeMode, VinylSpec,
 };
 use serde::{Deserialize, Serialize};
 
@@ -63,6 +63,11 @@ pub struct Art {
     pub border: u32,
     #[serde(default = "white")]
     pub border_color: [u8; 3],
+    /// The art turns: cut to a circle without a mask, with a spindle and ring.
+    #[serde(default)]
+    pub rotation: bool,
+    #[serde(default)]
+    pub rpm: f32,
 }
 
 fn white() -> [u8; 3] {
@@ -103,6 +108,27 @@ pub struct Scene {
     /// The fanart slot with the picture on show and its transition, when the skin has one.
     #[serde(default)]
     pub fanart: Option<Fanart>,
+    /// Whether the player plays, and whether a stop or pause is only a transition.
+    #[serde(default)]
+    pub playing: bool,
+    #[serde(default)]
+    pub transitional: bool,
+    /// How far through the track, 0 to 100, and the seconds left; `None` without a length.
+    #[serde(default)]
+    pub progress_pct: f32,
+    #[serde(default)]
+    pub time_remaining: Option<f32>,
+    /// The record under the art and its picture for this track.
+    #[serde(default)]
+    pub vinyl: Option<Vinyl>,
+    #[serde(default)]
+    pub tonearm: Option<TonearmSpec>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Vinyl {
+    pub spec: VinylSpec,
+    pub file: String,
 }
 
 /// The fanart slot of the scene: its box, the picture on show, the one it
@@ -145,6 +171,12 @@ impl Default for Scene {
             bar_heights: Vec::new(),
             folder_layers: Vec::new(),
             fanart: None,
+            playing: false,
+            transitional: false,
+            progress_pct: 0.0,
+            time_remaining: None,
+            vinyl: None,
+            tonearm: None,
         }
     }
 }
@@ -164,6 +196,8 @@ pub fn art(skin: &SkinDesc, meta: &Metadata) -> Option<Art> {
         mask: spec.mask.clone(),
         border: spec.border,
         border_color: spec.border_color,
+        rotation: spec.rotation,
+        rpm: spec.rpm * skin.rotation.speed,
     })
 }
 
@@ -386,6 +420,19 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
             transition_ms: input.metadata.fanart_transition_ms,
             elapsed_ms: input.metadata.fanart_elapsed_ms,
         }),
+        playing: input.metadata.status == "play",
+        transitional: input.metadata.volatile != Some(false),
+        progress_pct: if input.metadata.duration > 0.0 {
+            (input.metadata.seek.max(0.0) / input.metadata.duration * 100.0).clamp(0.0, 100.0)
+        } else {
+            0.0
+        },
+        time_remaining: (input.metadata.duration > 0.0).then(|| input.metadata.duration - input.metadata.seek.max(0.0)),
+        vinyl: skin.vinyl.as_ref().map(|spec| Vinyl {
+            spec: spec.clone(),
+            file: if input.metadata.vinyl_file.is_empty() { spec.theme_file.clone() } else { input.metadata.vinyl_file.clone() },
+        }),
+        tonearm: skin.tonearm.clone(),
     }
 }
 
@@ -527,6 +574,8 @@ mod tests {
             mask: "/t/mask.png".into(),
             border: 2,
             border_color: [1, 2, 3],
+            rotation: false,
+            rpm: 0.0,
         });
         assert_eq!(art(&skin, &waiting), None);
         let ready = Metadata { art_file: "/tmp/glass-art/1.img".into(), ..waiting };
