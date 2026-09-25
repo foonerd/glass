@@ -7,7 +7,7 @@ use std::collections::HashMap;
 
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
 use lead::{Direction, Fill, FolderLayerSpec, FontFiles, LinearSpec, MeterKind, Scale, ScrollDirection, SpectrumSpec, TextAlign, TextStyle, TypeAlign, TypeMode, ZOrder};
-use plot::{Scene, Text, TypeArea};
+use plot::{Fanart, Scene, Text, TypeArea};
 
 const BG: [u8; 4] = [12, 12, 16, 255];
 
@@ -194,6 +194,7 @@ pub fn raster(scene: &Scene) -> Frame {
             icon: None,
             spectrum: None,
             folder_pictures: &[],
+            fanart: (None, None),
         },
         &mut Motion::default(),
         0,
@@ -261,6 +262,8 @@ pub struct Stack<'a> {
     pub spectrum: Option<&'a SpectrumAssets>,
     /// One entry per `Scene::folder_layers`, the picture fitted to its box.
     pub folder_pictures: &'a [Option<FolderPicture>],
+    /// The fanart on show and the one it replaces, fitted to the slot.
+    pub fanart: (Option<&'a FolderPicture>, Option<&'a FolderPicture>),
 }
 
 /// Theme order: full-screen picture, meter face, album art, folder layers, needles, meter
@@ -289,6 +292,7 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
         }
     }
     draw_folder_layers(&mut rgba, width, height, scene, stack.folder_pictures, ZOrder::Background);
+    draw_fanart(&mut rgba, width, height, scene.fanart.as_ref(), stack.fanart, ZOrder::Background);
     if scene.meter.visible {
         let right_sprite = stack.needle_right.or(stack.needle);
         match (scene.meter.kind, &scene.meter.linear) {
@@ -356,6 +360,7 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
     // Overlay folder layers sit above everything but the meter foreground,
     // which the meter engine draws last of all.
     draw_folder_layers(&mut frame.rgba, width, height, scene, stack.folder_pictures, ZOrder::Overlay);
+    draw_fanart(&mut frame.rgba, width, height, scene.fanart.as_ref(), stack.fanart, ZOrder::Overlay);
     if let Some(front) = stack.front {
         blit_at(&mut frame.rgba, width, height, front, stack.face_at);
     }
@@ -1214,6 +1219,72 @@ fn draw_folder_layers(dst: &mut [u8], dst_w: u32, dst_h: u32, scene: &Scene, pic
             let c = layer.spec.border_color;
             draw_border(dst, dst_w, dst_h, (layer.spec.x, layer.spec.y, layer.spec.w, layer.spec.h), layer.spec.border, [c[0], c[1], c[2], 255]);
         }
+    }
+}
+
+/// Blend a picture at a position with its alpha scaled by `alpha` (255 is as is).
+fn blit_alpha(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (u32, u32), alpha: u8) {
+    if alpha == 0 {
+        return;
+    }
+    if alpha == 255 {
+        blit_at(dst, dst_w, dst_h, src, at);
+        return;
+    }
+    for y in 0..src.height {
+        let dy = at.1 + y;
+        if dy >= dst_h {
+            break;
+        }
+        for x in 0..src.width {
+            let dx = at.0 + x;
+            if dx >= dst_w {
+                break;
+            }
+            let s = (y as usize * src.width as usize + x as usize) * 4;
+            let d = (dy as usize * dst_w as usize + dx as usize) * 4;
+            let a = (src.rgba[s + 3] as u32 * alpha as u32 / 255) as u8;
+            blend(dst, d, [src.rgba[s], src.rgba[s + 1], src.rgba[s + 2], a]);
+        }
+    }
+}
+
+/// The fanart slot of one z-order. A `merge` crossfades the old picture into
+/// the new over the transition; a `fade` takes the old one out in the first
+/// half and the new one in over the second, or the new one in alone when
+/// there is no old picture; `none` shows the picture as it is.
+fn draw_fanart(dst: &mut [u8], dst_w: u32, dst_h: u32, fanart: Option<&Fanart>, pictures: (Option<&FolderPicture>, Option<&FolderPicture>), zorder: ZOrder) {
+    let Some(fanart) = fanart else {
+        return;
+    };
+    if fanart.spec.zorder != zorder {
+        return;
+    }
+    let (current, previous) = pictures;
+    let running = fanart.transition_ms > 0 && fanart.elapsed_ms < fanart.transition_ms && fanart.transition != "none";
+    if !running {
+        if let Some(picture) = current {
+            blit_at(dst, dst_w, dst_h, &picture.frame, picture.at);
+        }
+        return;
+    }
+    let p = fanart.elapsed_ms as f32 / fanart.transition_ms as f32;
+    let level = |f: f32| (255.0 * f.clamp(0.0, 1.0)) as u8;
+    match fanart.transition.as_str() {
+        "merge" => {
+            if let Some(old) = previous {
+                blit_alpha(dst, dst_w, dst_h, &old.frame, old.at, level(1.0 - p));
+            }
+            if let Some(new) = current {
+                blit_alpha(dst, dst_w, dst_h, &new.frame, new.at, level(p));
+            }
+        }
+        _ => match (previous, current) {
+            (Some(old), _) if p < 0.5 => blit_alpha(dst, dst_w, dst_h, &old.frame, old.at, level(1.0 - 2.0 * p)),
+            (Some(_), Some(new)) => blit_alpha(dst, dst_w, dst_h, &new.frame, new.at, level(2.0 * p - 1.0)),
+            (None, Some(new)) => blit_alpha(dst, dst_w, dst_h, &new.frame, new.at, level(p)),
+            _ => {}
+        },
     }
 }
 

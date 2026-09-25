@@ -99,6 +99,18 @@ pub struct Metadata {
     /// folder, or empty.
     #[serde(default)]
     pub folder_files: Vec<String>,
+    /// The fanart picture on show, the one it replaces during a transition,
+    /// the transition (`none`, `fade`, `merge`), its length, and how far it is.
+    #[serde(default)]
+    pub fanart_file: String,
+    #[serde(default)]
+    pub fanart_prev_file: String,
+    #[serde(default)]
+    pub fanart_transition: String,
+    #[serde(default)]
+    pub fanart_transition_ms: u32,
+    #[serde(default)]
+    pub fanart_elapsed_ms: u32,
 }
 
 /// Where a text sits inside its box when it fits.
@@ -894,6 +906,45 @@ pub fn folder_candidates(uri: &str, files: &[String]) -> Vec<String> {
         .collect()
 }
 
+/// The artist fanart slot a meter offers, `fanart.pos` and `fanart.dimension`.
+/// The player decides whether anything is shown in it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FanartSpec {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+    pub scale: Scale,
+    pub zorder: ZOrder,
+}
+
+pub fn meter_fanart(meters_txt: &str, meter: &str) -> Option<FanartSpec> {
+    let values = section_values(meters_txt, meter);
+    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+    let pair = |key: &str| -> Option<(u32, u32)> {
+        let mut parts = get(key)?.split(',');
+        let a = parts.next()?.trim().parse().ok()?;
+        let b = parts.next()?.trim().parse().ok()?;
+        Some((a, b))
+    };
+    let (x, y) = pair("fanart.pos")?;
+    let (w, h) = pair("fanart.dimension")?;
+    Some(FanartSpec {
+        x,
+        y,
+        w,
+        h,
+        scale: match get("fanart.scale").map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+            Some("stretch") => Scale::Stretch,
+            _ => Scale::Fit,
+        },
+        zorder: match get("fanart.zorder").map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+            Some("overlay") => ZOrder::Overlay,
+            _ => ZOrder::Background,
+        },
+    })
+}
+
 /// `[data.source]` from the player configuration, with the engine's defaults.
 pub fn data_source_from_config(text: &str) -> DataSourceSpec {
     let number = |key: &str, default: f32| {
@@ -1023,6 +1074,8 @@ pub struct SkinDesc {
     pub spectrum: Option<SpectrumSpec>,
     #[serde(default)]
     pub folder_layers: Vec<FolderLayerSpec>,
+    #[serde(default)]
+    pub fanart: Option<FanartSpec>,
 }
 
 impl Default for SkinDesc {
@@ -1070,6 +1123,7 @@ impl SkinDesc {
             meter: MeterSpec::default(),
             spectrum: None,
             folder_layers: Vec::new(),
+            fanart: None,
         }
     }
 }
@@ -2072,6 +2126,14 @@ mod tests {
         assert_eq!(folder_candidates("music-library/NAS/a/b.flac", &files)[0], "/mnt/NAS/a/back.png");
         assert!(folder_candidates("", &files).is_empty());
         assert_eq!(folder_candidates("rp2/channel@id=0", &files), ["/mnt/rp2/back.png", "/mnt/rp2/Logo.JPG"], "a stream maps under /mnt too and simply is not found");
+    }
+
+    #[test]
+    fn a_fanart_slot_needs_position_and_dimension() {
+        let m = "[m]\nfanart.pos = 0,0\nfanart.dimension = 1280,720\nfanart.scale = stretch\n[n]\nfanart.pos = 1,1\n";
+        let slot = meter_fanart(m, "m").unwrap();
+        assert_eq!((slot.x, slot.y, slot.w, slot.h, slot.scale, slot.zorder), (0, 0, 1280, 720, Scale::Stretch, ZOrder::Background));
+        assert_eq!(meter_fanart(m, "n"), None);
     }
 
     #[test]
