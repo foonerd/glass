@@ -13,6 +13,17 @@ use sdl2::render::{Canvas, Texture, TextureCreator};
 use sdl2::video::{Window, WindowContext};
 use sdl2::EventPump;
 
+/// What happened while a frame went up.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Shown {
+    /// The frame is up and the window stays.
+    Kept,
+    /// The window was closed from outside.
+    Closed,
+    /// A finger or a mouse button was lifted on the window.
+    Touched,
+}
+
 /// One window. The binary keeps it for the life of the player, with one
 /// streaming texture the frames are uploaded into.
 pub struct Surface {
@@ -20,6 +31,8 @@ pub struct Surface {
     creator: TextureCreator<WindowContext>,
     texture: Option<Texture>,
     pump: EventPump,
+    /// Where the frame's top left goes; `None` centres it in the window.
+    placement: Option<(i32, i32)>,
 }
 
 impl Surface {
@@ -37,14 +50,24 @@ impl Surface {
         let canvas = window.into_canvas().build().map_err(|err| err.to_string())?;
         let creator = canvas.texture_creator();
         let pump = sdl.event_pump()?;
-        Ok(Self { canvas, creator, texture: None, pump })
+        // A player's glass shows no pointer.
+        sdl.mouse().show_cursor(false);
+        Ok(Self { canvas, creator, texture: None, pump, placement: None })
     }
 
-    /// Upload one frame. `false` means the window was closed.
-    pub fn show(&mut self, frame: &Frame) -> Result<bool, String> {
+    /// Put the frame's top left at a fixed point instead of centring it.
+    pub fn place_at(&mut self, x: i32, y: i32) {
+        self.placement = Some((x, y));
+    }
+
+    /// Upload one frame and say what the window saw meanwhile.
+    pub fn show(&mut self, frame: &Frame) -> Result<Shown, String> {
+        let mut touched = false;
         for event in self.pump.poll_iter() {
-            if let Event::Quit { .. } = event {
-                return Ok(false);
+            match event {
+                Event::Quit { .. } => return Ok(Shown::Closed),
+                Event::MouseButtonUp { .. } | Event::FingerUp { .. } => touched = true,
+                _ => {}
             }
         }
         let fits = self.texture.as_ref().is_some_and(|t| {
@@ -69,15 +92,11 @@ impl Surface {
         self.canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
         self.canvas.clear();
         let (window_w, window_h) = self.canvas.output_size().unwrap_or((frame.width, frame.height));
-        let dest = sdl2::rect::Rect::new(
-            (window_w as i32 - frame.width as i32) / 2,
-            (window_h as i32 - frame.height as i32) / 2,
-            frame.width,
-            frame.height,
-        );
+        let (x, y) = self.placement.unwrap_or(((window_w as i32 - frame.width as i32) / 2, (window_h as i32 - frame.height as i32) / 2));
+        let dest = sdl2::rect::Rect::new(x, y, frame.width, frame.height);
         self.canvas.copy(texture, None, dest).map_err(|err| err.to_string())?;
         self.canvas.present();
-        Ok(true)
+        Ok(if touched { Shown::Touched } else { Shown::Kept })
     }
 }
 
