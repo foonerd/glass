@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::path::Path;
 
-use expose::Frame;
+use expose::{Frame, Rect};
 use plot::Scene;
 use sdl2::event::Event;
 use sdl2::pixels::PixelFormatEnum;
@@ -64,8 +64,9 @@ impl Surface {
         self.placement = Some((x, y));
     }
 
-    /// Upload one frame and say what the window saw meanwhile.
-    pub fn show(&mut self, frame: &Frame) -> Result<Shown, String> {
+    /// Upload one frame, or only its `changed` boxes when the texture already
+    /// holds the rest, and say what the window saw meanwhile.
+    pub fn show(&mut self, frame: &Frame, changed: &[Rect]) -> Result<Shown, String> {
         let mut touched = false;
         for event in self.pump.poll_iter() {
             match event {
@@ -90,9 +91,21 @@ impl Surface {
             self.texture = Some(texture);
         }
         let texture = self.texture.as_mut().expect("texture was just made");
-        texture
-            .update(None, &frame.rgba, frame.width as usize * 4)
-            .map_err(|err| err.to_string())?;
+        let pitch = frame.width as usize * 4;
+        let whole = !fits || changed.iter().any(|r| r.x == 0 && r.y == 0 && r.w >= frame.width && r.h >= frame.height);
+        if whole {
+            texture.update(None, &frame.rgba, pitch).map_err(|err| err.to_string())?;
+        } else {
+            if changed.is_empty() {
+                // The window shows this frame already.
+                return Ok(if touched { Shown::Touched } else { Shown::Kept });
+            }
+            for r in changed {
+                let from = (r.y as usize * frame.width as usize + r.x as usize) * 4;
+                let rect = sdl2::rect::Rect::new(r.x as i32, r.y as i32, r.w.max(1), r.h.max(1));
+                texture.update(Some(rect), &frame.rgba[from..], pitch).map_err(|err| err.to_string())?;
+            }
+        }
         self.canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
         self.canvas.clear();
         let (window_w, window_h) = self.canvas.output_size().unwrap_or((frame.width, frame.height));
