@@ -1,0 +1,117 @@
+{
+  "skin": {
+    "name": "black-white",
+    "width": 1280,
+    "height": 720,
+    "meter_max": 100.0,
+    "spectrum_max": 100.0,
+    "theme_dir": "/data/INTERNAL/peppy_screensaver/templates/1280x720_custom_3",
+    "background": "black-white-ext.jpg",
+    "left_at": [
+      342,
+      598
+    ],
+    "right_at": [
+      949,
+      598
+    ],
+    "indicator": "black-white-needle.png",
+    "face": "black-white-bgr.png",
+    "front": "black-white-fgr.png",
+    "face_at": [
+      0,
+      224
+    ],
+    "needle": [
+      45.0,
+      -45.0,
+      208.0
+    ],
+    "title_at": [
+      283,
+      138
+    ],
+    "artist_at": [
+      283,
+      172
+    ]
+  },
+  "input": {
+    "levels": {
+      "left": 18.0,
+      "right": 21.0,
+      "mono": 19.5
+    },
+    "bins": {
+      "values": [
+        51.0,
+        55.0,
+        54.0,
+        53.0,
+        49.0,
+        44.0,
+        37.0,
+        40.0,
+        41.0,
+        40.0,
+        34.0,
+        34.0,
+        32.0,
+        29.0,
+        34.0,
+        38.0,
+        41.0,
+        43.0,
+        41.0,
+        28.0
+      ]
+    },
+    "metadata": {
+      "title": "What I Am",
+      "artist": "Edie Brickell",
+      "album": "Street Life"
+    }
+  },
+  "scene": {
+    "skin": "black-white",
+    "width": 1280,
+    "height": 720,
+    "left": 0.18,
+    "right": 0.21,
+    "bars": [
+      0.51,
+      0.55,
+      0.54,
+      0.53,
+      0.49,
+      0.44,
+      0.37,
+      0.4,
+      0.41,
+      0.4,
+      0.34,
+      0.34,
+      0.32,
+      0.29,
+      0.34,
+      0.38,
+      0.41,
+      0.43,
+      0.41,
+      0.28
+    ],
+    "left_at": [
+      342,
+      598
+    ],
+    "right_at": [
+      949,
+      598
+    ],
+    "needle": [
+      45.0,
+      -45.0,
+      208.0
+    ]
+  }
+}
