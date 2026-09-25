@@ -15,8 +15,8 @@ use std::collections::VecDeque;
 use lead::{
     data_source_from_config, decode_meter, decode_spectrum, fonts_from_config, format_key,
     frame_rate_from_config, meter_art, meter_at, meter_background, meter_indicator,
-    meter_layers, meter_needle, meter_sections, meter_text_at, meter_texts, meter_type,
-    meter_visible, random_change_title_from_config, random_interval_from_config,
+    meter_layers, meter_needle, meter_sections, meter_spec, meter_text_at, meter_texts,
+    meter_type, random_change_title_from_config, random_interval_from_config,
     screen_from_config, scroll_speeds_from_config, selection_from_config, Bins,
     DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec, CONFIG_TXT,
     DEFAULT_FRAME_RATE, DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO,
@@ -790,7 +790,8 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         skin.face = face;
         skin.front = front;
         skin.face_at = face_at;
-        skin.needle = meter_needle(&meters, &skin.name).filter(|_| meter_visible(&meters, &skin.name));
+        skin.needle = meter_needle(&meters, &skin.name);
+        skin.meter = meter_spec(&meters, &skin.name);
         let (title_at, artist_at) = meter_text_at(&meters, &skin.name);
         skin.title_at = title_at;
         skin.artist_at = artist_at;

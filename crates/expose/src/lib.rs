@@ -6,7 +6,7 @@ use std::path::Path;
 use std::collections::HashMap;
 
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
-use lead::{FontFiles, ScrollDirection, TextAlign, TextStyle, TypeAlign, TypeMode};
+use lead::{Direction, FontFiles, LinearSpec, MeterKind, ScrollDirection, TextAlign, TextStyle, TypeAlign, TypeMode};
 use plot::{Scene, Text, TypeArea};
 
 const BG: [u8; 4] = [12, 12, 16, 255];
@@ -187,6 +187,7 @@ pub fn raster(scene: &Scene) -> Frame {
             face: None,
             front: None,
             needle: None,
+            needle_right: None,
             face_at: (0, 0),
             fonts: None,
             art: None,
@@ -242,7 +243,11 @@ pub struct Stack<'a> {
     pub screen: Option<&'a Frame>,
     pub face: Option<&'a Frame>,
     pub front: Option<&'a Frame>,
+    /// The indicator picture for the left or mono channel: a needle sprite,
+    /// or the bar picture of a linear meter, mirrored when the meter says so.
     pub needle: Option<&'a Frame>,
+    /// The right channel's picture; `None` shares `needle`.
+    pub needle_right: Option<&'a Frame>,
     pub face_at: (u32, u32),
     /// Theme fonts for `Scene::texts`. `None` draws every text in the bitmap font.
     pub fonts: Option<&'a Fonts>,
@@ -274,14 +279,46 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut TextMotion, now
     if let Some(face) = stack.face {
         blit_at(&mut rgba, width, height, face, stack.face_at);
     }
-    if let (Some(sprite), Some((start, stop, distance))) = (stack.needle, scene.needle) {
-        if let Some(at) = scene.left_at {
-            let angle = start + (stop - start) * scene.left;
-            blit_rotated(&mut rgba, width, height, sprite, at, angle, distance);
-        }
-        if let Some(at) = scene.right_at {
-            let angle = start + (stop - start) * scene.right;
-            blit_rotated(&mut rgba, width, height, sprite, at, angle, distance);
+    if scene.meter.visible {
+        let right_sprite = stack.needle_right.or(stack.needle);
+        match (scene.meter.kind, &scene.meter.linear) {
+            (MeterKind::Linear, Some(linear)) => {
+                if let Some(sprite) = stack.needle {
+                    if scene.meter.channels == 1 {
+                        if let Some(at) = scene.meter.mono_at {
+                            draw_bar(&mut rgba, width, height, sprite, at, linear.bar_width(scene.mono), linear, true);
+                        }
+                    } else {
+                        if let Some(at) = scene.left_at {
+                            draw_bar(&mut rgba, width, height, sprite, at, linear.bar_width(scene.left), linear, true);
+                        }
+                        if let (Some(at), Some(sprite)) = (scene.right_at, right_sprite) {
+                            draw_bar(&mut rgba, width, height, sprite, at, linear.bar_width(scene.right), linear, false);
+                        }
+                    }
+                }
+            }
+            _ => {
+                if let (Some(sprite), Some((start, stop, distance))) = (stack.needle, scene.needle) {
+                    let (left_start, left_stop) = scene.meter.left_angles.unwrap_or((start, stop));
+                    if scene.meter.channels == 1 {
+                        if let Some(at) = scene.meter.mono_at {
+                            let angle = left_start + (left_stop - left_start) * scene.mono;
+                            blit_rotated(&mut rgba, width, height, sprite, at, angle, distance);
+                        }
+                    } else {
+                        if let Some(at) = scene.left_at {
+                            let angle = left_start + (left_stop - left_start) * scene.left;
+                            blit_rotated(&mut rgba, width, height, sprite, at, angle, distance);
+                        }
+                        if let (Some(at), Some(sprite)) = (scene.right_at, right_sprite) {
+                            let (right_start, right_stop) = scene.meter.right_angles.unwrap_or((start, stop));
+                            let angle = right_start + (right_stop - right_start) * scene.right;
+                            blit_rotated(&mut rgba, width, height, sprite, at, angle, distance);
+                        }
+                    }
+                }
+            }
         }
     }
     if let Some(front) = stack.front {
@@ -810,7 +847,7 @@ fn blit_rotated(
     dst_w: u32,
     dst_h: u32,
     src: &Frame,
-    at: (u32, u32),
+    at: (i32, i32),
     degrees: f32,
     distance: f32,
 ) {
@@ -849,10 +886,105 @@ fn blit_rotated(
     }
 }
 
-fn place(fallback: Rect, at: Option<(u32, u32)>, width: u32, height: u32) -> Rect {
+/// The picture mirrored left to right.
+pub fn flip_x(src: &Frame) -> Frame {
+    let mut rgba = vec![0u8; src.rgba.len()];
+    let w = src.width as usize;
+    for y in 0..src.height as usize {
+        for x in 0..w {
+            let s = (y * w + x) * 4;
+            let d = (y * w + (w - 1 - x)) * 4;
+            rgba[d..d + 4].copy_from_slice(&src.rgba[s..s + 4]);
+        }
+    }
+    Frame {
+        width: src.width,
+        height: src.height,
+        rgba,
+    }
+}
+
+/// Blend the part `(src_x, src_y, src_w, src_h)` of a picture at a frame
+/// position that may lie partly outside the frame.
+fn blit_part(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (i32, i32), part: (u32, u32, u32, u32)) {
+    let (src_x, src_y, src_w, src_h) = part;
+    for row in 0..src_h {
+        let sy = src_y + row;
+        let dy = at.1 + row as i32;
+        if sy >= src.height || dy < 0 || dy >= dst_h as i32 {
+            continue;
+        }
+        for col in 0..src_w {
+            let sx = src_x + col;
+            let dx = at.0 + col as i32;
+            if sx >= src.width || dx < 0 || dx >= dst_w as i32 {
+                continue;
+            }
+            let s = (sy as usize * src.width as usize + sx as usize) * 4;
+            let d = (dy as usize * dst_w as usize + dx as usize) * 4;
+            blend(dst, d, [src.rgba[s], src.rgba[s + 1], src.rgba[s + 2], src.rgba[s + 3]]);
+        }
+    }
+}
+
+/// One channel of a linear meter, as the meter engine draws it. A bar shows
+/// `w` pixels of the indicator picture from the end the direction names,
+/// anchored at the channel origin; `edges-center` and `center-edges` anchor
+/// the two channels at opposite ends. A single indicator moves by `w`.
+#[allow(clippy::too_many_arguments)]
+fn draw_bar(dst: &mut [u8], dst_w: u32, dst_h: u32, sprite: &Frame, at: (i32, i32), w: u32, linear: &LinearSpec, left: bool) {
+    let (cw, ch) = (sprite.width, sprite.height);
+    if cw == 0 || ch == 0 {
+        return;
+    }
+    let (ox, oy) = at;
+    let w_i = w as i32;
+    if linear.single {
+        let at = match linear.direction {
+            Direction::BottomTop => (ox, oy - w_i),
+            Direction::TopBottom => (ox, oy + w_i),
+            Direction::CenterEdges => (if left { ox - w_i } else { ox + w_i }, oy),
+            Direction::EdgesCenter => (if left { ox + w_i } else { ox - w_i }, oy),
+            Direction::LeftRight => (ox + w_i, oy),
+            Direction::RightLeft => (ox - w_i, oy),
+        };
+        blit_part(dst, dst_w, dst_h, sprite, at, (0, 0, cw, ch));
+        return;
+    }
+    let across = w.min(cw);
+    let down = w.min(ch);
+    let (at, part) = match linear.direction {
+        Direction::LeftRight => ((ox, oy), (0, 0, across, ch)),
+        Direction::RightLeft => ((ox + (cw - across) as i32, oy), (cw - across, 0, across, ch)),
+        Direction::BottomTop => ((ox, oy + (ch - down) as i32), (0, ch - down, cw, down)),
+        Direction::TopBottom => ((ox, oy), (0, 0, cw, down)),
+        Direction::EdgesCenter => {
+            if left {
+                ((ox, oy), (0, 0, across, ch))
+            } else {
+                let x = if linear.flip_right { ox - across as i32 } else { ox };
+                ((x, oy), (cw - across, 0, across, ch))
+            }
+        }
+        Direction::CenterEdges => {
+            if left {
+                ((ox - across as i32, oy), (cw - across, 0, across, ch))
+            } else {
+                ((ox, oy), (0, 0, across, ch))
+            }
+        }
+    };
+    blit_part(dst, dst_w, dst_h, sprite, at, part);
+}
+
+fn place(fallback: Rect, at: Option<(i32, i32)>, width: u32, height: u32) -> Rect {
     let Some((x, y)) = at else {
         return fallback;
     };
+    if x < 0 || y < 0 {
+        return fallback;
+    }
+    let (x, y) = (x as u32, y as u32);
     if x >= width || y >= height {
         return fallback;
     }
@@ -943,6 +1075,7 @@ mod tests {
             texts: Vec::new(),
             art: None,
             type_area: None,
+            ..Scene::default()
         };
         let frame = raster(&scene);
         let layout = layout(frame.width, frame.height);
@@ -963,6 +1096,54 @@ mod tests {
     fn at(rgba: &[u8], stride: u32, x: u32, y: u32) -> [u8; 3] {
         let i = ((y * stride + x) * 4) as usize;
         [rgba[i], rgba[i + 1], rgba[i + 2]]
+    }
+
+    #[test]
+    fn a_bar_shows_the_picture_from_the_end_its_direction_names() {
+        // A 4 wide, 2 tall picture whose columns are 1, 2, 3, 4 in red.
+        let mut pic = Frame { width: 4, height: 2, rgba: vec![0; 4 * 2 * 4] };
+        for y in 0..2 {
+            for x in 0..4u32 {
+                let i = ((y * 4 + x) * 4) as usize;
+                pic.rgba[i..i + 4].copy_from_slice(&[(x + 1) as u8, 0, 0, 255]);
+            }
+        }
+        let lit = |dst: &[u8], w: u32, x: u32, y: u32| dst[((y * w + x) * 4) as usize];
+        let spec = |direction: Direction, single: bool, flip_right: bool| LinearSpec {
+            regular: 4,
+            step_regular: 1,
+            direction,
+            single,
+            flip_right,
+            ..LinearSpec::default()
+        };
+        // left-right: the first two columns at the origin.
+        let mut dst = vec![0u8; 10 * 6 * 4];
+        draw_bar(&mut dst, 10, 6, &pic, (2, 1), 2, &spec(Direction::LeftRight, false, false), true);
+        assert_eq!((lit(&dst, 10, 2, 1), lit(&dst, 10, 3, 1), lit(&dst, 10, 4, 1)), (1, 2, 0));
+        // right-left: the last two columns, at the picture's right end.
+        let mut dst = vec![0u8; 10 * 6 * 4];
+        draw_bar(&mut dst, 10, 6, &pic, (2, 1), 2, &spec(Direction::RightLeft, false, false), true);
+        assert_eq!((lit(&dst, 10, 3, 1), lit(&dst, 10, 4, 1), lit(&dst, 10, 5, 1)), (0, 3, 4));
+        // center-edges, left channel: the last two columns end at the origin.
+        let mut dst = vec![0u8; 10 * 6 * 4];
+        draw_bar(&mut dst, 10, 6, &pic, (5, 1), 2, &spec(Direction::CenterEdges, false, false), true);
+        assert_eq!((lit(&dst, 10, 3, 1), lit(&dst, 10, 4, 1), lit(&dst, 10, 5, 1)), (3, 4, 0));
+        // edges-center, flipped right channel: the last two columns end at the origin.
+        let mut dst = vec![0u8; 10 * 6 * 4];
+        draw_bar(&mut dst, 10, 6, &pic, (5, 1), 2, &spec(Direction::EdgesCenter, false, true), false);
+        assert_eq!((lit(&dst, 10, 3, 1), lit(&dst, 10, 4, 1), lit(&dst, 10, 5, 1)), (3, 4, 0));
+        // bottom-top: the bottom row only.
+        let mut dst = vec![0u8; 10 * 6 * 4];
+        draw_bar(&mut dst, 10, 6, &pic, (2, 1), 1, &spec(Direction::BottomTop, false, false), true);
+        assert_eq!((lit(&dst, 10, 2, 1), lit(&dst, 10, 2, 2)), (0, 1));
+        // single: the whole picture moved by w.
+        let mut dst = vec![0u8; 10 * 6 * 4];
+        draw_bar(&mut dst, 10, 6, &pic, (2, 1), 3, &spec(Direction::LeftRight, true, false), true);
+        assert_eq!((lit(&dst, 10, 4, 1), lit(&dst, 10, 5, 1), lit(&dst, 10, 8, 1)), (0, 1, 4));
+        // mirrored picture.
+        let flipped = flip_x(&pic);
+        assert_eq!((flipped.rgba[0], flipped.rgba[12]), (4, 1));
     }
 
     #[test]

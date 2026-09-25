@@ -2,8 +2,8 @@
 //! Pure: no files, no devices, no pixels.
 
 use lead::{
-    format_key, format_label, Input, Metadata, ScrollDirection, SkinDesc, TextAlign, TextSpec,
-    TextStyle, TypeAlign, TypeMode,
+    format_key, format_label, Input, Metadata, MeterSpec, ScrollDirection, SkinDesc, TextAlign,
+    TextSpec, TextStyle, TypeAlign, TypeMode,
 };
 use serde::{Deserialize, Serialize};
 
@@ -78,8 +78,8 @@ pub struct Scene {
     pub left: f32,
     pub right: f32,
     pub bars: Vec<f32>,
-    pub left_at: Option<(u32, u32)>,
-    pub right_at: Option<(u32, u32)>,
+    pub left_at: Option<(i32, i32)>,
+    pub right_at: Option<(i32, i32)>,
     pub needle: Option<(f32, f32, f32)>,
     #[serde(default)]
     pub texts: Vec<Text>,
@@ -87,6 +87,11 @@ pub struct Scene {
     pub art: Option<Art>,
     #[serde(default)]
     pub type_area: Option<TypeArea>,
+    /// The mono level, a fraction from 0 to 1, for one-channel meters.
+    #[serde(default)]
+    pub mono: f32,
+    #[serde(default)]
+    pub meter: MeterSpec,
 }
 
 impl Default for Scene {
@@ -104,6 +109,8 @@ impl Default for Scene {
             texts: Vec::new(),
             art: None,
             type_area: None,
+            mono: 0.0,
+            meter: MeterSpec::default(),
         }
     }
 }
@@ -320,6 +327,8 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
         texts: texts(skin, &input.metadata),
         art: art(skin, &input.metadata),
         type_area: type_area(skin, &input.metadata),
+        mono: (input.levels.mono / meter_max).clamp(0.0, 1.0),
+        meter: skin.meter.clone(),
     }
 }
 

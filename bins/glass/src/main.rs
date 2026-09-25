@@ -9,9 +9,9 @@ use std::process::ExitCode;
 use std::thread;
 use std::time::Instant;
 
-use expose::{raster_over, read_art, read_icon, read_png, Fonts, Stack, TextMotion};
+use expose::{flip_x, raster_over, read_art, read_icon, read_png, Fonts, Stack, TextMotion};
 use intake::{PipeSource, Selector, Source};
-use lead::{frame_period, Input, SkinDesc, TypeMode};
+use lead::{frame_period, Input, MeterKind, SkinDesc, TypeMode};
 use pane::{publish, write_ppm, Surface};
 use plot::{step, Scene};
 
@@ -27,7 +27,10 @@ struct Assets {
     background: Option<expose::Frame>,
     face: Option<expose::Frame>,
     front: Option<expose::Frame>,
+    /// The indicator for the left or mono channel, mirrored when the meter flips it.
     indicator: Option<expose::Frame>,
+    /// The right channel's indicator when it differs from the left one.
+    indicator_right: Option<expose::Frame>,
     fonts: Fonts,
     art_mask: Option<expose::Frame>,
 }
@@ -38,11 +41,26 @@ impl Assets {
         for field in [&skin.time, &skin.time_elapsed, &skin.time_total].into_iter().flatten() {
             fonts.add_file(&field.font_file);
         }
+        let picture = load_theme(&skin.theme_dir, &skin.indicator);
+        let (flip_left, flip_right) = match (skin.meter.kind, &skin.meter.linear) {
+            (MeterKind::Linear, Some(linear)) => (linear.flip_left, linear.flip_right),
+            _ => (skin.meter.flip_left, skin.meter.flip_right),
+        };
+        let indicator_right = match (&picture, flip_left == flip_right) {
+            (Some(p), false) if flip_right => Some(flip_x(p)),
+            (Some(p), false) => Some(p.clone()),
+            _ => None,
+        };
+        let indicator = match picture {
+            Some(p) if flip_left => Some(flip_x(&p)),
+            other => other,
+        };
         Self {
             background: load_theme(&skin.theme_dir, &skin.background),
             face: load_theme(&skin.theme_dir, &skin.face),
             front: load_theme(&skin.theme_dir, &skin.front),
-            indicator: load_theme(&skin.theme_dir, &skin.indicator),
+            indicator,
+            indicator_right,
             fonts,
             art_mask: skin
                 .art
@@ -243,6 +261,7 @@ fn main() -> ExitCode {
                     face: assets.face.as_ref(),
                     front: assets.front.as_ref(),
                     needle: assets.indicator.as_ref(),
+                    needle_right: assets.indicator_right.as_ref(),
                     face_at: skin.face_at,
                     fonts: Some(&assets.fonts),
                     art: art_cache.as_ref().map(|(_, frame)| frame),

@@ -423,6 +423,157 @@ pub fn meter_visible(meters_txt: &str, meter: &str) -> bool {
     get("meter.visible").map(|v| truthy(Some(v))).unwrap_or(true)
 }
 
+/// How a meter shows its level: a needle turning about an origin, or a bar
+/// growing along a direction.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum MeterKind {
+    #[default]
+    Circular,
+    Linear,
+}
+
+/// The way a linear meter's bar grows, `direction` in the meter section.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Direction {
+    #[default]
+    LeftRight,
+    RightLeft,
+    BottomTop,
+    TopBottom,
+    EdgesCenter,
+    CenterEdges,
+}
+
+/// A linear meter: the indicator picture is shown up to a width that grows
+/// in steps, or, as a single indicator, moved by that width.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct LinearSpec {
+    pub regular: u32,
+    pub overload: u32,
+    pub step_regular: u32,
+    pub step_overload: u32,
+    pub direction: Direction,
+    /// `indicator.type = single`: the whole picture moves instead of growing.
+    pub single: bool,
+    /// `flip.left.x` and `flip.right.x`: that channel's picture is mirrored.
+    pub flip_left: bool,
+    pub flip_right: bool,
+}
+
+impl LinearSpec {
+    /// Width per step, as the meter engine builds its masks: zero, then each
+    /// regular step, then each overload step on top of the regular run.
+    pub fn masks(&self) -> Vec<u32> {
+        let mut masks = vec![0];
+        masks.extend((1..=self.regular).map(|n| n * self.step_regular));
+        let regular_run = self.regular * self.step_regular;
+        masks.extend((1..=self.overload).map(|n| regular_run + n * self.step_overload));
+        masks
+    }
+
+    /// Pixels of bar for a level from 0 to 1: the step the level reaches,
+    /// never less than one pixel.
+    pub fn bar_width(&self, level: f32) -> u32 {
+        let masks = self.masks();
+        let total = masks.len();
+        let n = ((level.clamp(0.0, 1.0) * total as f32) as usize).min(total - 1);
+        masks[n].max(1)
+    }
+}
+
+/// Everything about how one meter draws its level, beyond the origins and
+/// the default needle angles the skin already carries.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct MeterSpec {
+    pub kind: MeterKind,
+    /// 1 shows one needle or bar for the mono level at `mono_at`, 2 shows left and right.
+    pub channels: u8,
+    /// `mono.origin.x/y` (circular) or `mono.x/y` (linear), plus `meter.x/y`.
+    pub mono_at: Option<(i32, i32)>,
+    /// `left.start.angle` and `left.stop.angle` when the channel has its own.
+    pub left_angles: Option<(f32, f32)>,
+    pub right_angles: Option<(f32, f32)>,
+    /// `left.needle.flip` and `right.needle.flip`: the needle picture is mirrored.
+    pub flip_left: bool,
+    pub flip_right: bool,
+    pub linear: Option<LinearSpec>,
+    /// `meter.visible` under `config.extend`; false draws no level at all.
+    pub visible: bool,
+}
+
+impl Default for MeterSpec {
+    fn default() -> Self {
+        Self {
+            kind: MeterKind::Circular,
+            channels: 2,
+            mono_at: None,
+            left_angles: None,
+            right_angles: None,
+            flip_left: false,
+            flip_right: false,
+            linear: None,
+            visible: true,
+        }
+    }
+}
+
+/// The meter's kind, channels, per-channel angles, flips and bar steps.
+pub fn meter_spec(meters_txt: &str, meter: &str) -> MeterSpec {
+    let values = section_values(meters_txt, meter);
+    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+    let number = |key: &str| get(key).and_then(|v| v.trim().parse::<u32>().ok());
+    let signed = |key: &str| get(key).and_then(|v| v.trim().parse::<i32>().ok());
+    let angle = |key: &str| get(key).and_then(|v| v.trim().parse::<f32>().ok());
+    let flag = |key: &str| truthy(get(key));
+    let kind = match get("meter.type").map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        Some("linear") => MeterKind::Linear,
+        _ => MeterKind::Circular,
+    };
+    let channels = if number("channels") == Some(1) { 1 } else { 2 };
+    let meter_x = signed("meter.x").unwrap_or(0);
+    let meter_y = signed("meter.y").unwrap_or(0);
+    let mono_at = match kind {
+        MeterKind::Circular => (signed("mono.origin.x"), signed("mono.origin.y")),
+        MeterKind::Linear => (signed("mono.x"), signed("mono.y")),
+    };
+    let mono_at = match mono_at {
+        (Some(x), Some(y)) => Some((x + meter_x, y + meter_y)),
+        _ => None,
+    };
+    let pair = |start: &str, stop: &str| match (angle(start), angle(stop)) {
+        (Some(a), Some(b)) => Some((a, b)),
+        _ => None,
+    };
+    let linear = (kind == MeterKind::Linear).then(|| LinearSpec {
+        regular: number("position.regular").unwrap_or(0),
+        overload: number("position.overload").unwrap_or(0),
+        step_regular: number("step.width.regular").unwrap_or(0),
+        step_overload: number("step.width.overload").unwrap_or(0),
+        direction: match get("direction").map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+            Some("right-left") => Direction::RightLeft,
+            Some("bottom-top") => Direction::BottomTop,
+            Some("top-bottom") => Direction::TopBottom,
+            Some("edges-center") => Direction::EdgesCenter,
+            Some("center-edges") => Direction::CenterEdges,
+            _ => Direction::LeftRight,
+        },
+        single: get("indicator.type").is_some_and(|v| v.trim().eq_ignore_ascii_case("single")),
+        flip_left: flag("flip.left.x"),
+        flip_right: flag("flip.right.x"),
+    });
+    MeterSpec {
+        kind,
+        channels,
+        mono_at,
+        left_angles: pair("left.start.angle", "left.stop.angle"),
+        right_angles: pair("right.start.angle", "right.stop.angle"),
+        flip_left: flag("left.needle.flip"),
+        flip_right: flag("right.needle.flip"),
+        linear,
+        visible: meter_visible(meters_txt, meter),
+    }
+}
+
 /// `[data.source]` from the player configuration, with the engine's defaults.
 pub fn data_source_from_config(text: &str) -> DataSourceSpec {
     let number = |key: &str, default: f32| {
@@ -494,10 +645,11 @@ pub struct SkinDesc {
     pub theme_dir: String,
     /// Background file name inside `theme_dir`, from the theme's `meters.txt`.
     pub background: String,
-    /// `left.x` and `left.y` from the selected meter. Absent on a theme-less frame.
-    pub left_at: Option<(u32, u32)>,
+    /// `left.x` and `left.y` from the selected meter, plus `meter.x/y`. Absent on a
+    /// theme-less frame. A theme may put an origin off screen, so they are signed.
+    pub left_at: Option<(i32, i32)>,
     /// `right.x` and `right.y` from the selected meter.
-    pub right_at: Option<(u32, u32)>,
+    pub right_at: Option<(i32, i32)>,
     /// `indicator.filename` from the selected meter.
     pub indicator: String,
     pub face: String,
@@ -545,6 +697,8 @@ pub struct SkinDesc {
     pub time_total: Option<TextSpec>,
     #[serde(default)]
     pub data_source: DataSourceSpec,
+    #[serde(default)]
+    pub meter: MeterSpec,
 }
 
 impl Default for SkinDesc {
@@ -589,6 +743,7 @@ impl SkinDesc {
             time_elapsed: None,
             time_total: None,
             data_source: DataSourceSpec::default(),
+            meter: MeterSpec::default(),
         }
     }
 }
@@ -778,24 +933,24 @@ pub fn meter_background(meters_txt: &str, meter: &str) -> Option<String> {
 }
 
 /// Channel origins from the selected meter. `random` and `list` use the first meter.
-pub fn meter_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Option<(u32, u32)>) {
-    let mut sections: Vec<(String, Option<(u32, u32)>, Option<(u32, u32)>)> = Vec::new();
+pub fn meter_at(meters_txt: &str, meter: &str) -> (Option<(i32, i32)>, Option<(i32, i32)>) {
+    let mut sections: Vec<(String, Option<(i32, i32)>, Option<(i32, i32)>)> = Vec::new();
     let mut name = String::new();
     let mut left_x = None;
     let mut left_y = None;
     let mut right_x = None;
     let mut right_y = None;
-    let mut meter_x = 0u32;
-    let mut meter_y = 0u32;
+    let mut meter_x = 0i32;
+    let mut meter_y = 0i32;
     let mut in_section = false;
-    let flush = |sections: &mut Vec<(String, Option<(u32, u32)>, Option<(u32, u32)>)>,
+    let flush = |sections: &mut Vec<(String, Option<(i32, i32)>, Option<(i32, i32)>)>,
                  name: &mut String,
-                 left_x: &mut Option<u32>,
-                 left_y: &mut Option<u32>,
-                 right_x: &mut Option<u32>,
-                 right_y: &mut Option<u32>,
-                 meter_x: &mut u32,
-                 meter_y: &mut u32,
+                 left_x: &mut Option<i32>,
+                 left_y: &mut Option<i32>,
+                 right_x: &mut Option<i32>,
+                 right_y: &mut Option<i32>,
+                 meter_x: &mut i32,
+                 meter_y: &mut i32,
                  in_section: &mut bool| {
         if *in_section && !name.is_empty() {
             let left = match (*left_x, *left_y) {
@@ -840,7 +995,7 @@ pub fn meter_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Option<(u
         let Some((key, value)) = line.split_once('=') else {
             continue;
         };
-        let parsed = value.trim().parse::<u32>().ok();
+        let parsed = value.trim().parse::<i32>().ok();
         match key.trim() {
             "left.x" | "left.origin.x" => left_x = parsed,
             "left.y" | "left.origin.y" => left_y = parsed,
@@ -961,19 +1116,23 @@ pub fn meter_layers(meters_txt: &str, meter: &str) -> (String, String, String, (
 pub fn meter_needle(meters_txt: &str, meter: &str) -> Option<(f32, f32, f32)> {
     let mut found_start = None;
     let mut found_stop = None;
+    let mut left_start = None;
+    let mut left_stop = None;
     let mut found_distance = 0.0;
     let named = meter != "random" && meter != "list" && !meter.is_empty();
     let mut take = !named;
     for line in meters_txt.lines() {
         let line = line.trim();
         if let Some(title) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            if take && found_start.is_some() && found_stop.is_some() {
-                return Some((found_start.unwrap(), found_stop.unwrap(), found_distance));
+            if let (true, Some(a), Some(b)) = (take, found_start.or(left_start), found_stop.or(left_stop)) {
+                return Some((a, b, found_distance));
             }
             take = !named || title.trim() == meter;
             if take {
                 found_start = None;
                 found_stop = None;
+                left_start = None;
+                left_stop = None;
                 found_distance = 0.0;
             }
             continue;
@@ -988,11 +1147,15 @@ pub fn meter_needle(meters_txt: &str, meter: &str) -> Option<(f32, f32, f32)> {
         match key.trim() {
             "start.angle" => found_start = parsed,
             "stop.angle" => found_stop = parsed,
+            // A meter with per-channel angles only: the left pair stands in
+            // for the shared one, as the meter engine reads it.
+            "left.start.angle" => left_start = parsed,
+            "left.stop.angle" => left_stop = parsed,
             "distance" => found_distance = parsed.unwrap_or(0.0),
             _ => {}
         }
     }
-    match (found_start, found_stop) {
+    match (found_start.or(left_start), found_stop.or(left_stop)) {
         (Some(a), Some(b)) => Some((a, b, found_distance)),
         _ => None,
     }
@@ -1524,6 +1687,27 @@ mod tests {
         assert!(!meter_visible(m, "a"));
         assert!(meter_visible(m, "b"), "meter.visible needs config.extend");
         assert!(meter_visible(m, "c"));
+    }
+
+    #[test]
+    fn a_meter_spec_reads_kind_channels_angles_flips_and_bar_steps() {
+        let m = "[bar]\nmeter.type = linear\nchannels = 2\nposition.regular = 9\nposition.overload = 4\nstep.width.regular = 34\n\
+            step.width.overload = 20\ndirection = bottom-top\nindicator.type = single\nflip.right.x = True\nmeter.x = 770\nmeter.y = 569\n\
+            [mono]\nmeter.type = circular\nchannels = 1\nmono.origin.x = 397\nmono.origin.y = 605\nmeter.x = 10\nmeter.y = 5\nleft.needle.flip = true\n\
+            [pair]\nmeter.type = circular\nchannels = 2\nleft.start.angle = 40\nleft.stop.angle = -40\nright.start.angle = -40\nright.stop.angle = 40\nright.needle.flip = True\n";
+        let bar = meter_spec(m, "bar");
+        assert_eq!((bar.kind, bar.channels, bar.mono_at), (MeterKind::Linear, 2, None));
+        let linear = bar.linear.unwrap();
+        assert_eq!((linear.direction, linear.single, linear.flip_left, linear.flip_right), (Direction::BottomTop, true, false, true));
+        assert_eq!(linear.masks(), [0, 34, 68, 102, 136, 170, 204, 238, 272, 306, 326, 346, 366, 386]);
+        assert_eq!((linear.bar_width(0.0), linear.bar_width(0.5), linear.bar_width(1.0)), (1, 238, 386), "14 steps; 0.5 reaches step 7; full is the last mask");
+        let mono = meter_spec(m, "mono");
+        assert_eq!((mono.kind, mono.channels, mono.mono_at, mono.flip_left), (MeterKind::Circular, 1, Some((407, 610)), true));
+        assert_eq!(mono.left_angles, None);
+        let pair = meter_spec(m, "pair");
+        assert_eq!((pair.left_angles, pair.right_angles, pair.flip_right), (Some((40.0, -40.0)), Some((-40.0, 40.0)), true));
+        assert!(pair.visible);
+        assert_eq!(meter_needle(m, "pair"), Some((40.0, -40.0, 0.0)), "the left pair stands in for missing shared angles");
     }
 
     #[test]

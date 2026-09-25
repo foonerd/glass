@@ -81,11 +81,17 @@ pub fn publish(scene: &Scene) {
 
 /// Write an RGB PPM. The alpha byte is dropped. Used to look at a frame with no display.
 pub fn write_ppm(path: impl AsRef<Path>, frame: &Frame) -> io::Result<()> {
-    let mut file = File::create(path)?;
+    // Written beside the target and renamed over it, so a reader never sees
+    // a half-written frame when the file is rewritten every step.
+    let path = path.as_ref();
+    let part = path.with_extension("ppm.part");
+    let mut file = File::create(&part)?;
     write!(file, "P6\n{} {}\n255\n", frame.width, frame.height)?;
     let mut rgb = Vec::with_capacity((frame.width * frame.height * 3) as usize);
     for px in frame.rgba.chunks_exact(4) {
         rgb.extend_from_slice(&px[..3]);
     }
-    file.write_all(&rgb)
+    file.write_all(&rgb)?;
+    drop(file);
+    std::fs::rename(&part, path)
 }
