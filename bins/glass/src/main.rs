@@ -7,6 +7,7 @@
 use std::env;
 use std::process::ExitCode;
 use std::thread;
+use std::time::Instant;
 
 use expose::{raster_over, read_art, read_icon, read_png, Fonts, Stack};
 use lead::TypeMode;
@@ -76,8 +77,10 @@ fn main() -> ExitCode {
     }
 
     let skin = intake::installed_skin();
-    let mut source = PipeSource::installed().with_icons(&skin);
+    let mut source = PipeSource::installed().with_skin(&skin);
     let frame_rate = intake::installed_frame_rate();
+    let started = Instant::now();
+    let mut motion = expose::TextMotion::default();
     let period = frame_period(frame_rate);
     println!(
         "glass: frame.rate={frame_rate} size={}x{} theme={}",
@@ -94,7 +97,7 @@ fn main() -> ExitCode {
     let front = load_theme(&skin.theme_dir, &skin.front);
     let indicator = load_theme(&skin.theme_dir, &skin.indicator);
     let fonts = Fonts::load(&skin.fonts);
-    println!("glass: fonts loaded {} of 4", fonts.loaded());
+    println!("glass: fonts loaded {} of 5", fonts.loaded());
     // The art picture, decoded and stretched once per file and box, cut with
     // the theme's mask when it has one.
     let art_mask = skin
@@ -191,6 +194,8 @@ fn main() -> ExitCode {
                     art: art_cache.as_ref().map(|(_, frame)| frame),
                     icon: icon_cache.as_ref().map(|(_, frame)| frame),
                 },
+                &mut motion,
+                started.elapsed().as_millis() as u64,
             );
             if let Some(window) = surface.as_mut() {
                 match window.show(&frame) {

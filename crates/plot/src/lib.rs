@@ -1,7 +1,10 @@
 //! Turn an [`lead::Input`] and a skin into a [`Scene`].
 //! Pure: no files, no devices, no pixels.
 
-use lead::{format_key, format_label, Input, Metadata, SkinDesc, TextSpec, TextStyle, TypeAlign, TypeMode};
+use lead::{
+    format_key, format_label, Input, Metadata, ScrollDirection, SkinDesc, TextAlign, TextSpec,
+    TextStyle, TypeAlign, TypeMode,
+};
 use serde::{Deserialize, Serialize};
 
 /// The type area to show: the box from the skin, the label for the track
@@ -21,7 +24,9 @@ pub struct TypeArea {
     pub icon: String,
 }
 
-/// One text the surface shows, already composed and coloured.
+/// One text the surface shows, already composed and coloured. A text wider
+/// than `max_width` moves at `speed` pixels a second in `direction`; with
+/// `loop_thirds` the text is three copies of one segment and wraps by a third.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Text {
     pub x: u32,
@@ -31,6 +36,14 @@ pub struct Text {
     pub color: [u8; 3],
     pub max_width: u32,
     pub text: String,
+    #[serde(default)]
+    pub align: TextAlign,
+    #[serde(default)]
+    pub speed: f32,
+    #[serde(default)]
+    pub direction: ScrollDirection,
+    #[serde(default)]
+    pub loop_thirds: bool,
 }
 
 /// The album art to show: the box from the skin and the file holding the picture.
@@ -144,7 +157,47 @@ fn text(spec: &TextSpec, content: String, color: [u8; 3]) -> Text {
         color,
         max_width: spec.max_width,
         text: content,
+        align: spec.align,
+        speed: spec.speed,
+        direction: ScrollDirection::Bounce,
+        loop_thirds: false,
     }
+}
+
+/// The ticker line as the player composes it: artist, title and album
+/// joined by the separator with its spaces, then `Next: Artist - Title`
+/// when asked and known, then the end spaces; three copies for a seamless loop.
+pub fn ticker_line(skin: &SkinDesc, meta: &Metadata) -> Option<Text> {
+    let ticker = skin.ticker.as_ref()?;
+    let space = " ".repeat(ticker.space_between as usize);
+    let between = format!("{space}{}{space}", ticker.separator);
+    let parts: Vec<&str> = [meta.artist.as_str(), meta.title.as_str(), meta.album.as_str()]
+        .into_iter()
+        .filter(|p| !p.is_empty())
+        .collect();
+    let mut content = parts.join(&between);
+    if ticker.append_next {
+        let next: Vec<&str> = [meta.next_artist.as_str(), meta.next_title.as_str()]
+            .into_iter()
+            .filter(|p| !p.is_empty())
+            .collect();
+        if !next.is_empty() {
+            let next_part = format!("Next: {}", next.join(" - "));
+            content = if content.is_empty() {
+                next_part
+            } else {
+                format!("{content}{between}{next_part}")
+            };
+        }
+    }
+    if content.is_empty() {
+        return None;
+    }
+    let segment = format!("{content}{}", " ".repeat(ticker.end_spaces as usize));
+    let mut line = text(&ticker.text, segment.repeat(3), ticker.text.color);
+    line.direction = ticker.direction;
+    line.loop_thirds = true;
+    Some(line)
 }
 
 /// Whole seconds left in the track, or `None` when the source has no length.
@@ -159,28 +212,40 @@ pub fn seconds_remaining(meta: &Metadata) -> Option<u32> {
 /// unless the skin places the album on its own.
 pub fn texts(skin: &SkinDesc, meta: &Metadata) -> Vec<Text> {
     let mut out = Vec::new();
-    if let Some(spec) = &skin.title {
-        if !meta.title.is_empty() {
-            out.push(text(spec, meta.title.clone(), spec.color));
-        }
-    }
-    if let Some(spec) = &skin.artist {
-        let line = if skin.album.is_none() && !meta.album.is_empty() {
-            if meta.artist.is_empty() {
-                meta.album.clone()
-            } else {
-                format!("{} - {}", meta.artist, meta.album)
+    let ticker_replaces = skin.ticker.as_ref().is_some_and(|t| t.replace);
+    if !ticker_replaces {
+        if let Some(spec) = &skin.title {
+            if !meta.title.is_empty() {
+                out.push(text(spec, meta.title.clone(), spec.color));
             }
-        } else {
-            meta.artist.clone()
-        };
-        if !line.is_empty() {
-            out.push(text(spec, line, spec.color));
         }
-    }
-    if let Some(spec) = &skin.album {
-        if !meta.album.is_empty() {
-            out.push(text(spec, meta.album.clone(), spec.color));
+        if let Some(spec) = &skin.artist {
+            let line = if skin.album.is_none() && !meta.album.is_empty() {
+                if meta.artist.is_empty() {
+                    meta.album.clone()
+                } else {
+                    format!("{} - {}", meta.artist, meta.album)
+                }
+            } else {
+                meta.artist.clone()
+            };
+            if !line.is_empty() {
+                out.push(text(spec, line, spec.color));
+            }
+        }
+        if let Some(spec) = &skin.album {
+            if !meta.album.is_empty() {
+                out.push(text(spec, meta.album.clone(), spec.color));
+            }
+        }
+        for (spec, value) in [
+            (&skin.next_title, &meta.next_title),
+            (&skin.next_artist, &meta.next_artist),
+            (&skin.next_album, &meta.next_album),
+        ] {
+            if let (Some(spec), false) = (spec, value.is_empty()) {
+                out.push(text(spec, value.clone(), spec.color));
+            }
         }
     }
     if let Some(spec) = &skin.sample {
@@ -202,6 +267,9 @@ pub fn texts(skin: &SkinDesc, meta: &Metadata) -> Vec<Text> {
             };
             out.push(text(spec, format!("{:02}:{:02}", left / 60, left % 60), color));
         }
+    }
+    if let Some(line) = ticker_line(skin, meta) {
+        out.push(line);
     }
     out
 }
@@ -265,7 +333,44 @@ mod tests {
             size: 20,
             color,
             max_width: 0,
+            align: TextAlign::Left,
+            speed: 40.0,
         }
+    }
+
+    #[test]
+    fn the_ticker_loops_one_line_and_can_replace_the_others() {
+        let mut skin = SkinDesc::basic();
+        skin.title = Some(spec(TextStyle::Bold, [1, 1, 1]));
+        skin.next_title = Some(spec(TextStyle::Regular, [2, 2, 2]));
+        skin.ticker = Some(lead::TickerSpec {
+            text: TextSpec { max_width: 720, ..spec(TextStyle::Regular, [9, 9, 9]) },
+            direction: ScrollDirection::Ltr,
+            separator: "-".into(),
+            space_between: 1,
+            end_spaces: 2,
+            append_next: true,
+            replace: false,
+        });
+        let meta = Metadata {
+            title: "Wonder".into(),
+            artist: "Courtney".into(),
+            album: String::new(),
+            next_title: "Next Song".into(),
+            next_artist: "Someone".into(),
+            ..Metadata::default()
+        };
+        let lines = texts(&skin, &meta);
+        let ticker = lines.last().unwrap();
+        let segment = "Courtney - Wonder - Next: Someone - Next Song  ";
+        assert_eq!(ticker.text, segment.repeat(3));
+        assert!(ticker.loop_thirds && ticker.direction == ScrollDirection::Ltr);
+        assert_eq!(lines.iter().map(|t| t.text.as_str()).collect::<Vec<_>>()[..2], ["Wonder", "Next Song"]);
+
+        skin.ticker.as_mut().unwrap().replace = true;
+        let lines = texts(&skin, &meta);
+        assert_eq!(lines.len(), 1, "replace hides the separate lines");
+        assert_eq!(ticker_line(&skin, &Metadata::default()), None, "nothing to say, no ticker");
     }
 
     #[test]

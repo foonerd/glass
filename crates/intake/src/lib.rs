@@ -13,10 +13,52 @@ use std::path::{Path, PathBuf};
 use lead::{
     decode_meter, decode_spectrum, fonts_from_config, format_key, frame_rate_from_config,
     meter_art, meter_at, meter_background, meter_indicator, meter_layers, meter_needle,
-    meter_text_at, meter_texts, meter_type, mono_average, scale_level, screen_from_config, Bins,
-    Input, Levels, SkinDesc, CONFIG_TXT, DEFAULT_FRAME_RATE, DEFAULT_METER_MAX,
-    DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO, STOCK_ICONS, current_value,
+    meter_text_at, meter_texts, meter_type, mono_average, scale_level, screen_from_config,
+    scroll_speeds_from_config, Bins, Input, Levels, SkinDesc, CONFIG_TXT, DEFAULT_FRAME_RATE,
+    DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO, STOCK_ICONS,
+    current_value,
 };
+
+/// One HTTP GET against the player on localhost. `None` when it does not answer.
+fn player_get(path: &str) -> Option<String> {
+    let address = std::net::SocketAddr::from(([127, 0, 0, 1], 3000));
+    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(200)).ok()?;
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    stream
+        .write_all(format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").as_bytes())
+        .ok()?;
+    let mut buf = String::new();
+    stream.read_to_string(&mut buf).ok()?;
+    Some(buf.split_once("\r\n\r\n").map(|(_, body)| body.to_string()).unwrap_or(buf))
+}
+
+/// The track after `position` in the player's queue: title (or name),
+/// artist, album. Empty strings when there is none or the player does not answer.
+pub fn queue_next(position: i64) -> (String, String, String) {
+    let Some(body) = player_get("/api/v1/getQueue") else {
+        return Default::default();
+    };
+    let value: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
+        Err(_) => return Default::default(),
+    };
+    let items = value
+        .as_array()
+        .or_else(|| value.get("queue").and_then(|q| q.as_array()));
+    let Some(items) = items else {
+        return Default::default();
+    };
+    let next = usize::try_from(position + 1).ok().and_then(|i| items.get(i));
+    let Some(next) = next else {
+        return Default::default();
+    };
+    let text = |key: &str| next.get(key).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let title = {
+        let t = text("title");
+        if t.is_empty() { text("name") } else { t }
+    };
+    (title, text("artist"), text("album"))
+}
 
 /// A file named `basename` in `dir`, matched exactly first, then ignoring
 /// case. Volumio ships `YouTube.svg`, which a case-sensitive open misses.
@@ -230,6 +272,8 @@ pub struct PipeSource {
     plugin_icons: String,
     /// Last resolved (key, icon path), so the directories are read once per key.
     icon_cache: (String, String),
+    /// Whether the skin shows the next track, which costs a queue read per refresh.
+    wants_next: bool,
 }
 
 impl PipeSource {
@@ -270,6 +314,7 @@ impl PipeSource {
             skin_icons: String::new(),
             plugin_icons: String::new(),
             icon_cache: (String::new(), String::new()),
+            wants_next: false,
         }
     }
 
@@ -280,10 +325,15 @@ impl PipeSource {
         self
     }
 
-    /// Where to look for type icons, from the skin.
-    pub fn with_icons(mut self, skin: &SkinDesc) -> Self {
+    /// What the skin needs from the player beyond the state: icon
+    /// directories, and the queue when a next line or the ticker shows it.
+    pub fn with_skin(mut self, skin: &SkinDesc) -> Self {
         self.skin_icons = skin.skin_icons.clone();
         self.plugin_icons = skin.plugin_icons.clone();
+        self.wants_next = skin.next_title.is_some()
+            || skin.next_artist.is_some()
+            || skin.next_album.is_some()
+            || skin.ticker.as_ref().is_some_and(|t| t.append_next);
         self
     }
 
@@ -354,6 +404,11 @@ impl Source for PipeSource {
                     let icon = resolve_icon(&key, &self.skin_icons, &self.plugin_icons);
                     self.icon_cache = (key, icon);
                 }
+                let (next_title, next_artist, next_album) = if self.wants_next {
+                    queue_next(playing.position)
+                } else {
+                    Default::default()
+                };
                 self.metadata_held = lead::Metadata {
                     title: playing.title,
                     artist: playing.artist,
@@ -368,6 +423,9 @@ impl Source for PipeSource {
                     track_type: playing.track_type,
                     bitrate: playing.bitrate,
                     type_icon: self.icon_cache.1.clone(),
+                    next_title,
+                    next_artist,
+                    next_album,
                 };
                 self.metadata_at = Some(Instant::now());
             }
@@ -456,12 +514,17 @@ pub fn installed_skin() -> SkinDesc {
         let (title_at, artist_at) = meter_text_at(&meters, &skin.name);
         skin.title_at = title_at;
         skin.artist_at = artist_at;
-        let texts = meter_texts(&meters, &skin.name);
+        let speeds = scroll_speeds_from_config(&text);
+        let texts = meter_texts(&meters, &skin.name, skin.width, &speeds);
         skin.title = texts.title;
         skin.artist = texts.artist;
         skin.album = texts.album;
         skin.sample = texts.sample;
         skin.time = texts.time;
+        skin.next_title = texts.next_title;
+        skin.next_artist = texts.next_artist;
+        skin.next_album = texts.next_album;
+        skin.ticker = texts.ticker;
         skin.art = meter_art(&meters, &skin.name, &skin.theme_dir);
         let default_mode = current_value(&text, "playinfo.type.mode");
         skin.type_area = meter_type(&meters, &skin.name, default_mode.as_deref());
@@ -474,10 +537,14 @@ pub fn installed_skin() -> SkinDesc {
         .map(|dir| dir.join("fonts").join("DSEG7Classic-Italic.ttf"))
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
+    let italic_default = handlers_dir
+        .map(|dir| dir.join("fonts").join("PeppyFont-Italic.ttf"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
     skin.plugin_icons = handlers_dir
         .map(|dir| dir.join("format-icons").to_string_lossy().into_owned())
         .unwrap_or_default();
-    skin.fonts = fonts_from_config(&text, &digi_default);
+    skin.fonts = fonts_from_config(&text, &digi_default, &italic_default);
     skin
 }
 
@@ -497,6 +564,8 @@ pub struct NowPlaying {
     pub albumart: String,
     pub track_type: String,
     pub bitrate: String,
+    /// Index of the playing item in the queue.
+    pub position: i64,
 }
 
 /// Current track from Volumio. Empty strings when the player does not answer.
@@ -527,6 +596,7 @@ pub fn now_playing() -> NowPlaying {
     playing.albumart = json_string(body, "albumart");
     playing.track_type = json_string(body, "trackType");
     playing.bitrate = json_string(body, "bitrate");
+    playing.position = json_number(body, "position").map(|p| p as i64).unwrap_or(0);
     playing
 }
 

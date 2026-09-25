@@ -34,71 +34,184 @@
     "artist_at": [
       283,
       172
-    ]
+    ],
+    "fonts": {
+      "light": "/volumio/http/www3/app/themes/volumio3/assets/variants/volumio/fonts/Lato-Light.ttf",
+      "regular": "/volumio/http/www3/app/themes/volumio3/assets/variants/volumio/fonts/Lato-Regular.ttf",
+      "bold": "/volumio/http/www3/app/themes/volumio3/assets/variants/volumio/fonts/Lato-Bold.ttf",
+      "digi": "/data/plugins/user_interface/peppy_screensaver/screensaver/fonts/DSEG7Classic-Italic.ttf",
+      "italic": "/data/plugins/user_interface/peppy_screensaver/screensaver/fonts/PeppyFont-Italic.ttf"
+    },
+    "title": {
+      "x": 283,
+      "y": 138,
+      "style": "Bold",
+      "size": 28,
+      "color": [
+        255,
+        237,
+        76
+      ],
+      "max_width": 535,
+      "align": "Left",
+      "speed": 8.0
+    },
+    "artist": {
+      "x": 283,
+      "y": 172,
+      "style": "Light",
+      "size": 25,
+      "color": [
+        255,
+        255,
+        255
+      ],
+      "max_width": 535,
+      "align": "Left",
+      "speed": 10.0
+    },
+    "album": null,
+    "sample": {
+      "x": 902,
+      "y": 160,
+      "style": "Regular",
+      "size": 20,
+      "color": [
+        255,
+        255,
+        255
+      ],
+      "max_width": 0,
+      "align": "Left",
+      "speed": 0.0
+    },
+    "time": {
+      "x": 1100,
+      "y": 160,
+      "style": "Digi",
+      "size": 40,
+      "color": [
+        180,
+        180,
+        180
+      ],
+      "max_width": 0,
+      "align": "Left",
+      "speed": 0.0
+    },
+    "art": {
+      "x": 36,
+      "y": 25,
+      "w": 201,
+      "h": 201,
+      "mask": "",
+      "border": 0,
+      "border_color": [
+        255,
+        255,
+        255
+      ]
+    },
+    "type_area": {
+      "x": 847,
+      "y": 149,
+      "box_size": [
+        45,
+        45
+      ],
+      "mode": "Icon",
+      "align": "Center",
+      "color": [
+        255,
+        255,
+        255
+      ],
+      "font_size": 20,
+      "font_style": "Regular"
+    },
+    "skin_icons": "/data/INTERNAL/peppy_screensaver/templates/1280x720_custom_3/format-icons",
+    "plugin_icons": "/data/plugins/user_interface/peppy_screensaver/screensaver/format-icons",
+    "next_title": null,
+    "next_artist": null,
+    "next_album": null,
+    "ticker": null
   },
   "input": {
     "levels": {
-      "left": 8.0,
-      "right": 10.0,
-      "mono": 9.0
+      "left": 43.0,
+      "right": 43.0,
+      "mono": 43.0
     },
     "bins": {
       "values": [
-        15.0,
-        49.0,
-        49.0,
+        61.0,
+        44.0,
+        57.0,
+        54.0,
+        51.0,
+        52.0,
+        46.0,
+        42.0,
+        42.0,
+        38.0,
+        46.0,
         50.0,
-        49.0,
-        41.0,
-        37.0,
-        22.0,
-        17.0,
-        36.0,
-        27.0,
-        24.0,
-        22.0,
-        22.0,
-        17.0,
-        19.0,
-        22.0,
-        24.0,
-        24.0,
-        21.0
+        48.0,
+        46.0,
+        47.0,
+        47.0,
+        57.0,
+        64.0,
+        70.0,
+        64.0
       ]
     },
     "metadata": {
-      "title": "What I Am",
-      "artist": "Edie Brickell",
-      "album": "Street Life"
+      "title": "Wonder",
+      "artist": "Courtney Barnett",
+      "album": "Creature of Habit",
+      "samplerate": "44.1 kHz",
+      "bitdepth": "16-bit",
+      "status": "play",
+      "duration": 218.051,
+      "seek": 3.1630383,
+      "albumart": "https://img.radioparadise.com/covers/l/26906.jpg",
+      "art_file": "",
+      "track_type": "The Main Mix - ",
+      "bitrate": "",
+      "type_icon": "",
+      "next_title": "",
+      "next_artist": "",
+      "next_album": ""
     }
   },
   "scene": {
     "skin": "black-white",
     "width": 1280,
     "height": 720,
-    "left": 0.08,
-    "right": 0.1,
+    "left": 0.43,
+    "right": 0.43,
     "bars": [
-      0.15,
-      0.49,
-      0.49,
+      0.61,
+      0.44,
+      0.57,
+      0.54,
+      0.51,
+      0.52,
+      0.46,
+      0.42,
+      0.42,
+      0.38,
+      0.46,
       0.5,
-      0.49,
-      0.41,
-      0.37,
-      0.22,
-      0.17,
-      0.36,
-      0.27,
-      0.24,
-      0.22,
-      0.22,
-      0.17,
-      0.19,
-      0.22,
-      0.24,
-      0.24,
-      0.21
+      0.48,
+      0.46,
+      0.47,
+      0.47,
+      0.57,
+      0.64,
+      0.7,
+      0.64
     ],
     "left_at": [
       342,
@@ -112,6 +225,96 @@
       45.0,
       -45.0,
       208.0
-    ]
+    ],
+    "texts": [
+      {
+        "x": 283,
+        "y": 138,
+        "style": "Bold",
+        "size": 28,
+        "color": [
+          255,
+          237,
+          76
+        ],
+        "max_width": 535,
+        "text": "Wonder",
+        "align": "Left",
+        "speed": 8.0,
+        "direction": "Bounce",
+        "loop_thirds": false
+      },
+      {
+        "x": 283,
+        "y": 172,
+        "style": "Light",
+        "size": 25,
+        "color": [
+          255,
+          255,
+          255
+        ],
+        "max_width": 535,
+        "text": "Courtney Barnett - Creature of Habit",
+        "align": "Left",
+        "speed": 10.0,
+        "direction": "Bounce",
+        "loop_thirds": false
+      },
+      {
+        "x": 902,
+        "y": 160,
+        "style": "Regular",
+        "size": 20,
+        "color": [
+          255,
+          255,
+          255
+        ],
+        "max_width": 0,
+        "text": "44.1 kHz 16-bit",
+        "align": "Left",
+        "speed": 0.0,
+        "direction": "Bounce",
+        "loop_thirds": false
+      },
+      {
+        "x": 1100,
+        "y": 160,
+        "style": "Digi",
+        "size": 40,
+        "color": [
+          180,
+          180,
+          180
+        ],
+        "max_width": 0,
+        "text": "03:34",
+        "align": "Left",
+        "speed": 0.0,
+        "direction": "Bounce",
+        "loop_thirds": false
+      }
+    ],
+    "art": null,
+    "type_area": {
+      "x": 847,
+      "y": 149,
+      "box_size": [
+        45,
+        45
+      ],
+      "mode": "Icon",
+      "align": "Center",
+      "color": [
+        255,
+        255,
+        255
+      ],
+      "font_size": 20,
+      "font_style": "Regular",
+      "label": "THE_MAIN_MIX_",
+      "icon": ""
+    }
   }
 }

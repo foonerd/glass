@@ -3,19 +3,23 @@
 
 use std::path::Path;
 
+use std::collections::HashMap;
+
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
-use lead::{FontFiles, TextStyle, TypeAlign, TypeMode};
+use lead::{FontFiles, ScrollDirection, TextAlign, TextStyle, TypeAlign, TypeMode};
 use plot::{Scene, Text, TypeArea};
 
 const BG: [u8; 4] = [12, 12, 16, 255];
 
 /// Theme fonts, loaded once per run. A style whose file is missing or
-/// unreadable stays `None`, and its texts fall back to the built-in bitmap font.
+/// unreadable stays `None`, and its texts fall back to the built-in bitmap
+/// font. Italic without its own file falls back to regular, as the player does.
 #[derive(Default)]
 pub struct Fonts {
     light: Option<FontVec>,
     regular: Option<FontVec>,
     bold: Option<FontVec>,
+    italic: Option<FontVec>,
     digi: Option<FontVec>,
 }
 
@@ -31,6 +35,7 @@ impl Fonts {
             light: read(&files.light),
             regular: read(&files.regular),
             bold: read(&files.bold),
+            italic: read(&files.italic),
             digi: read(&files.digi),
         }
     }
@@ -40,16 +45,44 @@ impl Fonts {
             TextStyle::Light => self.light.as_ref(),
             TextStyle::Regular => self.regular.as_ref(),
             TextStyle::Bold => self.bold.as_ref(),
+            TextStyle::Italic => self.italic.as_ref().or(self.regular.as_ref()),
             TextStyle::Digi => self.digi.as_ref(),
         }
     }
 
-    /// How many of the four styles have a font.
+    /// How many of the five styles have a font file of their own.
     pub fn loaded(&self) -> usize {
-        [&self.light, &self.regular, &self.bold, &self.digi]
+        [&self.light, &self.regular, &self.bold, &self.italic, &self.digi]
             .iter()
             .filter(|f| f.is_some())
             .count()
+    }
+}
+
+/// Pause at each end of a bouncing text, as the player pauses.
+const SCROLL_PAUSE_MS: u64 = 400;
+
+#[derive(Debug, Clone, Default)]
+struct ScrollState {
+    text: String,
+    box_w: u32,
+    offset: f32,
+    dir: f32,
+    pause_until: u64,
+    last_ms: u64,
+}
+
+/// Where each moving text is on its way, keyed by its position. Owned by the
+/// player binary across frames; `raster_over` advances it.
+#[derive(Debug, Default)]
+pub struct TextMotion {
+    states: HashMap<(u32, u32), ScrollState>,
+}
+
+impl TextMotion {
+    /// The current offset of a text, for tests and diagnostics.
+    pub fn offset(&self, x: u32, y: u32) -> Option<f32> {
+        self.states.get(&(x, y)).map(|s| s.offset)
     }
 }
 const METER: [u8; 4] = [80, 220, 120, 255];
@@ -134,6 +167,8 @@ pub fn raster(scene: &Scene) -> Frame {
             art: None,
             icon: None,
         },
+        &mut TextMotion::default(),
+        0,
     )
 }
 
@@ -193,8 +228,8 @@ pub struct Stack<'a> {
 }
 
 /// Theme order: full-screen picture, album art, meter face, needles, meter
-/// foreground, then the texts.
-pub fn raster_over(scene: &Scene, stack: Stack<'_>) -> Frame {
+/// foreground, then the texts. `now_ms` drives the moving texts through `motion`.
+pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut TextMotion, now_ms: u64) -> Frame {
     let width = scene.width.max(1);
     let height = scene.height.max(1);
     let mut rgba = vec![0u8; (width * height * 4) as usize];
@@ -241,12 +276,125 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>) -> Frame {
         rgba,
     };
     for text in &scene.texts {
-        draw_text_styled(&mut frame, text, stack.fonts);
+        draw_text_moving(&mut frame, text, stack.fonts, motion, now_ms);
     }
     if let Some(area) = &scene.type_area {
         draw_type_area(&mut frame, area, stack.icon, stack.fonts);
     }
     frame
+}
+
+fn align_text_x(box_x: u32, box_w: u32, item_w: u32, align: TextAlign) -> u32 {
+    match align {
+        TextAlign::Left => box_x,
+        TextAlign::Right => box_x + box_w.saturating_sub(item_w),
+        TextAlign::Center => box_x + box_w.saturating_sub(item_w) / 2,
+    }
+}
+
+/// Copy the part of `src` that falls inside the window `x..x+box_w` on the
+/// destination when `src` is placed at `draw_x`.
+fn blit_window(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, draw_x: i32, y: u32, x: u32, box_w: u32) {
+    let win_from = x as i32;
+    let win_to = (x + box_w).min(dst_w) as i32;
+    for row in 0..src.height {
+        let dy = y + row;
+        if dy >= dst_h {
+            break;
+        }
+        for col in 0..src.width {
+            let dx = draw_x + col as i32;
+            if dx < win_from {
+                continue;
+            }
+            if dx >= win_to {
+                break;
+            }
+            let s = (row as usize * src.width as usize + col as usize) * 4;
+            let d = (dy as usize * dst_w as usize + dx as usize) * 4;
+            blend(dst, d, [src.rgba[s], src.rgba[s + 1], src.rgba[s + 2], src.rgba[s + 3]]);
+        }
+    }
+}
+
+/// Draw one text in its box. A text that fits is placed by its alignment.
+/// A wider text moves as the player moves it: it bounces between its ends
+/// with a pause, or, as a ticker, loops by one segment. The drawn position
+/// is the box left edge minus the offset, and the box clips.
+pub fn draw_text_moving(frame: &mut Frame, text: &Text, fonts: Option<&Fonts>, motion: &mut TextMotion, now_ms: u64) {
+    let Some(line) = render_text(fonts, text.style, text.size, text.color, &text.text, 0) else {
+        draw_text(frame, text.x, text.y, &text.text);
+        return;
+    };
+    let key = (text.x, text.y);
+    let box_w = text.max_width;
+    if box_w == 0 || line.width <= box_w || text.speed <= 0.0 {
+        motion.states.remove(&key);
+        let x = if box_w == 0 {
+            text.x
+        } else {
+            align_text_x(text.x, box_w, line.width, text.align)
+        };
+        let shown = if box_w == 0 { line } else { clip_frame(&line, box_w, line.height) };
+        blit_at(&mut frame.rgba, frame.width, frame.height, &shown, (x, text.y));
+        return;
+    }
+    let limit = (line.width - box_w) as f32;
+    let segment = if text.loop_thirds { (line.width / 3) as f32 } else { 0.0 };
+    let state = motion.states.entry(key).or_default();
+    if state.text != text.text || state.box_w != box_w {
+        state.text = text.text.clone();
+        state.box_w = box_w;
+        if text.direction == ScrollDirection::Rtl {
+            state.offset = limit;
+            state.dir = -1.0;
+        } else {
+            state.offset = 0.0;
+            state.dir = 1.0;
+        }
+        state.pause_until = 0;
+        state.last_ms = now_ms;
+    }
+    let dt = now_ms.saturating_sub(state.last_ms) as f32 / 1000.0;
+    state.last_ms = now_ms;
+    if now_ms >= state.pause_until {
+        state.offset += state.dir * text.speed * dt;
+        match text.direction {
+            ScrollDirection::Bounce => {
+                if state.offset <= 0.0 {
+                    state.offset = 0.0;
+                    state.dir = 1.0;
+                    state.pause_until = now_ms + SCROLL_PAUSE_MS;
+                } else if state.offset >= limit {
+                    state.offset = limit;
+                    state.dir = -1.0;
+                    state.pause_until = now_ms + SCROLL_PAUSE_MS;
+                }
+            }
+            ScrollDirection::Ltr => {
+                if segment > 0.0 {
+                    while state.offset >= segment {
+                        state.offset -= segment;
+                    }
+                } else if state.offset >= limit {
+                    state.offset = limit;
+                    state.pause_until = now_ms + SCROLL_PAUSE_MS;
+                }
+            }
+            ScrollDirection::Rtl => {
+                if segment > 0.0 {
+                    while state.offset <= limit - segment {
+                        state.offset += segment;
+                    }
+                } else if state.offset <= 0.0 {
+                    state.offset = 0.0;
+                    state.pause_until = now_ms + SCROLL_PAUSE_MS;
+                }
+            }
+        }
+    }
+    let draw_x = text.x as i32 - state.offset.floor() as i32;
+    blit_window(&mut frame.rgba, frame.width, frame.height, &line, draw_x, text.y, text.x, box_w);
 }
 
 /// A rectangle outline `thickness` pixels wide, inside the box.
@@ -846,6 +994,10 @@ mod tests {
             color: [255, 200, 0],
             max_width: 0,
             text: "HHHH".into(),
+            align: TextAlign::Left,
+            speed: 0.0,
+            direction: ScrollDirection::Bounce,
+            loop_thirds: false,
         };
         draw_text_styled(&mut frame, &text, Some(&fonts));
         let lit = |frame: &Frame, x0: u32, x1: u32| -> usize {
@@ -867,6 +1019,65 @@ mod tests {
         draw_text_styled(&mut clipped, &narrow, Some(&fonts));
         assert!(lit(&clipped, 4, 14) > 0);
         assert_eq!(lit(&clipped, 14, 120), 0, "nothing past max_width");
+    }
+
+    #[test]
+    fn a_wide_text_bounces_and_a_ticker_loops() {
+        let Some(file) = any_font() else {
+            println!("no TrueType font on this host; fallback path only");
+            return;
+        };
+        let fonts = Fonts::load(&FontFiles {
+            regular: file,
+            ..FontFiles::default()
+        });
+        let mut motion = TextMotion::default();
+        let mut frame = Frame {
+            width: 200,
+            height: 40,
+            rgba: vec![0u8; 200 * 40 * 4],
+        };
+        let mut text = Text {
+            x: 10,
+            y: 2,
+            style: TextStyle::Regular,
+            size: 20,
+            color: [255, 255, 255],
+            max_width: 30,
+            text: "A very long line indeed".into(),
+            align: TextAlign::Left,
+            speed: 100.0,
+            direction: ScrollDirection::Bounce,
+            loop_thirds: false,
+        };
+        draw_text_moving(&mut frame, &text, Some(&fonts), &mut motion, 0);
+        assert_eq!(motion.offset(10, 2), Some(0.0), "starts at the left end");
+        draw_text_moving(&mut frame, &text, Some(&fonts), &mut motion, 100);
+        assert_eq!(motion.offset(10, 2), Some(0.0), "pauses at the end it starts from, as the player does");
+        draw_text_moving(&mut frame, &text, Some(&fonts), &mut motion, 500);
+        let after = motion.offset(10, 2).unwrap();
+        assert!(after > 39.0 && after < 41.0, "100 px/s over the 0.4 s since the last frame: {after}");
+        for step in 2..200u64 {
+            draw_text_moving(&mut frame, &text, Some(&fonts), &mut motion, step * 100);
+        }
+        let line_w = render_text(Some(&fonts), TextStyle::Regular, 20, [255, 255, 255], &text.text, 0).unwrap().width;
+        let limit = (line_w - 30) as f32;
+        let at_end = motion.offset(10, 2).unwrap();
+        assert!(at_end >= 0.0 && at_end <= limit, "bounces inside 0..limit: {at_end} of {limit}");
+        assert_eq!((0..10).filter(|&x| sample(&frame, x, 10)[3] > 0).count(), 0, "nothing left of the box");
+        assert_eq!((41..200).filter(|&x| sample(&frame, x, 10)[3] > 0).count(), 0, "nothing right of the box");
+
+        text.text = "loop  ".repeat(3);
+        text.direction = ScrollDirection::Ltr;
+        text.loop_thirds = true;
+        text.max_width = 20;
+        draw_text_moving(&mut frame, &text, Some(&fonts), &mut motion, 20_000);
+        let segment = render_text(Some(&fonts), TextStyle::Regular, 20, [255, 255, 255], &text.text, 0).unwrap().width / 3;
+        for step in 1..400u64 {
+            draw_text_moving(&mut frame, &text, Some(&fonts), &mut motion, 20_000 + step * 50);
+        }
+        let looped = motion.offset(10, 2).unwrap();
+        assert!(looped >= 0.0 && looped < segment as f32, "wraps by one segment: {looped} of {segment}");
     }
 
     #[test]
