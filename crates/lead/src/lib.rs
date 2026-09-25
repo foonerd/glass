@@ -118,6 +118,15 @@ pub struct Metadata {
     /// The record picture for this track: the album's own file or the theme's.
     #[serde(default)]
     pub vinyl_file: String,
+    /// The reel pictures for this track from the album folder, or empty for the theme's.
+    #[serde(default)]
+    pub reel_files: (String, String),
+    /// In queue mode: seconds of queue played before this track, and the
+    /// queue's whole length. Zero length means track progress applies.
+    #[serde(default)]
+    pub queue_before_s: f32,
+    #[serde(default)]
+    pub queue_total_s: f32,
 }
 
 /// Where a text sits inside its box when it fits.
@@ -1096,6 +1105,8 @@ pub struct SkinDesc {
     pub tonearm: Option<TonearmSpec>,
     #[serde(default)]
     pub rotation: RotationSettings,
+    #[serde(default)]
+    pub reels: Option<ReelsSpec>,
 }
 
 impl Default for SkinDesc {
@@ -1147,6 +1158,7 @@ impl SkinDesc {
             vinyl: None,
             tonearm: None,
             rotation: RotationSettings::default(),
+            reels: None,
         }
     }
 }
@@ -1985,11 +1997,26 @@ pub struct RotationSettings {
     pub speed: f32,
     /// `reel.direction`, the default turning direction: `cw` or `ccw`.
     pub direction: String,
+    /// `spool.left.speed` and `spool.right.speed`, applied under `custom` only.
+    #[serde(default = "one")]
+    pub spool_left: f32,
+    #[serde(default = "one")]
+    pub spool_right: f32,
+    /// `spool.adaptive`: reels speed up and slow down with the tape's progress.
+    #[serde(default)]
+    pub spool_adaptive: bool,
+    /// `queue.mode = queue`: progress runs over the whole queue.
+    #[serde(default)]
+    pub queue_mode: bool,
+}
+
+fn one() -> f32 {
+    1.0
 }
 
 impl Default for RotationSettings {
     fn default() -> Self {
-        Self { fps: 8, step: 6, speed: 1.0, direction: "cw".into() }
+        Self { fps: 8, step: 6, speed: 1.0, direction: "ccw".into(), spool_left: 1.0, spool_right: 1.0, spool_adaptive: false, queue_mode: false }
     }
 }
 
@@ -2006,12 +2033,80 @@ pub fn rotation_settings(text: &str) -> RotationSettings {
         ),
         _ => (8, 6, 1.0),
     };
+    let custom = quality == "custom";
+    let spool = |key: &str| if custom { current_value(text, key).and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0) } else { 1.0 };
     RotationSettings {
         fps,
         step,
         speed,
-        direction: current_value(text, "reel.direction").map(|v| v.to_ascii_lowercase()).filter(|v| v == "ccw").unwrap_or_else(|| "cw".into()),
+        direction: current_value(text, "reel.direction").map(|v| v.to_ascii_lowercase()).filter(|v| v == "cw").unwrap_or_else(|| "ccw".into()),
+        spool_left: spool("spool.left.speed"),
+        spool_right: spool("spool.right.speed"),
+        spool_adaptive: truthy(current_value(text, "spool.adaptive").as_deref()),
+        queue_mode: current_value(text, "queue.mode").map(|v| v.eq_ignore_ascii_case("queue")).unwrap_or(false),
     }
+}
+
+/// One tape reel: a theme picture, or a file from the track's folder scaled
+/// to the theme picture's size, turning about `center`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReelSpec {
+    pub theme_file: String,
+    pub album_file: String,
+    pub center: (i32, i32),
+    /// Turns a minute before the spool multiplier: `reel.rotation.speed`.
+    pub rpm: f32,
+}
+
+/// The two reels of a cassette meter and how they run.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ReelsSpec {
+    pub left: Option<ReelSpec>,
+    pub right: Option<ReelSpec>,
+    pub clockwise: bool,
+    /// The meter's own `spool.adaptive`, or the player's.
+    pub adaptive: bool,
+    pub spool_left: f32,
+    pub spool_right: f32,
+}
+
+/// `reel.*` of a meter, when it has a reel with a centre. A meter with a
+/// tonearm keeps its reels for the record instead.
+pub fn meter_reels(meters_txt: &str, meter: &str, theme_dir: &str, settings: &RotationSettings) -> Option<ReelsSpec> {
+    let values = section_values(meters_txt, meter);
+    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str()).map(str::trim).filter(|v| !v.is_empty());
+    let ipair = |key: &str| -> Option<(i32, i32)> {
+        let mut parts = get(key)?.split(',');
+        Some((parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
+    };
+    let has_tonearm = get("tonearm.filename").is_some() && get("tonearm.pivot.screen").is_some() && get("tonearm.pivot.image").is_some();
+    if has_tonearm || get("vinyl.center").is_some() {
+        return None;
+    }
+    let rpm = get("reel.rotation.speed").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0).abs();
+    let path = |file: &str| if theme_dir.is_empty() { file.to_string() } else { format!("{}/{}", theme_dir.trim_end_matches('/'), file) };
+    let reel = |side: &str| -> Option<ReelSpec> {
+        let file = get(&format!("reel.{side}.filename"))?;
+        let center = ipair(&format!("reel.{side}.center"))?;
+        let (album_file, theme_file) = match file.split_once(',') {
+            Some((album, theme)) => (album.trim().to_string(), if theme.trim().is_empty() { album.trim().to_string() } else { theme.trim().to_string() }),
+            None => (String::new(), file.to_string()),
+        };
+        Some(ReelSpec { theme_file: path(&theme_file), album_file, center, rpm })
+    };
+    let (left, right) = (reel("left"), reel("right"));
+    if left.is_none() && right.is_none() {
+        return None;
+    }
+    let direction = get("reel.direction").map(|v| v.to_ascii_lowercase()).unwrap_or_else(|| settings.direction.clone());
+    Some(ReelsSpec {
+        left,
+        right,
+        clockwise: direction == "cw",
+        adaptive: get("spool.adaptive").map(|v| truthy(Some(v))).unwrap_or(settings.spool_adaptive),
+        spool_left: settings.spool_left,
+        spool_right: settings.spool_right,
+    })
 }
 
 /// A turning record under the album art.
@@ -2316,9 +2411,9 @@ mod tests {
 
     #[test]
     fn a_turntable_meter_has_a_record_and_a_tonearm() {
-        let settings = rotation_settings("[current]\nrotation.quality = custom\nrotation.fps = 25\nrotation.speed = 2\nreel.direction = ccw\n");
-        assert_eq!(settings, RotationSettings { fps: 25, step: 1, speed: 2.0, direction: "ccw".into() });
-        assert_eq!(rotation_settings("[current]\nrotation.quality = high\nrotation.speed = 3\n"), RotationSettings { fps: 15, step: 3, speed: 1.0, direction: "cw".into() });
+        let settings = rotation_settings("[current]\nrotation.quality = custom\nrotation.fps = 25\nrotation.speed = 2\nreel.direction = ccw\nspool.left.speed = 1.5\nspool.adaptive = true\nqueue.mode = queue\n");
+        assert_eq!(settings, RotationSettings { fps: 25, step: 1, speed: 2.0, direction: "ccw".into(), spool_left: 1.5, spool_right: 1.0, spool_adaptive: true, queue_mode: true });
+        assert_eq!(rotation_settings("[current]\nrotation.quality = high\nrotation.speed = 3\nspool.left.speed = 4\nreel.direction = cw\n"), RotationSettings { fps: 15, step: 3, speed: 1.0, direction: "cw".into(), ..RotationSettings::default() });
         let m = "[t]\nalbumart.pos = 195,235\nalbumart.dimension = 198,198\nalbumart.rotation = True\nalbumart.rotation.speed = 30\n\
             tonearm.filename = arm.png\ntonearm.pivot.screen = 629,166\ntonearm.pivot.image = 57,129\ntonearm.angle.rest = 0\ntonearm.angle.start = -27\n\
             tonearm.angle.end = -47\ntonearm.drop.duration = 1.8\nvinyl.filename = vinyl.jpg,disc.png\nvinyl.pos = 50,92\nvinyl.center = 293,334\nvinyl.direction = cw\n\
@@ -2331,6 +2426,12 @@ mod tests {
         assert!((art.rotation, art.rpm) == (true, 30.0));
         let reel = meter_vinyl(m, "r", "", &settings).unwrap();
         assert_eq!((reel.theme_file.as_str(), reel.center, reel.rpm, reel.clockwise), ("reel.png", (40, 40), 6.0, false), "a single reel stands in, turning the default way");
+        let c = "[c]\nreel.left.filename = cdart.png,left.png\nreel.left.center = 360,321\nreel.right.filename = right.png\nreel.right.center = 957,321\nreel.rotation.speed = 25\nspool.adaptive = false\n";
+        let reels = meter_reels(c, "c", "/th", &settings).unwrap();
+        let left = reels.left.unwrap();
+        assert_eq!((left.theme_file.as_str(), left.album_file.as_str(), left.center, left.rpm), ("/th/left.png", "cdart.png", (360, 321), 25.0));
+        assert_eq!((reels.right.unwrap().theme_file.as_str(), reels.clockwise, reels.adaptive, reels.spool_left), ("/th/right.png", false, false, 1.5), "the meter's spool.adaptive overrides the player's");
+        assert_eq!(meter_reels(m, "r", "", &settings), None, "a reel with a tonearm is the record, not a reel");
         assert_eq!(meter_vinyl("[x]\nvinyl.filename = a.png\n", "x", "", &settings), None, "no centre, no record");
     }
 

@@ -38,6 +38,8 @@ struct Assets {
     spectrum: Option<SpectrumAssets>,
     /// The tonearm picture when the meter has one.
     tonearm: Option<expose::Frame>,
+    /// The theme's reel pictures; an album's reel is scaled to their size.
+    reels: (Option<expose::Frame>, Option<expose::Frame>),
 }
 
 impl Assets {
@@ -74,6 +76,10 @@ impl Assets {
                 .and_then(|art| read_png(std::path::Path::new(&art.mask))),
             spectrum: skin.spectrum.as_ref().map(SpectrumAssets::load),
             tonearm: skin.tonearm.as_ref().and_then(|arm| read_png(std::path::Path::new(&arm.file))),
+            reels: (
+                skin.reels.as_ref().and_then(|r| r.left.as_ref()).and_then(|r| read_png(std::path::Path::new(&r.theme_file))),
+                skin.reels.as_ref().and_then(|r| r.right.as_ref()).and_then(|r| read_png(std::path::Path::new(&r.theme_file))),
+            ),
         }
     }
 }
@@ -262,6 +268,8 @@ fn main() -> ExitCode {
     let mut fanart_slots: (PictureSlot, PictureSlot) = Default::default();
     // The record picture for the track, stretched to the theme's dimension.
     let mut vinyl_slot = PlainSlot::default();
+    // Album reel pictures for the track, scaled to the theme reels.
+    let mut reel_slots: (PlainSlot, PlainSlot) = Default::default();
     let show_window = env::var_os("DISPLAY").is_some() && !headless;
     let write_file = output.is_some();
     let serving_remote = false;
@@ -300,6 +308,7 @@ fn main() -> ExitCode {
                     folder_slots.clear();
                     fanart_slots = Default::default();
                     vinyl_slot = PlainSlot::default();
+                    reel_slots = Default::default();
                     motion = Motion::default();
                     switched_at = Instant::now();
                     println!("glass: meter={name}");
@@ -394,6 +403,25 @@ fn main() -> ExitCode {
                 Some(vinyl) => vinyl_slot.want(&vinyl.file, vinyl.spec.dimension),
                 None => vinyl_slot = PlainSlot::default(),
             }
+            // A reel from the album is scaled to the theme reel's size; the theme reel itself needs no slot.
+            let reel_pictures = match &scene.reels {
+                Some(reels) => {
+                    let side = |slot: &mut PlainSlot, file: &str, spec: Option<&lead::ReelSpec>, theme: Option<&expose::Frame>| -> Option<expose::Frame> {
+                        let spec = spec?;
+                        if file.is_empty() || file == spec.theme_file {
+                            slot.want("", None);
+                            return theme.cloned();
+                        }
+                        slot.want(file, theme.map(|t| (t.width, t.height)));
+                        slot.frame.clone().or_else(|| theme.cloned())
+                    };
+                    (
+                        side(&mut reel_slots.0, &reels.left_file, reels.spec.left.as_ref(), assets.reels.0.as_ref()),
+                        side(&mut reel_slots.1, &reels.right_file, reels.spec.right.as_ref(), assets.reels.1.as_ref()),
+                    )
+                }
+                None => (None, None),
+            };
             let frame = raster_over(
                 &scene,
                 Stack {
@@ -411,6 +439,7 @@ fn main() -> ExitCode {
                     fanart: (fanart_slots.0.picture.as_ref(), fanart_slots.1.picture.as_ref()),
                     vinyl: vinyl_slot.frame.as_ref(),
                     tonearm: assets.tonearm.as_ref(),
+                    reels: (reel_pictures.0.as_ref(), reel_pictures.1.as_ref()),
                 },
                 &mut motion,
                 started.elapsed().as_millis() as u64,

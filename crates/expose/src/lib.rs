@@ -198,6 +198,7 @@ pub fn raster(scene: &Scene) -> Frame {
             fanart: (None, None),
             vinyl: None,
             tonearm: None,
+            reels: (None, None),
         },
         &mut Motion::default(),
         0,
@@ -270,6 +271,8 @@ pub struct Stack<'a> {
     /// The record picture, already stretched to `vinyl.dimension`, and the tonearm picture.
     pub vinyl: Option<&'a Frame>,
     pub tonearm: Option<&'a Frame>,
+    /// The reel pictures, the album's scaled to the theme's.
+    pub reels: (Option<&'a Frame>, Option<&'a Frame>),
 }
 
 /// Theme order: full-screen picture, meter face, album art, folder layers, needles, meter
@@ -300,6 +303,28 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
     let art_rpm = scene.art.as_ref().filter(|a| a.rotation).map_or(0.0, |a| a.rpm);
     let turn_rpm = if scene.vinyl.is_some() { vinyl_rpm } else { art_rpm };
     let angle = motion.vinyl.advance(turn_rpm, scene.vinyl.as_ref().map_or(true, |v| v.spec.clockwise), scene.playing, scene.transitional, tonearm_animating, lift_s, now_ms);
+    if let Some(reels) = &scene.reels {
+        let spin = scene.playing || scene.transitional;
+        let p = scene.progress_pct / 100.0;
+        let (left_mult, right_mult) = if reels.spec.adaptive {
+            if reels.spec.clockwise {
+                (reels.spec.spool_left * (1.5 - p), reels.spec.spool_right * (0.5 + p))
+            } else {
+                (reels.spec.spool_left * (0.5 + p), reels.spec.spool_right * (1.5 - p))
+            }
+        } else {
+            (reels.spec.spool_left, reels.spec.spool_right)
+        };
+        let sides = [(&reels.spec.left, stack.reels.0, left_mult, &mut motion.reels.0), (&reels.spec.right, stack.reels.1, right_mult, &mut motion.reels.1)];
+        for (spec, picture, mult, turn) in sides {
+            let Some(spec) = spec else { continue };
+            let angle = turn.advance(spec.rpm * mult, reels.spec.clockwise, spin, now_ms);
+            if let Some(picture) = picture {
+                let pivot = (picture.width as f32 / 2.0, picture.height as f32 / 2.0);
+                blit_pivot(&mut rgba, width, height, picture, pivot, (spec.center.0 as f32, spec.center.1 as f32), -angle);
+            }
+        }
+    }
     if let (Some(vinyl), Some(picture)) = (&scene.vinyl, stack.vinyl) {
         let pivot = (picture.width as f32 / 2.0, picture.height as f32 / 2.0);
         blit_pivot(&mut rgba, width, height, picture, pivot, (vinyl.spec.center.0 as f32, vinyl.spec.center.1 as f32), -angle);
@@ -1050,6 +1075,26 @@ impl VinylMotion {
     }
 }
 
+/// A tape reel's turn: it spins while the player plays or a stop is only a
+/// transition, at the reel's speed times its spool multiplier.
+#[derive(Default)]
+pub struct ReelMotion {
+    angle: f32,
+    last_ms: Option<u64>,
+}
+
+impl ReelMotion {
+    pub fn advance(&mut self, rpm: f32, clockwise: bool, spinning: bool, now_ms: u64) -> f32 {
+        let dt = self.last_ms.map_or(0.0, |last| (now_ms.saturating_sub(last) as f32 / 1000.0).min(0.5));
+        self.last_ms = Some(now_ms);
+        if rpm > 0.0 && spinning {
+            let direction = if clockwise { 1.0 } else { -1.0 };
+            self.angle = (self.angle + rpm * 6.0 * dt * direction).rem_euclid(360.0);
+        }
+        self.angle
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum ArmState {
     #[default]
@@ -1268,6 +1313,7 @@ pub struct Motion {
     pub spectrum: SpectrumMotion,
     pub vinyl: VinylMotion,
     pub tonearm: TonearmMotion,
+    pub reels: (ReelMotion, ReelMotion),
 }
 
 /// The topping of each spectrum bar: where it sits, or `None` before the
