@@ -55,7 +55,7 @@ dependencies = [
 
 [[package]]
 name = "expose"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "font8x8",
  "image",
@@ -90,7 +90,7 @@ checksum = "875488b8711a968268c7cf5d139578713097ca4635a76044e8fe8eedf831d07e"
 
 [[package]]
 name = "glass"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "expose",
  "intake",
@@ -103,7 +103,7 @@ dependencies = [
 
 [[package]]
 name = "glass-remote"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "expose",
  "intake",
@@ -129,7 +129,7 @@ dependencies = [
 
 [[package]]
 name = "intake"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "lead",
 ]
@@ -148,7 +148,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lead"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "serde",
 ]
@@ -206,7 +206,7 @@ dependencies = [
 
 [[package]]
 name = "pane"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "expose",
  "plot",
@@ -215,7 +215,7 @@ dependencies = [
 
 [[package]]
 name = "plot"
-version = "0.4.5"
+version = "0.4.6"
 dependencies = [
  "lead",
  "serde",
