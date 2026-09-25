@@ -1,8 +1,25 @@
 //! Turn an [`lead::Input`] and a skin into a [`Scene`].
 //! Pure: no files, no devices, no pixels.
 
-use lead::{Input, Metadata, SkinDesc, TextSpec, TextStyle};
+use lead::{format_key, format_label, Input, Metadata, SkinDesc, TextSpec, TextStyle, TypeAlign, TypeMode};
 use serde::{Deserialize, Serialize};
+
+/// The type area to show: the box from the skin, the label for the track
+/// type, and the icon file when one exists.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TypeArea {
+    pub x: u32,
+    pub y: u32,
+    pub box_size: Option<(u32, u32)>,
+    pub mode: TypeMode,
+    pub align: TypeAlign,
+    pub color: [u8; 3],
+    pub font_size: u32,
+    pub font_style: TextStyle,
+    pub label: String,
+    /// Icon file, or empty. A `.svg` is tinted with `color`; a `.png` is not.
+    pub icon: String,
+}
 
 /// One text the surface shows, already composed and coloured.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -24,6 +41,16 @@ pub struct Art {
     pub w: u32,
     pub h: u32,
     pub file: String,
+    #[serde(default)]
+    pub mask: String,
+    #[serde(default)]
+    pub border: u32,
+    #[serde(default = "white")]
+    pub border_color: [u8; 3],
+}
+
+fn white() -> [u8; 3] {
+    [255, 255, 255]
 }
 
 /// What the surface should show. Levels and bars are fractions from 0 to 1.
@@ -42,6 +69,8 @@ pub struct Scene {
     pub texts: Vec<Text>,
     #[serde(default)]
     pub art: Option<Art>,
+    #[serde(default)]
+    pub type_area: Option<TypeArea>,
 }
 
 impl Default for Scene {
@@ -58,13 +87,14 @@ impl Default for Scene {
             needle: None,
             texts: Vec::new(),
             art: None,
+            type_area: None,
         }
     }
 }
 
 /// The art box with its picture, once the picture is on disk.
 pub fn art(skin: &SkinDesc, meta: &Metadata) -> Option<Art> {
-    let spec = skin.art?;
+    let spec = skin.art.as_ref()?;
     if meta.art_file.is_empty() {
         return None;
     }
@@ -74,6 +104,31 @@ pub fn art(skin: &SkinDesc, meta: &Metadata) -> Option<Art> {
         w: spec.w,
         h: spec.h,
         file: meta.art_file.clone(),
+        mask: spec.mask.clone(),
+        border: spec.border,
+        border_color: spec.border_color,
+    })
+}
+
+/// The type area for the reported track type. Nothing when the type is
+/// empty, so the area stays clear between tracks.
+pub fn type_area(skin: &SkinDesc, meta: &Metadata) -> Option<TypeArea> {
+    let spec = skin.type_area.as_ref()?;
+    let key = format_key(&meta.track_type);
+    if key.is_empty() {
+        return None;
+    }
+    Some(TypeArea {
+        x: spec.x,
+        y: spec.y,
+        box_size: spec.box_size,
+        mode: spec.mode,
+        align: spec.align,
+        color: spec.color,
+        font_size: spec.font_size,
+        font_style: spec.font_style,
+        label: format_label(&key),
+        icon: meta.type_icon.clone(),
     })
 }
 
@@ -129,8 +184,11 @@ pub fn texts(skin: &SkinDesc, meta: &Metadata) -> Vec<Text> {
         }
     }
     if let Some(spec) = &skin.sample {
+        // Samplerate and bit depth when the player sends them, else the
+        // bitrate, else nothing.
         let line = format!("{} {}", meta.samplerate, meta.bitdepth);
         let line = line.trim();
+        let line = if line.is_empty() { meta.bitrate.trim() } else { line };
         if !line.is_empty() {
             out.push(text(spec, line.to_string(), spec.color));
         }
@@ -169,6 +227,7 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
         needle: skin.needle,
         texts: texts(skin, &input.metadata),
         art: art(skin, &input.metadata),
+        type_area: type_area(skin, &input.metadata),
     }
 }
 
@@ -248,12 +307,48 @@ mod tests {
         let mut skin = SkinDesc::basic();
         let waiting = Metadata { albumart: "https://x/c.jpg".into(), ..Metadata::default() };
         assert_eq!(art(&skin, &waiting), None);
-        skin.art = Some(lead::ArtSpec { x: 36, y: 25, w: 201, h: 201 });
+        skin.art = Some(lead::ArtSpec {
+            x: 36,
+            y: 25,
+            w: 201,
+            h: 201,
+            mask: "/t/mask.png".into(),
+            border: 2,
+            border_color: [1, 2, 3],
+        });
         assert_eq!(art(&skin, &waiting), None);
         let ready = Metadata { art_file: "/tmp/glass-art/1.img".into(), ..waiting };
         let placed = art(&skin, &ready).unwrap();
         assert_eq!((placed.x, placed.y, placed.w, placed.h), (36, 25, 201, 201));
         assert_eq!(placed.file, "/tmp/glass-art/1.img");
+        assert_eq!((placed.mask.as_str(), placed.border, placed.border_color), ("/t/mask.png", 2, [1, 2, 3]));
+    }
+
+    #[test]
+    fn type_area_carries_label_and_icon_and_sample_falls_back_to_bitrate() {
+        let mut skin = SkinDesc::basic();
+        skin.type_area = Some(lead::TypeSpec {
+            x: 847,
+            y: 149,
+            box_size: Some((45, 45)),
+            mode: TypeMode::Icon,
+            align: TypeAlign::Center,
+            color: [204, 176, 97],
+            font_size: 20,
+            font_style: TextStyle::Regular,
+        });
+        skin.sample = Some(spec(TextStyle::Regular, [9, 9, 9]));
+        let meta = Metadata {
+            track_type: "WebRadio".into(),
+            type_icon: "/icons/radio.svg".into(),
+            bitrate: "192 Kbps".into(),
+            ..Metadata::default()
+        };
+        let area = type_area(&skin, &meta).unwrap();
+        assert_eq!((area.label.as_str(), area.icon.as_str()), ("Webradio", "/icons/radio.svg"));
+        assert_eq!((area.mode, area.align, area.font_size), (TypeMode::Icon, TypeAlign::Center, 20));
+        assert_eq!(texts(&skin, &meta)[0].text, "192 Kbps");
+        assert_eq!(type_area(&skin, &Metadata::default()), None);
     }
 
     /// One recorded step: the skin and input that went in, the scene that came out.

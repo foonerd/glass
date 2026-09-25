@@ -8,7 +8,8 @@ use std::env;
 use std::process::ExitCode;
 use std::thread;
 
-use expose::{raster_over, read_art, read_png, Fonts, Stack};
+use expose::{raster_over, read_art, read_icon, read_png, Fonts, Stack};
+use lead::TypeMode;
 use intake::{PipeSource, Source};
 use lead::{frame_period, Input, SkinDesc};
 use pane::{publish, write_ppm, Surface};
@@ -74,8 +75,8 @@ fn main() -> ExitCode {
         }
     }
 
-    let mut source = PipeSource::installed();
     let skin = intake::installed_skin();
+    let mut source = PipeSource::installed().with_icons(&skin);
     let frame_rate = intake::installed_frame_rate();
     let period = frame_period(frame_rate);
     println!(
@@ -94,8 +95,16 @@ fn main() -> ExitCode {
     let indicator = load_theme(&skin.theme_dir, &skin.indicator);
     let fonts = Fonts::load(&skin.fonts);
     println!("glass: fonts loaded {} of 4", fonts.loaded());
-    // The art picture, decoded and stretched once per file and box.
+    // The art picture, decoded and stretched once per file and box, cut with
+    // the theme's mask when it has one.
+    let art_mask = skin
+        .art
+        .as_ref()
+        .filter(|art| !art.mask.is_empty())
+        .and_then(|art| read_png(std::path::Path::new(&art.mask)));
     let mut art_cache: Option<(plot::Art, expose::Frame)> = None;
+    // The type icon, decoded once per file, box and tint.
+    let mut icon_cache: Option<((String, u32, u32, Option<[u8; 3]>), expose::Frame)> = None;
     let show_window = env::var_os("DISPLAY").is_some() && !headless;
     let write_file = output.is_some();
     let serving_remote = false;
@@ -141,11 +150,34 @@ fn main() -> ExitCode {
                 Some(art) => {
                     let stale = art_cache.as_ref().map_or(true, |(known, _)| known != art);
                     if stale {
-                        art_cache = read_art(std::path::Path::new(&art.file), art.w, art.h)
+                        art_cache = read_art(std::path::Path::new(&art.file), art.w, art.h, art_mask.as_ref())
                             .map(|frame| (art.clone(), frame));
                     }
                 }
                 None => art_cache = None,
+            }
+            match scene.type_area.as_ref().filter(|a| !a.icon.is_empty()) {
+                Some(area) => {
+                    let (w, h) = area.box_size.unwrap_or((1, 1));
+                    let (fw, fh) = if area.mode == TypeMode::Both {
+                        let side = w.min(h).max(1);
+                        (side, side)
+                    } else {
+                        (w, h)
+                    };
+                    let tint = if area.icon.to_ascii_lowercase().ends_with(".svg") {
+                        Some(area.color)
+                    } else {
+                        None
+                    };
+                    let key = (area.icon.clone(), fw, fh, tint);
+                    let stale = icon_cache.as_ref().map_or(true, |(known, _)| *known != key);
+                    if stale {
+                        icon_cache = read_icon(std::path::Path::new(&area.icon), fw, fh, tint)
+                            .map(|frame| (key, frame));
+                    }
+                }
+                None => icon_cache = None,
             }
             let frame = raster_over(
                 &scene,
@@ -157,6 +189,7 @@ fn main() -> ExitCode {
                     face_at: skin.face_at,
                     fonts: Some(&fonts),
                     art: art_cache.as_ref().map(|(_, frame)| frame),
+                    icon: icon_cache.as_ref().map(|(_, frame)| frame),
                 },
             );
             if let Some(window) = surface.as_mut() {
