@@ -1012,6 +1012,14 @@ fn blit_rotated(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (i32, i
 /// rotation does for records, reels, art and knobs.
 #[allow(clippy::too_many_arguments)]
 fn blit_pivot(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, pivot_image: (f32, f32), pivot_screen: (f32, f32), degrees: f32, smooth: bool) {
+    turn_onto(dst, dst_w, dst_h, src, pivot_image, pivot_screen, degrees, smooth, false);
+}
+
+/// The turn itself. `store` writes each turned pixel with its own alpha into
+/// a transparent canvas, for a picture kept turned; otherwise pixels blend
+/// onto the opaque frame.
+#[allow(clippy::too_many_arguments)]
+fn turn_onto(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, pivot_image: (f32, f32), pivot_screen: (f32, f32), degrees: f32, smooth: bool, store: bool) {
     if src.width == 0 || src.height == 0 || dst_w == 0 || dst_h == 0 {
         return;
     }
@@ -1060,7 +1068,12 @@ fn blit_pivot(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, pivot_image: 
             for dx in x_from..=x_to {
                 let color = sample_bilinear(src, sx, sy);
                 if color[3] != 0 {
-                    blend(dst, (row + dx as usize) * 4, color);
+                    let d = (row + dx as usize) * 4;
+                    if store {
+                        dst[d..d + 4].copy_from_slice(&color);
+                    } else {
+                        blend(dst, d, color);
+                    }
                 }
                 sx += cos;
                 sy += sin;
@@ -1080,7 +1093,9 @@ fn blit_pivot(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, pivot_image: 
                 let a = src.rgba[i + 3];
                 if a != 0 {
                     let d = (row + dx as usize) * 4;
-                    if a == 255 {
+                    if store {
+                        dst[d..d + 4].copy_from_slice(&src.rgba[i..i + 4]);
+                    } else if a == 255 {
                         dst[d..d + 3].copy_from_slice(&src.rgba[i..i + 3]);
                         dst[d + 3] = 255;
                     } else {
@@ -1570,7 +1585,7 @@ fn turn_picture(src: &Frame, pivot_image: (f32, f32), degrees: f32) -> TurnedPic
     let side = (reach * 2 + 1) as u32;
     let mut frame = empty_frame(side, side);
     // The pivot sits at the centre of the square frame.
-    blit_pivot(&mut frame.rgba, side, side, src, pivot_image, (reach as f32 + 0.5, reach as f32 + 0.5), degrees, true);
+    turn_onto(&mut frame.rgba, side, side, src, pivot_image, (reach as f32 + 0.5, reach as f32 + 0.5), degrees, true, true);
     // Trim to the rows and columns that hold anything.
     let (mut x0, mut y0, mut x1, mut y1) = (side, side, 0u32, 0u32);
     for y in 0..side {
@@ -2649,6 +2664,24 @@ mod tests {
         let mut ccw = VinylMotion::default();
         ccw.advance(60.0, false, true, false, false, 1.0, 0);
         assert!((ccw.advance(60.0, false, true, false, false, 1.0, 100) - 324.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_picture_kept_turned_keeps_its_soft_alpha() {
+        let mut soft = Frame { width: 4, height: 4, rgba: vec![0; 64] };
+        for px in soft.rgba.chunks_exact_mut(4) {
+            px.copy_from_slice(&[200, 100, 50, 128]);
+        }
+        let turned = turn_picture(&soft, (2.0, 2.0), 0.0);
+        let inside: Vec<[u8; 4]> = turned.frame.rgba.chunks_exact(4).filter(|p| p[3] != 0).map(|p| [p[0], p[1], p[2], p[3]]).collect();
+        assert!(!inside.is_empty());
+        assert!(inside.iter().all(|p| p[3] < 255 && p[0] >= 190), "kept half transparent and undarkened: {:?}", inside[0]);
+        // Blended onto a white frame, a half-transparent pixel lightens, never blackens.
+        let mut white = vec![255u8; 8 * 8 * 4];
+        let mut cache = Turned::default();
+        cache.draw(&mut white, 8, 8, 9, &soft, (2.0, 2.0), (4.0, 4.0), 0.0, 1);
+        let centre = &white[(4 * 8 + 4) * 4..(4 * 8 + 4) * 4 + 3];
+        assert!(centre[0] > 200 && centre[2] > 120, "blended over white: {centre:?}");
     }
 
     #[test]
