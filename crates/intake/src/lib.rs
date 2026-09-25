@@ -137,6 +137,8 @@ pub struct Overrides {
     pub meter: Option<String>,
     /// Seconds between meters; also turns title-driven rotation off.
     pub interval: Option<u32>,
+    /// Frames a second in place of `frame.rate`.
+    pub fps: Option<u32>,
 }
 
 static OVERRIDES: std::sync::Mutex<Option<Overrides>> = std::sync::Mutex::new(None);
@@ -199,6 +201,9 @@ fn config_text() -> Option<String> {
         if let Some(interval) = overrides.interval {
             text = with_current(&text, "random.meter.interval", &interval.to_string());
             text = with_current(&text, "random.change.title", "False");
+        }
+        if let Some(fps) = overrides.fps {
+            text = with_current(&text, "frame.rate", &fps.to_string());
         }
     }
     Some(text)
