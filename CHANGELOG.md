@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.22] - 2026-09-25
+
+Theme review. `--list` prints every installed theme with its meters. `--theme FOLDER`, `--meter NAME|random|a,b,c` and `--interval SECONDS` stand in for the installed configuration's theme, meter and rotation without changing the player's files. `--snapshot DIR` shows each meter of the theme, or of the `--meter` list, for `--settle` seconds (default 4) and writes `DIR/<theme>/<meter>.png` before moving on, with or without a window. `--output` writes PNG when the name ends in `.png`.
+
 ## [0.4.21] - 2026-09-25
 
 The plugin's run contract. When a window is open the player stands up the run flag `/tmp/peppyrunning` and leaves, fading out when it faded in, within half a second of the plugin removing it, taking the flag down as it goes. With `exit.on.touch` or `stop.display.on.touch`, a lifted finger or mouse button ends the player, writing the marker named in `PEPPY_USER_DISMISS_FILE` first when the run flag still stands, so the plugin re-arms its timeout instead of restarting. `position.type` other than `center` puts the frame's top left at `position.x`, `position.y`; the pointer is hidden. `plugin/run_glass.sh` names the dismiss marker as the engine's launcher does.

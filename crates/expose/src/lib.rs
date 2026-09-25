@@ -2359,6 +2359,13 @@ fn blit(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame) {
     }
 }
 
+/// Write a frame as a PNG, through a part file renamed into place.
+pub fn write_png(path: &Path, frame: &Frame) -> Result<(), String> {
+    let part = path.with_extension("png.part");
+    image::save_buffer_with_format(&part, &frame.rgba, frame.width, frame.height, image::ColorType::Rgba8, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+    std::fs::rename(&part, path).map_err(|e| e.to_string())
+}
+
 /// Load a theme PNG. The alpha channel is kept.
 pub fn read_png(path: &Path) -> Option<Frame> {
     let image = image::open(path).ok()?.into_rgba8();

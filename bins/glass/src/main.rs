@@ -10,8 +10,8 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
 
-use expose::{apply_circle, compose_base, fit_art, flip_x, raster_over, read_art, read_icon, read_png, FolderPicture, Fonts, IndicatorAssets, Motion, Spans, SpectrumAssets, Stack};
-use intake::{PipeSource, Selector, Source};
+use expose::{apply_circle, compose_base, fit_art, flip_x, raster_over, read_art, read_icon, read_png, write_png, FolderPicture, Fonts, IndicatorAssets, Motion, Spans, SpectrumAssets, Stack};
+use intake::{Overrides, PipeSource, Selector, Source};
 use lead::{frame_period, should_mark_dismiss, FolderLayerSpec, Input, MeterKind, SkinDesc, TypeMode, DISMISS_FILE_VAR, RUN_FLAG};
 use pane::{publish, write_ppm, Shown, Surface};
 use plot::{step, Scene};
@@ -215,6 +215,10 @@ fn main() -> ExitCode {
     let mut print_scene = false;
     let mut output: Option<String> = None;
     let mut record: Option<String> = None;
+    let mut overrides = Overrides::default();
+    let mut list = false;
+    let mut snapshot: Option<String> = None;
+    let mut settle_s: f32 = 4.0;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -235,13 +239,55 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
+            "--theme" => match args.next() {
+                Some(theme) => overrides.theme = Some(theme),
+                None => {
+                    eprintln!("glass: --theme needs a folder name");
+                    return ExitCode::from(2);
+                }
+            },
+            "--meter" => match args.next() {
+                Some(meter) => overrides.meter = Some(meter),
+                None => {
+                    eprintln!("glass: --meter needs a name, random, or a comma list");
+                    return ExitCode::from(2);
+                }
+            },
+            "--interval" => match args.next().and_then(|s| s.parse::<u32>().ok()) {
+                Some(seconds) => overrides.interval = Some(seconds.max(1)),
+                None => {
+                    eprintln!("glass: --interval needs whole seconds");
+                    return ExitCode::from(2);
+                }
+            },
+            "--settle" => match args.next().and_then(|s| s.parse::<f32>().ok()) {
+                Some(seconds) => settle_s = seconds.max(0.5),
+                None => {
+                    eprintln!("glass: --settle needs seconds");
+                    return ExitCode::from(2);
+                }
+            },
+            "--snapshot" => match args.next() {
+                Some(dir) => snapshot = Some(dir),
+                None => {
+                    eprintln!("glass: --snapshot needs a directory");
+                    return ExitCode::from(2);
+                }
+            },
+            "--list" => list = true,
             "--help" => {
                 println!(
-                    "glass [--once] [--headless] [--print] [--output frame.ppm] [--record step.json]\n\
+                    "glass [--once] [--headless] [--print] [--output frame.png|frame.ppm] [--record step.json]\n      \
+                     [--theme FOLDER] [--meter NAME|random|a,b,c] [--interval SECONDS]\n      \
+                     [--list] [--snapshot DIR [--settle SECONDS]]\n\
                      Reads {meter} and {spectrum}.\n\
                      A window opens when DISPLAY is set. --headless skips it.\n\
-                     --output writes a PPM and still rasters.\n\
-                     --record writes the skin, input and scene of each step as JSON.",
+                     --output writes every frame as a PNG or PPM and still rasters.\n\
+                     --record writes the skin, input and scene of each step as JSON.\n\
+                     --theme, --meter and --interval stand in for the installed configuration's values.\n\
+                     --list prints the installed themes and their meters.\n\
+                     --snapshot shows each meter of the theme (or of the --meter list) for --settle seconds\n\
+                     and writes DIR/<theme>/<meter>.png, then leaves.",
                     meter = lead::METER_FIFO,
                     spectrum = lead::SPECTRUM_FIFO
                 );
@@ -254,6 +300,43 @@ fn main() -> ExitCode {
         }
     }
 
+    intake::set_overrides(overrides.clone());
+    if list {
+        // Written through a lock so a closed pipe (`| head`) ends the listing quietly.
+        use std::io::Write;
+        let out = std::io::stdout();
+        let mut out = out.lock();
+        for (theme, meters) in intake::installed_themes() {
+            if writeln!(out, "{theme}").is_err() {
+                return ExitCode::SUCCESS;
+            }
+            for meter in meters {
+                if writeln!(out, "  {meter}").is_err() {
+                    return ExitCode::SUCCESS;
+                }
+            }
+        }
+        return ExitCode::SUCCESS;
+    }
+    // A snapshot walks the meters in turn; the first stands in for the
+    // configuration's meter so the rotation below stays still.
+    let snapshot_names: Vec<String> = match (&snapshot, &overrides.meter) {
+        (Some(_), Some(meter)) if meter != "random" => meter.split(',').map(|m| m.trim().to_string()).filter(|m| !m.is_empty()).collect(),
+        (Some(_), _) => intake::installed_meter_names(),
+        (None, _) => Vec::new(),
+    };
+    if snapshot.is_some() {
+        match snapshot_names.first() {
+            Some(first) => intake::set_overrides(Overrides { meter: Some(first.clone()), ..overrides.clone() }),
+            None => {
+                eprintln!("glass: --snapshot found no meters in the theme");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let mut snapshot_index = 0usize;
+    let mut snapshot_last: Option<expose::Frame> = None;
+    let settle = std::time::Duration::from_secs_f32(settle_s);
     // A theme in random or list mode moves to its next meter on the timer,
     // or with the next title when the player says so.
     let mut selector = Selector::new(intake::installed_rotation());
@@ -310,7 +393,7 @@ fn main() -> ExitCode {
     // Album reel pictures for the track, scaled to the theme reels.
     let mut reel_slots: (PlainSlot, PlainSlot) = Default::default();
     let show_window = env::var_os("DISPLAY").is_some() && !headless;
-    let write_file = output.is_some();
+    let write_file = output.is_some() || snapshot.is_some();
     let serving_remote = false;
     let mut surface = if show_window {
         match Surface::open(skin.width, skin.height) {
@@ -338,12 +421,58 @@ fn main() -> ExitCode {
     }
     let mut run_flag_checked = Instant::now();
     let mut leave: Option<&'static str> = None;
+    // Move to another meter of the theme: its skin, pictures and motion start afresh.
+    macro_rules! switch_meter {
+        ($name:expr) => {{
+            let name: String = $name;
+            skin = intake::installed_skin_named(Some(&name));
+            source.set_skin(&skin);
+            assets = Assets::load(&skin);
+            art_cache = None;
+            icon_cache = None;
+            folder_slots.clear();
+            fanart_slots = Default::default();
+            vinyl_slot = PlainSlot::default();
+            reel_slots = Default::default();
+            motion = Motion::default();
+            let now = started.elapsed().as_millis() as u64;
+            if skin.transition.fade && fade_lock_free(skin.transition.duration_s) {
+                motion.fade.begin_in(now, skin.transition.duration_s, skin.transition.white, skin.transition.opacity);
+                did_fade_in = true;
+            }
+            motion.ramp.begin(now);
+            switched_at = Instant::now();
+            println!("glass: meter={name}");
+        }};
+    }
 
     loop {
         let frame_started = Instant::now();
         let input = source.poll();
         let polled_at = Instant::now();
-        if selector.rotates() {
+        // A snapshot saves the settled frame of the meter on show and moves on.
+        if let Some(dir) = &snapshot {
+            if switched_at.elapsed() >= settle {
+                if let Some(frame) = &snapshot_last {
+                    let theme = std::path::Path::new(&skin.theme_dir).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "theme".into());
+                    let folder = std::path::Path::new(dir).join(theme);
+                    let _ = std::fs::create_dir_all(&folder);
+                    let file = folder.join(format!("{}.png", skin.name.replace('/', "_")));
+                    match write_png(&file, frame) {
+                        Ok(()) => println!("glass: snapshot {}", file.display()),
+                        Err(err) => eprintln!("glass: snapshot {}: {err}", file.display()),
+                    }
+                }
+                snapshot_index += 1;
+                match snapshot_names.get(snapshot_index) {
+                    Some(name) => {
+                        let name = name.clone();
+                        switch_meter!(name);
+                    }
+                    None => leave = Some("snapshots done"),
+                }
+            }
+        } else if selector.rotates() {
             let due = if selector.on_title() {
                 let title = &input.metadata.title;
                 let changed = last_title.as_ref().is_some_and(|known| known != title);
@@ -356,24 +485,7 @@ fn main() -> ExitCode {
             };
             if due {
                 if let Some(name) = selector.next() {
-                    skin = intake::installed_skin_named(Some(&name));
-                    source.set_skin(&skin);
-                    assets = Assets::load(&skin);
-                    art_cache = None;
-                    icon_cache = None;
-                    folder_slots.clear();
-                    fanart_slots = Default::default();
-                    vinyl_slot = PlainSlot::default();
-                    reel_slots = Default::default();
-                    motion = Motion::default();
-                    let now = started.elapsed().as_millis() as u64;
-                    if skin.transition.fade && fade_lock_free(skin.transition.duration_s) {
-                        motion.fade.begin_in(now, skin.transition.duration_s, skin.transition.white, skin.transition.opacity);
-                        did_fade_in = true;
-                    }
-                    motion.ramp.begin(now);
-                    switched_at = Instant::now();
-                    println!("glass: meter={name}");
+                    switch_meter!(name);
                 }
             }
         }
@@ -536,10 +648,18 @@ fn main() -> ExitCode {
                 }
             }
             if let Some(path) = &output {
-                if let Err(err) = write_ppm(path, frame) {
+                let written = if path.to_ascii_lowercase().ends_with(".png") {
+                    write_png(std::path::Path::new(path), frame)
+                } else {
+                    write_ppm(path, frame).map_err(|e| e.to_string())
+                };
+                if let Err(err) = written {
                     eprintln!("glass: {err}");
                     return ExitCode::from(1);
                 }
+            }
+            if snapshot.is_some() {
+                snapshot_last = Some(frame.clone());
             }
         }
         if serving_remote {
