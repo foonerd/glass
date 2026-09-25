@@ -189,6 +189,7 @@ fn fill_bars(rgba: &mut [u8], stride: u32, rect: &Rect, bars: &[f32], color: [u8
     }
 }
 
+/// Copy a layer at a position. Its alpha channel blends over what is there.
 fn blit_at(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (u32, u32)) {
     for y in 0..src.height {
         let dy = at.1 + y;
@@ -201,15 +202,84 @@ fn blit_at(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (u32, u32)) 
                 break;
             }
             let s = (y as usize * src.width as usize + x as usize) * 4;
-            if src.rgba[s + 3] == 0 {
-                continue;
-            }
             let d = (dy as usize * dst_w as usize + dx as usize) * 4;
-            dst[d..d + 4].copy_from_slice(&src.rgba[s..s + 4]);
+            blend(
+                dst,
+                d,
+                [src.rgba[s], src.rgba[s + 1], src.rgba[s + 2], src.rgba[s + 3]],
+            );
         }
     }
 }
 
+/// Source-over one straight-alpha pixel onto the opaque frame.
+fn blend(dst: &mut [u8], d: usize, color: [u8; 4]) {
+    let a = color[3] as u32;
+    if a == 0 {
+        return;
+    }
+    if a == 255 {
+        dst[d..d + 3].copy_from_slice(&color[..3]);
+        dst[d + 3] = 255;
+        return;
+    }
+    let inv = 255 - a;
+    for c in 0..3 {
+        dst[d + c] = ((color[c] as u32 * a + dst[d + c] as u32 * inv + 127) / 255) as u8;
+    }
+    dst[d + 3] = 255;
+}
+
+/// Texel at integer coordinates. Outside the sprite is transparent.
+fn texel(src: &Frame, x: i32, y: i32) -> [u8; 4] {
+    if x < 0 || y < 0 || x >= src.width as i32 || y >= src.height as i32 {
+        return [0, 0, 0, 0];
+    }
+    let s = (y as usize * src.width as usize + x as usize) * 4;
+    [src.rgba[s], src.rgba[s + 1], src.rgba[s + 2], src.rgba[s + 3]]
+}
+
+/// Bilinear sample at a continuous position, where texel centres sit at
+/// half coordinates. Alpha is premultiplied while mixing so a transparent
+/// neighbour lends no colour to the edge.
+fn sample_bilinear(src: &Frame, sx: f32, sy: f32) -> [u8; 4] {
+    let fx = sx - 0.5;
+    let fy = sy - 0.5;
+    let x0 = fx.floor();
+    let y0 = fy.floor();
+    let tx = fx - x0;
+    let ty = fy - y0;
+    let (x0, y0) = (x0 as i32, y0 as i32);
+    let corners = [
+        (texel(src, x0, y0), (1.0 - tx) * (1.0 - ty)),
+        (texel(src, x0 + 1, y0), tx * (1.0 - ty)),
+        (texel(src, x0, y0 + 1), (1.0 - tx) * ty),
+        (texel(src, x0 + 1, y0 + 1), tx * ty),
+    ];
+    let mut acc = [0.0f32; 4];
+    for (px, w) in corners {
+        let a = px[3] as f32 * w;
+        acc[0] += px[0] as f32 * a;
+        acc[1] += px[1] as f32 * a;
+        acc[2] += px[2] as f32 * a;
+        acc[3] += a;
+    }
+    if acc[3] <= 0.0 {
+        return [0, 0, 0, 0];
+    }
+    [
+        (acc[0] / acc[3]).round() as u8,
+        (acc[1] / acc[3]).round() as u8,
+        (acc[2] / acc[3]).round() as u8,
+        acc[3].round().clamp(0.0, 255.0) as u8,
+    ]
+}
+
+/// Draw `src` turned by `degrees` about the theme origin `at`, with the sprite
+/// centre `distance` pixels from that origin along the needle. Positive degrees
+/// turn the needle to the left of vertical, as the theme files count them.
+/// Every frame pixel inside the turned bounds samples the sprite bilinearly,
+/// so the edge stays smooth and the alpha channel blends over the face.
 fn blit_rotated(
     dst: &mut [u8],
     dst_w: u32,
@@ -219,29 +289,37 @@ fn blit_rotated(
     degrees: f32,
     distance: f32,
 ) {
+    if src.width == 0 || src.height == 0 || dst_w == 0 || dst_h == 0 {
+        return;
+    }
     let rad = degrees.to_radians();
     let (sin, cos) = rad.sin_cos();
-    let pivot_x = src.width as f32 / 2.0;
-    let pivot_y = src.height as f32 / 2.0;
+    let half_w = src.width as f32 / 2.0;
+    let half_h = src.height as f32 / 2.0;
     let center_x = at.0 as f32 - distance * sin;
     let center_y = at.1 as f32 - distance * cos;
-    for y in 0..src.height {
-        for x in 0..src.width {
-            let s = (y as usize * src.width as usize + x as usize) * 4;
-            if src.rgba[s + 3] == 0 {
+    let extent_x = (half_w * cos).abs() + (half_h * sin).abs() + 1.0;
+    let extent_y = (half_w * sin).abs() + (half_h * cos).abs() + 1.0;
+    let x_from = ((center_x - extent_x).floor() as i32).max(0);
+    let x_to = ((center_x + extent_x).ceil() as i32).min(dst_w as i32 - 1);
+    let y_from = ((center_y - extent_y).floor() as i32).max(0);
+    let y_to = ((center_y + extent_y).ceil() as i32).min(dst_h as i32 - 1);
+    for dy in y_from..=y_to {
+        for dx in x_from..=x_to {
+            let vx = dx as f32 + 0.5 - center_x;
+            let vy = dy as f32 + 0.5 - center_y;
+            // Inverse of the rotation that carries the sprite onto the frame.
+            let sx = half_w + vx * cos - vy * sin;
+            let sy = half_h + vx * sin + vy * cos;
+            if sx < 0.0 || sy < 0.0 || sx > src.width as f32 || sy > src.height as f32 {
                 continue;
             }
-            let vx = x as f32 - pivot_x;
-            let vy = y as f32 - pivot_y;
-            let rx = vx * cos + vy * sin;
-            let ry = -vx * sin + vy * cos;
-            let dx = (center_x + rx).round() as i32;
-            let dy = (center_y + ry).round() as i32;
-            if dx < 0 || dy < 0 || dx >= dst_w as i32 || dy >= dst_h as i32 {
+            let px = sample_bilinear(src, sx, sy);
+            if px[3] == 0 {
                 continue;
             }
             let d = (dy as usize * dst_w as usize + dx as usize) * 4;
-            dst[d..d + 4].copy_from_slice(&src.rgba[s..s + 4]);
+            blend(dst, d, px);
         }
     }
 }
@@ -344,5 +422,44 @@ mod tests {
         let right_top = sample(&frame, layout.right_meter.x, layout.right_meter.y);
         assert_eq!(top, METER);
         assert_eq!(right_top, BG);
+    }
+
+    fn sprite(width: u32, height: u32, color: [u8; 4]) -> Frame {
+        Frame {
+            width,
+            height,
+            rgba: (0..width * height).flat_map(|_| color).collect(),
+        }
+    }
+
+    fn at(rgba: &[u8], stride: u32, x: u32, y: u32) -> [u8; 3] {
+        let i = ((y * stride + x) * 4) as usize;
+        [rgba[i], rgba[i + 1], rgba[i + 2]]
+    }
+
+    #[test]
+    fn a_turned_needle_lands_where_the_theme_origin_sends_it() {
+        // Pivot at (50, 80), sprite centre 30 px out. Straight up, the sprite
+        // covers y 40..60 at x 50. Turned 90° left, it covers x 10..30 at y 80.
+        let needle = sprite(2, 20, [255, 0, 0, 255]);
+        let mut rgba = vec![0u8; 100 * 100 * 4];
+        blit_rotated(&mut rgba, 100, 100, &needle, (50, 80), 0.0, 30.0);
+        assert_eq!(at(&rgba, 100, 50, 45), [255, 0, 0]);
+        assert_eq!(at(&rgba, 100, 25, 80), [0, 0, 0]);
+        let mut rgba = vec![0u8; 100 * 100 * 4];
+        blit_rotated(&mut rgba, 100, 100, &needle, (50, 80), 90.0, 30.0);
+        assert_eq!(at(&rgba, 100, 25, 80), [255, 0, 0]);
+        assert_eq!(at(&rgba, 100, 50, 45), [0, 0, 0]);
+    }
+
+    #[test]
+    fn a_half_transparent_layer_blends_over_the_frame() {
+        let mut rgba = vec![0u8; 4 * 4 * 4];
+        for px in rgba.chunks_exact_mut(4) {
+            px.copy_from_slice(&[0, 0, 0, 255]);
+        }
+        let layer = sprite(1, 1, [200, 100, 0, 128]);
+        blit_at(&mut rgba, 4, 4, &layer, (1, 1));
+        assert_eq!(at(&rgba, 4, 1, 1), [100, 50, 0]);
     }
 }
