@@ -11,12 +11,53 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use lead::{
-    decode_meter, decode_spectrum, fonts_from_config, frame_rate_from_config, meter_art,
-    meter_at, meter_background, meter_indicator, meter_layers, meter_needle, meter_text_at,
-    meter_texts, mono_average, scale_level, screen_from_config, Bins, Input, Levels, SkinDesc,
-    CONFIG_TXT, DEFAULT_FRAME_RATE, DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO,
-    SPECTRUM_FIFO, current_value,
+    decode_meter, decode_spectrum, fonts_from_config, format_key, frame_rate_from_config,
+    meter_art, meter_at, meter_background, meter_indicator, meter_layers, meter_needle,
+    meter_text_at, meter_texts, meter_type, mono_average, scale_level, screen_from_config, Bins,
+    Input, Levels, SkinDesc, CONFIG_TXT, DEFAULT_FRAME_RATE, DEFAULT_METER_MAX,
+    DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO, STOCK_ICONS, current_value,
 };
+
+/// A file named `basename` in `dir`, matched exactly first, then ignoring
+/// case. Volumio ships `YouTube.svg`, which a case-sensitive open misses.
+pub fn existing_icon_file(dir: &str, basename: &str) -> Option<PathBuf> {
+    if dir.is_empty() || basename.is_empty() {
+        return None;
+    }
+    let exact = Path::new(dir).join(basename);
+    if exact.is_file() {
+        return Some(exact);
+    }
+    let wanted = basename.to_ascii_lowercase();
+    std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .map(|entry| entry.path())
+        .find(|path| {
+            path.file_name()
+                .and_then(|n| n.to_str())
+                .is_some_and(|n| n.to_ascii_lowercase() == wanted)
+        })
+}
+
+/// The icon for a key: the skin's `format-icons` (`.png` then `.svg`), the
+/// player's own set (`.svg`), then Volumio's stock set. Empty when none.
+pub fn resolve_icon(key: &str, skin_icons: &str, plugin_icons: &str) -> String {
+    if key.is_empty() {
+        return String::new();
+    }
+    for ext in [".png", ".svg"] {
+        if let Some(found) = existing_icon_file(skin_icons, &format!("{key}{ext}")) {
+            return found.to_string_lossy().into_owned();
+        }
+    }
+    if let Some(found) = existing_icon_file(plugin_icons, &format!("{key}.svg")) {
+        return found.to_string_lossy().into_owned();
+    }
+    existing_icon_file(STOCK_ICONS, &format!("{key}.svg"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default()
+}
 
 /// Album art location as the player reports it, made fetchable. A leading
 /// slash is a path served by the player itself; anything else is used as is.
@@ -184,6 +225,11 @@ pub struct PipeSource {
     /// Position the player reported at `metadata_at`, in seconds.
     seek_polled: f32,
     art: ArtFetcher,
+    /// Icon directories from the skin, for resolving the type icon.
+    skin_icons: String,
+    plugin_icons: String,
+    /// Last resolved (key, icon path), so the directories are read once per key.
+    icon_cache: (String, String),
 }
 
 impl PipeSource {
@@ -221,6 +267,9 @@ impl PipeSource {
             metadata_every: Some(Duration::from_secs(1)),
             seek_polled: 0.0,
             art: ArtFetcher::default(),
+            skin_icons: String::new(),
+            plugin_icons: String::new(),
+            icon_cache: (String::new(), String::new()),
         }
     }
 
@@ -228,6 +277,13 @@ impl PipeSource {
     /// a host without Volumio.
     pub fn without_player(mut self) -> Self {
         self.metadata_every = None;
+        self
+    }
+
+    /// Where to look for type icons, from the skin.
+    pub fn with_icons(mut self, skin: &SkinDesc) -> Self {
+        self.skin_icons = skin.skin_icons.clone();
+        self.plugin_icons = skin.plugin_icons.clone();
         self
     }
 
@@ -293,6 +349,11 @@ impl Source for PipeSource {
                 let playing = now_playing();
                 self.seek_polled = playing.seek;
                 self.art.want(&playing.albumart);
+                let key = format_key(&playing.track_type);
+                if key != self.icon_cache.0 {
+                    let icon = resolve_icon(&key, &self.skin_icons, &self.plugin_icons);
+                    self.icon_cache = (key, icon);
+                }
                 self.metadata_held = lead::Metadata {
                     title: playing.title,
                     artist: playing.artist,
@@ -304,6 +365,9 @@ impl Source for PipeSource {
                     seek: playing.seek,
                     albumart: playing.albumart,
                     art_file: String::new(),
+                    track_type: playing.track_type,
+                    bitrate: playing.bitrate,
+                    type_icon: self.icon_cache.1.clone(),
                 };
                 self.metadata_at = Some(Instant::now());
             }
@@ -398,14 +462,20 @@ pub fn installed_skin() -> SkinDesc {
         skin.album = texts.album;
         skin.sample = texts.sample;
         skin.time = texts.time;
-        skin.art = meter_art(&meters, &skin.name);
+        skin.art = meter_art(&meters, &skin.name, &skin.theme_dir);
+        let default_mode = current_value(&text, "playinfo.type.mode");
+        skin.type_area = meter_type(&meters, &skin.name, default_mode.as_deref());
+        skin.skin_icons = theme.join("format-icons").to_string_lossy().into_owned();
     }
-    // The clock font ships next to the player's handlers: <plugin>/screensaver/fonts.
-    let digi_default = Path::new(&path)
-        .parent()
-        .and_then(Path::parent)
+    // The clock font and the player's icon set ship next to the player's
+    // handlers: <plugin>/screensaver/fonts and <plugin>/screensaver/format-icons.
+    let handlers_dir = Path::new(&path).parent().and_then(Path::parent);
+    let digi_default = handlers_dir
         .map(|dir| dir.join("fonts").join("DSEG7Classic-Italic.ttf"))
         .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    skin.plugin_icons = handlers_dir
+        .map(|dir| dir.join("format-icons").to_string_lossy().into_owned())
         .unwrap_or_default();
     skin.fonts = fonts_from_config(&text, &digi_default);
     skin
@@ -425,6 +495,8 @@ pub struct NowPlaying {
     pub seek: f32,
     /// Album art location as reported: a URL, or a path on the player.
     pub albumart: String,
+    pub track_type: String,
+    pub bitrate: String,
 }
 
 /// Current track from Volumio. Empty strings when the player does not answer.
@@ -453,6 +525,8 @@ pub fn now_playing() -> NowPlaying {
     playing.duration = json_number(body, "duration").unwrap_or(0.0);
     playing.seek = json_number(body, "seek").unwrap_or(0.0) / 1000.0;
     playing.albumart = json_string(body, "albumart");
+    playing.track_type = json_string(body, "trackType");
+    playing.bitrate = json_string(body, "bitrate");
     playing
 }
 
@@ -546,6 +620,24 @@ mod tests {
         assert_eq!(json_number(body, "missing"), None);
         assert_eq!(json_string(body, "status"), "play");
         assert_eq!(json_string(body, "samplerate"), "44.1 kHz");
+    }
+
+    #[test]
+    fn icons_are_found_ignoring_case_and_in_order() {
+        let dir = std::env::temp_dir().join(format!("glass-icons-{}", std::process::id()));
+        let skin = dir.join("skin");
+        let plugin = dir.join("plugin");
+        std::fs::create_dir_all(&skin).unwrap();
+        std::fs::create_dir_all(&plugin).unwrap();
+        std::fs::write(skin.join("flac.png"), b"x").unwrap();
+        std::fs::write(plugin.join("YouTube.svg"), b"x").unwrap();
+        std::fs::write(plugin.join("flac.svg"), b"x").unwrap();
+        let skin_s = skin.to_string_lossy().into_owned();
+        let plugin_s = plugin.to_string_lossy().into_owned();
+        assert!(resolve_icon("flac", &skin_s, &plugin_s).ends_with("skin/flac.png"));
+        assert!(resolve_icon("youtube", &skin_s, &plugin_s).ends_with("plugin/YouTube.svg"));
+        assert_eq!(resolve_icon("", &skin_s, &plugin_s), "");
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

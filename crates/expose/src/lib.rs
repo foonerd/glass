@@ -4,8 +4,8 @@
 use std::path::Path;
 
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
-use lead::{FontFiles, TextStyle};
-use plot::{Scene, Text};
+use lead::{FontFiles, TextStyle, TypeAlign, TypeMode};
+use plot::{Scene, Text, TypeArea};
 
 const BG: [u8; 4] = [12, 12, 16, 255];
 
@@ -132,13 +132,14 @@ pub fn raster(scene: &Scene) -> Frame {
             face_at: (0, 0),
             fonts: None,
             art: None,
+            icon: None,
         },
     )
 }
 
 /// Decode a picture by its content and stretch it to `w` by `h`, as the
-/// player's engine does with album art.
-pub fn read_art(path: &Path, w: u32, h: u32) -> Option<Frame> {
+/// player's engine does with album art, then cut it with `mask` if given.
+pub fn read_art(path: &Path, w: u32, h: u32, mask: Option<&Frame>) -> Option<Frame> {
     let image = image::ImageReader::open(path)
         .ok()?
         .with_guessed_format()
@@ -151,7 +152,11 @@ pub fn read_art(path: &Path, w: u32, h: u32) -> Option<Frame> {
         height: image.height(),
         rgba: image.into_raw(),
     };
-    Some(fit_art(&frame, w, h))
+    let mut fitted = fit_art(&frame, w, h);
+    if let Some(mask) = mask {
+        apply_mask(&mut fitted, mask);
+    }
+    Some(fitted)
 }
 
 /// Stretch a frame to `w` by `h` with bilinear filtering.
@@ -183,6 +188,8 @@ pub struct Stack<'a> {
     pub fonts: Option<&'a Fonts>,
     /// Album art already stretched to the box in `Scene::art`.
     pub art: Option<&'a Frame>,
+    /// Type icon already fitted for `Scene::type_area`, tinted when it was an SVG.
+    pub icon: Option<&'a Frame>,
 }
 
 /// Theme order: full-screen picture, album art, meter face, needles, meter
@@ -199,6 +206,10 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>) -> Frame {
     }
     if let (Some(art), Some(place)) = (stack.art, &scene.art) {
         blit_at(&mut rgba, width, height, art, (place.x, place.y));
+        if place.border > 0 {
+            let color = [place.border_color[0], place.border_color[1], place.border_color[2], 255];
+            draw_border(&mut rgba, width, height, (place.x, place.y, place.w, place.h), place.border, color);
+        }
     }
     if let Some(face) = stack.face {
         blit_at(&mut rgba, width, height, face, stack.face_at);
@@ -232,56 +243,248 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>) -> Frame {
     for text in &scene.texts {
         draw_text_styled(&mut frame, text, stack.fonts);
     }
+    if let Some(area) = &scene.type_area {
+        draw_type_area(&mut frame, area, stack.icon, stack.fonts);
+    }
     frame
+}
+
+/// A rectangle outline `thickness` pixels wide, inside the box.
+fn draw_border(dst: &mut [u8], dst_w: u32, dst_h: u32, rect: (u32, u32, u32, u32), thickness: u32, color: [u8; 4]) {
+    let (x, y, w, h) = rect;
+    let t = thickness.min(w / 2).min(h / 2).max(1);
+    for row in 0..h {
+        let edge_row = row < t || row + t >= h;
+        for col in 0..w {
+            if !(edge_row || col < t || col + t >= w) {
+                continue;
+            }
+            let (px, py) = (x + col, y + row);
+            if px < dst_w && py < dst_h {
+                put(dst, dst_w, px, py, color);
+            }
+        }
+    }
+}
+
+/// Copy the top-left `w` by `h` of a frame. A frame already inside is returned as is.
+fn clip_frame(frame: &Frame, w: u32, h: u32) -> Frame {
+    if frame.width <= w && frame.height <= h {
+        return frame.clone();
+    }
+    let cw = frame.width.min(w).max(1);
+    let ch = frame.height.min(h).max(1);
+    let mut rgba = Vec::with_capacity((cw * ch * 4) as usize);
+    for y in 0..ch {
+        let from = (y * frame.width * 4) as usize;
+        rgba.extend_from_slice(&frame.rgba[from..from + (cw * 4) as usize]);
+    }
+    Frame {
+        width: cw,
+        height: ch,
+        rgba,
+    }
+}
+
+fn align_x(box_x: u32, box_w: u32, item_w: u32, align: TypeAlign) -> u32 {
+    match align {
+        TypeAlign::Left => box_x,
+        TypeAlign::Right => box_x + box_w.saturating_sub(item_w),
+        TypeAlign::Center => box_x + box_w.saturating_sub(item_w) / 2,
+    }
+}
+
+/// Draw the type area. Inside a real box the icon or label is clipped to the
+/// box, placed by `align`, and centred vertically. `both` puts the icon on
+/// the left and the label three pixels to its right. Text mode without a
+/// box draws the label at the position.
+pub fn draw_type_area(frame: &mut Frame, area: &TypeArea, icon: Option<&Frame>, fonts: Option<&Fonts>) {
+    const GAP: u32 = 3;
+    let label = render_text(fonts, area.font_style, area.font_size, area.color, &area.label, 0);
+    let Some((w, h)) = area.box_size else {
+        if area.mode == TypeMode::Text {
+            if let Some(label) = label {
+                blit_at(&mut frame.rgba, frame.width, frame.height, &label, (area.x, area.y));
+            }
+        }
+        return;
+    };
+    let place = |frame: &mut Frame, item: &Frame| {
+        let item = clip_frame(item, w, h);
+        let x = align_x(area.x, w, item.width, area.align);
+        let y = area.y + h.saturating_sub(item.height) / 2;
+        blit_at(&mut frame.rgba, frame.width, frame.height, &item, (x, y));
+    };
+    match area.mode {
+        TypeMode::Text => {
+            if let Some(label) = &label {
+                place(frame, label);
+            }
+        }
+        TypeMode::Icon => match (icon, &label) {
+            (Some(icon), _) => place(frame, icon),
+            (None, Some(label)) => place(frame, label),
+            (None, None) => {}
+        },
+        TypeMode::Both => match (icon, label) {
+            (None, None) => {}
+            (None, Some(label)) => place(frame, &label),
+            (Some(icon), None) => {
+                let y = area.y + h.saturating_sub(icon.height) / 2;
+                blit_at(&mut frame.rgba, frame.width, frame.height, &clip_frame(icon, w, h), (area.x, y));
+            }
+            (Some(icon), Some(label)) => {
+                let icon = clip_frame(icon, w, h);
+                let iy = area.y + h.saturating_sub(icon.height) / 2;
+                blit_at(&mut frame.rgba, frame.width, frame.height, &icon, (area.x, iy));
+                let text_x = icon.width + GAP;
+                if text_x < w {
+                    let label = clip_frame(&label, w - text_x, h);
+                    let ty = area.y + h.saturating_sub(label.height) / 2;
+                    blit_at(&mut frame.rgba, frame.width, frame.height, &label, (area.x + text_x, ty));
+                }
+            }
+        },
+    }
+}
+
+/// Decode a type icon fitted inside `w` by `h`, keeping its aspect. An SVG
+/// is rendered at that size and every visible pixel takes `tint`; a PNG keeps
+/// its own colours. A picture smaller than the box is enlarged to it.
+pub fn read_icon(path: &Path, w: u32, h: u32, tint: Option<[u8; 3]>) -> Option<Frame> {
+    let (w, h) = (w.max(1), h.max(1));
+    let is_svg = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg"));
+    let mut frame = if is_svg {
+        let bytes = std::fs::read(path).ok()?;
+        let tree = resvg::usvg::Tree::from_data(&bytes, &resvg::usvg::Options::default()).ok()?;
+        let size = tree.size();
+        let (sw, sh) = (size.width(), size.height());
+        if sw <= 0.0 || sh <= 0.0 {
+            return None;
+        }
+        let scale = (w as f32 / sw).min(h as f32 / sh);
+        let pw = ((sw * scale).round() as u32).clamp(1, w);
+        let ph = ((sh * scale).round() as u32).clamp(1, h);
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(pw, ph)?;
+        resvg::render(
+            &tree,
+            resvg::tiny_skia::Transform::from_scale(scale, scale),
+            &mut pixmap.as_mut(),
+        );
+        let mut rgba = Vec::with_capacity((pw * ph * 4) as usize);
+        for px in pixmap.pixels() {
+            let c = px.demultiply();
+            rgba.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
+        }
+        Frame {
+            width: pw,
+            height: ph,
+            rgba,
+        }
+    } else {
+        let picture = read_png(path)?;
+        let scale = (w as f32 / picture.width.max(1) as f32).min(h as f32 / picture.height.max(1) as f32);
+        let fw = ((picture.width as f32 * scale) as u32).clamp(1, w);
+        let fh = ((picture.height as f32 * scale) as u32).clamp(1, h);
+        fit_art(&picture, fw, fh)
+    };
+    if let (true, Some(tint)) = (is_svg, tint) {
+        for px in frame.rgba.chunks_exact_mut(4) {
+            if px[3] > 0 {
+                px[..3].copy_from_slice(&tint);
+            }
+        }
+    }
+    Some(frame)
+}
+
+/// Cut a picture with a mask of the same box: the mask's white is removed,
+/// its black kept, as the player's engine does with `albumart.mask`.
+pub fn apply_mask(art: &mut Frame, mask: &Frame) {
+    let mask = fit_art(mask, art.width, art.height);
+    for (px, mpx) in art.rgba.chunks_exact_mut(4).zip(mask.rgba.chunks_exact(4)) {
+        let luminance = (u32::from(mpx[0]) * 299 + u32::from(mpx[1]) * 587 + u32::from(mpx[2]) * 114) / 1000;
+        let keep = 255 - luminance.min(255) as u8;
+        px[3] = ((u32::from(px[3]) * u32::from(keep)) / 255) as u8;
+    }
 }
 
 /// Draw one theme text. With its font, the top of the em box sits at `y`, as
 /// the player's renderer places it, and `max_width` clips the line. Without
 /// a font for its style the bitmap font stands in.
 pub fn draw_text_styled(frame: &mut Frame, text: &Text, fonts: Option<&Fonts>) {
-    let Some(font) = fonts.and_then(|f| f.get(text.style)) else {
-        draw_text(frame, text.x, text.y, &text.text);
-        return;
-    };
-    let scale = PxScale::from(text.size.max(1) as f32);
+    match render_text(fonts, text.style, text.size, text.color, &text.text, text.max_width) {
+        Some(line) => blit_at(&mut frame.rgba, frame.width, frame.height, &line, (text.x, text.y)),
+        None => draw_text(frame, text.x, text.y, &text.text),
+    }
+}
+
+/// Set a line of text in a font: a transparent frame one line high whose
+/// width is the text's advance, or `max_width` when that is smaller and not
+/// zero. `None` when the style has no font or the text is empty.
+pub fn render_text(fonts: Option<&Fonts>, style: TextStyle, size: u32, color: [u8; 3], text: &str, max_width: u32) -> Option<Frame> {
+    let font = fonts.and_then(|f| f.get(style))?;
+    if text.is_empty() {
+        return None;
+    }
+    let scale = PxScale::from(size.max(1) as f32);
     let scaled = font.as_scaled(scale);
-    let baseline = text.y as f32 + scaled.ascent();
-    let width = frame.width;
-    let height = frame.height;
-    let limit = if text.max_width == 0 {
-        width
-    } else {
-        text.x.saturating_add(text.max_width).min(width)
-    };
-    let rgba = &mut frame.rgba;
-    let mut pen = text.x as f32;
+    let ascent = scaled.ascent();
+    let line_height = (ascent - scaled.descent()).ceil().max(1.0) as u32;
+    let mut advance = 0.0f32;
     let mut last: Option<ab_glyph::GlyphId> = None;
-    for ch in text.text.chars() {
+    for ch in text.chars() {
+        let id = font.glyph_id(ch);
+        if let Some(prev) = last {
+            advance += scaled.kern(prev, id);
+        }
+        advance += scaled.h_advance(id);
+        last = Some(id);
+    }
+    let mut width = advance.ceil().max(1.0) as u32;
+    if max_width > 0 {
+        width = width.min(max_width);
+    }
+    let height = line_height;
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+    let mut pen = 0.0f32;
+    let mut last: Option<ab_glyph::GlyphId> = None;
+    for ch in text.chars() {
         let id = font.glyph_id(ch);
         if let Some(prev) = last {
             pen += scaled.kern(prev, id);
         }
-        let glyph = id.with_scale_and_position(scale, ab_glyph::point(pen, baseline));
+        let glyph = id.with_scale_and_position(scale, ab_glyph::point(pen, ascent));
         if let Some(outline) = font.outline_glyph(glyph) {
             let bounds = outline.px_bounds();
-            let color = text.color;
             outline.draw(|gx, gy, coverage| {
                 let px = bounds.min.x as i32 + gx as i32;
                 let py = bounds.min.y as i32 + gy as i32;
-                if px < 0 || py < 0 || px as u32 >= limit || py as u32 >= height {
+                if px < 0 || py < 0 || px as u32 >= width || py as u32 >= height {
                     return;
                 }
                 let a = (coverage.clamp(0.0, 1.0) * 255.0).round() as u8;
+                if a == 0 {
+                    return;
+                }
                 let d = (py as usize * width as usize + px as usize) * 4;
-                blend(rgba, d, [color[0], color[1], color[2], a]);
+                // Text is drawn onto a clear frame: keep the strongest coverage.
+                if a >= rgba[d + 3] {
+                    rgba[d..d + 4].copy_from_slice(&[color[0], color[1], color[2], a]);
+                }
             });
         }
         pen += scaled.h_advance(id);
         last = Some(id);
-        if pen >= limit as f32 {
+        if pen >= width as f32 {
             break;
         }
     }
+    Some(Frame {
+        width,
+        height,
+        rgba,
+    })
 }
 
 pub fn sample(frame: &Frame, x: u32, y: u32) -> [u8; 4] {
@@ -561,6 +764,7 @@ mod tests {
             needle: None,
             texts: Vec::new(),
             art: None,
+            type_area: None,
         };
         let frame = raster(&scene);
         let layout = layout(frame.width, frame.height);
@@ -663,6 +867,71 @@ mod tests {
         draw_text_styled(&mut clipped, &narrow, Some(&fonts));
         assert!(lit(&clipped, 4, 14) > 0);
         assert_eq!(lit(&clipped, 14, 120), 0, "nothing past max_width");
+    }
+
+    #[test]
+    fn an_svg_icon_is_fitted_and_tinted() {
+        let dir = std::env::temp_dir().join(format!("glass-svg-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("wide.svg");
+        std::fs::write(
+            &path,
+            r##"<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><rect x="0" y="0" width="200" height="100" fill="#000"/></svg>"##,
+        )
+        .unwrap();
+        let icon = read_icon(&path, 50, 50, Some([204, 176, 97])).unwrap();
+        assert_eq!((icon.width, icon.height), (50, 25), "fits the box, keeps the aspect");
+        assert_eq!(sample(&icon, 25, 12), [204, 176, 97, 255], "tinted, opaque");
+        let untinted = read_icon(&path, 50, 50, None).unwrap();
+        assert_eq!(sample(&untinted, 25, 12), [0, 0, 0, 255]);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_mask_cuts_the_white_and_a_border_frames_the_box() {
+        let mut art = sprite(4, 4, [10, 20, 30, 255]);
+        let mut mask = sprite(4, 4, [0, 0, 0, 255]);
+        for x in 2..4u32 {
+            for y in 0..4u32 {
+                let i = ((y * 4 + x) * 4) as usize;
+                mask.rgba[i..i + 4].copy_from_slice(&[255, 255, 255, 255]);
+            }
+        }
+        apply_mask(&mut art, &mask);
+        assert_eq!(sample(&art, 0, 0)[3], 255, "black in the mask keeps the picture");
+        assert_eq!(sample(&art, 3, 3)[3], 0, "white in the mask cuts it");
+
+        let mut rgba = vec![0u8; 8 * 8 * 4];
+        draw_border(&mut rgba, 8, 8, (2, 2, 4, 4), 1, [9, 9, 9, 255]);
+        assert_eq!(at(&rgba, 8, 2, 2), [9, 9, 9], "corner is border");
+        assert_eq!(at(&rgba, 8, 5, 3), [9, 9, 9], "right edge is border");
+        assert_eq!(at(&rgba, 8, 3, 3), [0, 0, 0], "inside stays");
+        assert_eq!(at(&rgba, 8, 1, 1), [0, 0, 0], "outside stays");
+    }
+
+    #[test]
+    fn the_type_area_aligns_inside_its_box() {
+        let icon = sprite(10, 6, [1, 2, 3, 255]);
+        let area = TypeArea {
+            x: 20,
+            y: 10,
+            box_size: Some((40, 20)),
+            mode: TypeMode::Icon,
+            align: TypeAlign::Right,
+            color: [1, 2, 3],
+            font_size: 12,
+            font_style: TextStyle::Regular,
+            label: "FLAC".into(),
+            icon: "x.svg".into(),
+        };
+        let mut frame = Frame {
+            width: 80,
+            height: 40,
+            rgba: vec![0u8; 80 * 40 * 4],
+        };
+        draw_type_area(&mut frame, &area, Some(&icon), None);
+        assert_eq!(sample(&frame, 59, 17)[..3], [1, 2, 3], "right-aligned, vertically centred");
+        assert_eq!(sample(&frame, 20, 17)[3], 0, "nothing on the left of the box");
     }
 
     #[test]

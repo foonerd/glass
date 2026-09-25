@@ -69,15 +69,133 @@ pub struct Metadata {
     /// Local file holding the fetched picture for `albumart`. Empty until fetched.
     #[serde(default)]
     pub art_file: String,
+    /// Track type as the player reports it, for example `flac` or `webradio`.
+    #[serde(default)]
+    pub track_type: String,
+    /// Bitrate as the player reports it, for example `192 Kbps`.
+    #[serde(default)]
+    pub bitrate: String,
+    /// Icon file resolved for `track_type`, or empty when none exists.
+    #[serde(default)]
+    pub type_icon: String,
 }
 
 /// Where the album art is drawn. The picture is stretched to `w` by `h`.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ArtSpec {
     pub x: u32,
     pub y: u32,
     pub w: u32,
     pub h: u32,
+    /// Mask picture path, or empty. Its white is cut away, its black kept.
+    #[serde(default)]
+    pub mask: String,
+    /// Border width in pixels drawn inside the box. Zero is none.
+    #[serde(default)]
+    pub border: u32,
+    /// Border colour: the theme's `font.color`.
+    #[serde(default = "white")]
+    pub border_color: [u8; 3],
+}
+
+fn white() -> [u8; 3] {
+    [255, 255, 255]
+}
+
+/// How the type area shows the track type.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TypeMode {
+    Icon,
+    Text,
+    Both,
+}
+
+/// Horizontal placement inside the type box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TypeAlign {
+    Left,
+    Center,
+    Right,
+}
+
+/// The type area: `playinfo.type.*`. `box_size` is `None` when the meter
+/// gives no real dimension, which only the text mode accepts.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TypeSpec {
+    pub x: u32,
+    pub y: u32,
+    pub box_size: Option<(u32, u32)>,
+    pub mode: TypeMode,
+    pub align: TypeAlign,
+    pub color: [u8; 3],
+    pub font_size: u32,
+    pub font_style: TextStyle,
+}
+
+/// Volumio's own icon set.
+pub const STOCK_ICONS: &str = "/volumio/http/www3/app/assets-common/format-icons";
+
+/// The icon and label key for a reported track type: lower case, spaces to
+/// underscores, `dsf` is `dsd`, cut at the first character outside
+/// `[a-z0-9_]`, then the known aliases.
+pub fn format_key(track_type: &str) -> String {
+    let mut key: String = track_type
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c == ' ' { '_' } else { c })
+        .collect();
+    if key == "dsf" {
+        key = "dsd".into();
+    }
+    let clean: String = key
+        .chars()
+        .take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_')
+        .collect();
+    if !clean.is_empty() {
+        key = clean;
+    }
+    let alias = match key.as_str() {
+        "dab_radio" | "dab_" | "dab" | "rtlsdr" | "rtlsdr_radio" => "dab",
+        "fm_radio" | "fm_" | "fm" => "fm",
+        "webradio" | "web_radio" | "internet_radio" => "radio",
+        "tidal_connect" => "tidal",
+        "qobuz_connect" => "qobuz",
+        "spotify_connect" => "spotify",
+        "dlna" => "upnp",
+        other => other,
+    };
+    alias.to_string()
+}
+
+/// The text shown for a key: proper case for known services, upper case
+/// for codecs.
+pub fn format_label(key: &str) -> String {
+    match key {
+        "" => String::new(),
+        "tidal" => "Tidal".into(),
+        "qobuz" => "Qobuz".into(),
+        "spotify" => "Spotify".into(),
+        "radio" => "Webradio".into(),
+        "airplay" => "AirPlay".into(),
+        "bluetooth" => "Bluetooth".into(),
+        "upnp" => "UPnP".into(),
+        "dab" => "DAB".into(),
+        "fm" => "FM".into(),
+        "cd" => "CD".into(),
+        other => other.to_ascii_uppercase(),
+    }
+}
+
+/// Font size for the type text when the meter sets none: inside a real box,
+/// the smaller of the samplerate size and `0.45 × height`, at least 10;
+/// without a box, the samplerate size.
+pub fn type_font_size(sample_size: u32, box_height: Option<u32>) -> u32 {
+    let sample = sample_size.max(1);
+    match box_height {
+        Some(h) if h > 1 => sample.min(((h as f32) * 0.45) as u32).max(10).min(sample.max(10)),
+        _ => sample,
+    }
 }
 
 /// Which theme font a text is set in.
@@ -170,6 +288,14 @@ pub struct SkinDesc {
     pub time: Option<TextSpec>,
     #[serde(default)]
     pub art: Option<ArtSpec>,
+    #[serde(default)]
+    pub type_area: Option<TypeSpec>,
+    /// `format-icons` inside the theme folder, searched first. Empty when none.
+    #[serde(default)]
+    pub skin_icons: String,
+    /// `format-icons` beside the player's handlers, searched second.
+    #[serde(default)]
+    pub plugin_icons: String,
 }
 
 impl Default for SkinDesc {
@@ -204,6 +330,9 @@ impl SkinDesc {
             sample: None,
             time: None,
             art: None,
+            type_area: None,
+            skin_icons: String::new(),
+            plugin_icons: String::new(),
         }
     }
 }
@@ -762,18 +891,84 @@ pub fn meter_texts(meters_txt: &str, meter: &str) -> MeterTexts {
             max_width: limit,
         })
     };
+    // The samplerate line takes the type colour before the font colour.
+    let type_color = get("playinfo.type.color").and_then(color_triplet).unwrap_or(font_color);
+    let mut sample = spec("playinfo.samplerate.pos", "playinfo.samplerate.color", TextStyle::Light, 0);
+    if let Some(s) = sample.as_mut() {
+        if get("playinfo.samplerate.color").and_then(color_triplet).is_none() {
+            s.color = type_color;
+        }
+    }
     MeterTexts {
         title: spec("playinfo.title.pos", "playinfo.title.color", TextStyle::Bold, max_width),
         artist: spec("playinfo.artist.pos", "playinfo.artist.color", TextStyle::Light, max_width),
         album: spec("playinfo.album.pos", "playinfo.album.color", TextStyle::Light, max_width),
-        sample: spec("playinfo.samplerate.pos", "playinfo.samplerate.color", TextStyle::Light, 0),
+        sample,
         time: spec("time.remaining.pos", "time.remaining.color", TextStyle::Digi, 0),
     }
 }
 
+/// The type area for the selected meter. `default_mode` is the player's
+/// `playinfo.type.mode` from `[current]`, used when the meter sets none;
+/// `theme_dir` resolves `albumart.mask` and the skin icons.
+pub fn meter_type(meters_txt: &str, meter: &str, default_mode: Option<&str>) -> Option<TypeSpec> {
+    let values = section_values(meters_txt, meter);
+    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+    let (x, y) = pair_pos(get("playinfo.type.pos")?)?;
+    let mode_word = |word: Option<&str>| match word.map(|w| w.trim().to_ascii_lowercase()).as_deref() {
+        Some("icon") => Some(TypeMode::Icon),
+        Some("text") => Some(TypeMode::Text),
+        Some("both") => Some(TypeMode::Both),
+        _ => None,
+    };
+    let mode = mode_word(get("playinfo.type.mode"))
+        .or_else(|| mode_word(default_mode))
+        .unwrap_or(TypeMode::Icon);
+    let box_size = get("playinfo.type.dimension")
+        .and_then(pair_pos)
+        .filter(|&(w, h)| w > 0 && h > 0 && (w, h) != (1, 1));
+    if box_size.is_none() && mode != TypeMode::Text {
+        return None;
+    }
+    let align = match get("playinfo.type.align").map(|w| w.trim().to_ascii_lowercase()).as_deref() {
+        Some("left") => TypeAlign::Left,
+        Some("right") => TypeAlign::Right,
+        _ => TypeAlign::Center,
+    };
+    let font_color = get("font.color").and_then(color_triplet).unwrap_or([255, 255, 255]);
+    let color = get("playinfo.type.color").and_then(color_triplet).unwrap_or(font_color);
+    let sample_style = get("playinfo.samplerate.pos")
+        .and_then(|pos| pos.split(',').nth(2))
+        .and_then(style_word)
+        .unwrap_or(TextStyle::Light);
+    let number = |key: &str, default: u32| get(key).and_then(|v| v.parse().ok()).unwrap_or(default);
+    let sample_size = match sample_style {
+        TextStyle::Light => number("font.size.light", 30),
+        TextStyle::Regular => number("font.size.regular", 35),
+        TextStyle::Bold => number("font.size.bold", 40),
+        TextStyle::Digi => number("font.size.digi", 40),
+    };
+    let font_size = get("playinfo.type.fontsize")
+        .and_then(|v| v.parse::<u32>().ok())
+        .filter(|n| *n > 0)
+        .unwrap_or_else(|| type_font_size(sample_size, box_size.map(|(_, h)| h)));
+    Some(TypeSpec {
+        x,
+        y,
+        box_size,
+        mode,
+        align,
+        color,
+        font_size,
+        font_style: sample_style,
+    })
+}
+
 /// Album art box for the selected meter: `albumart.pos` as `x,y` and
-/// `albumart.dimension` as `w,h`. Both must be present.
-pub fn meter_art(meters_txt: &str, meter: &str) -> Option<ArtSpec> {
+/// `albumart.dimension` as `w,h`. Both must be present. `albumart.mask` is
+/// a file in `theme_dir`; `albumart.border` is a width in pixels drawn in
+/// `font.color`.
+pub fn meter_art(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<ArtSpec> {
     let values = section_values(meters_txt, meter);
     let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
     let (x, y) = pair_pos(get("albumart.pos")?)?;
@@ -781,7 +976,24 @@ pub fn meter_art(meters_txt: &str, meter: &str) -> Option<ArtSpec> {
     if w == 0 || h == 0 {
         return None;
     }
-    Some(ArtSpec { x, y, w, h })
+    let mask = match get("albumart.mask").map(str::trim) {
+        Some(file) if !file.is_empty() && !theme_dir.is_empty() => {
+            format!("{}/{}", theme_dir.trim_end_matches('/'), file)
+        }
+        Some(file) if !file.is_empty() => file.to_string(),
+        _ => String::new(),
+    };
+    let border = get("albumart.border").and_then(|v| v.trim().parse().ok()).unwrap_or(0);
+    let border_color = get("font.color").and_then(color_triplet).unwrap_or([255, 255, 255]);
+    Some(ArtSpec {
+        x,
+        y,
+        w,
+        h,
+        mask,
+        border,
+        border_color,
+    })
 }
 
 /// Sleep between steps for a frame rate in frames per second.
@@ -873,11 +1085,45 @@ mod tests {
     #[test]
     fn album_art_box_needs_position_and_dimension() {
         let text = "[black-white]\nalbumart.pos = 36,25\nalbumart.dimension = 201,201\n";
-        assert_eq!(
-            meter_art(text, "black-white"),
-            Some(ArtSpec { x: 36, y: 25, w: 201, h: 201 })
-        );
-        assert_eq!(meter_art("[bar]\nalbumart.pos = 1,2\n", "bar"), None);
+        let art = meter_art(text, "black-white", "/themes/t").unwrap();
+        assert_eq!((art.x, art.y, art.w, art.h), (36, 25, 201, 201));
+        assert_eq!((art.mask.as_str(), art.border, art.border_color), ("", 0, [255, 255, 255]));
+        assert_eq!(meter_art("[bar]\nalbumart.pos = 1,2\n", "bar", ""), None);
+        let masked = "[v]\nalbumart.pos = 27,28\nalbumart.dimension = 432,432\nalbumart.mask = mask.png\nalbumart.border = 2\nfont.color = 10,20,30\n";
+        let art = meter_art(masked, "v", "/themes/v").unwrap();
+        assert_eq!((art.mask.as_str(), art.border, art.border_color), ("/themes/v/mask.png", 2, [10, 20, 30]));
+    }
+
+    #[test]
+    fn track_types_become_keys_and_labels() {
+        assert_eq!(format_key("FLAC"), "flac");
+        assert_eq!(format_key("dsf"), "dsd");
+        assert_eq!(format_key("dab_●◦◦◦◦"), "dab");
+        assert_eq!(format_key("Tidal Connect"), "tidal");
+        assert_eq!(format_key("The Main Mix - "), "the_main_mix_");
+        assert_eq!(format_key("WebRadio"), "radio");
+        assert_eq!(format_label("radio"), "Webradio");
+        assert_eq!(format_label("flac"), "FLAC");
+        assert_eq!(format_label(""), "");
+    }
+
+    #[test]
+    fn type_area_follows_mode_box_and_size_rules() {
+        let text = "[m]\nplayinfo.type.pos = 847,149\nplayinfo.type.dimension = 45,45\n\
+            playinfo.type.color = 204,176,97\nplayinfo.samplerate.pos = 902,160,regular\nfont.size.regular = 20\n";
+        let spec = meter_type(text, "m", Some("icon")).unwrap();
+        assert_eq!((spec.x, spec.y, spec.box_size), (847, 149, Some((45, 45))));
+        assert_eq!((spec.mode, spec.align, spec.color), (TypeMode::Icon, TypeAlign::Center, [204, 176, 97]));
+        assert_eq!((spec.font_size, spec.font_style), (20, TextStyle::Regular));
+        let meter_wins = "[m]\nplayinfo.type.pos = 1,1\nplayinfo.type.dimension = 53,53\nplayinfo.type.mode = both\nplayinfo.type.align = right\nplayinfo.type.fontsize = 18\n";
+        let spec = meter_type(meter_wins, "m", Some("text")).unwrap();
+        assert_eq!((spec.mode, spec.align, spec.font_size), (TypeMode::Both, TypeAlign::Right, 18));
+        assert_eq!(meter_type("[m]\nplayinfo.type.pos = 1,1\nplayinfo.type.dimension = 1,1\n", "m", None), None);
+        let text_only = meter_type("[m]\nplayinfo.type.pos = 5,6\nplayinfo.type.mode = text\n", "m", None).unwrap();
+        assert_eq!((text_only.box_size, text_only.font_size), (None, 30));
+        assert_eq!(type_font_size(20, Some(45)), 20);
+        assert_eq!(type_font_size(40, Some(45)), 20);
+        assert_eq!(type_font_size(40, Some(12)), 10);
     }
 
     #[test]
