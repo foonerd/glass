@@ -386,6 +386,7 @@ fn main() -> ExitCode {
     let mut profile_sum: Vec<(&'static str, u64)> = Vec::new();
     let mut profile_loop = [0u64; 4];
     let mut profile_frames = 0u32;
+    let mut profile_window = Instant::now();
     // The art picture, decoded and stretched once per file and box, cut with
     // the theme's mask when it has one.
     let mut art_cache: Option<(plot::Art, expose::Frame)> = None;
@@ -712,8 +713,10 @@ fn main() -> ExitCode {
             if profile_frames == 60 {
                 let n = u64::from(profile_frames);
                 let stages: Vec<String> = profile_sum.iter().map(|(name, sum)| format!("{name} {}us", sum / n)).collect();
+                let achieved = n as f64 / profile_window.elapsed().as_secs_f64();
+                profile_window = Instant::now();
                 println!(
-                    "glass: profile per frame: poll {}us, step {}us, raster {}us [{}], show {}us",
+                    "glass: profile per frame: {achieved:.1} fps, poll {}us, step {}us, raster {}us [{}], show {}us",
                     profile_loop[0] / n, profile_loop[1] / n, profile_loop[2] / n, stages.join(", "), profile_loop[3] / n
                 );
                 profile_sum.clear();
@@ -724,7 +727,11 @@ fn main() -> ExitCode {
         if once {
             break;
         }
-        thread::sleep(period);
+        // Pace to the frame rate: sleep what is left of the period, not a whole one.
+        let spent = frame_started.elapsed();
+        if spent < period {
+            thread::sleep(period - spent);
+        }
     }
     if running_for_plugin {
         let _ = std::fs::remove_file(RUN_FLAG);

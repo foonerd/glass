@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.24] - 2026-09-25
+
+Fixed: the spectrum theme is taken from the folder that carries the meter theme's own name, falling back to the spectrum configuration's `spectrum.folder`. A meter shown through `--theme`, or before the player has mirrored a theme change into the spectrum configuration, drew no spectrum.
+
 ## [0.4.23] - 2026-09-25
 
 Turning pictures cost less. A turned picture visits only the span each frame row covers; records, reels, turning art and knobs take the nearest texel in fixed point, as the engine's plain rotation does, while needles and the tonearm keep bilinear sampling; the tonearm is kept turned per half degree like the needles. On the Pi 5 the Pioneer Gold turntable went from 55 to 25 percent of one core at 30 frames a second and holds 60 frames a second at 41 percent. `--fps N` stands in for `frame.rate` for one run.
