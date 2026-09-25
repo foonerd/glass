@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.26] - 2026-09-25
+
+A frame is planned, then painted. The drawing steps of a frame are laid out first as read-only operations, and the canvas is painted in row bands that several threads share. By default a frame takes from one thread up to one a core as it needs: painting that overruns its share of the period gets another thread, painting that would fit in half the period with one fewer gives it back. `--threads N` fixes the count. Lines set in type for the type area and the gauges are kept between frames. The turned pictures kept for needles and the tonearm share a byte budget. The screen and face pictures are dropped once the base is composed. Glass says which SDL renderer draws the window at start.
+
+Fixed: the glow of a picture indicator was composed onto black and darkened its surroundings.
+
 ## [0.4.25] - 2026-09-25
 
 Fixed: a picture kept turned (a needle or the tonearm) keeps the alpha of its soft edges. The kept copy was composed onto black, so a tonearm with a translucent glow or shadow drew a black surface around the arm since 0.4.23, and needles with soft edges carried a dark fringe since 0.4.20.

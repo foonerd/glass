@@ -25,8 +25,6 @@ fn load_theme(dir: &str, file: &str) -> Option<expose::Frame> {
 
 /// Everything decoded once per meter: its pictures, fonts and art mask.
 struct Assets {
-    background: Option<expose::Frame>,
-    face: Option<expose::Frame>,
     front: Option<Spans>,
     /// The indicator for the left or mono channel, mirrored when the meter flips it.
     indicator: Option<expose::Frame>,
@@ -42,7 +40,8 @@ struct Assets {
     reels: (Option<expose::Frame>, Option<expose::Frame>),
     /// The indicators' prepared states and pictures.
     indicators: Option<IndicatorAssets>,
-    /// The screen picture and face composed once per meter.
+    /// The screen picture and face composed once per meter; the pictures
+    /// themselves are not kept.
     base: expose::Frame,
 }
 
@@ -70,8 +69,6 @@ impl Assets {
         let face = load_theme(&skin.theme_dir, &skin.face);
         let base = compose_base(skin.width.max(1), skin.height.max(1), background.as_ref(), face.as_ref(), skin.face_at);
         Self {
-            background,
-            face,
             base,
             front: load_theme(&skin.theme_dir, &skin.front).map(Spans::new),
             indicator,
@@ -219,6 +216,7 @@ fn main() -> ExitCode {
     let mut list = false;
     let mut snapshot: Option<String> = None;
     let mut settle_s: f32 = 4.0;
+    let mut threads: Option<usize> = None;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -267,6 +265,13 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
+            "--threads" => match args.next().and_then(|s| s.parse::<usize>().ok()) {
+                Some(n) => threads = Some(n.clamp(1, 64)),
+                None => {
+                    eprintln!("glass: --threads needs a whole number");
+                    return ExitCode::from(2);
+                }
+            },
             "--settle" => match args.next().and_then(|s| s.parse::<f32>().ok()) {
                 Some(seconds) => settle_s = seconds.max(0.5),
                 None => {
@@ -285,13 +290,14 @@ fn main() -> ExitCode {
             "--help" => {
                 println!(
                     "glass [--once] [--headless] [--print] [--output frame.png|frame.ppm] [--record step.json]\n      \
-                     [--theme FOLDER] [--meter NAME|random|a,b,c] [--interval SECONDS] [--fps N]\n      \
+                     [--theme FOLDER] [--meter NAME|random|a,b,c] [--interval SECONDS] [--fps N] [--threads N]\n      \
                      [--list] [--snapshot DIR [--settle SECONDS]]\n\
                      Reads {meter} and {spectrum}.\n\
                      A window opens when DISPLAY is set. --headless skips it.\n\
                      --output writes every frame as a PNG or PPM and still rasters.\n\
                      --record writes the skin, input and scene of each step as JSON.\n\
                      --theme, --meter, --interval and --fps stand in for the installed configuration's values.\n\
+                     --threads N paints every frame on N threads; by default a frame takes from one thread up to one a core as it needs.\n\
                      --list prints the installed themes and their meters.\n\
                      --snapshot shows each meter of the theme (or of the --meter list) for --settle seconds\n\
                      and writes DIR/<theme>/<meter>.png, then leaves.",
@@ -354,10 +360,16 @@ fn main() -> ExitCode {
     let mut source = PipeSource::installed().with_skin(&skin);
     let frame_rate = intake::installed_frame_rate();
     let started = Instant::now();
-    let mut motion = Motion::default();
+    // A frame is painted in row bands across the cores when it needs them:
+    // from one thread up to one per core, at most eight. --threads fixes the count.
+    let (threads, adaptive) = match threads {
+        Some(fixed) => (fixed, None),
+        None => (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(8), Some(frame_rate)),
+    };
+    let mut motion = Motion::new(threads, adaptive);
     let period = frame_period(frame_rate);
     println!(
-        "glass: frame.rate={frame_rate} size={}x{} theme={} meter={}",
+        "glass: frame.rate={frame_rate} size={}x{} theme={} meter={} threads={threads}{}",
         skin.width,
         skin.height,
         if skin.theme_dir.is_empty() {
@@ -365,7 +377,8 @@ fn main() -> ExitCode {
         } else {
             &skin.theme_dir
         },
-        skin.name
+        skin.name,
+        if adaptive.is_some() { " as needed" } else { "" }
     );
     let mut assets = Assets::load(&skin);
     println!("glass: fonts loaded {} of 5", assets.fonts.loaded());
@@ -442,7 +455,7 @@ fn main() -> ExitCode {
             fanart_slots = Default::default();
             vinyl_slot = PlainSlot::default();
             reel_slots = Default::default();
-            motion = Motion::default();
+            motion = Motion::new(threads, adaptive);
             let now = started.elapsed().as_millis() as u64;
             if skin.transition.fade && fade_lock_free(skin.transition.duration_s) {
                 motion.fade.begin_in(now, skin.transition.duration_s, skin.transition.white, skin.transition.opacity);
@@ -614,8 +627,8 @@ fn main() -> ExitCode {
             let frame = raster_over(
                 &scene,
                 Stack {
-                    screen: assets.background.as_ref(),
-                    face: assets.face.as_ref(),
+                    screen: None,
+                    face: None,
                     front: assets.front.as_ref(),
                     needle: assets.indicator.as_ref(),
                     needle_right: assets.indicator_right.as_ref(),
@@ -686,7 +699,7 @@ fn main() -> ExitCode {
                 let now = started.elapsed().as_millis() as u64;
                 motion.fade.begin_out(now, skin.transition.duration_s, skin.transition.white, skin.transition.opacity);
                 while motion.fade.running(started.elapsed().as_millis() as u64) {
-                    let frame = raster_over(&scene, Stack { screen: assets.background.as_ref(), face: assets.face.as_ref(), front: assets.front.as_ref(), needle: assets.indicator.as_ref(), needle_right: assets.indicator_right.as_ref(), face_at: skin.face_at, fonts: Some(&assets.fonts), art: art_cache.as_ref().map(|(_, frame)| frame), icon: icon_cache.as_ref().map(|(_, frame)| frame), spectrum: assets.spectrum.as_ref(), folder_pictures: &folder_pictures, fanart: (fanart_slots.0.picture.as_ref(), fanart_slots.1.picture.as_ref()), vinyl: vinyl_slot.frame.as_ref(), tonearm: assets.tonearm.as_ref(), reels: (reel_pictures.0.as_ref(), reel_pictures.1.as_ref()), indicators: assets.indicators.as_ref(), base: Some(&assets.base) }, &mut motion, started.elapsed().as_millis() as u64);
+                    let frame = raster_over(&scene, Stack { screen: None, face: None, front: assets.front.as_ref(), needle: assets.indicator.as_ref(), needle_right: assets.indicator_right.as_ref(), face_at: skin.face_at, fonts: Some(&assets.fonts), art: art_cache.as_ref().map(|(_, frame)| frame), icon: icon_cache.as_ref().map(|(_, frame)| frame), spectrum: assets.spectrum.as_ref(), folder_pictures: &folder_pictures, fanart: (fanart_slots.0.picture.as_ref(), fanart_slots.1.picture.as_ref()), vinyl: vinyl_slot.frame.as_ref(), tonearm: assets.tonearm.as_ref(), reels: (reel_pictures.0.as_ref(), reel_pictures.1.as_ref()), indicators: assets.indicators.as_ref(), base: Some(&assets.base) }, &mut motion, started.elapsed().as_millis() as u64);
                     if window.show(frame).is_err() {
                         break;
                     }
@@ -716,8 +729,8 @@ fn main() -> ExitCode {
                 let achieved = n as f64 / profile_window.elapsed().as_secs_f64();
                 profile_window = Instant::now();
                 println!(
-                    "glass: profile per frame: {achieved:.1} fps, poll {}us, step {}us, raster {}us [{}], show {}us",
-                    profile_loop[0] / n, profile_loop[1] / n, profile_loop[2] / n, stages.join(", "), profile_loop[3] / n
+                    "glass: profile per frame: {achieved:.1} fps, painters {}, poll {}us, step {}us, raster {}us [{}], show {}us",
+                    motion.painters(), profile_loop[0] / n, profile_loop[1] / n, profile_loop[2] / n, stages.join(", "), profile_loop[3] / n
                 );
                 profile_sum.clear();
                 profile_loop = [0; 4];
