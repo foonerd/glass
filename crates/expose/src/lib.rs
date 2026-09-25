@@ -7,6 +7,7 @@ use std::collections::HashMap;
 
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
 use lead::{Direction, Fill, FolderLayerSpec, FontFiles, LinearSpec, MeterKind, Scale, ScrollDirection, SpectrumSpec, TextAlign, TextStyle, TypeAlign, TypeMode, ZOrder};
+use lead::TonearmSpec;
 use plot::{Fanart, Scene, Text, TypeArea};
 
 const BG: [u8; 4] = [12, 12, 16, 255];
@@ -195,6 +196,8 @@ pub fn raster(scene: &Scene) -> Frame {
             spectrum: None,
             folder_pictures: &[],
             fanart: (None, None),
+            vinyl: None,
+            tonearm: None,
         },
         &mut Motion::default(),
         0,
@@ -264,6 +267,9 @@ pub struct Stack<'a> {
     pub folder_pictures: &'a [Option<FolderPicture>],
     /// The fanart on show and the one it replaces, fitted to the slot.
     pub fanart: (Option<&'a FolderPicture>, Option<&'a FolderPicture>),
+    /// The record picture, already stretched to `vinyl.dimension`, and the tonearm picture.
+    pub vinyl: Option<&'a Frame>,
+    pub tonearm: Option<&'a Frame>,
 }
 
 /// Theme order: full-screen picture, meter face, album art, folder layers, needles, meter
@@ -284,11 +290,41 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
     if let Some(face) = stack.face {
         blit_at(&mut rgba, width, height, face, stack.face_at);
     }
+    // The tonearm's state decides whether the record keeps turning while it lifts.
+    let tonearm_animating = scene.tonearm.as_ref().map_or(false, |spec| {
+        motion.tonearm.update(spec, scene.playing, scene.progress_pct, scene.time_remaining, now_ms);
+        motion.tonearm.is_animating()
+    });
+    let lift_s = scene.tonearm.as_ref().map_or(1.5, |spec| spec.lift_s);
+    let vinyl_rpm = scene.vinyl.as_ref().map_or(0.0, |v| v.spec.rpm);
+    let art_rpm = scene.art.as_ref().filter(|a| a.rotation).map_or(0.0, |a| a.rpm);
+    let turn_rpm = if scene.vinyl.is_some() { vinyl_rpm } else { art_rpm };
+    let angle = motion.vinyl.advance(turn_rpm, scene.vinyl.as_ref().map_or(true, |v| v.spec.clockwise), scene.playing, scene.transitional, tonearm_animating, lift_s, now_ms);
+    if let (Some(vinyl), Some(picture)) = (&scene.vinyl, stack.vinyl) {
+        let pivot = (picture.width as f32 / 2.0, picture.height as f32 / 2.0);
+        blit_pivot(&mut rgba, width, height, picture, pivot, (vinyl.spec.center.0 as f32, vinyl.spec.center.1 as f32), -angle);
+    }
     if let (Some(art), Some(place)) = (stack.art, &scene.art) {
-        blit_at(&mut rgba, width, height, art, (place.x, place.y));
-        if place.border > 0 {
-            let color = [place.border_color[0], place.border_color[1], place.border_color[2], 255];
-            draw_border(&mut rgba, width, height, (place.x, place.y, place.w, place.h), place.border, color);
+        let color = [place.border_color[0], place.border_color[1], place.border_color[2], 255];
+        if place.rotation && place.rpm > 0.0 {
+            // Turning art sits on the record's centre when there is one.
+            let centre = scene
+                .vinyl
+                .as_ref()
+                .map(|v| (v.spec.center.0 as f32, v.spec.center.1 as f32))
+                .unwrap_or((place.x as f32 + place.w as f32 / 2.0, place.y as f32 + place.h as f32 / 2.0));
+            blit_pivot(&mut rgba, width, height, art, (art.width as f32 / 2.0, art.height as f32 / 2.0), centre, -angle);
+            let (cx, cy) = (centre.0.round() as i32, centre.1.round() as i32);
+            if place.border > 0 {
+                draw_circle(&mut rgba, width, height, cx, cy, (place.w.min(place.h) / 2) as i32, place.border as i32, color);
+            }
+            fill_circle(&mut rgba, width, height, cx, cy, 5, color);
+            draw_circle(&mut rgba, width, height, cx, cy, (place.w.min(place.h) / 10).max(3) as i32, 1, color);
+        } else {
+            blit_at(&mut rgba, width, height, art, (place.x, place.y));
+            if place.border > 0 {
+                draw_border(&mut rgba, width, height, (place.x, place.y, place.w, place.h), place.border, color);
+            }
         }
     }
     draw_folder_layers(&mut rgba, width, height, scene, stack.folder_pictures, ZOrder::Background);
@@ -353,6 +389,17 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
     };
     for text in &scene.texts {
         draw_text_moving(&mut frame, text, stack.fonts, &mut motion.text, now_ms);
+    }
+    if let (Some(spec), Some(picture)) = (&scene.tonearm, stack.tonearm) {
+        blit_pivot(
+            &mut frame.rgba,
+            width,
+            height,
+            picture,
+            (spec.pivot_image.0 as f32, spec.pivot_image.1 as f32),
+            (spec.pivot_screen.0 as f32, spec.pivot_screen.1 as f32),
+            motion.tonearm.angle(),
+        );
     }
     if let Some(area) = &scene.type_area {
         draw_type_area(&mut frame, area, stack.icon, stack.fonts);
@@ -863,47 +910,263 @@ fn sample_bilinear(src: &Frame, sx: f32, sy: f32) -> [u8; 4] {
 /// turn the needle to the left of vertical, as the theme files count them.
 /// Every frame pixel inside the turned bounds samples the sprite bilinearly,
 /// so the edge stays smooth and the alpha channel blends over the face.
-fn blit_rotated(
-    dst: &mut [u8],
-    dst_w: u32,
-    dst_h: u32,
-    src: &Frame,
-    at: (i32, i32),
-    degrees: f32,
-    distance: f32,
-) {
+fn blit_rotated(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (i32, i32), degrees: f32, distance: f32) {
+    // The needle turns about a point `distance` below its picture's centre,
+    // which the theme places on the origin.
+    let pivot = (src.width as f32 / 2.0, src.height as f32 / 2.0 + distance);
+    blit_pivot(dst, dst_w, dst_h, src, pivot, (at.0 as f32, at.1 as f32), degrees);
+}
+
+/// Blend a picture turned `degrees` counter-clockwise about `pivot_image`,
+/// that point landing on `pivot_screen`. Bilinear, premultiplied alpha,
+/// inverse mapping from every frame pixel the turned picture can reach.
+fn blit_pivot(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, pivot_image: (f32, f32), pivot_screen: (f32, f32), degrees: f32) {
     if src.width == 0 || src.height == 0 || dst_w == 0 || dst_h == 0 {
         return;
     }
     let rad = degrees.to_radians();
     let (sin, cos) = rad.sin_cos();
-    let half_w = src.width as f32 / 2.0;
-    let half_h = src.height as f32 / 2.0;
-    let center_x = at.0 as f32 - distance * sin;
-    let center_y = at.1 as f32 - distance * cos;
-    let extent_x = (half_w * cos).abs() + (half_h * sin).abs() + 1.0;
-    let extent_y = (half_w * sin).abs() + (half_h * cos).abs() + 1.0;
-    let x_from = ((center_x - extent_x).floor() as i32).max(0);
-    let x_to = ((center_x + extent_x).ceil() as i32).min(dst_w as i32 - 1);
-    let y_from = ((center_y - extent_y).floor() as i32).max(0);
-    let y_to = ((center_y + extent_y).ceil() as i32).min(dst_h as i32 - 1);
+    let (px, py) = pivot_image;
+    let reach = [(0.0, 0.0), (src.width as f32, 0.0), (0.0, src.height as f32), (src.width as f32, src.height as f32)]
+        .iter()
+        .map(|(x, y)| ((x - px).powi(2) + (y - py).powi(2)).sqrt())
+        .fold(0.0f32, f32::max)
+        + 1.0;
+    let x_from = ((pivot_screen.0 - reach).floor() as i32).max(0);
+    let x_to = ((pivot_screen.0 + reach).ceil() as i32).min(dst_w as i32 - 1);
+    let y_from = ((pivot_screen.1 - reach).floor() as i32).max(0);
+    let y_to = ((pivot_screen.1 + reach).ceil() as i32).min(dst_h as i32 - 1);
     for dy in y_from..=y_to {
         for dx in x_from..=x_to {
-            let vx = dx as f32 + 0.5 - center_x;
-            let vy = dy as f32 + 0.5 - center_y;
-            // Inverse of the rotation that carries the sprite onto the frame.
-            let sx = half_w + vx * cos - vy * sin;
-            let sy = half_h + vx * sin + vy * cos;
+            let vx = dx as f32 + 0.5 - pivot_screen.0;
+            let vy = dy as f32 + 0.5 - pivot_screen.1;
+            let sx = px + vx * cos - vy * sin;
+            let sy = py + vx * sin + vy * cos;
             if sx < 0.0 || sy < 0.0 || sx > src.width as f32 || sy > src.height as f32 {
                 continue;
             }
-            let px = sample_bilinear(src, sx, sy);
-            if px[3] == 0 {
+            let color = sample_bilinear(src, sx, sy);
+            if color[3] == 0 {
                 continue;
             }
             let d = (dy as usize * dst_w as usize + dx as usize) * 4;
-            blend(dst, d, px);
+            blend(dst, d, color);
         }
+    }
+}
+
+/// Cut a picture to the ellipse inscribed in its box, as turning art is cut
+/// when it has no mask of its own.
+pub fn apply_circle(frame: &Frame) -> Frame {
+    let mut out = frame.clone();
+    let (w, h) = (frame.width as f32, frame.height as f32);
+    let (rx, ry) = (w / 2.0, h / 2.0);
+    for y in 0..frame.height {
+        for x in 0..frame.width {
+            let nx = (x as f32 + 0.5 - rx) / rx;
+            let ny = (y as f32 + 0.5 - ry) / ry;
+            if nx * nx + ny * ny > 1.0 {
+                out.rgba[((y * frame.width + x) * 4 + 3) as usize] = 0;
+            }
+        }
+    }
+    out
+}
+
+/// A filled disc.
+fn fill_circle(dst: &mut [u8], dst_w: u32, dst_h: u32, cx: i32, cy: i32, r: i32, color: [u8; 4]) {
+    draw_circle(dst, dst_w, dst_h, cx, cy, r, r + 1, color);
+}
+
+/// A ring of the given thickness inside radius `r`, as the player's draw call
+/// makes it.
+fn draw_circle(dst: &mut [u8], dst_w: u32, dst_h: u32, cx: i32, cy: i32, r: i32, thickness: i32, color: [u8; 4]) {
+    if r <= 0 || thickness <= 0 {
+        return;
+    }
+    let inner = (r - thickness).max(0) as f32;
+    let outer = r as f32;
+    for y in (cy - r).max(0)..=(cy + r).min(dst_h as i32 - 1) {
+        for x in (cx - r).max(0)..=(cx + r).min(dst_w as i32 - 1) {
+            let d = (((x - cx) as f32).powi(2) + ((y - cy) as f32).powi(2)).sqrt();
+            if d <= outer && d >= inner {
+                blend(dst, (y as usize * dst_w as usize + x as usize) * 4, color);
+            }
+        }
+    }
+}
+
+/// The record's turn: it spins while the player plays, while a stop is only
+/// a transition, while the tonearm moves, and while it slows to a halt over
+/// the tonearm's lift after playback stops.
+#[derive(Default)]
+pub struct VinylMotion {
+    angle: f32,
+    last_ms: Option<u64>,
+    was_playing: bool,
+    decel_start_ms: Option<u64>,
+    decel_ms: u64,
+}
+
+impl VinylMotion {
+    /// Move the record on and give its angle in degrees, growing clockwise.
+    #[allow(clippy::too_many_arguments)]
+    pub fn advance(&mut self, rpm: f32, clockwise: bool, playing: bool, transitional: bool, tonearm_animating: bool, lift_s: f32, now_ms: u64) -> f32 {
+        if self.was_playing && !playing {
+            self.decel_start_ms = Some(now_ms);
+            self.decel_ms = (lift_s.max(0.0) * 1000.0) as u64;
+        }
+        if !self.was_playing && playing {
+            self.decel_start_ms = None;
+        }
+        self.was_playing = playing;
+        let mut factor = 1.0f32;
+        let mut decelerating = false;
+        if let Some(start) = self.decel_start_ms {
+            let elapsed = now_ms.saturating_sub(start);
+            if elapsed < self.decel_ms {
+                let p = elapsed as f32 / self.decel_ms as f32;
+                factor = (1.0 - p * p).max(0.0);
+                decelerating = true;
+            } else {
+                factor = 0.0;
+                if !tonearm_animating {
+                    self.decel_start_ms = None;
+                }
+            }
+        }
+        let spinning = playing || transitional || decelerating || tonearm_animating;
+        let dt = self.last_ms.map_or(0.0, |last| (now_ms.saturating_sub(last) as f32 / 1000.0).min(0.5));
+        self.last_ms = Some(now_ms);
+        if rpm > 0.0 && spinning && (playing || transitional || factor > 0.0) {
+            let direction = if clockwise { 1.0 } else { -1.0 };
+            self.angle = (self.angle + rpm * factor * 6.0 * dt * direction).rem_euclid(360.0);
+        }
+        self.angle
+    }
+
+    pub fn angle(&self) -> f32 {
+        self.angle
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+enum ArmState {
+    #[default]
+    Rest,
+    Drop,
+    Tracking,
+    Lift,
+}
+
+/// The tonearm's state: parked, dropping onto the record, following the
+/// track, or lifting back, with eased moves over the theme's durations.
+#[derive(Default)]
+pub struct TonearmMotion {
+    state: ArmState,
+    angle: f32,
+    started: bool,
+    anim_start_ms: u64,
+    anim_from: f32,
+    anim_to: f32,
+    anim_ms: u64,
+    early_lift: bool,
+    pending_target: Option<f32>,
+}
+
+impl TonearmMotion {
+    fn start_move(&mut self, to: f32, seconds: f32, now_ms: u64) {
+        self.anim_start_ms = now_ms;
+        self.anim_from = self.angle;
+        self.anim_to = to;
+        self.anim_ms = (seconds.max(0.0) * 1000.0) as u64;
+    }
+
+    /// Advance the current move; true when it has arrived.
+    fn step_move(&mut self, now_ms: u64) -> bool {
+        if self.anim_ms == 0 {
+            self.angle = self.anim_to;
+            return true;
+        }
+        let p = (now_ms.saturating_sub(self.anim_start_ms) as f32 / self.anim_ms as f32).min(1.0);
+        let eased = 1.0 - (1.0 - p) * (1.0 - p);
+        self.angle = self.anim_from + (self.anim_to - self.anim_from) * eased;
+        p >= 1.0
+    }
+
+    pub fn update(&mut self, spec: &TonearmSpec, playing: bool, progress_pct: f32, time_remaining: Option<f32>, now_ms: u64) {
+        if !self.started {
+            self.started = true;
+            self.angle = spec.rest;
+        }
+        let progress = progress_pct.clamp(0.0, 100.0);
+        let target = spec.start + (spec.end - spec.start) * (progress / 100.0);
+        match self.state {
+            ArmState::Rest => {
+                if playing {
+                    if self.early_lift && progress > 10.0 {
+                        return;
+                    }
+                    self.early_lift = false;
+                    self.state = ArmState::Drop;
+                    self.start_move(target, spec.drop_s, now_ms);
+                }
+            }
+            ArmState::Drop => {
+                if !playing {
+                    self.state = ArmState::Lift;
+                    self.early_lift = false;
+                    self.start_move(spec.rest, spec.lift_s, now_ms);
+                } else if self.step_move(now_ms) {
+                    self.angle = target;
+                    self.state = ArmState::Tracking;
+                }
+            }
+            ArmState::Tracking => {
+                if time_remaining.is_some_and(|left| left < 1.5 && left > 0.0) {
+                    self.state = ArmState::Lift;
+                    self.pending_target = None;
+                    self.early_lift = true;
+                    self.start_move(spec.rest, spec.lift_s, now_ms);
+                } else if !playing {
+                    self.state = ArmState::Lift;
+                    self.pending_target = None;
+                    self.early_lift = false;
+                    self.start_move(spec.rest, spec.lift_s, now_ms);
+                } else if (target - self.angle).abs() > 2.0 {
+                    self.state = ArmState::Lift;
+                    self.pending_target = Some(target);
+                    self.early_lift = false;
+                    self.start_move(spec.rest, spec.lift_s, now_ms);
+                } else if (target - self.angle).abs() > 0.2 {
+                    self.angle = target;
+                }
+            }
+            ArmState::Lift => {
+                if self.step_move(now_ms) {
+                    if self.early_lift {
+                        self.state = ArmState::Rest;
+                        self.pending_target = None;
+                    } else if let Some(pending) = self.pending_target.take() {
+                        self.state = ArmState::Drop;
+                        self.start_move(pending, spec.drop_s, now_ms);
+                    } else if playing {
+                        self.state = ArmState::Drop;
+                        self.start_move(target, spec.drop_s, now_ms);
+                    } else {
+                        self.state = ArmState::Rest;
+                    }
+                }
+            }
+        }
+    }
+
+    pub fn is_animating(&self) -> bool {
+        matches!(self.state, ArmState::Drop | ArmState::Lift)
+    }
+
+    pub fn angle(&self) -> f32 {
+        self.angle
     }
 }
 
@@ -1003,6 +1266,8 @@ fn draw_bar(dst: &mut [u8], dst_w: u32, dst_h: u32, sprite: &Frame, at: (i32, i3
 pub struct Motion {
     pub text: TextMotion,
     pub spectrum: SpectrumMotion,
+    pub vinyl: VinylMotion,
+    pub tonearm: TonearmMotion,
 }
 
 /// The topping of each spectrum bar: where it sits, or `None` before the
@@ -1507,6 +1772,45 @@ mod tests {
         // Gradient: first colour at the bottom.
         let g = gradient_frame(1, 3, &[[0, 0, 0, 255], [200, 0, 0, 255]]);
         assert_eq!((g.rgba[0], g.rgba[4], g.rgba[8]), (200, 100, 0));
+    }
+
+    #[test]
+    fn a_tonearm_drops_tracks_and_lifts_and_a_record_slows_to_a_halt() {
+        let spec = TonearmSpec { file: String::new(), pivot_screen: (0, 0), pivot_image: (0, 0), rest: 0.0, start: -20.0, end: -40.0, drop_s: 1.0, lift_s: 1.0 };
+        let mut arm = TonearmMotion::default();
+        arm.update(&spec, false, 0.0, None, 0);
+        assert_eq!((arm.angle(), arm.is_animating()), (0.0, false), "parked");
+        arm.update(&spec, true, 50.0, Some(100.0), 0);
+        assert!(arm.is_animating(), "dropping");
+        arm.update(&spec, true, 50.0, Some(100.0), 500);
+        assert!(arm.angle() < -20.0 && arm.angle() > -30.0, "eased past the midpoint: {}", arm.angle());
+        arm.update(&spec, true, 50.0, Some(100.0), 1000);
+        arm.update(&spec, true, 50.0, Some(100.0), 1001);
+        assert_eq!((arm.angle(), arm.is_animating()), (-30.0, false), "tracking at half the track");
+        arm.update(&spec, true, 55.0, Some(90.0), 1002);
+        assert_eq!(arm.angle(), -31.0, "follows a small move");
+        arm.update(&spec, true, 5.0, Some(190.0), 1003);
+        assert!(arm.is_animating(), "a jump lifts the arm first");
+        arm.update(&spec, true, 5.0, Some(190.0), 2100);
+        arm.update(&spec, true, 5.0, Some(190.0), 3200);
+        arm.update(&spec, true, 5.0, Some(190.0), 3201);
+        assert_eq!(arm.angle(), -21.0, "dropped back to the new position");
+        arm.update(&spec, true, 99.0, Some(1.0), 3202);
+        assert!(arm.is_animating(), "lifts early before the end");
+
+        let mut record = VinylMotion::default();
+        record.advance(60.0, true, true, false, false, 1.0, 0);
+        let a = record.advance(60.0, true, true, false, false, 1.0, 100);
+        assert!((a - 36.0).abs() < 0.01, "60 rpm turns 36 degrees in 100 ms: {a}");
+        record.advance(60.0, true, false, false, false, 1.0, 100);
+        let b = record.advance(60.0, true, false, false, false, 1.0, 600);
+        assert!(b > 36.0 && b < 36.0 + 180.0, "slowing: {b}");
+        let c = record.advance(60.0, true, false, false, false, 1.0, 1200);
+        let d = record.advance(60.0, true, false, false, false, 1.0, 1300);
+        assert_eq!(c, d, "stopped after the lift");
+        let mut ccw = VinylMotion::default();
+        ccw.advance(60.0, false, true, false, false, 1.0, 0);
+        assert!((ccw.advance(60.0, false, true, false, false, 1.0, 100) - 324.0).abs() < 0.01);
     }
 
     #[test]

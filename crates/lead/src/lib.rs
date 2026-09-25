@@ -111,6 +111,13 @@ pub struct Metadata {
     pub fanart_transition_ms: u32,
     #[serde(default)]
     pub fanart_elapsed_ms: u32,
+    /// `volatile` as the player reports it: a stop or pause that is only a
+    /// transition when true or unknown. `None` is unknown.
+    #[serde(default)]
+    pub volatile: Option<bool>,
+    /// The record picture for this track: the album's own file or the theme's.
+    #[serde(default)]
+    pub vinyl_file: String,
 }
 
 /// Where a text sits inside its box when it fits.
@@ -173,7 +180,7 @@ pub fn scroll_speeds_from_config(text: &str) -> ScrollSpeeds {
 }
 
 /// Where the album art is drawn. The picture is stretched to `w` by `h`.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ArtSpec {
     pub x: u32,
     pub y: u32,
@@ -188,6 +195,13 @@ pub struct ArtSpec {
     /// Border colour: the theme's `font.color`.
     #[serde(default = "white")]
     pub border_color: [u8; 3],
+    /// `albumart.rotation`: the art turns like a record label, cut to a
+    /// circle when it has no mask, with a spindle and ring drawn over it.
+    #[serde(default)]
+    pub rotation: bool,
+    /// Turns per minute, `albumart.rotation.speed` times the player's multiplier.
+    #[serde(default)]
+    pub rpm: f32,
 }
 
 fn white() -> [u8; 3] {
@@ -1076,6 +1090,12 @@ pub struct SkinDesc {
     pub folder_layers: Vec<FolderLayerSpec>,
     #[serde(default)]
     pub fanart: Option<FanartSpec>,
+    #[serde(default)]
+    pub vinyl: Option<VinylSpec>,
+    #[serde(default)]
+    pub tonearm: Option<TonearmSpec>,
+    #[serde(default)]
+    pub rotation: RotationSettings,
 }
 
 impl Default for SkinDesc {
@@ -1124,6 +1144,9 @@ impl SkinDesc {
             spectrum: None,
             folder_layers: Vec::new(),
             fanart: None,
+            vinyl: None,
+            tonearm: None,
+            rotation: RotationSettings::default(),
         }
     }
 }
@@ -1946,6 +1969,161 @@ pub fn meter_art(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<ArtSp
         mask,
         border,
         border_color,
+        rotation: truthy(get("albumart.rotation")),
+        rpm: get("albumart.rotation.speed").and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(0.0),
+    })
+}
+
+/// How turning pictures are paced: `rotation.quality` picks frames per
+/// second and the degree step of the engine's prepared frames (`low` 4 and 12,
+/// `medium` 8 and 6, `high` 15 and 3, `custom` takes `rotation.fps` with a
+/// step of `45 / fps` from 1 to 12), and only `custom` applies `rotation.speed`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RotationSettings {
+    pub fps: u32,
+    pub step: u32,
+    pub speed: f32,
+    /// `reel.direction`, the default turning direction: `cw` or `ccw`.
+    pub direction: String,
+}
+
+impl Default for RotationSettings {
+    fn default() -> Self {
+        Self { fps: 8, step: 6, speed: 1.0, direction: "cw".into() }
+    }
+}
+
+pub fn rotation_settings(text: &str) -> RotationSettings {
+    let quality = current_value(text, "rotation.quality").map(|v| v.to_ascii_lowercase()).unwrap_or_else(|| "medium".into());
+    let custom_fps = current_value(text, "rotation.fps").and_then(|v| v.parse::<u32>().ok()).unwrap_or(8).max(1);
+    let (fps, step, speed) = match quality.as_str() {
+        "low" => (4, 12, 1.0),
+        "high" => (15, 3, 1.0),
+        "custom" => (
+            custom_fps,
+            (45 / custom_fps).clamp(1, 12),
+            current_value(text, "rotation.speed").and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0),
+        ),
+        _ => (8, 6, 1.0),
+    };
+    RotationSettings {
+        fps,
+        step,
+        speed,
+        direction: current_value(text, "reel.direction").map(|v| v.to_ascii_lowercase()).filter(|v| v == "ccw").unwrap_or_else(|| "cw".into()),
+    }
+}
+
+/// A turning record under the album art.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VinylSpec {
+    /// The theme's picture, as a path.
+    pub theme_file: String,
+    /// A file name to prefer from the track's folder, or empty.
+    pub album_file: String,
+    pub x: i32,
+    pub y: i32,
+    /// `vinyl.center`: the point it turns about.
+    pub center: (i32, i32),
+    /// `vinyl.dimension`: the picture is stretched to this before it turns.
+    pub dimension: Option<(u32, u32)>,
+    pub clockwise: bool,
+    /// Turns per minute: `albumart.rotation.speed` times the multiplier, or a
+    /// stand-in reel's `reel.rotation.speed`.
+    pub rpm: f32,
+}
+
+/// `vinyl.*` of a meter. With a tonearm but no vinyl, a single reel stands
+/// in for the record, as the player's handler does.
+pub fn meter_vinyl(meters_txt: &str, meter: &str, theme_dir: &str, settings: &RotationSettings) -> Option<VinylSpec> {
+    let values = section_values(meters_txt, meter);
+    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str()).map(str::trim).filter(|v| !v.is_empty());
+    let ipair = |key: &str| -> Option<(i32, i32)> {
+        let mut parts = get(key)?.split(',');
+        Some((parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
+    };
+    let upair = |key: &str| -> Option<(u32, u32)> {
+        let mut parts = get(key)?.split(',');
+        Some((parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
+    };
+    let path = |file: &str| if theme_dir.is_empty() { file.to_string() } else { format!("{}/{}", theme_dir.trim_end_matches('/'), file) };
+    let has_tonearm = get("tonearm.filename").is_some() && get("tonearm.pivot.screen").is_some() && get("tonearm.pivot.image").is_some();
+    let mut file = get("vinyl.filename").map(str::to_string);
+    let mut pos = ipair("vinyl.pos");
+    let mut center = ipair("vinyl.center");
+    let mut rpm = get("albumart.rotation.speed").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+    if file.is_none() && has_tonearm {
+        if let (Some(reel), Some(c)) = (get("reel.left.filename"), ipair("reel.left.center")) {
+            file = Some(reel.to_string());
+            pos = ipair("reel.left.pos");
+            center = Some(c);
+        } else if let (Some(reel), Some(c)) = (get("reel.right.filename"), ipair("reel.right.center")) {
+            file = Some(reel.to_string());
+            pos = ipair("reel.right.pos");
+            center = Some(c);
+        }
+        if rpm <= 0.0 {
+            rpm = get("reel.rotation.speed").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+        }
+    }
+    let file = file?;
+    let center = center?;
+    // `a,b` prefers `a` from the track's folder with `b` from the theme;
+    // `,b` and `b` are the theme's picture alone.
+    let (album_file, theme_file) = match file.split_once(',') {
+        Some((album, theme)) => (album.trim().to_string(), if theme.trim().is_empty() { file.clone() } else { theme.trim().to_string() }),
+        None => (String::new(), file.clone()),
+    };
+    let (x, y) = pos.unwrap_or((0, 0));
+    let direction = get("vinyl.direction").map(|v| v.to_ascii_lowercase()).unwrap_or_else(|| settings.direction.clone());
+    Some(VinylSpec {
+        theme_file: path(&theme_file),
+        album_file,
+        x,
+        y,
+        center,
+        dimension: upair("vinyl.dimension").filter(|&(w, h)| w > 0 && h > 0),
+        clockwise: direction != "ccw",
+        rpm: (rpm * settings.speed).abs(),
+    })
+}
+
+/// A tonearm that follows the track: parked at `rest`, dropped onto the
+/// record over `drop_s` seconds, sweeping from `start` to `end` with the
+/// track, lifted back over `lift_s`. Angles in degrees, 0 pointing right,
+/// negative clockwise.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TonearmSpec {
+    pub file: String,
+    pub pivot_screen: (i32, i32),
+    pub pivot_image: (i32, i32),
+    pub rest: f32,
+    pub start: f32,
+    pub end: f32,
+    pub drop_s: f32,
+    pub lift_s: f32,
+}
+
+pub fn meter_tonearm(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<TonearmSpec> {
+    let values = section_values(meters_txt, meter);
+    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str()).map(str::trim).filter(|v| !v.is_empty());
+    let ipair = |key: &str| -> Option<(i32, i32)> {
+        let mut parts = get(key)?.split(',');
+        Some((parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
+    };
+    let number = |key: &str, default: f32| get(key).and_then(|v| v.parse::<f32>().ok()).unwrap_or(default);
+    let file = get("tonearm.filename")?;
+    let pivot_screen = ipair("tonearm.pivot.screen")?;
+    let pivot_image = ipair("tonearm.pivot.image")?;
+    Some(TonearmSpec {
+        file: if theme_dir.is_empty() { file.to_string() } else { format!("{}/{}", theme_dir.trim_end_matches('/'), file) },
+        pivot_screen,
+        pivot_image,
+        rest: number("tonearm.angle.rest", -30.0),
+        start: number("tonearm.angle.start", 0.0),
+        end: number("tonearm.angle.end", 25.0),
+        drop_s: number("tonearm.drop.duration", 1.5),
+        lift_s: number("tonearm.lift.duration", 1.0),
     })
 }
 
@@ -2134,6 +2312,26 @@ mod tests {
         let slot = meter_fanart(m, "m").unwrap();
         assert_eq!((slot.x, slot.y, slot.w, slot.h, slot.scale, slot.zorder), (0, 0, 1280, 720, Scale::Stretch, ZOrder::Background));
         assert_eq!(meter_fanart(m, "n"), None);
+    }
+
+    #[test]
+    fn a_turntable_meter_has_a_record_and_a_tonearm() {
+        let settings = rotation_settings("[current]\nrotation.quality = custom\nrotation.fps = 25\nrotation.speed = 2\nreel.direction = ccw\n");
+        assert_eq!(settings, RotationSettings { fps: 25, step: 1, speed: 2.0, direction: "ccw".into() });
+        assert_eq!(rotation_settings("[current]\nrotation.quality = high\nrotation.speed = 3\n"), RotationSettings { fps: 15, step: 3, speed: 1.0, direction: "cw".into() });
+        let m = "[t]\nalbumart.pos = 195,235\nalbumart.dimension = 198,198\nalbumart.rotation = True\nalbumart.rotation.speed = 30\n\
+            tonearm.filename = arm.png\ntonearm.pivot.screen = 629,166\ntonearm.pivot.image = 57,129\ntonearm.angle.rest = 0\ntonearm.angle.start = -27\n\
+            tonearm.angle.end = -47\ntonearm.drop.duration = 1.8\nvinyl.filename = vinyl.jpg,disc.png\nvinyl.pos = 50,92\nvinyl.center = 293,334\nvinyl.direction = cw\n\
+            [r]\ntonearm.filename = arm.png\ntonearm.pivot.screen = 1,1\ntonearm.pivot.image = 1,1\nreel.left.filename = reel.png\nreel.left.pos = 5,5\nreel.left.center = 40,40\nreel.rotation.speed = 3\n";
+        let vinyl = meter_vinyl(m, "t", "/th", &settings).unwrap();
+        assert_eq!((vinyl.theme_file.as_str(), vinyl.album_file.as_str(), vinyl.x, vinyl.y, vinyl.center, vinyl.clockwise, vinyl.rpm), ("/th/disc.png", "vinyl.jpg", 50, 92, (293, 334), true, 60.0));
+        let arm = meter_tonearm(m, "t", "/th").unwrap();
+        assert_eq!((arm.file.as_str(), arm.pivot_screen, arm.pivot_image, arm.rest, arm.start, arm.end, arm.drop_s, arm.lift_s), ("/th/arm.png", (629, 166), (57, 129), 0.0, -27.0, -47.0, 1.8, 1.0));
+        let art = meter_art(m, "t", "/th").unwrap();
+        assert!((art.rotation, art.rpm) == (true, 30.0));
+        let reel = meter_vinyl(m, "r", "", &settings).unwrap();
+        assert_eq!((reel.theme_file.as_str(), reel.center, reel.rpm, reel.clockwise), ("reel.png", (40, 40), 6.0, false), "a single reel stands in, turning the default way");
+        assert_eq!(meter_vinyl("[x]\nvinyl.filename = a.png\n", "x", "", &settings), None, "no centre, no record");
     }
 
     #[test]

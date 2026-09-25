@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.16] - 2026-09-25
+
+Turntables. `vinyl.filename` (a theme picture, or `album,theme` to prefer a file from the track's folder), `vinyl.pos`, `vinyl.center`, `vinyl.dimension` and `vinyl.direction` put a record under the art that turns at `albumart.rotation.speed` while the player plays, keeps turning through a transitional stop and while the tonearm moves, and slows to a halt over the tonearm's lift after playback stops. `albumart.rotation` turns the art with the record on the record's centre, cut to a circle when it has no mask, with a spindle and ring in `font.color` and a round border. `tonearm.*` places an arm that drops onto the record over `tonearm.drop.duration`, follows the track from `tonearm.angle.start` to `tonearm.angle.end`, lifts over `tonearm.lift.duration` when playback stops, a second and a half before the end, or on a jump, and drops again where the track now is. `rotation.quality`, `rotation.fps` and `rotation.speed` from the player pace and scale the turning; a tonearm with a single reel and no record turns the reel as the record. Needles, records and arms all turn through one routine that maps a pivot in the picture onto a point on screen.
+
 ## [0.4.15] - 2026-09-25
 
 Artist fanart. A meter with `fanart.pos` and `fanart.dimension` (plus `fanart.scale` and `fanart.zorder`, default `fit` and `background`) shows the pictures the player resolves for the playing artist through its `peppy_screensaver_artistfanart` endpoint, read from the player's own cache when it is there. The set is asked for when the artist changes and again on every track and every timed interval; the show moves one picture on per track and per interval, in order or at random as the player is set, remembering its place per artist and set. `fade` and `merge` transitions run over the player's duration; `none` cuts. Pictures for fanart and folder layers are now decoded off the frame loop, so a large picture never stalls a frame.

@@ -10,7 +10,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
 
-use expose::{flip_x, raster_over, read_art, read_icon, read_png, FolderPicture, Fonts, Motion, SpectrumAssets, Stack};
+use expose::{apply_circle, fit_art, flip_x, raster_over, read_art, read_icon, read_png, FolderPicture, Fonts, Motion, SpectrumAssets, Stack};
 use intake::{PipeSource, Selector, Source};
 use lead::{frame_period, FolderLayerSpec, Input, MeterKind, SkinDesc, TypeMode};
 use pane::{publish, write_ppm, Surface};
@@ -36,6 +36,8 @@ struct Assets {
     art_mask: Option<expose::Frame>,
     /// The spectrum's pictures when the meter shows one.
     spectrum: Option<SpectrumAssets>,
+    /// The tonearm picture when the meter has one.
+    tonearm: Option<expose::Frame>,
 }
 
 impl Assets {
@@ -71,6 +73,7 @@ impl Assets {
                 .filter(|art| !art.mask.is_empty())
                 .and_then(|art| read_png(std::path::Path::new(&art.mask))),
             spectrum: skin.spectrum.as_ref().map(SpectrumAssets::load),
+            tonearm: skin.tonearm.as_ref().and_then(|arm| read_png(std::path::Path::new(&arm.file))),
         }
     }
 }
@@ -120,6 +123,51 @@ impl PictureSlot {
             let _ = tx.send(FolderPicture::load(std::path::Path::new(&path), &spec));
         });
         self.pending = Some((file.to_string(), rx));
+    }
+}
+
+/// A picture decoded off the frame loop and stretched to a size, or kept
+/// as it is: the record.
+#[derive(Default)]
+struct PlainSlot {
+    key: (String, Option<(u32, u32)>),
+    frame: Option<expose::Frame>,
+    pending: Option<((String, Option<(u32, u32)>), mpsc::Receiver<Option<expose::Frame>>)>,
+}
+
+impl PlainSlot {
+    fn want(&mut self, file: &str, size: Option<(u32, u32)>) {
+        if let Some((wanted, rx)) = &self.pending {
+            match rx.try_recv() {
+                Ok(frame) => {
+                    self.key = wanted.clone();
+                    self.frame = frame;
+                    self.pending = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => self.pending = None,
+            }
+        }
+        let key = (file.to_string(), size);
+        if key == self.key || self.pending.as_ref().is_some_and(|(wanted, _)| *wanted == key) {
+            return;
+        }
+        if file.is_empty() {
+            self.key = key;
+            self.frame = None;
+            self.pending = None;
+            return;
+        }
+        let (tx, rx) = mpsc::channel();
+        let path = file.to_string();
+        thread::spawn(move || {
+            let frame = read_png(std::path::Path::new(&path)).map(|f| match size {
+                Some((w, h)) => fit_art(&f, w, h),
+                None => f,
+            });
+            let _ = tx.send(frame);
+        });
+        self.pending = Some((key, rx));
     }
 }
 
@@ -212,6 +260,8 @@ fn main() -> ExitCode {
     let mut folder_slots: Vec<PictureSlot> = Vec::new();
     // The fanart on show and the one it replaces during a transition.
     let mut fanart_slots: (PictureSlot, PictureSlot) = Default::default();
+    // The record picture for the track, stretched to the theme's dimension.
+    let mut vinyl_slot = PlainSlot::default();
     let show_window = env::var_os("DISPLAY").is_some() && !headless;
     let write_file = output.is_some();
     let serving_remote = false;
@@ -249,6 +299,7 @@ fn main() -> ExitCode {
                     icon_cache = None;
                     folder_slots.clear();
                     fanart_slots = Default::default();
+                    vinyl_slot = PlainSlot::default();
                     motion = Motion::default();
                     switched_at = Instant::now();
                     println!("glass: meter={name}");
@@ -284,6 +335,7 @@ fn main() -> ExitCode {
                     let stale = art_cache.as_ref().map_or(true, |(known, _)| known != art);
                     if stale {
                         art_cache = read_art(std::path::Path::new(&art.file), art.w, art.h, assets.art_mask.as_ref())
+                            .map(|frame| if art.rotation && art.mask.is_empty() { apply_circle(&frame) } else { frame })
                             .map(|frame| (art.clone(), frame));
                     }
                 }
@@ -338,6 +390,10 @@ fn main() -> ExitCode {
             } else {
                 fanart_slots = Default::default();
             }
+            match &scene.vinyl {
+                Some(vinyl) => vinyl_slot.want(&vinyl.file, vinyl.spec.dimension),
+                None => vinyl_slot = PlainSlot::default(),
+            }
             let frame = raster_over(
                 &scene,
                 Stack {
@@ -353,6 +409,8 @@ fn main() -> ExitCode {
                     spectrum: assets.spectrum.as_ref(),
                     folder_pictures: &folder_pictures,
                     fanart: (fanart_slots.0.picture.as_ref(), fanart_slots.1.picture.as_ref()),
+                    vinyl: vinyl_slot.frame.as_ref(),
+                    tonearm: assets.tonearm.as_ref(),
                 },
                 &mut motion,
                 started.elapsed().as_millis() as u64,
