@@ -48,6 +48,10 @@ impl Surface {
             .build()
             .map_err(|err| err.to_string())?;
         let canvas = window.into_canvas().build().map_err(|err| err.to_string())?;
+        // Say what draws the frames, so a report from a player tells whether
+        // the upload goes through hardware.
+        let info = canvas.info();
+        println!("glass: renderer {} on {}", info.name, video.current_video_driver());
         let creator = canvas.texture_creator();
         let pump = sdl.event_pump()?;
         // A player's glass shows no pointer.
