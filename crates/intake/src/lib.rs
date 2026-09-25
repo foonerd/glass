@@ -128,11 +128,125 @@ fn config_path() -> String {
     std::env::var("GLASS_CONFIG").unwrap_or_else(|_| CONFIG_TXT.to_string())
 }
 
+/// Values that stand in for the installed configuration's `[current]`
+/// theme, meter and rotation interval, for reviewing themes without
+/// touching the player's files.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Overrides {
+    pub theme: Option<String>,
+    pub meter: Option<String>,
+    /// Seconds between meters; also turns title-driven rotation off.
+    pub interval: Option<u32>,
+}
+
+static OVERRIDES: std::sync::Mutex<Option<Overrides>> = std::sync::Mutex::new(None);
+
+/// Apply overrides to every later read of the installed configuration.
+pub fn set_overrides(overrides: Overrides) {
+    if let Ok(mut slot) = OVERRIDES.lock() {
+        *slot = Some(overrides);
+    }
+}
+
+/// The `[current]` section with one key set to a value, added when absent.
+fn with_current(text: &str, key: &str, value: &str) -> String {
+    let mut out = String::new();
+    let mut in_current = false;
+    let mut written = false;
+    for line in text.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            if in_current && !written {
+                out.push_str(&format!("{key} = {value}\n"));
+                written = true;
+            }
+            in_current = trimmed.eq_ignore_ascii_case("[current]");
+            out.push_str(line);
+            out.push('\n');
+            continue;
+        }
+        if in_current && trimmed.split_once('=').is_some_and(|(k, _)| k.trim() == key) {
+            if !written {
+                out.push_str(&format!("{key} = {value}\n"));
+                written = true;
+            }
+            continue;
+        }
+        out.push_str(line);
+        out.push('\n');
+    }
+    if !written {
+        if in_current {
+            out.push_str(&format!("{key} = {value}\n"));
+        } else {
+            out.push_str(&format!("[current]\n{key} = {value}\n"));
+        }
+    }
+    out
+}
+
+/// The installed configuration's text with the overrides applied.
+fn config_text() -> Option<String> {
+    let mut text = std::fs::read_to_string(config_path()).ok()?;
+    let overrides = OVERRIDES.lock().ok().and_then(|slot| slot.clone());
+    if let Some(overrides) = overrides {
+        if let Some(theme) = &overrides.theme {
+            text = with_current(&text, "meter.folder", theme);
+        }
+        if let Some(meter) = &overrides.meter {
+            text = with_current(&text, "meter", meter);
+        }
+        if let Some(interval) = overrides.interval {
+            text = with_current(&text, "random.meter.interval", &interval.to_string());
+            text = with_current(&text, "random.change.title", "False");
+        }
+    }
+    Some(text)
+}
+
+/// Every theme folder under the installed `base.folder`, each with the
+/// names of its meters, in folder order.
+pub fn installed_themes() -> Vec<(String, Vec<String>)> {
+    let Some(text) = config_text() else {
+        return Vec::new();
+    };
+    let path = config_path();
+    let base = current_value(&text, "base.folder")
+        .filter(|b| !b.is_empty())
+        .map(PathBuf::from)
+        .or_else(|| Path::new(&path).parent().map(Path::to_path_buf))
+        .unwrap_or_else(|| PathBuf::from("."));
+    let Ok(entries) = std::fs::read_dir(&base) else {
+        return Vec::new();
+    };
+    let mut themes: Vec<(String, Vec<String>)> = entries
+        .flatten()
+        .filter(|e| e.path().join("meters.txt").is_file())
+        .map(|e| {
+            let sections = std::fs::read_to_string(e.path().join("meters.txt")).map(|m| meter_sections(&m)).unwrap_or_default();
+            (e.file_name().to_string_lossy().into_owned(), sections)
+        })
+        .collect();
+    themes.sort();
+    themes
+}
+
+/// The meters of the installed theme, after overrides.
+pub fn installed_meter_names() -> Vec<String> {
+    let Some(text) = config_text() else {
+        return Vec::new();
+    };
+    theme_dir_from(&text, &config_path())
+        .and_then(|dir| std::fs::read_to_string(dir.join("meters.txt")).ok())
+        .map(|meters| meter_sections(&meters))
+        .unwrap_or_default()
+}
+
 /// The meter rotation from the installed configuration. `random` walks every
 /// section of the theme's meters file.
 pub fn installed_rotation() -> Rotation {
     let path = config_path();
-    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let text = config_text().unwrap_or_default();
     let (names, random) = match selection_from_config(&text) {
         Selection::Named(_) => (Vec::new(), false),
         Selection::List(names) => (names, false),
@@ -1215,8 +1329,7 @@ impl Source for PipeSource {
 
 /// `frame.rate` from the installed `config.txt`, or 30 when that file is absent.
 pub fn installed_frame_rate() -> u32 {
-    let path = std::env::var("GLASS_CONFIG").unwrap_or_else(|_| CONFIG_TXT.to_string());
-    match std::fs::read_to_string(&path) {
+    match config_text().ok_or(()) {
         Ok(text) => frame_rate_from_config(&text),
         Err(_) => DEFAULT_FRAME_RATE,
     }
@@ -1234,7 +1347,7 @@ pub fn installed_skin() -> SkinDesc {
 pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
     let path = config_path();
     let mut skin = SkinDesc::basic();
-    let Ok(text) = std::fs::read_to_string(&path) else {
+    let Some(text) = config_text() else {
         return skin;
     };
     let (width, height) = screen_from_config(&text);
@@ -1526,6 +1639,17 @@ mod tests {
         let mut averaged = Conditioner::new(DataSourceSpec { stereo: "average".into(), ..DataSourceSpec::default() });
         averaged.condition(80, 80);
         assert_eq!(averaged.condition(0, 0).left, 20.0, "average with the previous averaged value");
+    }
+
+    #[test]
+    fn an_override_replaces_or_adds_a_current_value() {
+        let text = "[current]\nmeter = gold\nmeter.folder = a\n[data.source]\nmeter = x\n";
+        let out = with_current(text, "meter", "random");
+        assert!(out.contains("[current]\nmeter = random\nmeter.folder = a\n"), "{out}");
+        assert!(out.contains("[data.source]\nmeter = x\n"), "other sections keep theirs: {out}");
+        let added = with_current("[current]\nmeter = gold\n[x]\n", "random.meter.interval", "5");
+        assert!(added.contains("meter = gold\nrandom.meter.interval = 5\n[x]"), "{added}");
+        assert_eq!(with_current("", "meter", "a"), "[current]\nmeter = a\n");
     }
 
     #[test]
