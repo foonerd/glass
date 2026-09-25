@@ -12,4 +12,5 @@ plot = { path = "../plot" }
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 font8x8 = "0.3"
 ab_glyph = "0.2.32"
+memmap2 = "0.9"
 resvg = "0.48.1"

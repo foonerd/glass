@@ -46,6 +46,21 @@ struct Assets {
 }
 
 impl Assets {
+    /// What the meter's pictures and fonts take, by store, in bytes.
+    fn memory(&self) -> Vec<(&'static str, usize)> {
+        vec![
+            ("base", self.base.bytes()),
+            ("front", self.front.as_ref().map_or(0, Spans::bytes)),
+            ("needles", expose::bytes_of([&self.indicator, &self.indicator_right])),
+            ("tonearm", expose::bytes_of([&self.tonearm])),
+            ("reels", expose::bytes_of([&self.reels.0, &self.reels.1])),
+            ("mask", expose::bytes_of([&self.art_mask])),
+            ("spectrum", self.spectrum.as_ref().map_or(0, SpectrumAssets::bytes)),
+            ("indicators", self.indicators.as_ref().map_or(0, IndicatorAssets::bytes)),
+            ("fonts", self.fonts.bytes()),
+        ]
+    }
+
     fn load(skin: &SkinDesc) -> Self {
         let mut fonts = Fonts::load(&skin.fonts);
         for field in [&skin.time, &skin.time_elapsed, &skin.time_total].into_iter().flatten() {
@@ -360,6 +375,8 @@ fn main() -> ExitCode {
     let mut source = PipeSource::installed().with_skin(&skin);
     let frame_rate = intake::installed_frame_rate();
     let started = Instant::now();
+    // GLASS_PROFILE prints where each frame's time goes, averaged over 60 frames, and what is kept in memory.
+    let profiling = env::var_os("GLASS_PROFILE").is_some();
     // A frame is painted in row bands across the cores when it needs them:
     // from one thread up to one per core, at most eight. --threads fixes the count.
     let (threads, adaptive) = match threads {
@@ -382,6 +399,9 @@ fn main() -> ExitCode {
     );
     let mut assets = Assets::load(&skin);
     println!("glass: fonts loaded {} of 5", assets.fonts.loaded());
+    if profiling {
+        println!("glass: memory kept for the meter: {}", memory_line(&assets.memory()));
+    }
     // The engine fades the first frame in when the player asks for a start
     // animation, and every later meter in; a lock file shared with the
     // player's own engine keeps two starts within the fade's time from fading twice.
@@ -394,8 +414,6 @@ fn main() -> ExitCode {
     motion.ramp.begin(loaded_ms);
     let mut switched_at = Instant::now();
     let mut last_title: Option<String> = None;
-    // GLASS_PROFILE prints where each frame's time goes, averaged over 60 frames.
-    let profiling = env::var_os("GLASS_PROFILE").is_some();
     let mut profile_sum: Vec<(&'static str, u64)> = Vec::new();
     let mut profile_loop = [0u64; 4];
     let mut profile_painted = 0u64;
@@ -737,6 +755,19 @@ fn main() -> ExitCode {
                     "glass: profile per frame: {achieved:.1} fps, painters {}, painted {}% in {:.1} boxes, poll {}us, step {}us, raster {}us [{}], show {}us",
                     motion.painters(), profile_painted * 100 / (n * u64::from(skin.width.max(1)) * u64::from(skin.height.max(1))), profile_boxes as f64 / n as f64, profile_loop[0] / n, profile_loop[1] / n, profile_loop[2] / n, stages.join(", "), profile_loop[3] / n
                 );
+                let moving: Vec<(&'static str, usize)> = motion
+                    .memory()
+                    .into_iter()
+                    .chain([
+                        ("art", art_cache.as_ref().map_or(0, |(_, f)| f.bytes())),
+                        ("icon", icon_cache.as_ref().map_or(0, |(_, f)| f.bytes())),
+                        ("layers", folder_pictures.iter().flatten().map(|p| p.frame.bytes()).sum()),
+                        ("fanart", [&fanart_slots.0, &fanart_slots.1].into_iter().filter_map(|s| s.picture.as_ref()).map(|p| p.frame.bytes()).sum()),
+                        ("vinyl", vinyl_slot.frame.as_ref().map_or(0, expose::Frame::bytes)),
+                        ("reels", expose::bytes_of([&reel_pictures.0, &reel_pictures.1])),
+                    ])
+                    .collect();
+                println!("glass: memory moving: {}", memory_line(&moving));
                 profile_sum.clear();
                 profile_loop = [0; 4];
                 profile_painted = 0;
@@ -757,4 +788,11 @@ fn main() -> ExitCode {
         let _ = std::fs::remove_file(RUN_FLAG);
     }
     ExitCode::SUCCESS
+}
+
+/// Stores and their sizes in kB, with the total first.
+fn memory_line(stores: &[(&'static str, usize)]) -> String {
+    let total: usize = stores.iter().map(|(_, b)| b).sum();
+    let parts: Vec<String> = stores.iter().filter(|(_, b)| *b > 0).map(|(name, b)| format!("{name} {}", b / 1024)).collect();
+    format!("{} kB ({})", total / 1024, parts.join(", "))
 }

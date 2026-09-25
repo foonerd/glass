@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.28] - 2026-09-25
+
+Less memory. Font files are mapped rather than read, so a face costs the pages its glyphs touch and a file named by several styles is mapped once; a turned picture not shown for ten seconds is let go and the turned pictures share 16 MB; the meter foreground keeps only the pixels of its opaque spans. On a Pi 5 the Thorens turntable's resident set went from 125 MB to 87 MB. With `GLASS_PROFILE=1` Glass says what each store holds.
+
 ## [0.4.27] - 2026-09-25
 
 Only what changed is painted. A frame's drawing steps are keyed, the boxes of the steps that differ from the last frame's are the only part of the canvas repainted, and only those boxes are uploaded to the window's texture; a frame with nothing changed is not uploaded at all. The result is pixel for pixel the frame a whole repaint gives. A turning picture's box is measured from where it has pixels, so a round record or reel in a square picture claims a box its own size. The profile line says how much of the frame was painted and in how many boxes.

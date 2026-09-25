@@ -5,7 +5,9 @@ use std::path::Path;
 
 use std::collections::HashMap;
 
-use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
+use std::sync::Arc;
+
+use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
 use lead::{Direction, Fill, FolderLayerSpec, FontFiles, LinearSpec, MeterKind, Scale, ScrollDirection, SpectrumSpec, TextAlign, TextStyle, TypeAlign, TypeMode, ZOrder};
 use lead::{GaugeSpec, GaugeStyle, StateIndicator, StateLook, TonearmSpec};
 use plot::{Fanart, Indicators, Scene, Text, TypeArea};
@@ -16,37 +18,68 @@ use plot::Art;
 
 const BG: [u8; 4] = [12, 12, 16, 255];
 
-/// Theme fonts, loaded once per run. A style whose file is missing or
+/// Theme fonts, loaded once per meter. A style whose file is missing or
 /// unreadable stays `None`, and its texts fall back to the built-in bitmap
 /// font. Italic without its own file falls back to regular, as the player does.
+/// A file named by several styles is mapped once.
 #[derive(Default)]
 pub struct Fonts {
-    light: Option<FontVec>,
-    regular: Option<FontVec>,
-    bold: Option<FontVec>,
-    italic: Option<FontVec>,
-    digi: Option<FontVec>,
-    /// Fonts a field names by file, loaded once each.
-    files: HashMap<String, FontVec>,
+    light: Option<Arc<Face>>,
+    regular: Option<Arc<Face>>,
+    bold: Option<Arc<Face>>,
+    italic: Option<Arc<Face>>,
+    digi: Option<Arc<Face>>,
+    /// Fonts a field names by file.
+    files: HashMap<String, Arc<Face>>,
+    /// Every face by its path.
+    by_path: HashMap<String, Arc<Face>>,
 }
 
-fn read_font(path: &str) -> Option<FontVec> {
+/// A font file mapped into memory rather than read: the kernel brings in
+/// only the pages the glyphs touch, and shares them with any other process
+/// that maps the file. A 16 MB face costs the tables it uses.
+pub struct Face {
+    font: FontRef<'static>,
+    /// Holds the bytes `font` reads; dropped after it.
+    _map: memmap2::Mmap,
+}
+
+fn open_face(path: &str) -> Option<Arc<Face>> {
     if path.is_empty() {
         return None;
     }
-    FontVec::try_from_vec(std::fs::read(path).ok()?).ok()
+    let file = std::fs::File::open(path).ok()?;
+    // The theme's font files are not written while a meter shows them.
+    let map = unsafe { memmap2::Mmap::map(&file) }.ok()?;
+    // The font borrows the map for as long as the face lives, and the face
+    // keeps the map; nothing hands the font out past the face.
+    let bytes: &'static [u8] = unsafe { std::slice::from_raw_parts(map.as_ptr(), map.len()) };
+    let font = FontRef::try_from_slice(bytes).ok()?;
+    Some(Arc::new(Face { font, _map: map }))
 }
 
 impl Fonts {
     pub fn load(files: &FontFiles) -> Self {
-        Self {
-            light: read_font(&files.light),
-            regular: read_font(&files.regular),
-            bold: read_font(&files.bold),
-            italic: read_font(&files.italic),
-            digi: read_font(&files.digi),
-            files: HashMap::new(),
+        let mut fonts = Self::default();
+        fonts.light = fonts.face(&files.light);
+        fonts.regular = fonts.face(&files.regular);
+        fonts.bold = fonts.face(&files.bold);
+        fonts.italic = fonts.face(&files.italic);
+        fonts.digi = fonts.face(&files.digi);
+        fonts
+    }
+
+    /// The face of a file, mapped on the first ask.
+    fn face(&mut self, path: &str) -> Option<Arc<Face>> {
+        if path.is_empty() {
+            return None;
         }
+        if let Some(face) = self.by_path.get(path) {
+            return Some(Arc::clone(face));
+        }
+        let face = open_face(path)?;
+        self.by_path.insert(path.to_string(), Arc::clone(&face));
+        Some(face)
     }
 
     /// Load a font a field names by file, so `get_for` can serve it.
@@ -54,30 +87,36 @@ impl Fonts {
         if path.is_empty() || self.files.contains_key(path) {
             return;
         }
-        if let Some(font) = read_font(path) {
-            self.files.insert(path.to_string(), font);
+        if let Some(face) = self.face(path) {
+            self.files.insert(path.to_string(), face);
         }
     }
 
-    fn get(&self, style: TextStyle) -> Option<&FontVec> {
-        match style {
+    fn get(&self, style: TextStyle) -> Option<&FontRef<'static>> {
+        let face = match style {
             TextStyle::Light => self.light.as_ref(),
             TextStyle::Regular => self.regular.as_ref(),
             TextStyle::Bold => self.bold.as_ref(),
             TextStyle::Italic => self.italic.as_ref().or(self.regular.as_ref()),
             TextStyle::Digi => self.digi.as_ref(),
-        }
+        };
+        face.map(|f| &f.font)
     }
 
     /// The font for a text: its own file when it names one and that file
     /// loaded, else its style's font.
-    fn get_for(&self, style: TextStyle, font_file: &str) -> Option<&FontVec> {
+    fn get_for(&self, style: TextStyle, font_file: &str) -> Option<&FontRef<'static>> {
         if !font_file.is_empty() {
-            if let Some(font) = self.files.get(font_file) {
-                return Some(font);
+            if let Some(face) = self.files.get(font_file) {
+                return Some(&face.font);
             }
         }
         self.get(style)
+    }
+
+    /// The bytes the mapped font files span; only the pages touched are resident.
+    pub fn bytes(&self) -> usize {
+        self.by_path.values().map(|f| f._map.len()).sum()
     }
 
     /// How many of the five styles have a font file of their own.
@@ -128,6 +167,18 @@ pub struct Frame {
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
+}
+
+impl Frame {
+    /// The bytes the pixels take.
+    pub fn bytes(&self) -> usize {
+        self.rgba.len()
+    }
+}
+
+/// The bytes a set of optional pictures take.
+pub fn bytes_of<'a>(pictures: impl IntoIterator<Item = &'a Option<Frame>>) -> usize {
+    pictures.into_iter().flatten().map(Frame::bytes).sum()
 }
 
 impl Default for Frame {
@@ -710,8 +761,11 @@ impl Fnv {
     /// place with the same length; a replacement is made before the old
     /// one goes, so it never takes the old place.
     fn pic(&mut self, picture: &Frame) {
-        self.bytes(&(picture.rgba.as_ptr() as usize).to_le_bytes());
-        self.bytes(&picture.rgba.len().to_le_bytes());
+        self.buf(picture.rgba.as_ptr() as usize, picture.rgba.len());
+    }
+    fn buf(&mut self, at: usize, len: usize) {
+        self.bytes(&at.to_le_bytes());
+        self.bytes(&len.to_le_bytes());
     }
 }
 
@@ -757,7 +811,7 @@ impl Op<'_> {
             Op::RoundRect { x, y, w, h, .. } => (x, y, x.saturating_add(w), y.saturating_add(h)),
             Op::Arc { x, y, w, h, .. } => (x, y, x.saturating_add(w as i32), y.saturating_add(h as i32)),
             Op::Column { rect, .. } => (rect.x as i32, rect.y as i32, (rect.x + rect.w) as i32, (rect.y + rect.h) as i32),
-            Op::Front { spans, at } => (at.0 as i32, at.1 as i32, (at.0 + spans.frame.width) as i32, (at.1 + spans.frame.height) as i32),
+            Op::Front { spans, at } => (at.0 as i32, at.1 as i32, (at.0 + spans.width) as i32, (at.1 + spans.height) as i32),
             Op::Fade { .. } => (0, 0, width as i32, height as i32),
         };
         clip_box(b, width, height)
@@ -815,7 +869,7 @@ impl Op<'_> {
             }
             Op::Front { spans, at } => {
                 h.tag(8);
-                h.pic(&spans.frame);
+                h.buf(spans.pixels.as_ptr() as usize, spans.pixels.len());
                 h.u32s(&[at.0, at.1]);
             }
             Op::Fade { color, alpha } => {
@@ -1311,7 +1365,7 @@ pub fn render_text(fonts: Option<&Fonts>, style: TextStyle, size: u32, color: [u
     render_line(fonts.and_then(|f| f.get(style)), size, color, text, max_width)
 }
 
-fn render_line(font: Option<&FontVec>, size: u32, color: [u8; 3], text: &str, max_width: u32) -> Option<Frame> {
+fn render_line(font: Option<&FontRef<'static>>, size: u32, color: [u8; 3], text: &str, max_width: u32) -> Option<Frame> {
     let font = font?;
     if text.is_empty() {
         return None;
@@ -2076,6 +2130,16 @@ impl Motion {
     pub fn damage(&self) -> &[Rect] {
         &self.damage
     }
+
+    /// What the motion holds, by store, in bytes.
+    pub fn memory(&self) -> [(&'static str, usize); 4] {
+        [
+            ("canvas", self.canvas.bytes()),
+            ("turned", self.needles.bytes()),
+            ("labels", self.labels.lines.values().map(|(f, _)| f.bytes()).sum()),
+            ("lines", self.text.lines.values().map(|(_, f)| f.bytes()).sum()),
+        ]
+    }
 }
 
 /// How many threads paint. Frames whose painting overruns its budget get
@@ -2224,7 +2288,10 @@ struct TurnedPicture {
 const TURNED_KEEP: usize = 400;
 /// What the kept turned pictures may hold together; the least recently
 /// shown go first.
-const TURNED_BUDGET: usize = 24 << 20;
+const TURNED_BUDGET: usize = 16 << 20;
+/// A turn not shown for this long is let go: a tonearm's drop leaves a
+/// trail of angles that are never shown again.
+const TURNED_KEEP_MS: u64 = 10_000;
 
 impl Turned {
     /// Turn `src` by `degrees` about `pivot_image` unless that turn is kept
@@ -2238,6 +2305,14 @@ impl Turned {
         let mut picture = turn_picture(src, pivot_image, key.1 as f32 / 2.0);
         picture.used = tick;
         let size = picture.frame.rgba.len();
+        let bytes = &mut self.bytes;
+        self.entries.retain(|(_, p)| {
+            let kept = tick.saturating_sub(p.used) < TURNED_KEEP_MS;
+            if !kept {
+                *bytes -= p.frame.rgba.len();
+            }
+            kept
+        });
         while !self.entries.is_empty() && (self.entries.len() >= TURNED_KEEP || self.bytes + size > TURNED_BUDGET) {
             let oldest = self.entries.iter().enumerate().min_by_key(|(_, (_, p))| p.used).map(|(i, _)| i).unwrap_or(0);
             let (_, gone) = self.entries.swap_remove(oldest);
@@ -2298,43 +2373,54 @@ fn turn_picture(src: &Frame, pivot_image: (f32, f32), degrees: f32) -> TurnedPic
     TurnedPicture { frame: trimmed, offset: (x0 as i32 - reach, y0 as i32 - reach), used: 0 }
 }
 
-/// A picture with the opaque span of every row, so a mostly transparent
-/// layer such as a meter foreground blends only where it has pixels.
+/// A picture kept as the opaque span of every row, so a mostly transparent
+/// layer such as a meter foreground blends only where it has pixels and
+/// holds only those pixels.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Spans {
-    pub frame: Frame,
-    rows: Vec<(u32, u32)>,
+    width: u32,
+    height: u32,
+    /// Each row's first and last column with alpha, and where its pixels start.
+    rows: Vec<(u32, u32, usize)>,
+    pixels: Vec<u8>,
 }
 
 impl Spans {
     pub fn new(frame: Frame) -> Self {
-        let rows = (0..frame.height)
-            .map(|y| {
-                let row = &frame.rgba[(y * frame.width * 4) as usize..((y + 1) * frame.width * 4) as usize];
-                let first = (0..frame.width).find(|&x| row[(x * 4 + 3) as usize] != 0);
-                let last = (0..frame.width).rev().find(|&x| row[(x * 4 + 3) as usize] != 0);
-                match (first, last) {
-                    (Some(a), Some(b)) => (a, b + 1),
-                    _ => (0, 0),
+        let mut rows = Vec::with_capacity(frame.height as usize);
+        let mut pixels = Vec::new();
+        for y in 0..frame.height {
+            let row = &frame.rgba[(y * frame.width * 4) as usize..((y + 1) * frame.width * 4) as usize];
+            let first = (0..frame.width).find(|&x| row[(x * 4 + 3) as usize] != 0);
+            let last = (0..frame.width).rev().find(|&x| row[(x * 4 + 3) as usize] != 0);
+            match (first, last) {
+                (Some(a), Some(b)) => {
+                    rows.push((a, b + 1, pixels.len()));
+                    pixels.extend_from_slice(&row[(a * 4) as usize..((b + 1) * 4) as usize]);
                 }
-            })
-            .collect();
-        Self { frame, rows }
+                _ => rows.push((0, 0, pixels.len())),
+            }
+        }
+        Self { width: frame.width, height: frame.height, rows, pixels }
+    }
+
+    pub fn bytes(&self) -> usize {
+        self.pixels.len() + self.rows.len() * std::mem::size_of::<(u32, u32, usize)>()
     }
 
     fn blit(&self, band: &mut Band, at: (u32, u32)) {
         for dy in band.rows(at.1 as i32, at.1.saturating_add(self.rows.len() as u32) as i32) {
             let y = dy - at.1;
-            let (x0, x1) = self.rows[y as usize];
+            let (x0, x1, start) = self.rows[y as usize];
             let cols = band.cols((at.0 + x0) as i32, (at.0 + x1) as i32);
             if cols.is_empty() {
                 continue;
             }
-            let s = ((y * self.frame.width + (cols.start - at.0)) * 4) as usize;
+            let s = start + ((cols.start - at.0 - x0) * 4) as usize;
             let d = (cols.start * 4) as usize;
             let n = ((cols.end - cols.start) * 4) as usize;
             let row = band.row(dy);
-            for (dp, sp) in row[d..d + n].chunks_exact_mut(4).zip(self.frame.rgba[s..s + n].chunks_exact(4)) {
+            for (dp, sp) in row[d..d + n].chunks_exact_mut(4).zip(self.pixels[s..s + n].chunks_exact(4)) {
                 blend(dp, 0, [sp[0], sp[1], sp[2], sp[3]]);
             }
         }
@@ -2377,6 +2463,10 @@ pub struct SpectrumAssets {
 }
 
 impl SpectrumAssets {
+    pub fn bytes(&self) -> usize {
+        bytes_of([&self.background, &self.bar, &self.reflection, &self.foreground])
+    }
+
     pub fn load(spec: &SpectrumSpec) -> Self {
         let bar_box = (spec.bar_w, spec.bar_h);
         Self {
@@ -2814,6 +2904,11 @@ pub struct GaugeAssets {
 }
 
 impl IndicatorAssets {
+    pub fn bytes(&self) -> usize {
+        let gauge = |g: &GaugeAssets| bytes_of([&g.knob, &g.track, &g.tip, &g.head]) + bytes_of(&g.markers);
+        bytes_of(&self.mute) + bytes_of(&self.shuffle) + bytes_of(&self.repeat) + bytes_of(&self.playstate) + gauge(&self.volume) + gauge(&self.progress)
+    }
+
     pub fn load(spec: &lead::IndicatorsSpec) -> Self {
         let states = |indicator: &Option<StateIndicator>| -> Vec<Option<Frame>> {
             let Some(indicator) = indicator else { return Vec::new() };
