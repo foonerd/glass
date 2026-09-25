@@ -78,6 +78,72 @@ pub struct Metadata {
     /// Icon file resolved for `track_type`, or empty when none exists.
     #[serde(default)]
     pub type_icon: String,
+    /// The track after the current one in the queue, or empty.
+    #[serde(default)]
+    pub next_title: String,
+    #[serde(default)]
+    pub next_artist: String,
+    #[serde(default)]
+    pub next_album: String,
+}
+
+/// Where a text sits inside its box when it fits.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum TextAlign {
+    #[default]
+    Left,
+    Center,
+    Right,
+}
+
+/// How a text that does not fit its box moves. `Bounce` runs to the end,
+/// pauses and comes back. `Ltr` and `Rtl` are the ticker's continuous loops,
+/// named as the player names them.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub enum ScrollDirection {
+    #[default]
+    Bounce,
+    Ltr,
+    Rtl,
+}
+
+/// The single looping line: `playinfo.ticker.*`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TickerSpec {
+    pub text: TextSpec,
+    pub direction: ScrollDirection,
+    pub separator: String,
+    pub space_between: u32,
+    pub end_spaces: u32,
+    pub append_next: bool,
+    /// Hide the separate title, artist, album and next lines.
+    pub replace: bool,
+}
+
+/// Scrolling speeds from the player configuration `[current]`:
+/// `scrolling.mode` is `default` (40 everywhere), `custom` (these values)
+/// or `skin` (the meter's own keys).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct ScrollSpeeds {
+    pub mode: String,
+    pub title: f32,
+    pub artist: f32,
+    pub album: f32,
+}
+
+pub fn scroll_speeds_from_config(text: &str) -> ScrollSpeeds {
+    let number = |key: &str| {
+        current_value(text, key)
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .filter(|n| *n > 0.0)
+            .unwrap_or(40.0)
+    };
+    ScrollSpeeds {
+        mode: current_value(text, "scrolling.mode").unwrap_or_default().trim().to_ascii_lowercase(),
+        title: number("scrolling.speed.title"),
+        artist: number("scrolling.speed.artist"),
+        album: number("scrolling.speed.album"),
+    }
 }
 
 /// Where the album art is drawn. The picture is stretched to `w` by `h`.
@@ -204,6 +270,7 @@ pub enum TextStyle {
     Light,
     Regular,
     Bold,
+    Italic,
     Digi,
 }
 
@@ -216,8 +283,15 @@ pub struct TextSpec {
     pub style: TextStyle,
     pub size: u32,
     pub color: [u8; 3],
-    /// Widest the text may draw, in pixels. Zero is no limit.
+    /// The box the text draws in, in pixels. Zero is no box: the text is
+    /// drawn whole at its position.
     pub max_width: u32,
+    /// Placement inside the box when the text fits.
+    #[serde(default)]
+    pub align: TextAlign,
+    /// Pixels per second when the text does not fit. Zero clips instead.
+    #[serde(default)]
+    pub speed: f32,
 }
 
 /// Font files the theme text is set in. An empty string is no file.
@@ -227,6 +301,8 @@ pub struct FontFiles {
     pub regular: String,
     pub bold: String,
     pub digi: String,
+    #[serde(default)]
+    pub italic: String,
 }
 
 /// The text placements one meter declares.
@@ -237,6 +313,10 @@ pub struct MeterTexts {
     pub album: Option<TextSpec>,
     pub sample: Option<TextSpec>,
     pub time: Option<TextSpec>,
+    pub next_title: Option<TextSpec>,
+    pub next_artist: Option<TextSpec>,
+    pub next_album: Option<TextSpec>,
+    pub ticker: Option<TickerSpec>,
 }
 
 /// One snapshot of the outside world. `plot` turns it into a scene.
@@ -296,6 +376,14 @@ pub struct SkinDesc {
     /// `format-icons` beside the player's handlers, searched second.
     #[serde(default)]
     pub plugin_icons: String,
+    #[serde(default)]
+    pub next_title: Option<TextSpec>,
+    #[serde(default)]
+    pub next_artist: Option<TextSpec>,
+    #[serde(default)]
+    pub next_album: Option<TextSpec>,
+    #[serde(default)]
+    pub ticker: Option<TickerSpec>,
 }
 
 impl Default for SkinDesc {
@@ -333,6 +421,10 @@ impl SkinDesc {
             type_area: None,
             skin_icons: String::new(),
             plugin_icons: String::new(),
+            next_title: None,
+            next_artist: None,
+            next_album: None,
+            ticker: None,
         }
     }
 }
@@ -784,9 +876,10 @@ pub fn meter_text_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Opti
 }
 
 /// Font files from `[current]`: `font.path` joined with `font.light`,
-/// `font.regular` and `font.bold`. `font.digi` is optional; `digi_default`
-/// stands in when it is absent.
-pub fn fonts_from_config(text: &str, digi_default: &str) -> FontFiles {
+/// `font.regular`, `font.bold` and `font.italic`. `font.digi` is optional;
+/// `digi_default` stands in when it is absent, and `italic_default` when
+/// `font.italic` is.
+pub fn fonts_from_config(text: &str, digi_default: &str, italic_default: &str) -> FontFiles {
     let base = current_value(text, "font.path").unwrap_or_default();
     let join = |file: Option<String>| -> String {
         let file = file.unwrap_or_default();
@@ -803,6 +896,7 @@ pub fn fonts_from_config(text: &str, digi_default: &str) -> FontFiles {
         }
     };
     let digi = current_value(text, "font.digi").unwrap_or_default();
+    let italic = join(current_value(text, "font.italic"));
     FontFiles {
         light: join(current_value(text, "font.light")),
         regular: join(current_value(text, "font.regular")),
@@ -811,6 +905,11 @@ pub fn fonts_from_config(text: &str, digi_default: &str) -> FontFiles {
             digi_default.to_string()
         } else {
             digi.trim().to_string()
+        },
+        italic: if italic.is_empty() {
+            italic_default.to_string()
+        } else {
+            italic
         },
     }
 }
@@ -856,55 +955,159 @@ fn style_word(word: &str) -> Option<TextStyle> {
         "light" => Some(TextStyle::Light),
         "regular" => Some(TextStyle::Regular),
         "bold" => Some(TextStyle::Bold),
+        "italic" => Some(TextStyle::Italic),
         "digi" => Some(TextStyle::Digi),
         _ => None,
     }
 }
 
+fn truthy(value: Option<&str>) -> bool {
+    matches!(
+        value.map(|v| v.trim().to_ascii_lowercase()).as_deref(),
+        Some("true") | Some("1") | Some("yes") | Some("on")
+    )
+}
+
 /// Text placements for the selected meter. A position is `x,y` or
 /// `x,y,style`. Missing sizes and colours fall back to `font.size.*` and
 /// `font.color`, with the player's defaults when those are absent too.
-pub fn meter_texts(meters_txt: &str, meter: &str) -> MeterTexts {
+///
+/// Every title, artist, album and next line has a box: its own `maxwidth`,
+/// else `playinfo.maxwidth`, else the width left of it on a `screen_w` wide
+/// screen minus a 20 pixel margin, or six tenths of the screen when the
+/// lines are centred. `playinfo.align` places a fitting text; the legacy
+/// `playinfo.center = True` means centred. Scrolling speed follows
+/// `speeds.mode`: `default` is 40 everywhere, `custom` takes the player's
+/// values, anything else the meter's `playinfo.scrolling.speed.*`, then its
+/// `playinfo.scrolling.speed`, then 40.
+pub fn meter_texts(meters_txt: &str, meter: &str, screen_w: u32, speeds: &ScrollSpeeds) -> MeterTexts {
     let values = section_values(meters_txt, meter);
     let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
     let number = |key: &str, default: u32| get(key).and_then(|v| v.parse().ok()).unwrap_or(default);
     let font_color = get("font.color").and_then(color_triplet).unwrap_or([255, 255, 255]);
-    let max_width = number("playinfo.maxwidth", 0);
+    let global_max = number("playinfo.maxwidth", 0);
+    let align = match get("playinfo.align").map(|w| w.trim().to_ascii_lowercase()).as_deref() {
+        Some("center") => TextAlign::Center,
+        Some("right") => TextAlign::Right,
+        Some("left") => TextAlign::Left,
+        _ => {
+            if truthy(get("playinfo.center")) || truthy(get("playinfo.text.center")) {
+                TextAlign::Center
+            } else {
+                TextAlign::Left
+            }
+        }
+    };
     let size_of = |style: TextStyle| match style {
         TextStyle::Light => number("font.size.light", 30),
         TextStyle::Regular => number("font.size.regular", 35),
         TextStyle::Bold => number("font.size.bold", 40),
+        TextStyle::Italic => number("font.size.italic", number("font.size.regular", 35)),
         TextStyle::Digi => number("font.size.digi", 40),
     };
-    let spec = |pos_key: &str, color_key: &str, default_style: TextStyle, limit: u32| {
+    let skin_speed = |field: &str| -> f32 {
+        get(&format!("playinfo.scrolling.speed.{field}"))
+            .or_else(|| get("playinfo.scrolling.speed"))
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .filter(|n| *n > 0.0)
+            .unwrap_or(40.0)
+    };
+    let speed_for = |field: &str| -> f32 {
+        match speeds.mode.as_str() {
+            "default" => 40.0,
+            "custom" => match field {
+                "title" => speeds.title,
+                "artist" => speeds.artist,
+                _ => speeds.album,
+            },
+            _ => skin_speed(field),
+        }
+    };
+    let box_for = |x: u32, own: u32| -> u32 {
+        if own > 0 {
+            own
+        } else if global_max > 0 {
+            global_max
+        } else if align == TextAlign::Center {
+            (screen_w as f32 * 0.6) as u32
+        } else {
+            screen_w.saturating_sub(x).saturating_sub(20)
+        }
+    };
+    let spec = |pos_key: &str, color_key: &str, default_style: TextStyle, boxed: Option<(&str, &str)>| {
         let pos = get(pos_key)?;
         let mut parts = pos.split(',');
         let x = parts.next()?.trim().parse().ok()?;
         let y = parts.next()?.trim().parse().ok()?;
         let style = parts.next().and_then(style_word).unwrap_or(default_style);
+        let (max_width, speed, align) = match boxed {
+            Some((max_key, field)) => (box_for(x, number(max_key, 0)), speed_for(field), align),
+            None => (0, 0.0, TextAlign::Left),
+        };
         Some(TextSpec {
             x,
             y,
             style,
             size: size_of(style),
             color: get(color_key).and_then(color_triplet).unwrap_or(font_color),
-            max_width: limit,
+            max_width,
+            align,
+            speed,
         })
     };
     // The samplerate line takes the type colour before the font colour.
     let type_color = get("playinfo.type.color").and_then(color_triplet).unwrap_or(font_color);
-    let mut sample = spec("playinfo.samplerate.pos", "playinfo.samplerate.color", TextStyle::Light, 0);
+    let mut sample = spec("playinfo.samplerate.pos", "playinfo.samplerate.color", TextStyle::Light, None);
     if let Some(s) = sample.as_mut() {
         if get("playinfo.samplerate.color").and_then(color_triplet).is_none() {
             s.color = type_color;
         }
+        s.max_width = number("playinfo.samplerate.maxwidth", 0);
     }
+    let title = spec("playinfo.title.pos", "playinfo.title.color", TextStyle::Bold, Some(("playinfo.title.maxwidth", "title")));
+    let ticker = if truthy(get("playinfo.ticker")) {
+        spec("playinfo.ticker.pos", "playinfo.ticker.color", TextStyle::Regular, Some(("playinfo.ticker.maxwidth", "ticker"))).map(|mut text| {
+            if get("playinfo.ticker.color").and_then(color_triplet).is_none() {
+                text.color = title.as_ref().map(|t| t.color).unwrap_or(font_color);
+            }
+            // Always inside the visible width, whatever the box says.
+            let visible = screen_w.saturating_sub(text.x);
+            text.max_width = if number("playinfo.ticker.maxwidth", 0) > 0 {
+                text.max_width.min(visible)
+            } else {
+                visible
+            };
+            text.speed = get("playinfo.ticker.speed")
+                .and_then(|v| v.trim().parse::<f32>().ok())
+                .filter(|n| *n > 0.0)
+                .unwrap_or_else(|| skin_speed("ticker"));
+            text.align = TextAlign::Left;
+            TickerSpec {
+                text,
+                direction: match get("playinfo.ticker.direction").map(|w| w.trim().to_ascii_lowercase()).as_deref() {
+                    Some("ltr") => ScrollDirection::Ltr,
+                    _ => ScrollDirection::Rtl,
+                },
+                separator: get("playinfo.ticker.separator").map(|s| s.to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| " · ".to_string()),
+                space_between: number("playinfo.ticker.space_between", 0),
+                end_spaces: number("playinfo.ticker.end_spaces", 8),
+                append_next: truthy(get("playinfo.ticker.append_next")),
+                replace: truthy(get("playinfo.ticker.replace")),
+            }
+        })
+    } else {
+        None
+    };
     MeterTexts {
-        title: spec("playinfo.title.pos", "playinfo.title.color", TextStyle::Bold, max_width),
-        artist: spec("playinfo.artist.pos", "playinfo.artist.color", TextStyle::Light, max_width),
-        album: spec("playinfo.album.pos", "playinfo.album.color", TextStyle::Light, max_width),
+        title,
+        artist: spec("playinfo.artist.pos", "playinfo.artist.color", TextStyle::Light, Some(("playinfo.artist.maxwidth", "artist"))),
+        album: spec("playinfo.album.pos", "playinfo.album.color", TextStyle::Light, Some(("playinfo.album.maxwidth", "album"))),
         sample,
-        time: spec("time.remaining.pos", "time.remaining.color", TextStyle::Digi, 0),
+        time: spec("time.remaining.pos", "time.remaining.color", TextStyle::Digi, None),
+        next_title: spec("playinfo.next.title.pos", "playinfo.next.title.color", TextStyle::Regular, Some(("playinfo.next.title.maxwidth", "title"))),
+        next_artist: spec("playinfo.next.artist.pos", "playinfo.next.artist.color", TextStyle::Regular, Some(("playinfo.next.artist.maxwidth", "artist"))),
+        next_album: spec("playinfo.next.album.pos", "playinfo.next.album.color", TextStyle::Regular, Some(("playinfo.next.album.maxwidth", "album"))),
+        ticker,
     }
 }
 
@@ -946,6 +1149,7 @@ pub fn meter_type(meters_txt: &str, meter: &str, default_mode: Option<&str>) -> 
         TextStyle::Light => number("font.size.light", 30),
         TextStyle::Regular => number("font.size.regular", 35),
         TextStyle::Bold => number("font.size.bold", 40),
+        TextStyle::Italic => number("font.size.italic", number("font.size.regular", 35)),
         TextStyle::Digi => number("font.size.digi", 40),
     };
     let font_size = get("playinfo.type.fontsize")
@@ -1069,17 +1273,44 @@ mod tests {
             time.remaining.pos = 1100,160\ntime.remaining.color = 180,180,180\n\
             playinfo.maxwidth = 535\nfont.size.light = 25\nfont.size.regular = 20\n\
             font.size.bold = 28\nfont.color = 255,255,255\n";
-        let texts = meter_texts(text, "black-white");
+        let speeds = ScrollSpeeds { mode: "custom".into(), title: 8.0, artist: 10.0, album: 8.0 };
+        let texts = meter_texts(text, "black-white", 1280, &speeds);
         let title = texts.title.unwrap();
         assert_eq!((title.x, title.y, title.style, title.size), (283, 138, TextStyle::Bold, 28));
-        assert_eq!((title.color, title.max_width), ([255, 237, 76], 535));
+        assert_eq!((title.color, title.max_width, title.speed, title.align), ([255, 237, 76], 535, 8.0, TextAlign::Left));
         let artist = texts.artist.unwrap();
-        assert_eq!((artist.style, artist.size, artist.color), (TextStyle::Light, 25, [255, 255, 255]));
+        assert_eq!((artist.style, artist.size, artist.color, artist.speed), (TextStyle::Light, 25, [255, 255, 255], 10.0));
         assert_eq!(texts.sample.unwrap().style, TextStyle::Regular);
         let time = texts.time.unwrap();
-        assert_eq!((time.style, time.size, time.color), (TextStyle::Digi, 40, [180, 180, 180]));
-        assert!(texts.album.is_none());
-        assert_eq!(meter_texts(text, "random").title.unwrap().x, 10);
+        assert_eq!((time.style, time.size, time.color, time.max_width), (TextStyle::Digi, 40, [180, 180, 180], 0));
+        assert!(texts.album.is_none() && texts.ticker.is_none());
+        assert_eq!(meter_texts(text, "random", 1280, &speeds).title.unwrap().x, 10);
+    }
+
+    #[test]
+    fn boxes_alignment_speeds_and_the_ticker_follow_the_player() {
+        let text = "[m]\nplayinfo.title.pos = 830,205,italic\nplayinfo.artist.pos = 830,40\nplayinfo.artist.maxwidth = 441\n\
+            playinfo.center = True\nplayinfo.scrolling.speed = 25\nplayinfo.scrolling.speed.title = 15\nfont.size.regular = 22\n\
+            playinfo.ticker = True\nplayinfo.ticker.pos = 40,420,regular\nplayinfo.ticker.maxwidth = 9000\n\
+            playinfo.ticker.direction = ltr\nplayinfo.ticker.separator =  - \nplayinfo.ticker.space_between = 1\n\
+            playinfo.ticker.end_spaces = 10\nplayinfo.ticker.append_next = True\nplayinfo.ticker.replace = True\n\
+            playinfo.next.title.pos = 830,300\n";
+        let skin = ScrollSpeeds { mode: "skin".into(), ..ScrollSpeeds::default() };
+        let texts = meter_texts(text, "m", 1280, &skin);
+        let title = texts.title.unwrap();
+        assert_eq!((title.style, title.size, title.align), (TextStyle::Italic, 22, TextAlign::Center));
+        assert_eq!((title.max_width, title.speed), (768, 15.0), "centred: six tenths of the screen; per-field speed");
+        let artist = texts.artist.unwrap();
+        assert_eq!((artist.max_width, artist.speed), (441, 25.0), "own maxwidth; meter's global speed");
+        assert_eq!(texts.next_title.unwrap().max_width, 768);
+        let ticker = texts.ticker.unwrap();
+        assert_eq!((ticker.text.x, ticker.text.max_width, ticker.text.speed), (40, 1240, 25.0), "capped to the visible width");
+        assert_eq!((ticker.direction, ticker.separator.as_str(), ticker.space_between, ticker.end_spaces), (ScrollDirection::Ltr, "-", 1, 10), "values are trimmed as the player's parser trims them; spacing comes from space_between");
+        assert!(ticker.append_next && ticker.replace);
+        let default_mode = ScrollSpeeds { mode: "default".into(), ..ScrollSpeeds::default() };
+        assert_eq!(meter_texts(text, "m", 1280, &default_mode).title.unwrap().speed, 40.0);
+        let plain = meter_texts("[m]\nplayinfo.title.pos = 100,5\n", "m", 800, &default_mode);
+        assert_eq!(plain.title.unwrap().max_width, 680, "auto box: screen minus x minus margin");
     }
 
     #[test]
@@ -1129,10 +1360,15 @@ mod tests {
     #[test]
     fn font_files_join_the_path_and_default_the_clock_font() {
         let text = "[current]\nfont.path = /fonts\nfont.light = /Lato-Light.ttf\nfont.bold = Lato-Bold.ttf\n";
-        let fonts = fonts_from_config(text, "/plugin/fonts/DSEG7.ttf");
+        let fonts = fonts_from_config(text, "/plugin/fonts/DSEG7.ttf", "/plugin/fonts/PeppyFont-Italic.ttf");
         assert_eq!(fonts.light, "/fonts/Lato-Light.ttf");
         assert_eq!(fonts.bold, "/fonts/Lato-Bold.ttf");
         assert_eq!(fonts.regular, "");
         assert_eq!(fonts.digi, "/plugin/fonts/DSEG7.ttf");
+        assert_eq!(fonts.italic, "/plugin/fonts/PeppyFont-Italic.ttf");
+        let own = fonts_from_config("[current]\nfont.path = /f\nfont.italic = /I.ttf\n", "", "/d/i.ttf");
+        assert_eq!(own.italic, "/f/I.ttf");
+        let speeds = scroll_speeds_from_config("[current]\nscrolling.mode = custom\nscrolling.speed.title = 8\nscrolling.speed.artist = 10\n");
+        assert_eq!((speeds.mode.as_str(), speeds.title, speeds.artist, speeds.album), ("custom", 8.0, 10.0, 40.0));
     }
 }
