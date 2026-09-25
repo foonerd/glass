@@ -3,6 +3,22 @@
 version = 4
 
 [[package]]
+name = "ab_glyph"
+version = "0.2.32"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01c0457472c38ea5bd1c3b5ada5e368271cb550be7a4ca4a0b4634e9913f6cc2"
+dependencies = [
+ "ab_glyph_rasterizer",
+ "owned_ttf_parser",
+]
+
+[[package]]
+name = "ab_glyph_rasterizer"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "366ffbaa4442f4684d91e2cd7c5ea7c4ed8add41959a31447066e279e432b618"
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -55,10 +71,12 @@ dependencies = [
 
 [[package]]
 name = "expose"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
+ "ab_glyph",
  "font8x8",
  "image",
+ "lead",
  "plot",
 ]
 
@@ -90,7 +108,7 @@ checksum = "875488b8711a968268c7cf5d139578713097ca4635a76044e8fe8eedf831d07e"
 
 [[package]]
 name = "glass"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "expose",
  "intake",
@@ -103,7 +121,7 @@ dependencies = [
 
 [[package]]
 name = "glass-remote"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "expose",
  "intake",
@@ -129,7 +147,7 @@ dependencies = [
 
 [[package]]
 name = "intake"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "lead",
 ]
@@ -148,7 +166,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lead"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "serde",
 ]
@@ -205,8 +223,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "owned_ttf_parser"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "36820e9051aca1014ddc75770aab4d68bc1e9e632f0f5627c4086bc216fb583b"
+dependencies = [
+ "ttf-parser",
+]
+
+[[package]]
 name = "pane"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "expose",
  "plot",
@@ -215,7 +242,7 @@ dependencies = [
 
 [[package]]
 name = "plot"
-version = "0.4.6"
+version = "0.4.7"
 dependencies = [
  "lead",
  "serde",
@@ -341,6 +368,12 @@ dependencies = [
  "quote",
  "unicode-ident",
 ]
+
+[[package]]
+name = "ttf-parser"
+version = "0.25.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 
 [[package]]
 name = "unicode-ident"

@@ -3,9 +3,55 @@
 
 use std::path::Path;
 
-use plot::Scene;
+use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
+use lead::{FontFiles, TextStyle};
+use plot::{Scene, Text};
 
 const BG: [u8; 4] = [12, 12, 16, 255];
+
+/// Theme fonts, loaded once per run. A style whose file is missing or
+/// unreadable stays `None`, and its texts fall back to the built-in bitmap font.
+#[derive(Default)]
+pub struct Fonts {
+    light: Option<FontVec>,
+    regular: Option<FontVec>,
+    bold: Option<FontVec>,
+    digi: Option<FontVec>,
+}
+
+impl Fonts {
+    pub fn load(files: &FontFiles) -> Self {
+        let read = |path: &str| -> Option<FontVec> {
+            if path.is_empty() {
+                return None;
+            }
+            FontVec::try_from_vec(std::fs::read(path).ok()?).ok()
+        };
+        Self {
+            light: read(&files.light),
+            regular: read(&files.regular),
+            bold: read(&files.bold),
+            digi: read(&files.digi),
+        }
+    }
+
+    fn get(&self, style: TextStyle) -> Option<&FontVec> {
+        match style {
+            TextStyle::Light => self.light.as_ref(),
+            TextStyle::Regular => self.regular.as_ref(),
+            TextStyle::Bold => self.bold.as_ref(),
+            TextStyle::Digi => self.digi.as_ref(),
+        }
+    }
+
+    /// How many of the four styles have a font.
+    pub fn loaded(&self) -> usize {
+        [&self.light, &self.regular, &self.bold, &self.digi]
+            .iter()
+            .filter(|f| f.is_some())
+            .count()
+    }
+}
 const METER: [u8; 4] = [80, 220, 120, 255];
 const BAR: [u8; 4] = [90, 170, 255, 255];
 
@@ -84,6 +130,7 @@ pub fn raster(scene: &Scene) -> Frame {
             front: None,
             needle: None,
             face_at: (0, 0),
+            fonts: None,
         },
     )
 }
@@ -96,9 +143,12 @@ pub struct Stack<'a> {
     pub front: Option<&'a Frame>,
     pub needle: Option<&'a Frame>,
     pub face_at: (u32, u32),
+    /// Theme fonts for `Scene::texts`. `None` draws every text in the bitmap font.
+    pub fonts: Option<&'a Fonts>,
 }
 
-/// Theme order: full-screen picture, meter face, needles, meter foreground.
+/// Theme order: full-screen picture, meter face, needles, meter foreground,
+/// then the texts.
 pub fn raster_over(scene: &Scene, stack: Stack<'_>) -> Frame {
     let width = scene.width.max(1);
     let height = scene.height.max(1);
@@ -133,10 +183,63 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>) -> Frame {
         fill_column(&mut rgba, width, &right_meter, scene.right, METER);
         fill_bars(&mut rgba, width, &layout.spectrum, &scene.bars, BAR);
     }
-    Frame {
+    let mut frame = Frame {
         width,
         height,
         rgba,
+    };
+    for text in &scene.texts {
+        draw_text_styled(&mut frame, text, stack.fonts);
+    }
+    frame
+}
+
+/// Draw one theme text. With its font, the top of the em box sits at `y`, as
+/// the player's renderer places it, and `max_width` clips the line. Without
+/// a font for its style the bitmap font stands in.
+pub fn draw_text_styled(frame: &mut Frame, text: &Text, fonts: Option<&Fonts>) {
+    let Some(font) = fonts.and_then(|f| f.get(text.style)) else {
+        draw_text(frame, text.x, text.y, &text.text);
+        return;
+    };
+    let scale = PxScale::from(text.size.max(1) as f32);
+    let scaled = font.as_scaled(scale);
+    let baseline = text.y as f32 + scaled.ascent();
+    let width = frame.width;
+    let height = frame.height;
+    let limit = if text.max_width == 0 {
+        width
+    } else {
+        text.x.saturating_add(text.max_width).min(width)
+    };
+    let rgba = &mut frame.rgba;
+    let mut pen = text.x as f32;
+    let mut last: Option<ab_glyph::GlyphId> = None;
+    for ch in text.text.chars() {
+        let id = font.glyph_id(ch);
+        if let Some(prev) = last {
+            pen += scaled.kern(prev, id);
+        }
+        let glyph = id.with_scale_and_position(scale, ab_glyph::point(pen, baseline));
+        if let Some(outline) = font.outline_glyph(glyph) {
+            let bounds = outline.px_bounds();
+            let color = text.color;
+            outline.draw(|gx, gy, coverage| {
+                let px = bounds.min.x as i32 + gx as i32;
+                let py = bounds.min.y as i32 + gy as i32;
+                if px < 0 || py < 0 || px as u32 >= limit || py as u32 >= height {
+                    return;
+                }
+                let a = (coverage.clamp(0.0, 1.0) * 255.0).round() as u8;
+                let d = (py as usize * width as usize + px as usize) * 4;
+                blend(rgba, d, [color[0], color[1], color[2], a]);
+            });
+        }
+        pen += scaled.h_advance(id);
+        last = Some(id);
+        if pen >= limit as f32 {
+            break;
+        }
     }
 }
 
@@ -415,6 +518,7 @@ mod tests {
             left_at: None,
             right_at: None,
             needle: None,
+            texts: Vec::new(),
         };
         let frame = raster(&scene);
         let layout = layout(frame.width, frame.height);
@@ -450,6 +554,73 @@ mod tests {
         blit_rotated(&mut rgba, 100, 100, &needle, (50, 80), 90.0, 30.0);
         assert_eq!(at(&rgba, 100, 25, 80), [255, 0, 0]);
         assert_eq!(at(&rgba, 100, 50, 45), [0, 0, 0]);
+    }
+
+    /// Any TrueType file on the host will do; the test is about placement and
+    /// clipping, not the face. Without one the bitmap fallback is exercised.
+    fn any_font() -> Option<String> {
+        let dirs = ["/usr/share/fonts/truetype", "/usr/share/fonts/TTF", "/usr/share/fonts"];
+        fn walk(dir: &Path, depth: u32) -> Option<String> {
+            for entry in std::fs::read_dir(dir).ok()?.flatten() {
+                let path = entry.path();
+                if path.is_dir() && depth > 0 {
+                    if let Some(found) = walk(&path, depth - 1) {
+                        return Some(found);
+                    }
+                } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ttf")) {
+                    return Some(path.to_string_lossy().into_owned());
+                }
+            }
+            None
+        }
+        dirs.iter().find_map(|d| walk(Path::new(d), 3))
+    }
+
+    #[test]
+    fn theme_text_draws_below_its_top_and_clips_at_max_width() {
+        let Some(file) = any_font() else {
+            println!("no TrueType font on this host; fallback path only");
+            return;
+        };
+        let fonts = Fonts::load(&FontFiles {
+            regular: file,
+            ..FontFiles::default()
+        });
+        assert_eq!(fonts.loaded(), 1);
+        let mut frame = Frame {
+            width: 120,
+            height: 40,
+            rgba: vec![0u8; 120 * 40 * 4],
+        };
+        let text = Text {
+            x: 4,
+            y: 2,
+            style: TextStyle::Regular,
+            size: 24,
+            color: [255, 200, 0],
+            max_width: 0,
+            text: "HHHH".into(),
+        };
+        draw_text_styled(&mut frame, &text, Some(&fonts));
+        let lit = |frame: &Frame, x0: u32, x1: u32| -> usize {
+            (0..frame.height)
+                .flat_map(|y| (x0..x1).map(move |x| (x, y)))
+                .filter(|&(x, y)| sample(frame, x, y)[0] > 0)
+                .count()
+        };
+        assert!(lit(&frame, 4, 120) > 0, "glyphs were drawn");
+        assert_eq!(lit(&frame, 0, 4), 0, "nothing left of x");
+        assert_eq!((0..120).filter(|&x| sample(&frame, x, 0)[0] > 0).count(), 0, "row 0 above the em box is empty");
+
+        let mut clipped = Frame {
+            width: 120,
+            height: 40,
+            rgba: vec![0u8; 120 * 40 * 4],
+        };
+        let narrow = Text { max_width: 10, ..text };
+        draw_text_styled(&mut clipped, &narrow, Some(&fonts));
+        assert!(lit(&clipped, 4, 14) > 0);
+        assert_eq!(lit(&clipped, 14, 120), 0, "nothing past max_width");
     }
 
     #[test]
