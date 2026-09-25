@@ -103,6 +103,10 @@ struct ScrollState {
 #[derive(Debug, Default)]
 pub struct TextMotion {
     states: HashMap<(u32, u32), ScrollState>,
+    /// The rendered line of each text position, kept while the text, its
+    /// style, size, colour and font stay the same; glyphs are set once, not
+    /// every frame.
+    lines: HashMap<(u32, u32), (String, Frame)>,
 }
 
 impl TextMotion {
@@ -181,6 +185,7 @@ pub fn layout(width: u32, height: u32) -> Layout {
 
 /// Build the frame from the scene fractions, over an optional theme image.
 pub fn raster(scene: &Scene) -> Frame {
+    let mut motion = Motion::default();
     raster_over(
         scene,
         Stack {
@@ -200,10 +205,12 @@ pub fn raster(scene: &Scene) -> Frame {
             tonearm: None,
             reels: (None, None),
             indicators: None,
+            base: None,
         },
-        &mut Motion::default(),
+        &mut motion,
         0,
     )
+    .clone()
 }
 
 /// Decode a picture by its content and stretch it to `w` by `h`, as the
@@ -250,7 +257,8 @@ pub fn fit_art(frame: &Frame, w: u32, h: u32) -> Frame {
 pub struct Stack<'a> {
     pub screen: Option<&'a Frame>,
     pub face: Option<&'a Frame>,
-    pub front: Option<&'a Frame>,
+    /// The meter foreground with its opaque spans.
+    pub front: Option<&'a Spans>,
     /// The indicator picture for the left or mono channel: a needle sprite,
     /// or the bar picture of a linear meter, mirrored when the meter says so.
     pub needle: Option<&'a Frame>,
@@ -276,11 +284,13 @@ pub struct Stack<'a> {
     pub reels: (Option<&'a Frame>, Option<&'a Frame>),
     /// The indicators' prepared pictures, when the meter has indicators.
     pub indicators: Option<&'a IndicatorAssets>,
+    /// The screen picture and meter face composed once; the frame starts as a copy of it.
+    pub base: Option<&'a Frame>,
 }
 
 /// Theme order: full-screen picture, meter face, album art, folder layers, needles, meter
 /// spectrum, texts, overlay folder layers, and the meter foreground last. `now_ms` drives the moving texts through `motion`.
-pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms: u64) -> Frame {
+pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, now_ms: u64) -> &'m Frame {
     // A start ramps the levels up over the engine's first frames.
     let ramp = motion.ramp.factor(now_ms);
     let ramped;
@@ -298,19 +308,19 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
     };
     let width = scene.width.max(1);
     let height = scene.height.max(1);
-    let mut rgba = vec![0u8; (width * height * 4) as usize];
-    for px in rgba.chunks_exact_mut(4) {
-        px.copy_from_slice(&BG);
-    }
-    if let Some(screen) = stack.screen {
-        blit(&mut rgba, width, height, screen);
-    }
     // The meter engine composes the screen picture and the meter face into
     // one static background; album art and background folder layers go over
-    // that, under the needles.
-    if let Some(face) = stack.face {
-        blit_at(&mut rgba, width, height, face, stack.face_at);
+    // that, under the needles. A prepared base is copied; otherwise it is
+    // composed here.
+    let mut taken = motion.profile.take();
+    let mut stages = Stages::new(taken.as_mut());
+    let mut rgba = std::mem::take(&mut motion.canvas.rgba);
+    rgba.resize((width * height * 4) as usize, 0);
+    match stack.base {
+        Some(base) if base.width == width && base.height == height => rgba.copy_from_slice(&base.rgba),
+        _ => rgba.copy_from_slice(&compose_base(width, height, stack.screen, stack.face, stack.face_at).rgba),
     }
+    stages.mark("base");
     // The tonearm's state decides whether the record keeps turning while it lifts.
     let tonearm_animating = scene.tonearm.as_ref().map_or(false, |spec| {
         motion.tonearm.update(spec, scene.playing, scene.progress_pct, scene.time_remaining, now_ms);
@@ -372,6 +382,7 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
     }
     draw_folder_layers(&mut rgba, width, height, scene, stack.folder_pictures, ZOrder::Background);
     draw_fanart(&mut rgba, width, height, scene.fanart.as_ref(), stack.fanart, ZOrder::Background);
+    stages.mark("layers");
     if scene.meter.visible {
         let right_sprite = stack.needle_right.or(stack.needle);
         match (scene.meter.kind, &scene.meter.linear) {
@@ -394,29 +405,33 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
             _ => {
                 if let (Some(sprite), Some((start, stop, distance))) = (stack.needle, scene.needle) {
                     let (left_start, left_stop) = scene.meter.left_angles.unwrap_or((start, stop));
+                    let pivot = |s: &Frame| (s.width as f32 / 2.0, s.height as f32 / 2.0 + distance);
                     if scene.meter.channels == 1 {
                         if let Some(at) = scene.meter.mono_at {
                             let angle = left_start + (left_stop - left_start) * scene.mono;
-                            blit_rotated(&mut rgba, width, height, sprite, at, angle, distance);
+                            motion.needles.draw(&mut rgba, width, height, 0, sprite, pivot(sprite), (at.0 as f32, at.1 as f32), angle, now_ms);
                         }
                     } else {
                         if let Some(at) = scene.left_at {
                             let angle = left_start + (left_stop - left_start) * scene.left;
-                            blit_rotated(&mut rgba, width, height, sprite, at, angle, distance);
+                            motion.needles.draw(&mut rgba, width, height, 0, sprite, pivot(sprite), (at.0 as f32, at.1 as f32), angle, now_ms);
                         }
                         if let (Some(at), Some(sprite)) = (scene.right_at, right_sprite) {
                             let (right_start, right_stop) = scene.meter.right_angles.unwrap_or((start, stop));
                             let angle = right_start + (right_stop - right_start) * scene.right;
-                            blit_rotated(&mut rgba, width, height, sprite, at, angle, distance);
+                            let slot = if stack.needle_right.is_some() { 1 } else { 0 };
+                            motion.needles.draw(&mut rgba, width, height, slot, sprite, pivot(sprite), (at.0 as f32, at.1 as f32), angle, now_ms);
                         }
                     }
                 }
             }
         }
     }
+    stages.mark("meters");
     if let (Some(spec), Some(assets)) = (&scene.spectrum, stack.spectrum) {
         draw_spectrum(&mut rgba, width, height, spec, &scene.bar_heights, assets, &mut motion.spectrum);
     }
+    stages.mark("spectrum");
     if stack.screen.is_none() && stack.face.is_none() {
         let layout = layout(width, height);
         let left_meter = place(layout.left_meter, scene.left_at, width, height);
@@ -433,6 +448,7 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
     for text in &scene.texts {
         draw_text_moving(&mut frame, text, stack.fonts, &mut motion.text, now_ms);
     }
+    stages.mark("texts");
     if let (Some(spec), Some(picture)) = (&scene.tonearm, stack.tonearm) {
         blit_pivot(
             &mut frame.rgba,
@@ -450,19 +466,24 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
     if let Some(area) = &scene.type_area {
         draw_type_area(&mut frame, area, stack.icon, stack.fonts);
     }
+    stages.mark("arms and indicators");
     // Overlay folder layers sit above everything but the meter foreground,
     // which the meter engine draws last of all.
     draw_folder_layers(&mut frame.rgba, width, height, scene, stack.folder_pictures, ZOrder::Overlay);
     draw_fanart(&mut frame.rgba, width, height, scene.fanart.as_ref(), stack.fanart, ZOrder::Overlay);
     if let Some(front) = stack.front {
-        blit_at(&mut frame.rgba, width, height, front, stack.face_at);
+        front.blit(&mut frame.rgba, width, height, stack.face_at);
     }
     if let Some((color, alpha)) = motion.fade.overlay(now_ms) {
         for px in frame.rgba.chunks_exact_mut(4) {
             blend(px, 0, [color[0], color[1], color[2], alpha]);
         }
     }
-    frame
+    stages.mark("front and fade");
+    drop(stages);
+    motion.profile = taken;
+    motion.canvas = frame;
+    &motion.canvas
 }
 
 fn align_text_x(box_x: u32, box_w: u32, item_w: u32, align: TextAlign) -> u32 {
@@ -503,12 +524,22 @@ fn blit_window(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, draw_x: i32,
 /// with a pause, or, as a ticker, loops by one segment. The drawn position
 /// is the box left edge minus the offset, and the box clips.
 pub fn draw_text_moving(frame: &mut Frame, text: &Text, fonts: Option<&Fonts>, motion: &mut TextMotion, now_ms: u64) {
-    let font = fonts.and_then(|f| f.get_for(text.style, &text.font_file));
-    let Some(line) = render_line(font, text.size, text.color, &text.text, 0) else {
-        draw_text(frame, text.x, text.y, &text.text);
-        return;
-    };
     let key = (text.x, text.y);
+    let line_key = format!("{}\0{:?}\0{}\0{:?}\0{}", text.text, text.style, text.size, text.color, text.font_file);
+    let cached = motion.lines.get(&key).filter(|(k, _)| *k == line_key).map(|(_, line)| line.clone());
+    let line = match cached {
+        Some(line) => line,
+        None => {
+            let font = fonts.and_then(|f| f.get_for(text.style, &text.font_file));
+            let Some(line) = render_line(font, text.size, text.color, &text.text, 0) else {
+                motion.lines.remove(&key);
+                draw_text(frame, text.x, text.y, &text.text);
+                return;
+            };
+            motion.lines.insert(key, (line_key, line.clone()));
+            line
+        }
+    };
     let box_w = text.max_width;
     if box_w == 0 || line.width <= box_w || text.speed <= 0.0 {
         motion.states.remove(&key);
@@ -961,6 +992,9 @@ fn sample_bilinear(src: &Frame, sx: f32, sy: f32) -> [u8; 4] {
 /// turn the needle to the left of vertical, as the theme files count them.
 /// Every frame pixel inside the turned bounds samples the sprite bilinearly,
 /// so the edge stays smooth and the alpha channel blends over the face.
+/// The direct form of the needle turn, which the cached turn reproduces;
+/// the tests pin the geometry through it.
+#[allow(dead_code)]
 fn blit_rotated(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (i32, i32), degrees: f32, distance: f32) {
     // The needle turns about a point `distance` below its picture's centre,
     // which the theme places on the origin.
@@ -1418,6 +1452,159 @@ pub struct Motion {
     /// The fade over the whole frame and the level ramp after a start.
     pub fade: Fade,
     pub ramp: Ramp,
+    /// When set, `raster_over` appends how long each stage took, in microseconds.
+    pub profile: Option<Vec<(&'static str, u64)>>,
+    /// Needle sprites turned to recent angles, so a needle that holds or
+    /// moves slowly costs one plain blit a frame.
+    pub needles: Turned,
+    /// The frame buffer, kept between frames so no frame allocates one.
+    canvas: Frame,
+}
+
+/// Pictures turned to a quantised angle about a pivot, kept for the last
+/// few dozen angles seen. Half a degree is the engine's high quality step.
+#[derive(Default)]
+pub struct Turned {
+    entries: Vec<((usize, i32), TurnedPicture)>,
+}
+
+struct TurnedPicture {
+    frame: Frame,
+    /// Where the frame's top left sits relative to the pivot on screen.
+    offset: (i32, i32),
+    used: u64,
+}
+
+const TURNED_KEEP: usize = 400;
+
+impl Turned {
+    /// Draw `src` turned `degrees` about `pivot_image`, that point on
+    /// `pivot_screen`, through the cache. `slot` tells pictures apart.
+    #[allow(clippy::too_many_arguments)]
+    fn draw(&mut self, dst: &mut [u8], dst_w: u32, dst_h: u32, slot: usize, src: &Frame, pivot_image: (f32, f32), pivot_screen: (f32, f32), degrees: f32, tick: u64) {
+        let key = (slot, (degrees * 2.0).round() as i32);
+        let angle = key.1 as f32 / 2.0;
+        let index = match self.entries.iter().position(|(k, _)| *k == key) {
+            Some(i) => i,
+            None => {
+                let picture = turn_picture(src, pivot_image, angle);
+                if self.entries.len() >= TURNED_KEEP {
+                    let oldest = self.entries.iter().enumerate().min_by_key(|(_, (_, p))| p.used).map(|(i, _)| i).unwrap_or(0);
+                    self.entries.swap_remove(oldest);
+                }
+                self.entries.push((key, picture));
+                self.entries.len() - 1
+            }
+        };
+        let entry = &mut self.entries[index].1;
+        entry.used = tick;
+        let at = ((pivot_screen.0.round() as i32) + entry.offset.0, (pivot_screen.1.round() as i32) + entry.offset.1);
+        blit_part(dst, dst_w, dst_h, &entry.frame, at, (0, 0, entry.frame.width, entry.frame.height));
+    }
+}
+
+/// A picture turned about a pivot into its own frame, with the frame's
+/// offset from the pivot, sampled as `blit_pivot` samples.
+fn turn_picture(src: &Frame, pivot_image: (f32, f32), degrees: f32) -> TurnedPicture {
+    let (px, py) = pivot_image;
+    let reach = [(0.0, 0.0), (src.width as f32, 0.0), (0.0, src.height as f32), (src.width as f32, src.height as f32)]
+        .iter()
+        .map(|(x, y)| ((x - px).powi(2) + (y - py).powi(2)).sqrt())
+        .fold(0.0f32, f32::max)
+        .ceil() as i32
+        + 1;
+    let side = (reach * 2 + 1) as u32;
+    let mut frame = empty_frame(side, side);
+    // The pivot sits at the centre of the square frame.
+    blit_pivot(&mut frame.rgba, side, side, src, pivot_image, (reach as f32 + 0.5, reach as f32 + 0.5), degrees);
+    // Trim to the rows and columns that hold anything.
+    let (mut x0, mut y0, mut x1, mut y1) = (side, side, 0u32, 0u32);
+    for y in 0..side {
+        for x in 0..side {
+            if frame.rgba[((y * side + x) * 4 + 3) as usize] != 0 {
+                x0 = x0.min(x);
+                y0 = y0.min(y);
+                x1 = x1.max(x + 1);
+                y1 = y1.max(y + 1);
+            }
+        }
+    }
+    if x1 <= x0 || y1 <= y0 {
+        return TurnedPicture { frame: empty_frame(1, 1), offset: (0, 0), used: 0 };
+    }
+    let mut trimmed = empty_frame(x1 - x0, y1 - y0);
+    for y in y0..y1 {
+        let from = ((y * side + x0) * 4) as usize;
+        let to = (((y - y0) * (x1 - x0)) * 4) as usize;
+        trimmed.rgba[to..to + ((x1 - x0) * 4) as usize].copy_from_slice(&frame.rgba[from..from + ((x1 - x0) * 4) as usize]);
+    }
+    TurnedPicture { frame: trimmed, offset: (x0 as i32 - reach, y0 as i32 - reach), used: 0 }
+}
+
+/// A picture with the opaque span of every row, so a mostly transparent
+/// layer such as a meter foreground blends only where it has pixels.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Spans {
+    pub frame: Frame,
+    rows: Vec<(u32, u32)>,
+}
+
+impl Spans {
+    pub fn new(frame: Frame) -> Self {
+        let rows = (0..frame.height)
+            .map(|y| {
+                let row = &frame.rgba[(y * frame.width * 4) as usize..((y + 1) * frame.width * 4) as usize];
+                let first = (0..frame.width).find(|&x| row[(x * 4 + 3) as usize] != 0);
+                let last = (0..frame.width).rev().find(|&x| row[(x * 4 + 3) as usize] != 0);
+                match (first, last) {
+                    (Some(a), Some(b)) => (a, b + 1),
+                    _ => (0, 0),
+                }
+            })
+            .collect();
+        Self { frame, rows }
+    }
+
+    fn blit(&self, dst: &mut [u8], dst_w: u32, dst_h: u32, at: (u32, u32)) {
+        for (y, &(x0, x1)) in self.rows.iter().enumerate() {
+            if x1 <= x0 {
+                continue;
+            }
+            let dy = at.1 + y as u32;
+            if dy >= dst_h {
+                break;
+            }
+            for x in x0..x1 {
+                let dx = at.0 + x;
+                if dx >= dst_w {
+                    break;
+                }
+                let s = ((y as u32 * self.frame.width + x) * 4) as usize;
+                let d = (dy as usize * dst_w as usize + dx as usize) * 4;
+                blend(dst, d, [self.frame.rgba[s], self.frame.rgba[s + 1], self.frame.rgba[s + 2], self.frame.rgba[s + 3]]);
+            }
+        }
+    }
+}
+
+/// A stopwatch for the raster's stages, silent unless profiling is on.
+struct Stages<'a> {
+    sink: Option<&'a mut Vec<(&'static str, u64)>>,
+    last: std::time::Instant,
+}
+
+impl<'a> Stages<'a> {
+    fn new(sink: Option<&'a mut Vec<(&'static str, u64)>>) -> Self {
+        Self { sink, last: std::time::Instant::now() }
+    }
+
+    fn mark(&mut self, name: &'static str) {
+        if let Some(sink) = self.sink.as_deref_mut() {
+            let now = std::time::Instant::now();
+            sink.push((name, now.duration_since(self.last).as_micros() as u64));
+            self.last = now;
+        }
+    }
 }
 
 /// The topping of each spectrum bar: where it sits, or `None` before the
@@ -2124,6 +2311,23 @@ fn draw_indicators(frame: &mut Frame, indicators: &Indicators, assets: &Indicato
     if let Some(progress) = &indicators.spec.progress {
         draw_gauge(frame, progress, indicators.progress, &assets.progress, fonts);
     }
+}
+
+/// The static background: the dark fill, the screen picture over it, and
+/// the meter face at its position.
+pub fn compose_base(width: u32, height: u32, screen: Option<&Frame>, face: Option<&Frame>, face_at: (u32, u32)) -> Frame {
+    let (width, height) = (width.max(1), height.max(1));
+    let mut rgba = vec![0u8; (width * height * 4) as usize];
+    for px in rgba.chunks_exact_mut(4) {
+        px.copy_from_slice(&BG);
+    }
+    if let Some(screen) = screen {
+        blit(&mut rgba, width, height, screen);
+    }
+    if let Some(face) = face {
+        blit_at(&mut rgba, width, height, face, face_at);
+    }
+    Frame { width, height, rgba }
 }
 
 fn place(fallback: Rect, at: Option<(i32, i32)>, width: u32, height: u32) -> Rect {

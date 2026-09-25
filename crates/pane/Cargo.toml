@@ -9,4 +9,4 @@ description = "Put a frame on the glass, or publish a Scene"
 [dependencies]
 expose = { path = "../expose" }
 plot = { path = "../plot" }
-sdl2 = "0.37"
+sdl2 = { version = "0.37", features = ["unsafe_textures"] }

@@ -9,13 +9,16 @@ use expose::Frame;
 use plot::Scene;
 use sdl2::event::Event;
 use sdl2::pixels::PixelFormatEnum;
-use sdl2::render::Canvas;
-use sdl2::video::Window;
+use sdl2::render::{Canvas, Texture, TextureCreator};
+use sdl2::video::{Window, WindowContext};
 use sdl2::EventPump;
 
-/// One window. The binary keeps it for the life of the player.
+/// One window. The binary keeps it for the life of the player, with one
+/// streaming texture the frames are uploaded into.
 pub struct Surface {
     canvas: Canvas<Window>,
+    creator: TextureCreator<WindowContext>,
+    texture: Option<Texture>,
     pump: EventPump,
 }
 
@@ -32,8 +35,9 @@ impl Surface {
             .build()
             .map_err(|err| err.to_string())?;
         let canvas = window.into_canvas().build().map_err(|err| err.to_string())?;
+        let creator = canvas.texture_creator();
         let pump = sdl.event_pump()?;
-        Ok(Self { canvas, pump })
+        Ok(Self { canvas, creator, texture: None, pump })
     }
 
     /// Upload one frame. `false` means the window was closed.
@@ -43,19 +47,24 @@ impl Surface {
                 return Ok(false);
             }
         }
-        let creator = self.canvas.texture_creator();
-        let mut texture = creator
-            .create_texture_streaming(PixelFormatEnum::RGBA32, frame.width, frame.height)
-            .map_err(|err| err.to_string())?;
+        let fits = self.texture.as_ref().is_some_and(|t| {
+            let q = t.query();
+            q.width == frame.width && q.height == frame.height
+        });
+        if !fits {
+            if let Some(old) = self.texture.take() {
+                // With `unsafe_textures` a texture is freed by hand.
+                unsafe { old.destroy() };
+            }
+            let texture = self
+                .creator
+                .create_texture_streaming(PixelFormatEnum::RGBA32, frame.width, frame.height)
+                .map_err(|err| err.to_string())?;
+            self.texture = Some(texture);
+        }
+        let texture = self.texture.as_mut().expect("texture was just made");
         texture
-            .with_lock(None, |buffer, pitch| {
-                let row = frame.width as usize * 4;
-                for y in 0..frame.height as usize {
-                    let src = y * row;
-                    let dst = y * pitch;
-                    buffer[dst..dst + row].copy_from_slice(&frame.rgba[src..src + row]);
-                }
-            })
+            .update(None, &frame.rgba, frame.width as usize * 4)
             .map_err(|err| err.to_string())?;
         self.canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
         self.canvas.clear();
@@ -66,9 +75,7 @@ impl Surface {
             frame.width,
             frame.height,
         );
-        self.canvas
-            .copy(&texture, None, dest)
-            .map_err(|err| err.to_string())?;
+        self.canvas.copy(texture, None, dest).map_err(|err| err.to_string())?;
         self.canvas.present();
         Ok(true)
     }
