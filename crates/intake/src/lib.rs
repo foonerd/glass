@@ -16,7 +16,7 @@ use lead::{
     data_source_from_config, decode_meter, decode_spectrum, fonts_from_config, format_key,
     frame_rate_from_config, meter_art, meter_at, meter_background, meter_indicator,
     folder_candidates, meter_fanart, meter_folder_layers, meter_layers, meter_needle, meter_sections, meter_spec, meter_spectrum, meter_text_at,
-    meter_tonearm, meter_vinyl, rotation_settings,
+    meter_reels, meter_tonearm, meter_vinyl, rotation_settings,
     meter_texts, meter_type, random_change_title_from_config, random_interval_from_config,
     screen_from_config, scroll_speeds_from_config, selection_from_config, spectrum_from_theme,
     spectrum_settings, Bins, DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec, CONFIG_TXT,
@@ -624,6 +624,20 @@ pub fn queue_next(position: i64) -> (String, String, String) {
     (title, text("artist"), text("album"))
 }
 
+/// The length in seconds of every track in the player's queue, in order.
+pub fn queue_lengths() -> Vec<f32> {
+    let Some(body) = player_get("/api/v1/getQueue") else {
+        return Vec::new();
+    };
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) else {
+        return Vec::new();
+    };
+    let items = value.as_array().or_else(|| value.get("queue").and_then(|q| q.as_array()));
+    items
+        .map(|items| items.iter().map(|item| item.get("duration").and_then(|d| d.as_f64()).unwrap_or(0.0).max(0.0) as f32).collect())
+        .unwrap_or_default()
+}
+
 /// A file named `basename` in `dir`, matched exactly first, then ignoring
 /// case. Volumio ships `YouTube.svg`, which a case-sensitive open misses.
 pub fn existing_icon_file(dir: &str, basename: &str) -> Option<PathBuf> {
@@ -849,6 +863,14 @@ pub struct PipeSource {
     vinyl_album_file: String,
     vinyl_key: String,
     vinyl_file: String,
+    /// The reels' album file names and the files found.
+    reel_album_files: (String, String),
+    reel_key: String,
+    reel_files: (String, String),
+    /// Queue mode: the queue's track lengths, read every ten seconds.
+    queue_mode: bool,
+    queue_lengths: Vec<f32>,
+    queue_read_at: Option<Instant>,
 }
 
 impl PipeSource {
@@ -896,6 +918,12 @@ impl PipeSource {
             vinyl_album_file: String::new(),
             vinyl_key: String::new(),
             vinyl_file: String::new(),
+            reel_album_files: (String::new(), String::new()),
+            reel_key: String::new(),
+            reel_files: (String::new(), String::new()),
+            queue_mode: false,
+            queue_lengths: Vec::new(),
+            queue_read_at: None,
             conditioner: Conditioner::new(DataSourceSpec {
                 max_ui: meter_max,
                 max_pipe: meter_max,
@@ -941,6 +969,46 @@ impl PipeSource {
         self.folder_files.clone()
     }
 
+    /// The reel pictures for a track, as for the record.
+    fn reel_files_for(&mut self, uri: &str) -> (String, String) {
+        if self.reel_album_files.0.is_empty() && self.reel_album_files.1.is_empty() {
+            return (String::new(), String::new());
+        }
+        let key = uri.rfind('/').map(|i| &uri[..i]).unwrap_or(uri).to_string();
+        if key != self.reel_key {
+            self.reel_key = key;
+            let find = |name: &String| -> String {
+                if name.is_empty() {
+                    return String::new();
+                }
+                folder_candidates(uri, std::slice::from_ref(name))
+                    .into_iter()
+                    .find(|candidate| Path::new(candidate).is_file())
+                    .unwrap_or_default()
+            };
+            self.reel_files = (find(&self.reel_album_files.0), find(&self.reel_album_files.1));
+        }
+        self.reel_files.clone()
+    }
+
+    /// In queue mode, the seconds of queue before `position` and the whole
+    /// queue's length, from the player's queue read every ten seconds.
+    fn queue_progress_for(&mut self, position: i64) -> (f32, f32) {
+        if !self.queue_mode {
+            return (0.0, 0.0);
+        }
+        if self.queue_read_at.map_or(true, |at| at.elapsed() >= Duration::from_secs(10)) {
+            self.queue_lengths = queue_lengths();
+            self.queue_read_at = Some(Instant::now());
+        }
+        let total: f32 = self.queue_lengths.iter().sum();
+        if self.queue_lengths.is_empty() || total <= 0.0 {
+            return (0.0, 0.0);
+        }
+        let before: f32 = self.queue_lengths.iter().take(position.max(0) as usize).sum();
+        (before, total)
+    }
+
     /// The record picture for a track: the album file named by the skin when
     /// the track's folder has it, else empty for the theme's own.
     fn vinyl_file_for(&mut self, uri: &str) -> String {
@@ -976,6 +1044,15 @@ impl PipeSource {
         self.vinyl_album_file = skin.vinyl.as_ref().map(|v| v.album_file.clone()).unwrap_or_default();
         self.vinyl_key = String::new();
         self.vinyl_file = String::new();
+        self.reel_album_files = (
+            skin.reels.as_ref().and_then(|r| r.left.as_ref()).map(|r| r.album_file.clone()).unwrap_or_default(),
+            skin.reels.as_ref().and_then(|r| r.right.as_ref()).map(|r| r.album_file.clone()).unwrap_or_default(),
+        );
+        self.reel_key = String::new();
+        self.reel_files = (String::new(), String::new());
+        self.queue_mode = skin.rotation.queue_mode;
+        self.queue_lengths.clear();
+        self.queue_read_at = None;
         self.fanart = skin.fanart.as_ref().map(|_| Slideshow {
             seed: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1),
             ..Slideshow::default()
@@ -1079,6 +1156,9 @@ impl Source for PipeSource {
                     persist_left: 0,
                     folder_files: self.folder_files_for(&playing.uri),
                     vinyl_file: self.vinyl_file_for(&playing.uri),
+                    reel_files: self.reel_files_for(&playing.uri),
+                    queue_before_s: self.queue_progress_for(playing.position).0,
+                    queue_total_s: self.queue_progress_for(playing.position).1,
                     volatile: playing.volatile,
                     uri: playing.uri,
                     fanart_file: String::new(),
@@ -1189,6 +1269,7 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         skin.rotation = rotation_settings(&text);
         skin.vinyl = meter_vinyl(&meters, &skin.name, &skin.theme_dir, &skin.rotation);
         skin.tonearm = meter_tonearm(&meters, &skin.name, &skin.theme_dir);
+        skin.reels = meter_reels(&meters, &skin.name, &skin.theme_dir, &skin.rotation);
         let (title_at, artist_at) = meter_text_at(&meters, &skin.name);
         skin.title_at = title_at;
         skin.artist_at = artist_at;

@@ -3,7 +3,7 @@
 
 use lead::{
     format_key, format_label, FanartSpec, FolderLayerSpec, Input, Metadata, MeterSpec, ScrollDirection,
-    SkinDesc, SpectrumSpec, TextAlign, TextSpec, TextStyle, TonearmSpec, TypeAlign, TypeMode, VinylSpec,
+    ReelsSpec, SkinDesc, SpectrumSpec, TextAlign, TextSpec, TextStyle, TonearmSpec, TypeAlign, TypeMode, VinylSpec,
 };
 use serde::{Deserialize, Serialize};
 
@@ -123,6 +123,16 @@ pub struct Scene {
     pub vinyl: Option<Vinyl>,
     #[serde(default)]
     pub tonearm: Option<TonearmSpec>,
+    /// The cassette reels and the pictures they show for this track.
+    #[serde(default)]
+    pub reels: Option<Reels>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Reels {
+    pub spec: ReelsSpec,
+    pub left_file: String,
+    pub right_file: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -177,6 +187,7 @@ impl Default for Scene {
             time_remaining: None,
             vinyl: None,
             tonearm: None,
+            reels: None,
         }
     }
 }
@@ -422,17 +433,42 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
         }),
         playing: input.metadata.status == "play",
         transitional: input.metadata.volatile != Some(false),
-        progress_pct: if input.metadata.duration > 0.0 {
-            (input.metadata.seek.max(0.0) / input.metadata.duration * 100.0).clamp(0.0, 100.0)
-        } else {
-            0.0
-        },
-        time_remaining: (input.metadata.duration > 0.0).then(|| input.metadata.duration - input.metadata.seek.max(0.0)),
+        progress_pct: progress(&input.metadata).0,
+        time_remaining: progress(&input.metadata).1,
         vinyl: skin.vinyl.as_ref().map(|spec| Vinyl {
             spec: spec.clone(),
             file: if input.metadata.vinyl_file.is_empty() { spec.theme_file.clone() } else { input.metadata.vinyl_file.clone() },
         }),
         tonearm: skin.tonearm.clone(),
+        reels: skin.reels.as_ref().map(|spec| Reels {
+            spec: spec.clone(),
+            left_file: match (&spec.left, input.metadata.reel_files.0.is_empty()) {
+                (Some(reel), true) => reel.theme_file.clone(),
+                (Some(_), false) => input.metadata.reel_files.0.clone(),
+                (None, _) => String::new(),
+            },
+            right_file: match (&spec.right, input.metadata.reel_files.1.is_empty()) {
+                (Some(reel), true) => reel.theme_file.clone(),
+                (Some(_), false) => input.metadata.reel_files.1.clone(),
+                (None, _) => String::new(),
+            },
+        }),
+    }
+}
+
+/// How far the playback is, 0 to 100, and the seconds left: over the whole
+/// queue when the player reports one and the source is not a stream, else
+/// over the track; nothing without a length.
+fn progress(meta: &Metadata) -> (f32, Option<f32>) {
+    let seek = meta.seek.max(0.0);
+    if meta.queue_total_s > 0.0 && meta.duration > 0.0 && meta.volatile != Some(true) {
+        let played = meta.queue_before_s + seek;
+        return (((played / meta.queue_total_s) * 100.0).min(100.0), Some((meta.queue_total_s - played).max(0.0)));
+    }
+    if meta.duration > 0.0 {
+        ((seek / meta.duration * 100.0).clamp(0.0, 100.0), Some(meta.duration - seek))
+    } else {
+        (0.0, None)
     }
 }
 
