@@ -10,7 +10,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
 
-use expose::{apply_circle, fit_art, flip_x, raster_over, read_art, read_icon, read_png, FolderPicture, Fonts, Motion, SpectrumAssets, Stack};
+use expose::{apply_circle, fit_art, flip_x, raster_over, read_art, read_icon, read_png, FolderPicture, Fonts, IndicatorAssets, Motion, SpectrumAssets, Stack};
 use intake::{PipeSource, Selector, Source};
 use lead::{frame_period, FolderLayerSpec, Input, MeterKind, SkinDesc, TypeMode};
 use pane::{publish, write_ppm, Surface};
@@ -40,6 +40,8 @@ struct Assets {
     tonearm: Option<expose::Frame>,
     /// The theme's reel pictures; an album's reel is scaled to their size.
     reels: (Option<expose::Frame>, Option<expose::Frame>),
+    /// The indicators' prepared states and pictures.
+    indicators: Option<IndicatorAssets>,
 }
 
 impl Assets {
@@ -80,6 +82,7 @@ impl Assets {
                 skin.reels.as_ref().and_then(|r| r.left.as_ref()).and_then(|r| read_png(std::path::Path::new(&r.theme_file))),
                 skin.reels.as_ref().and_then(|r| r.right.as_ref()).and_then(|r| read_png(std::path::Path::new(&r.theme_file))),
             ),
+            indicators: skin.indicators.as_ref().map(IndicatorAssets::load),
         }
     }
 }
@@ -440,6 +443,7 @@ fn main() -> ExitCode {
                     vinyl: vinyl_slot.frame.as_ref(),
                     tonearm: assets.tonearm.as_ref(),
                     reels: (reel_pictures.0.as_ref(), reel_pictures.1.as_ref()),
+                    indicators: assets.indicators.as_ref(),
                 },
                 &mut motion,
                 started.elapsed().as_millis() as u64,

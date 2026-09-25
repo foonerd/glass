@@ -16,7 +16,7 @@ use lead::{
     data_source_from_config, decode_meter, decode_spectrum, fonts_from_config, format_key,
     frame_rate_from_config, meter_art, meter_at, meter_background, meter_indicator,
     folder_candidates, meter_fanart, meter_folder_layers, meter_layers, meter_needle, meter_sections, meter_spec, meter_spectrum, meter_text_at,
-    meter_reels, meter_tonearm, meter_vinyl, rotation_settings,
+    meter_indicators, meter_reels, meter_tonearm, meter_vinyl, rotation_settings,
     meter_texts, meter_type, random_change_title_from_config, random_interval_from_config,
     screen_from_config, scroll_speeds_from_config, selection_from_config, spectrum_from_theme,
     spectrum_settings, Bins, DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec, CONFIG_TXT,
@@ -1160,6 +1160,11 @@ impl Source for PipeSource {
                     queue_before_s: self.queue_progress_for(playing.position).0,
                     queue_total_s: self.queue_progress_for(playing.position).1,
                     volatile: playing.volatile,
+                    volume: playing.volume,
+                    mute: playing.mute,
+                    random: playing.random,
+                    repeat: playing.repeat,
+                    repeat_single: playing.repeat_single,
                     uri: playing.uri,
                     fanart_file: String::new(),
                     fanart_prev_file: String::new(),
@@ -1270,6 +1275,7 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         skin.vinyl = meter_vinyl(&meters, &skin.name, &skin.theme_dir, &skin.rotation);
         skin.tonearm = meter_tonearm(&meters, &skin.name, &skin.theme_dir);
         skin.reels = meter_reels(&meters, &skin.name, &skin.theme_dir, &skin.rotation);
+        skin.indicators = meter_indicators(&meters, &skin.name, &skin.theme_dir);
         let (title_at, artist_at) = meter_text_at(&meters, &skin.name);
         skin.title_at = title_at;
         skin.artist_at = artist_at;
@@ -1335,6 +1341,11 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
 
 #[derive(Debug, Default)]
 pub struct NowPlaying {
+    pub volume: u32,
+    pub mute: bool,
+    pub random: bool,
+    pub repeat: bool,
+    pub repeat_single: bool,
     pub volatile: Option<bool>,
     pub uri: String,
     pub title: String,
@@ -1383,6 +1394,11 @@ pub fn now_playing() -> NowPlaying {
     playing.albumart = json_string(body, "albumart");
     playing.uri = json_string(body, "uri");
     playing.volatile = json_bool(body, "volatile");
+    playing.volume = json_number(body, "volume").unwrap_or(0.0).clamp(0.0, 100.0) as u32;
+    playing.mute = json_bool(body, "mute").unwrap_or(false);
+    playing.random = json_bool(body, "random").unwrap_or(false);
+    playing.repeat = json_bool(body, "repeat").unwrap_or(false);
+    playing.repeat_single = json_bool(body, "repeatSingle").unwrap_or(false);
     playing.track_type = json_string(body, "trackType");
     playing.bitrate = json_string(body, "bitrate");
     playing.position = json_number(body, "position").map(|p| p as i64).unwrap_or(0);

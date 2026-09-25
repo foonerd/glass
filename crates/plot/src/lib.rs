@@ -3,7 +3,8 @@
 
 use lead::{
     format_key, format_label, FanartSpec, FolderLayerSpec, Input, Metadata, MeterSpec, ScrollDirection,
-    ReelsSpec, SkinDesc, SpectrumSpec, TextAlign, TextSpec, TextStyle, TonearmSpec, TypeAlign, TypeMode, VinylSpec,
+    IndicatorsSpec, ReelsSpec, SkinDesc, SpectrumSpec, StateLook, TextAlign, TextSpec, TextStyle, TonearmSpec, TypeAlign,
+    TypeMode, VinylSpec,
 };
 use serde::{Deserialize, Serialize};
 
@@ -126,6 +127,24 @@ pub struct Scene {
     /// The cassette reels and the pictures they show for this track.
     #[serde(default)]
     pub reels: Option<Reels>,
+    /// The indicators with their states for this frame.
+    #[serde(default)]
+    pub indicators: Option<Indicators>,
+}
+
+/// The indicators of the scene: the volume 0 to 100, the state index of
+/// mute (off, on, zero), shuffle (off, on, legacy infinity), repeat (off,
+/// all, single, infinity) and play state (stop, pause, play), and the
+/// progress 0 to 100.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Indicators {
+    pub spec: IndicatorsSpec,
+    pub volume: u32,
+    pub mute_state: usize,
+    pub shuffle_state: usize,
+    pub repeat_state: usize,
+    pub play_state: usize,
+    pub progress: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -188,6 +207,7 @@ impl Default for Scene {
             vinyl: None,
             tonearm: None,
             reels: None,
+            indicators: None,
         }
     }
 }
@@ -453,6 +473,30 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
                 (None, _) => String::new(),
             },
         }),
+        indicators: skin.indicators.as_ref().map(|spec| indicators(spec, &input.metadata, progress(&input.metadata).0)),
+    }
+}
+
+/// The indicator states the player's handler derives. The player has no
+/// infinity event here, so infinity never shows.
+fn indicators(spec: &IndicatorsSpec, meta: &Metadata, progress_pct: f32) -> Indicators {
+    let repeat_has_infinity = spec.repeat.as_ref().is_some_and(|r| match &r.look {
+        StateLook::Icons { files } => files.len() >= 4 && !files[3].is_empty(),
+        StateLook::Led { colors, .. } => colors.len() >= 4,
+    });
+    let infinity = false;
+    Indicators {
+        spec: spec.clone(),
+        volume: meta.volume.min(100),
+        mute_state: if meta.mute { 1 } else if meta.volume == 0 { 2 } else { 0 },
+        shuffle_state: if infinity && !repeat_has_infinity { 2 } else if meta.random { 1 } else { 0 },
+        repeat_state: if repeat_has_infinity && infinity { 3 } else if meta.repeat_single { 2 } else if meta.repeat { 1 } else { 0 },
+        play_state: match meta.status.as_str() {
+            "play" => 2,
+            "pause" => 1,
+            _ => 0,
+        },
+        progress: progress_pct.clamp(0.0, 100.0) as u32,
     }
 }
 
