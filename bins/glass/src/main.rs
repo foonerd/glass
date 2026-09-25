@@ -8,7 +8,7 @@ use std::env;
 use std::process::ExitCode;
 use std::thread;
 
-use expose::{draw_text, raster_over, read_png, Stack};
+use expose::{raster_over, read_png, Fonts, Stack};
 use intake::{PipeSource, Source};
 use lead::{frame_period, Input, SkinDesc};
 use pane::{publish, write_ppm, Surface};
@@ -92,6 +92,8 @@ fn main() -> ExitCode {
     let face = load_theme(&skin.theme_dir, &skin.face);
     let front = load_theme(&skin.theme_dir, &skin.front);
     let indicator = load_theme(&skin.theme_dir, &skin.indicator);
+    let fonts = Fonts::load(&skin.fonts);
+    println!("glass: fonts loaded {} of 4", fonts.loaded());
     let show_window = env::var_os("DISPLAY").is_some() && !headless;
     let write_file = output.is_some();
     let serving_remote = false;
@@ -133,7 +135,7 @@ fn main() -> ExitCode {
             );
         }
         if surface.is_some() || write_file {
-            let mut frame = raster_over(
+            let frame = raster_over(
                 &scene,
                 Stack {
                     screen: background.as_ref(),
@@ -141,17 +143,9 @@ fn main() -> ExitCode {
                     front: front.as_ref(),
                     needle: indicator.as_ref(),
                     face_at: skin.face_at,
+                    fonts: Some(&fonts),
                 },
             );
-            let playing = &input.metadata;
-            let title_at = skin.title_at.unwrap_or((48, frame.height.saturating_sub(72)));
-            let artist_at = skin.artist_at.unwrap_or((48, frame.height.saturating_sub(40)));
-            if !playing.title.is_empty() {
-                draw_text(&mut frame, title_at.0, title_at.1, &playing.title);
-            }
-            if !playing.artist.is_empty() {
-                draw_text(&mut frame, artist_at.0, artist_at.1, &playing.artist);
-            }
             if let Some(window) = surface.as_mut() {
                 match window.show(&frame) {
                     Ok(true) => {}

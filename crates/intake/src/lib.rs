@@ -9,10 +9,11 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use lead::{
-    decode_meter, decode_spectrum, frame_rate_from_config, meter_at, meter_background,
-    meter_indicator, meter_layers, meter_needle, meter_text_at, mono_average,
-    scale_level, screen_from_config, Bins, Input, Levels, SkinDesc, CONFIG_TXT, DEFAULT_FRAME_RATE,
-    DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO, current_value,
+    decode_meter, decode_spectrum, fonts_from_config, frame_rate_from_config, meter_at,
+    meter_background, meter_indicator, meter_layers, meter_needle, meter_text_at, meter_texts,
+    mono_average, scale_level, screen_from_config, Bins, Input, Levels, SkinDesc, CONFIG_TXT,
+    DEFAULT_FRAME_RATE, DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO,
+    current_value,
 };
 
 /// Linux `O_NONBLOCK`. A blocking open on a FIFO waits for the writer.
@@ -78,6 +79,8 @@ pub struct PipeSource {
     metadata_at: Option<Instant>,
     /// How often the player is asked for now-playing text. `None` never asks.
     metadata_every: Option<Duration>,
+    /// Position the player reported at `metadata_at`, in seconds.
+    seek_polled: f32,
 }
 
 impl PipeSource {
@@ -113,6 +116,7 @@ impl PipeSource {
             metadata_held: lead::Metadata::default(),
             metadata_at: None,
             metadata_every: Some(Duration::from_secs(1)),
+            seek_polled: 0.0,
         }
     }
 
@@ -183,12 +187,27 @@ impl Source for PipeSource {
             let due = self.metadata_at.map_or(true, |at| at.elapsed() >= every);
             if due {
                 let playing = now_playing();
+                self.seek_polled = playing.seek;
                 self.metadata_held = lead::Metadata {
                     title: playing.title,
                     artist: playing.artist,
                     album: playing.album,
+                    samplerate: playing.samplerate,
+                    bitdepth: playing.bitdepth,
+                    status: playing.status,
+                    duration: playing.duration,
+                    seek: playing.seek,
                 };
                 self.metadata_at = Some(Instant::now());
+            }
+        }
+
+        // The player reports its position once a second; while it plays,
+        // the snapshot moves on from that report by the time since.
+        let mut metadata = self.metadata_held.clone();
+        if metadata.status == "play" {
+            if let Some(at) = self.metadata_at {
+                metadata.seek = self.seek_polled + at.elapsed().as_secs_f32();
             }
         }
 
@@ -197,7 +216,7 @@ impl Source for PipeSource {
             bins: Bins {
                 values: self.spectrum_held.clone(),
             },
-            metadata: self.metadata_held.clone(),
+            metadata,
         }
     }
 }
@@ -263,24 +282,42 @@ pub fn installed_skin() -> SkinDesc {
         let (title_at, artist_at) = meter_text_at(&meters, &skin.name);
         skin.title_at = title_at;
         skin.artist_at = artist_at;
+        let texts = meter_texts(&meters, &skin.name);
+        skin.title = texts.title;
+        skin.artist = texts.artist;
+        skin.album = texts.album;
+        skin.sample = texts.sample;
+        skin.time = texts.time;
     }
+    // The clock font ships next to the player's handlers: <plugin>/screensaver/fonts.
+    let digi_default = Path::new(&path)
+        .parent()
+        .and_then(Path::parent)
+        .map(|dir| dir.join("fonts").join("DSEG7Classic-Italic.ttf"))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    skin.fonts = fonts_from_config(&text, &digi_default);
     skin
 }
 
+#[derive(Debug, Default)]
 pub struct NowPlaying {
     pub title: String,
     pub artist: String,
     pub album: String,
+    pub samplerate: String,
+    pub bitdepth: String,
+    pub status: String,
+    /// Seconds. Zero when the player reports none.
+    pub duration: f32,
+    /// Seconds. The player reports milliseconds.
+    pub seek: f32,
 }
 
 /// Current track from Volumio. Empty strings when the player does not answer.
 /// One HTTP request; [`PipeSource`] calls this once a second.
 pub fn now_playing() -> NowPlaying {
-    let mut playing = NowPlaying {
-        title: String::new(),
-        artist: String::new(),
-        album: String::new(),
-    };
+    let mut playing = NowPlaying::default();
     let address = std::net::SocketAddr::from(([127, 0, 0, 1], 3000));
     let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(200)) else {
         return playing;
@@ -297,7 +334,25 @@ pub fn now_playing() -> NowPlaying {
     playing.title = json_string(body, "title");
     playing.artist = json_string(body, "artist");
     playing.album = json_string(body, "album");
+    playing.samplerate = json_string(body, "samplerate");
+    playing.bitdepth = json_string(body, "bitdepth");
+    playing.status = json_string(body, "status");
+    playing.duration = json_number(body, "duration").unwrap_or(0.0);
+    playing.seek = json_number(body, "seek").unwrap_or(0.0) / 1000.0;
     playing
+}
+
+/// A bare JSON number after `"key":`. `None` when the key is absent or the
+/// value is not a number.
+fn json_number(body: &str, key: &str) -> Option<f32> {
+    let pattern = format!("\"{key}\"");
+    let start = body.find(&pattern)?;
+    let rest = body[start + pattern.len()..].trim_start();
+    let rest = rest.strip_prefix(':')?.trim_start();
+    let end = rest
+        .find(|c: char| !(c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | 'e' | 'E')))
+        .unwrap_or(rest.len());
+    rest[..end].parse().ok()
 }
 
 fn json_string(body: &str, key: &str) -> String {
@@ -367,6 +422,16 @@ mod tests {
         assert_eq!(input.levels.right, 25.0);
         assert_eq!(input.levels.mono, 37.5);
         assert_eq!(input.bins.values, vec![100.0, 0.0]);
+    }
+
+    #[test]
+    fn player_state_numbers_and_words_are_read() {
+        let body = r#"{"status":"play","title":"Wonder","duration":218.051,"seek":1994.96,"samplerate":"44.1 kHz","bitdepth":"16-bit"}"#;
+        assert_eq!(json_number(body, "duration"), Some(218.051));
+        assert_eq!(json_number(body, "seek"), Some(1994.96));
+        assert_eq!(json_number(body, "missing"), None);
+        assert_eq!(json_string(body, "status"), "play");
+        assert_eq!(json_string(body, "samplerate"), "44.1 kHz");
     }
 
     #[test]

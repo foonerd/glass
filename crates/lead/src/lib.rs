@@ -42,12 +42,68 @@ pub struct Bins {
     pub values: Vec<f32>,
 }
 
-/// Now-playing text for the surface.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+/// Now-playing text and position for the surface.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Metadata {
     pub title: String,
     pub artist: String,
     pub album: String,
+    /// As the player reports it, for example `44.1 kHz`.
+    #[serde(default)]
+    pub samplerate: String,
+    /// As the player reports it, for example `16-bit`.
+    #[serde(default)]
+    pub bitdepth: String,
+    /// Player status word: `play`, `pause`, `stop`, or empty.
+    #[serde(default)]
+    pub status: String,
+    /// Track length in seconds. Zero when the source has none.
+    #[serde(default)]
+    pub duration: f32,
+    /// Position in seconds at the time of this snapshot.
+    #[serde(default)]
+    pub seek: f32,
+}
+
+/// Which theme font a text is set in.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TextStyle {
+    Light,
+    Regular,
+    Bold,
+    Digi,
+}
+
+/// Where and how one theme text is drawn. The top of the text sits at `y`.
+/// `size` is the em height in pixels, as the theme files count it.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TextSpec {
+    pub x: u32,
+    pub y: u32,
+    pub style: TextStyle,
+    pub size: u32,
+    pub color: [u8; 3],
+    /// Widest the text may draw, in pixels. Zero is no limit.
+    pub max_width: u32,
+}
+
+/// Font files the theme text is set in. An empty string is no file.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct FontFiles {
+    pub light: String,
+    pub regular: String,
+    pub bold: String,
+    pub digi: String,
+}
+
+/// The text placements one meter declares.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct MeterTexts {
+    pub title: Option<TextSpec>,
+    pub artist: Option<TextSpec>,
+    pub album: Option<TextSpec>,
+    pub sample: Option<TextSpec>,
+    pub time: Option<TextSpec>,
 }
 
 /// One snapshot of the outside world. `plot` turns it into a scene.
@@ -83,6 +139,20 @@ pub struct SkinDesc {
     pub needle: Option<(f32, f32, f32)>,
     pub title_at: Option<(u32, u32)>,
     pub artist_at: Option<(u32, u32)>,
+    /// Theme fonts from the player configuration.
+    #[serde(default)]
+    pub fonts: FontFiles,
+    #[serde(default)]
+    pub title: Option<TextSpec>,
+    #[serde(default)]
+    pub artist: Option<TextSpec>,
+    /// Present only when the meter places the album on its own line.
+    #[serde(default)]
+    pub album: Option<TextSpec>,
+    #[serde(default)]
+    pub sample: Option<TextSpec>,
+    #[serde(default)]
+    pub time: Option<TextSpec>,
 }
 
 impl Default for SkinDesc {
@@ -110,6 +180,12 @@ impl SkinDesc {
             needle: None,
             title_at: None,
             artist_at: None,
+            fonts: FontFiles::default(),
+            title: None,
+            artist: None,
+            album: None,
+            sample: None,
+            time: None,
         }
     }
 }
@@ -560,6 +636,123 @@ pub fn meter_text_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Opti
     (title, artist)
 }
 
+/// Font files from `[current]`: `font.path` joined with `font.light`,
+/// `font.regular` and `font.bold`. `font.digi` is optional; `digi_default`
+/// stands in when it is absent.
+pub fn fonts_from_config(text: &str, digi_default: &str) -> FontFiles {
+    let base = current_value(text, "font.path").unwrap_or_default();
+    let join = |file: Option<String>| -> String {
+        let file = file.unwrap_or_default();
+        let file = file.trim();
+        if file.is_empty() {
+            return String::new();
+        }
+        if file.starts_with('/') && !base.is_empty() {
+            format!("{base}{file}")
+        } else if base.is_empty() {
+            file.to_string()
+        } else {
+            format!("{base}/{file}")
+        }
+    };
+    let digi = current_value(text, "font.digi").unwrap_or_default();
+    FontFiles {
+        light: join(current_value(text, "font.light")),
+        regular: join(current_value(text, "font.regular")),
+        bold: join(current_value(text, "font.bold")),
+        digi: if digi.trim().is_empty() {
+            digi_default.to_string()
+        } else {
+            digi.trim().to_string()
+        },
+    }
+}
+
+/// Key and value pairs of the selected meter section. `random` and `list`
+/// use the first section in the file.
+fn section_values(meters_txt: &str, meter: &str) -> Vec<(String, String)> {
+    let named = meter != "random" && meter != "list" && !meter.is_empty();
+    let mut take = false;
+    let mut seen_any = false;
+    let mut values = Vec::new();
+    for line in meters_txt.lines() {
+        let line = line.trim();
+        if let Some(title) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
+            if take {
+                break;
+            }
+            take = if named {
+                title.trim() == meter
+            } else {
+                !seen_any
+            };
+            seen_any = true;
+            continue;
+        }
+        if !take || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if let Some((key, value)) = line.split_once('=') {
+            values.push((key.trim().to_string(), value.trim().to_string()));
+        }
+    }
+    values
+}
+
+fn color_triplet(value: &str) -> Option<[u8; 3]> {
+    let mut parts = value.split(',').map(|p| p.trim().parse::<u8>().ok());
+    Some([parts.next()??, parts.next()??, parts.next()??])
+}
+
+fn style_word(word: &str) -> Option<TextStyle> {
+    match word.trim().to_ascii_lowercase().as_str() {
+        "light" => Some(TextStyle::Light),
+        "regular" => Some(TextStyle::Regular),
+        "bold" => Some(TextStyle::Bold),
+        "digi" => Some(TextStyle::Digi),
+        _ => None,
+    }
+}
+
+/// Text placements for the selected meter. A position is `x,y` or
+/// `x,y,style`. Missing sizes and colours fall back to `font.size.*` and
+/// `font.color`, with the player's defaults when those are absent too.
+pub fn meter_texts(meters_txt: &str, meter: &str) -> MeterTexts {
+    let values = section_values(meters_txt, meter);
+    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+    let number = |key: &str, default: u32| get(key).and_then(|v| v.parse().ok()).unwrap_or(default);
+    let font_color = get("font.color").and_then(color_triplet).unwrap_or([255, 255, 255]);
+    let max_width = number("playinfo.maxwidth", 0);
+    let size_of = |style: TextStyle| match style {
+        TextStyle::Light => number("font.size.light", 30),
+        TextStyle::Regular => number("font.size.regular", 35),
+        TextStyle::Bold => number("font.size.bold", 40),
+        TextStyle::Digi => number("font.size.digi", 40),
+    };
+    let spec = |pos_key: &str, color_key: &str, default_style: TextStyle, limit: u32| {
+        let pos = get(pos_key)?;
+        let mut parts = pos.split(',');
+        let x = parts.next()?.trim().parse().ok()?;
+        let y = parts.next()?.trim().parse().ok()?;
+        let style = parts.next().and_then(style_word).unwrap_or(default_style);
+        Some(TextSpec {
+            x,
+            y,
+            style,
+            size: size_of(style),
+            color: get(color_key).and_then(color_triplet).unwrap_or(font_color),
+            max_width: limit,
+        })
+    };
+    MeterTexts {
+        title: spec("playinfo.title.pos", "playinfo.title.color", TextStyle::Bold, max_width),
+        artist: spec("playinfo.artist.pos", "playinfo.artist.color", TextStyle::Light, max_width),
+        album: spec("playinfo.album.pos", "playinfo.album.color", TextStyle::Light, max_width),
+        sample: spec("playinfo.samplerate.pos", "playinfo.samplerate.color", TextStyle::Light, 0),
+        time: spec("time.remaining.pos", "time.remaining.color", TextStyle::Digi, 0),
+    }
+}
+
 /// Sleep between steps for a frame rate in frames per second.
 pub fn frame_period(rate: u32) -> std::time::Duration {
     let rate = rate.clamp(MIN_FRAME_RATE, MAX_FRAME_RATE);
@@ -623,5 +816,36 @@ mod tests {
             meter_indicator("[bar]\nindicator.filename = bar-indicator.png\n", "bar").as_deref(),
             Some("bar-indicator.png")
         );
+    }
+
+    #[test]
+    fn theme_texts_come_with_style_size_and_colour() {
+        let text = "[gold]\nplayinfo.title.pos = 10,20\n\n[black-white]\n\
+            playinfo.title.pos = 283,138,bold\nplayinfo.title.color = 255,237,76\n\
+            playinfo.artist.pos = 283,172,light\nplayinfo.samplerate.pos = 902,160,regular\n\
+            time.remaining.pos = 1100,160\ntime.remaining.color = 180,180,180\n\
+            playinfo.maxwidth = 535\nfont.size.light = 25\nfont.size.regular = 20\n\
+            font.size.bold = 28\nfont.color = 255,255,255\n";
+        let texts = meter_texts(text, "black-white");
+        let title = texts.title.unwrap();
+        assert_eq!((title.x, title.y, title.style, title.size), (283, 138, TextStyle::Bold, 28));
+        assert_eq!((title.color, title.max_width), ([255, 237, 76], 535));
+        let artist = texts.artist.unwrap();
+        assert_eq!((artist.style, artist.size, artist.color), (TextStyle::Light, 25, [255, 255, 255]));
+        assert_eq!(texts.sample.unwrap().style, TextStyle::Regular);
+        let time = texts.time.unwrap();
+        assert_eq!((time.style, time.size, time.color), (TextStyle::Digi, 40, [180, 180, 180]));
+        assert!(texts.album.is_none());
+        assert_eq!(meter_texts(text, "random").title.unwrap().x, 10);
+    }
+
+    #[test]
+    fn font_files_join_the_path_and_default_the_clock_font() {
+        let text = "[current]\nfont.path = /fonts\nfont.light = /Lato-Light.ttf\nfont.bold = Lato-Bold.ttf\n";
+        let fonts = fonts_from_config(text, "/plugin/fonts/DSEG7.ttf");
+        assert_eq!(fonts.light, "/fonts/Lato-Light.ttf");
+        assert_eq!(fonts.bold, "/fonts/Lato-Bold.ttf");
+        assert_eq!(fonts.regular, "");
+        assert_eq!(fonts.digi, "/plugin/fonts/DSEG7.ttf");
     }
 }
