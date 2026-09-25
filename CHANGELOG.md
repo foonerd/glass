@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.23] - 2026-09-25
+
+Turning pictures cost less. A turned picture visits only the span each frame row covers; records, reels, turning art and knobs take the nearest texel in fixed point, as the engine's plain rotation does, while needles and the tonearm keep bilinear sampling; the tonearm is kept turned per half degree like the needles. On the Pi 5 the Pioneer Gold turntable went from 55 to 25 percent of one core at 30 frames a second and holds 60 frames a second at 41 percent. `--fps N` stands in for `frame.rate` for one run.
+
 ## [0.4.22] - 2026-09-25
 
 Theme review. `--list` prints every installed theme with its meters. `--theme FOLDER`, `--meter NAME|random|a,b,c` and `--interval SECONDS` stand in for the installed configuration's theme, meter and rotation without changing the player's files. `--snapshot DIR` shows each meter of the theme, or of the `--meter` list, for `--settle` seconds (default 4) and writes `DIR/<theme>/<meter>.png` before moving on, with or without a window. `--output` writes PNG when the name ends in `.png`.

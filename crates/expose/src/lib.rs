@@ -349,13 +349,13 @@ pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, 
             let angle = turn.advance(spec.rpm * mult, reels.spec.clockwise, spin, now_ms);
             if let Some(picture) = picture {
                 let pivot = (picture.width as f32 / 2.0, picture.height as f32 / 2.0);
-                blit_pivot(&mut rgba, width, height, picture, pivot, (spec.center.0 as f32, spec.center.1 as f32), -angle);
+                blit_pivot(&mut rgba, width, height, picture, pivot, (spec.center.0 as f32, spec.center.1 as f32), -angle, false);
             }
         }
     }
     if let (Some(vinyl), Some(picture)) = (&scene.vinyl, stack.vinyl) {
         let pivot = (picture.width as f32 / 2.0, picture.height as f32 / 2.0);
-        blit_pivot(&mut rgba, width, height, picture, pivot, (vinyl.spec.center.0 as f32, vinyl.spec.center.1 as f32), -angle);
+        blit_pivot(&mut rgba, width, height, picture, pivot, (vinyl.spec.center.0 as f32, vinyl.spec.center.1 as f32), -angle, false);
     }
     if let (Some(art), Some(place)) = (stack.art, &scene.art) {
         let color = [place.border_color[0], place.border_color[1], place.border_color[2], 255];
@@ -366,7 +366,7 @@ pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, 
                 .as_ref()
                 .map(|v| (v.spec.center.0 as f32, v.spec.center.1 as f32))
                 .unwrap_or((place.x as f32 + place.w as f32 / 2.0, place.y as f32 + place.h as f32 / 2.0));
-            blit_pivot(&mut rgba, width, height, art, (art.width as f32 / 2.0, art.height as f32 / 2.0), centre, -angle);
+            blit_pivot(&mut rgba, width, height, art, (art.width as f32 / 2.0, art.height as f32 / 2.0), centre, -angle, false);
             let (cx, cy) = (centre.0.round() as i32, centre.1.round() as i32);
             if place.border > 0 {
                 draw_circle(&mut rgba, width, height, cx, cy, (place.w.min(place.h) / 2) as i32, place.border as i32, color);
@@ -450,14 +450,17 @@ pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, 
     }
     stages.mark("texts");
     if let (Some(spec), Some(picture)) = (&scene.tonearm, stack.tonearm) {
-        blit_pivot(
+        let angle = motion.tonearm.angle();
+        motion.needles.draw(
             &mut frame.rgba,
             width,
             height,
+            2,
             picture,
             (spec.pivot_image.0 as f32, spec.pivot_image.1 as f32),
             (spec.pivot_screen.0 as f32, spec.pivot_screen.1 as f32),
-            motion.tonearm.angle(),
+            angle,
+            now_ms,
         );
     }
     if let (Some(indicators), Some(assets)) = (&scene.indicators, stack.indicators) {
@@ -999,43 +1002,94 @@ fn blit_rotated(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (i32, i
     // The needle turns about a point `distance` below its picture's centre,
     // which the theme places on the origin.
     let pivot = (src.width as f32 / 2.0, src.height as f32 / 2.0 + distance);
-    blit_pivot(dst, dst_w, dst_h, src, pivot, (at.0 as f32, at.1 as f32), degrees);
+    blit_pivot(dst, dst_w, dst_h, src, pivot, (at.0 as f32, at.1 as f32), degrees, true);
 }
 
 /// Blend a picture turned `degrees` counter-clockwise about `pivot_image`,
-/// that point landing on `pivot_screen`. Bilinear, premultiplied alpha,
-/// inverse mapping from every frame pixel the turned picture can reach.
-fn blit_pivot(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, pivot_image: (f32, f32), pivot_screen: (f32, f32), degrees: f32) {
+/// that point landing on `pivot_screen`. Each frame row visits only the
+/// span the turned picture covers; `smooth` samples bilinearly with
+/// premultiplied alpha, otherwise the nearest texel, as the engine's plain
+/// rotation does for records, reels, art and knobs.
+#[allow(clippy::too_many_arguments)]
+fn blit_pivot(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, pivot_image: (f32, f32), pivot_screen: (f32, f32), degrees: f32, smooth: bool) {
     if src.width == 0 || src.height == 0 || dst_w == 0 || dst_h == 0 {
         return;
     }
     let rad = degrees.to_radians();
     let (sin, cos) = rad.sin_cos();
     let (px, py) = pivot_image;
-    let reach = [(0.0, 0.0), (src.width as f32, 0.0), (0.0, src.height as f32), (src.width as f32, src.height as f32)]
+    let (sw, sh) = (src.width as f32, src.height as f32);
+    let reach = [(0.0, 0.0), (sw, 0.0), (0.0, sh), (sw, sh)]
         .iter()
         .map(|(x, y)| ((x - px).powi(2) + (y - py).powi(2)).sqrt())
         .fold(0.0f32, f32::max)
         + 1.0;
-    let x_from = ((pivot_screen.0 - reach).floor() as i32).max(0);
-    let x_to = ((pivot_screen.0 + reach).ceil() as i32).min(dst_w as i32 - 1);
     let y_from = ((pivot_screen.1 - reach).floor() as i32).max(0);
     let y_to = ((pivot_screen.1 + reach).ceil() as i32).min(dst_h as i32 - 1);
+    // A source coordinate is linear in the frame column: sx = a_x + vx cos,
+    // sy = a_y + vx sin. Each bound gives an interval of vx.
+    let bound = |coef: f32, base: f32, limit: f32| -> Option<(f32, f32)> {
+        if coef.abs() < 1e-6 {
+            return if base >= 0.0 && base <= limit { Some((f32::MIN, f32::MAX)) } else { None };
+        }
+        let (a, b) = ((0.0 - base) / coef, (limit - base) / coef);
+        Some((a.min(b), a.max(b)))
+    };
     for dy in y_from..=y_to {
-        for dx in x_from..=x_to {
-            let vx = dx as f32 + 0.5 - pivot_screen.0;
-            let vy = dy as f32 + 0.5 - pivot_screen.1;
-            let sx = px + vx * cos - vy * sin;
-            let sy = py + vx * sin + vy * cos;
-            if sx < 0.0 || sy < 0.0 || sx > src.width as f32 || sy > src.height as f32 {
-                continue;
+        let vy = dy as f32 + 0.5 - pivot_screen.1;
+        let a_x = px - vy * sin;
+        let a_y = py + vy * cos;
+        let (Some(bx), Some(by)) = (bound(cos, a_x, sw), bound(sin, a_y, sh)) else {
+            continue;
+        };
+        let lo = bx.0.max(by.0);
+        let hi = bx.1.min(by.1);
+        if hi < lo {
+            continue;
+        }
+        let x_from = ((lo + pivot_screen.0 - 0.5).ceil() as i32).max(0);
+        let x_to = ((hi + pivot_screen.0 - 0.5).floor() as i32).min(dst_w as i32 - 1);
+        if x_to < x_from {
+            continue;
+        }
+        let vx0 = x_from as f32 + 0.5 - pivot_screen.0;
+        let row = dy as usize * dst_w as usize;
+        if smooth {
+            let mut sx = a_x + vx0 * cos;
+            let mut sy = a_y + vx0 * sin;
+            for dx in x_from..=x_to {
+                let color = sample_bilinear(src, sx, sy);
+                if color[3] != 0 {
+                    blend(dst, (row + dx as usize) * 4, color);
+                }
+                sx += cos;
+                sy += sin;
             }
-            let color = sample_bilinear(src, sx, sy);
-            if color[3] == 0 {
-                continue;
+        } else {
+            // Nearest texel in 16.16 fixed point: two adds and two shifts a pixel.
+            let scale = 65536.0;
+            let mut fx = ((a_x + vx0 * cos) * scale) as i64;
+            let mut fy = ((a_y + vx0 * sin) * scale) as i64;
+            let (dfx, dfy) = ((cos * scale) as i64, (sin * scale) as i64);
+            let (max_x, max_y) = (src.width as i64 - 1, src.height as i64 - 1);
+            let stride = src.width as usize * 4;
+            for dx in x_from..=x_to {
+                let tx = (fx >> 16).clamp(0, max_x) as usize;
+                let ty = (fy >> 16).clamp(0, max_y) as usize;
+                let i = ty * stride + tx * 4;
+                let a = src.rgba[i + 3];
+                if a != 0 {
+                    let d = (row + dx as usize) * 4;
+                    if a == 255 {
+                        dst[d..d + 3].copy_from_slice(&src.rgba[i..i + 3]);
+                        dst[d + 3] = 255;
+                    } else {
+                        blend(dst, d, [src.rgba[i], src.rgba[i + 1], src.rgba[i + 2], a]);
+                    }
+                }
+                fx += dfx;
+                fy += dfy;
             }
-            let d = (dy as usize * dst_w as usize + dx as usize) * 4;
-            blend(dst, d, color);
         }
     }
 }
@@ -1516,7 +1570,7 @@ fn turn_picture(src: &Frame, pivot_image: (f32, f32), degrees: f32) -> TurnedPic
     let side = (reach * 2 + 1) as u32;
     let mut frame = empty_frame(side, side);
     // The pivot sits at the centre of the square frame.
-    blit_pivot(&mut frame.rgba, side, side, src, pivot_image, (reach as f32 + 0.5, reach as f32 + 0.5), degrees);
+    blit_pivot(&mut frame.rgba, side, side, src, pivot_image, (reach as f32 + 0.5, reach as f32 + 0.5), degrees, true);
     // Trim to the rows and columns that hold anything.
     let (mut x0, mut y0, mut x1, mut y1) = (side, side, 0u32, 0u32);
     for y in 0..side {
@@ -2255,7 +2309,7 @@ fn draw_gauge(frame: &mut Frame, g: &GaugeSpec, value: u32, assets: &GaugeAssets
             if let Some(knob) = &assets.knob {
                 let angle = g.knob_start - value as f32 / 100.0 * (g.knob_start - g.knob_end);
                 let centre = (g.x as f32 + g.w as f32 / 2.0, g.y as f32 + g.h as f32 / 2.0);
-                blit_pivot(&mut frame.rgba, width, height, knob, (knob.width as f32 / 2.0, knob.height as f32 / 2.0), centre, angle);
+                blit_pivot(&mut frame.rgba, width, height, knob, (knob.width as f32 / 2.0, knob.height as f32 / 2.0), centre, angle, false);
             } else {
                 draw_arc_gauge(frame, g, value);
             }

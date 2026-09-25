@@ -260,6 +260,13 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
+            "--fps" => match args.next().and_then(|s| s.parse::<u32>().ok()) {
+                Some(fps) => overrides.fps = Some(fps.clamp(1, 120)),
+                None => {
+                    eprintln!("glass: --fps needs a whole number");
+                    return ExitCode::from(2);
+                }
+            },
             "--settle" => match args.next().and_then(|s| s.parse::<f32>().ok()) {
                 Some(seconds) => settle_s = seconds.max(0.5),
                 None => {
@@ -278,13 +285,13 @@ fn main() -> ExitCode {
             "--help" => {
                 println!(
                     "glass [--once] [--headless] [--print] [--output frame.png|frame.ppm] [--record step.json]\n      \
-                     [--theme FOLDER] [--meter NAME|random|a,b,c] [--interval SECONDS]\n      \
+                     [--theme FOLDER] [--meter NAME|random|a,b,c] [--interval SECONDS] [--fps N]\n      \
                      [--list] [--snapshot DIR [--settle SECONDS]]\n\
                      Reads {meter} and {spectrum}.\n\
                      A window opens when DISPLAY is set. --headless skips it.\n\
                      --output writes every frame as a PNG or PPM and still rasters.\n\
                      --record writes the skin, input and scene of each step as JSON.\n\
-                     --theme, --meter and --interval stand in for the installed configuration's values.\n\
+                     --theme, --meter, --interval and --fps stand in for the installed configuration's values.\n\
                      --list prints the installed themes and their meters.\n\
                      --snapshot shows each meter of the theme (or of the --meter list) for --settle seconds\n\
                      and writes DIR/<theme>/<meter>.png, then leaves.",
