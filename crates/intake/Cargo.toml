@@ -8,3 +8,4 @@ description = "FIFO, socket.io, and UDP become one Input"
 
 [dependencies]
 lead = { path = "../lead" }
+ureq = "3.4.2"

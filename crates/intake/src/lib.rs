@@ -4,17 +4,119 @@
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
+use std::sync::mpsc;
+use std::thread;
 use std::time::{Duration, Instant};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
 use lead::{
-    decode_meter, decode_spectrum, fonts_from_config, frame_rate_from_config, meter_at,
-    meter_background, meter_indicator, meter_layers, meter_needle, meter_text_at, meter_texts,
-    mono_average, scale_level, screen_from_config, Bins, Input, Levels, SkinDesc, CONFIG_TXT,
-    DEFAULT_FRAME_RATE, DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO,
-    current_value,
+    decode_meter, decode_spectrum, fonts_from_config, frame_rate_from_config, meter_art,
+    meter_at, meter_background, meter_indicator, meter_layers, meter_needle, meter_text_at,
+    meter_texts, mono_average, scale_level, screen_from_config, Bins, Input, Levels, SkinDesc,
+    CONFIG_TXT, DEFAULT_FRAME_RATE, DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO,
+    SPECTRUM_FIFO, current_value,
 };
+
+/// Album art location as the player reports it, made fetchable. A leading
+/// slash is a path served by the player itself; anything else is used as is.
+pub fn art_url(reported: &str) -> String {
+    if reported.starts_with('/') {
+        format!("http://127.0.0.1:3000{reported}")
+    } else {
+        reported.to_string()
+    }
+}
+
+fn fnv1a(text: &str) -> u64 {
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+/// Fetch one picture into the art cache under the temp dir. `None` when the
+/// player does not answer, the answer is not an image, or the file cannot be
+/// written. A picture fetched earlier for the same location is reused.
+fn fetch_art(reported: &str) -> Option<PathBuf> {
+    let dir = std::env::temp_dir().join("glass-art");
+    std::fs::create_dir_all(&dir).ok()?;
+    let path = dir.join(format!("{:016x}.img", fnv1a(reported)));
+    if path.is_file() {
+        return Some(path);
+    }
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(3)))
+        .build()
+        .new_agent();
+    let mut response = agent.get(art_url(reported)).call().ok()?;
+    let kind = response
+        .headers()
+        .get("content-type")
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if !kind.contains("image") {
+        return None;
+    }
+    let bytes = response.body_mut().read_to_vec().ok()?;
+    std::fs::write(&path, bytes).ok()?;
+    Some(path)
+}
+
+/// Fetches the picture for the current album art location in the background
+/// and remembers the file it landed in. One fetch runs at a time; a location
+/// that changes meanwhile is fetched once the running one returns.
+#[derive(Default)]
+struct ArtFetcher {
+    wanted: String,
+    have_url: String,
+    have_file: String,
+    pending: Option<(String, mpsc::Receiver<Option<PathBuf>>)>,
+}
+
+impl ArtFetcher {
+    fn want(&mut self, reported: &str) {
+        self.wanted = reported.to_string();
+    }
+
+    /// The file for the wanted location, or empty while it is not there yet.
+    fn file(&mut self) -> String {
+        if let Some((url, rx)) = &self.pending {
+            match rx.try_recv() {
+                Ok(result) => {
+                    self.have_url = url.clone();
+                    self.have_file = result
+                        .map(|p| p.to_string_lossy().into_owned())
+                        .unwrap_or_default();
+                    self.pending = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => self.pending = None,
+            }
+        }
+        if self.pending.is_none() && self.wanted != self.have_url {
+            if self.wanted.is_empty() {
+                self.have_url.clear();
+                self.have_file.clear();
+            } else {
+                let (tx, rx) = mpsc::channel();
+                let reported = self.wanted.clone();
+                thread::spawn(move || {
+                    let _ = tx.send(fetch_art(&reported));
+                });
+                self.pending = Some((self.wanted.clone(), rx));
+            }
+        }
+        if self.wanted == self.have_url {
+            self.have_file.clone()
+        } else {
+            String::new()
+        }
+    }
+}
 
 /// Linux `O_NONBLOCK`. A blocking open on a FIFO waits for the writer.
 const O_NONBLOCK: i32 = 0x800;
@@ -81,6 +183,7 @@ pub struct PipeSource {
     metadata_every: Option<Duration>,
     /// Position the player reported at `metadata_at`, in seconds.
     seek_polled: f32,
+    art: ArtFetcher,
 }
 
 impl PipeSource {
@@ -117,6 +220,7 @@ impl PipeSource {
             metadata_at: None,
             metadata_every: Some(Duration::from_secs(1)),
             seek_polled: 0.0,
+            art: ArtFetcher::default(),
         }
     }
 
@@ -188,6 +292,7 @@ impl Source for PipeSource {
             if due {
                 let playing = now_playing();
                 self.seek_polled = playing.seek;
+                self.art.want(&playing.albumart);
                 self.metadata_held = lead::Metadata {
                     title: playing.title,
                     artist: playing.artist,
@@ -197,6 +302,8 @@ impl Source for PipeSource {
                     status: playing.status,
                     duration: playing.duration,
                     seek: playing.seek,
+                    albumart: playing.albumart,
+                    art_file: String::new(),
                 };
                 self.metadata_at = Some(Instant::now());
             }
@@ -209,6 +316,9 @@ impl Source for PipeSource {
             if let Some(at) = self.metadata_at {
                 metadata.seek = self.seek_polled + at.elapsed().as_secs_f32();
             }
+        }
+        if self.metadata_every.is_some() {
+            metadata.art_file = self.art.file();
         }
 
         Input {
@@ -288,6 +398,7 @@ pub fn installed_skin() -> SkinDesc {
         skin.album = texts.album;
         skin.sample = texts.sample;
         skin.time = texts.time;
+        skin.art = meter_art(&meters, &skin.name);
     }
     // The clock font ships next to the player's handlers: <plugin>/screensaver/fonts.
     let digi_default = Path::new(&path)
@@ -312,6 +423,8 @@ pub struct NowPlaying {
     pub duration: f32,
     /// Seconds. The player reports milliseconds.
     pub seek: f32,
+    /// Album art location as reported: a URL, or a path on the player.
+    pub albumart: String,
 }
 
 /// Current track from Volumio. Empty strings when the player does not answer.
@@ -339,6 +452,7 @@ pub fn now_playing() -> NowPlaying {
     playing.status = json_string(body, "status");
     playing.duration = json_number(body, "duration").unwrap_or(0.0);
     playing.seek = json_number(body, "seek").unwrap_or(0.0) / 1000.0;
+    playing.albumart = json_string(body, "albumart");
     playing
 }
 
@@ -432,6 +546,14 @@ mod tests {
         assert_eq!(json_number(body, "missing"), None);
         assert_eq!(json_string(body, "status"), "play");
         assert_eq!(json_string(body, "samplerate"), "44.1 kHz");
+    }
+
+    #[test]
+    fn art_on_the_player_is_fetched_from_the_player() {
+        assert_eq!(art_url("/albumart?web=a/b/large"), "http://127.0.0.1:3000/albumart?web=a/b/large");
+        assert_eq!(art_url("https://img.example/cover.jpg"), "https://img.example/cover.jpg");
+        assert_ne!(fnv1a("a"), fnv1a("b"));
+        assert_eq!(fnv1a("cover"), fnv1a("cover"));
     }
 
     #[test]

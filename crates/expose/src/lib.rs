@@ -131,8 +131,44 @@ pub fn raster(scene: &Scene) -> Frame {
             needle: None,
             face_at: (0, 0),
             fonts: None,
+            art: None,
         },
     )
+}
+
+/// Decode a picture by its content and stretch it to `w` by `h`, as the
+/// player's engine does with album art.
+pub fn read_art(path: &Path, w: u32, h: u32) -> Option<Frame> {
+    let image = image::ImageReader::open(path)
+        .ok()?
+        .with_guessed_format()
+        .ok()?
+        .decode()
+        .ok()?
+        .into_rgba8();
+    let frame = Frame {
+        width: image.width(),
+        height: image.height(),
+        rgba: image.into_raw(),
+    };
+    Some(fit_art(&frame, w, h))
+}
+
+/// Stretch a frame to `w` by `h` with bilinear filtering.
+pub fn fit_art(frame: &Frame, w: u32, h: u32) -> Frame {
+    let (w, h) = (w.max(1), h.max(1));
+    if frame.width == w && frame.height == h {
+        return frame.clone();
+    }
+    let Some(image) = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone()) else {
+        return frame.clone();
+    };
+    let scaled = image::imageops::resize(&image, w, h, image::imageops::FilterType::Triangle);
+    Frame {
+        width: w,
+        height: h,
+        rgba: scaled.into_raw(),
+    }
 }
 
 /// `background` is the theme picture. It is copied in place. It is not scaled.
@@ -145,10 +181,12 @@ pub struct Stack<'a> {
     pub face_at: (u32, u32),
     /// Theme fonts for `Scene::texts`. `None` draws every text in the bitmap font.
     pub fonts: Option<&'a Fonts>,
+    /// Album art already stretched to the box in `Scene::art`.
+    pub art: Option<&'a Frame>,
 }
 
-/// Theme order: full-screen picture, meter face, needles, meter foreground,
-/// then the texts.
+/// Theme order: full-screen picture, album art, meter face, needles, meter
+/// foreground, then the texts.
 pub fn raster_over(scene: &Scene, stack: Stack<'_>) -> Frame {
     let width = scene.width.max(1);
     let height = scene.height.max(1);
@@ -158,6 +196,9 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>) -> Frame {
     }
     if let Some(screen) = stack.screen {
         blit(&mut rgba, width, height, screen);
+    }
+    if let (Some(art), Some(place)) = (stack.art, &scene.art) {
+        blit_at(&mut rgba, width, height, art, (place.x, place.y));
     }
     if let Some(face) = stack.face {
         blit_at(&mut rgba, width, height, face, stack.face_at);
@@ -519,6 +560,7 @@ mod tests {
             right_at: None,
             needle: None,
             texts: Vec::new(),
+            art: None,
         };
         let frame = raster(&scene);
         let layout = layout(frame.width, frame.height);
@@ -621,6 +663,15 @@ mod tests {
         draw_text_styled(&mut clipped, &narrow, Some(&fonts));
         assert!(lit(&clipped, 4, 14) > 0);
         assert_eq!(lit(&clipped, 14, 120), 0, "nothing past max_width");
+    }
+
+    #[test]
+    fn art_is_stretched_to_its_box() {
+        let small = sprite(2, 2, [10, 20, 30, 255]);
+        let fitted = fit_art(&small, 6, 4);
+        assert_eq!((fitted.width, fitted.height), (6, 4));
+        assert_eq!(sample(&fitted, 3, 2), [10, 20, 30, 255]);
+        assert_eq!(fit_art(&small, 2, 2), small);
     }
 
     #[test]
