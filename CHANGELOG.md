@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.19] - 2026-09-25
+
+Start and stop. With `start.animation` the first frame fades in from `transition.color` over `transition.duration` seconds at `transition.opacity`, unless `transition.type` is `none`; every later meter of a rotation fades in the same way; a fade lock file shared with the player's engine keeps two starts within the fade time from fading twice. When the window closes after a fade in, the frame fades out before the player exits. After every start the levels and spectrum bars rise to their values over 0.7 seconds in ten steps, as the engine raises its full scale.
+
 ## [0.4.18] - 2026-09-25
 
 Indicators, under `config.extend`. `mute.*`, `shuffle.*`, `repeat.*` and `playstate.*` show a state as an LED (`*.led` size, `*.led.shape` circle or rect, `*.led.color` one triple per state) or as one picture per state (`*.icon`), with an optional glow (`*.led.glow` or `*.icon.glow` radius, `.intensity`, `.color` per state) blurred behind them; a state past the look's last takes the last. Mute is off, muted, or zero volume; shuffle follows random; repeat is off, all, single, with a fourth state for infinity when the look has one; play state is stop, pause, play. `volume.*` and `progress.*` are gauges in the styles `numeric`, `slider` (a rounded bar, or a picture tip on a track with an optional fill tail), `knob` (a picture turned between two angles) and `arc` (a solid ring sector), with markers (`progress.marker.N.*`, picture or label at a percentage) and a head picture that moves with the value. The progress bar draws `progress.border` in `progress.border.color`. The player's controls (volume, mute, random, repeat, repeat single) come with the state.

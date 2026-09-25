@@ -1221,6 +1221,35 @@ pub fn meter_indicators(meters_txt: &str, meter: &str, theme_dir: &str) -> Optio
     (!spec.is_empty()).then_some(spec)
 }
 
+/// The player's start and stop animation: `start.animation` turns the
+/// fade at the first frame on; `transition.type` (`fade` or `none`),
+/// `transition.duration` in seconds, `transition.color` (`black` or `white`)
+/// and `transition.opacity` (0 to 100) shape every fade.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct TransitionSettings {
+    pub at_start: bool,
+    pub fade: bool,
+    pub duration_s: f32,
+    pub white: bool,
+    pub opacity: f32,
+}
+
+impl Default for TransitionSettings {
+    fn default() -> Self {
+        Self { at_start: false, fade: true, duration_s: 0.5, white: false, opacity: 1.0 }
+    }
+}
+
+pub fn transition_settings(text: &str) -> TransitionSettings {
+    TransitionSettings {
+        at_start: truthy(current_value(text, "start.animation").as_deref()),
+        fade: current_value(text, "transition.type").map_or(true, |v| !v.eq_ignore_ascii_case("none")),
+        duration_s: current_value(text, "transition.duration").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.5).max(0.0),
+        white: current_value(text, "transition.color").is_some_and(|v| v.eq_ignore_ascii_case("white")),
+        opacity: current_value(text, "transition.opacity").and_then(|v| v.parse::<f32>().ok()).unwrap_or(100.0).clamp(0.0, 100.0) / 100.0,
+    }
+}
+
 /// `[data.source]` from the player configuration, with the engine's defaults.
 pub fn data_source_from_config(text: &str) -> DataSourceSpec {
     let number = |key: &str, default: f32| {
@@ -1362,6 +1391,8 @@ pub struct SkinDesc {
     pub reels: Option<ReelsSpec>,
     #[serde(default)]
     pub indicators: Option<IndicatorsSpec>,
+    #[serde(default)]
+    pub transition: TransitionSettings,
 }
 
 impl Default for SkinDesc {
@@ -1415,6 +1446,7 @@ impl SkinDesc {
             rotation: RotationSettings::default(),
             reels: None,
             indicators: None,
+            transition: TransitionSettings::default(),
         }
     }
 }
@@ -2717,6 +2749,14 @@ mod tests {
         assert_eq!((progress.markers[1].pos, progress.markers[1].image.as_str(), progress.markers[1].font_size), (50.0, "/th/m.png", Some(12)));
         assert_eq!(progress.head_image.as_str(), "/th/head.png");
         assert_eq!(meter_indicators(m, "n", ""), None, "indicators need config.extend");
+    }
+
+    #[test]
+    fn the_transition_settings_follow_the_player() {
+        let s = transition_settings("[current]\nstart.animation = True\ntransition.type = fade\ntransition.duration = 1.5\ntransition.color = white\ntransition.opacity = 60\n");
+        assert_eq!(s, TransitionSettings { at_start: true, fade: true, duration_s: 1.5, white: true, opacity: 0.6 });
+        assert_eq!(transition_settings("[current]\ntransition.type = none\n"), TransitionSettings { fade: false, ..TransitionSettings::default() });
+        assert_eq!(transition_settings(""), TransitionSettings::default());
     }
 
     #[test]

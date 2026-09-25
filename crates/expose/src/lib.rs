@@ -281,6 +281,21 @@ pub struct Stack<'a> {
 /// Theme order: full-screen picture, meter face, album art, folder layers, needles, meter
 /// spectrum, texts, overlay folder layers, and the meter foreground last. `now_ms` drives the moving texts through `motion`.
 pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms: u64) -> Frame {
+    // A start ramps the levels up over the engine's first frames.
+    let ramp = motion.ramp.factor(now_ms);
+    let ramped;
+    let scene = if ramp < 1.0 {
+        ramped = Scene {
+            left: scene.left * ramp,
+            right: scene.right * ramp,
+            mono: scene.mono * ramp,
+            bar_heights: scene.bar_heights.iter().map(|&h| (h as f32 * ramp) as u32).collect(),
+            ..scene.clone()
+        };
+        &ramped
+    } else {
+        scene
+    };
     let width = scene.width.max(1);
     let height = scene.height.max(1);
     let mut rgba = vec![0u8; (width * height * 4) as usize];
@@ -441,6 +456,11 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
     draw_fanart(&mut frame.rgba, width, height, scene.fanart.as_ref(), stack.fanart, ZOrder::Overlay);
     if let Some(front) = stack.front {
         blit_at(&mut frame.rgba, width, height, front, stack.face_at);
+    }
+    if let Some((color, alpha)) = motion.fade.overlay(now_ms) {
+        for px in frame.rgba.chunks_exact_mut(4) {
+            blend(px, 0, [color[0], color[1], color[2], alpha]);
+        }
     }
     frame
 }
@@ -1101,6 +1121,81 @@ impl ReelMotion {
     }
 }
 
+/// A fade of the whole frame from or to a colour: the overlay's alpha runs
+/// from the opacity down to nothing on the way in, and up on the way out,
+/// over the duration.
+#[derive(Default)]
+pub struct Fade {
+    started_ms: Option<u64>,
+    duration_ms: u64,
+    color: [u8; 3],
+    max_alpha: u8,
+    out: bool,
+}
+
+impl Fade {
+    fn begin(&mut self, now_ms: u64, duration_s: f32, white: bool, opacity: f32, out: bool) {
+        self.started_ms = Some(now_ms);
+        self.duration_ms = (duration_s.max(0.0) * 1000.0) as u64;
+        self.color = if white { [255, 255, 255] } else { [0, 0, 0] };
+        self.max_alpha = (255.0 * opacity.clamp(0.0, 1.0)) as u8;
+        self.out = out;
+    }
+
+    /// Start showing the frame from the colour.
+    pub fn begin_in(&mut self, now_ms: u64, duration_s: f32, white: bool, opacity: f32) {
+        self.begin(now_ms, duration_s, white, opacity, false);
+    }
+
+    /// Start hiding the frame under the colour.
+    pub fn begin_out(&mut self, now_ms: u64, duration_s: f32, white: bool, opacity: f32) {
+        self.begin(now_ms, duration_s, white, opacity, true);
+    }
+
+    /// The overlay for this moment, or `None` once a fade in has finished.
+    /// A finished fade out keeps the frame covered.
+    pub fn overlay(&mut self, now_ms: u64) -> Option<([u8; 3], u8)> {
+        let started = self.started_ms?;
+        let p = if self.duration_ms == 0 { 1.0 } else { (now_ms.saturating_sub(started) as f32 / self.duration_ms as f32).min(1.0) };
+        if self.out {
+            return Some((self.color, (self.max_alpha as f32 * p) as u8));
+        }
+        if p >= 1.0 {
+            self.started_ms = None;
+            return None;
+        }
+        Some((self.color, (self.max_alpha as f32 * (1.0 - p)) as u8))
+    }
+
+    pub fn running(&self, now_ms: u64) -> bool {
+        self.started_ms.is_some_and(|s| now_ms.saturating_sub(s) < self.duration_ms)
+    }
+}
+
+/// The level ramp after a start: the engine raises its full scale in ten
+/// steps of 70 ms, so the needles rise to the level over 0.7 s.
+#[derive(Default)]
+pub struct Ramp {
+    started_ms: Option<u64>,
+}
+
+impl Ramp {
+    pub fn begin(&mut self, now_ms: u64) {
+        self.started_ms = Some(now_ms);
+    }
+
+    /// The share of the level to show, 0.0 to 1.0.
+    pub fn factor(&mut self, now_ms: u64) -> f32 {
+        let Some(started) = self.started_ms else { return 1.0 };
+        let steps = now_ms.saturating_sub(started) / 70;
+        if steps >= 10 {
+            self.started_ms = None;
+            return 1.0;
+        }
+        steps as f32 / 10.0
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 enum ArmState {
     #[default]
@@ -1320,6 +1415,9 @@ pub struct Motion {
     pub vinyl: VinylMotion,
     pub tonearm: TonearmMotion,
     pub reels: (ReelMotion, ReelMotion),
+    /// The fade over the whole frame and the level ramp after a start.
+    pub fade: Fade,
+    pub ramp: Ramp,
 }
 
 /// The topping of each spectrum bar: where it sits, or `None` before the

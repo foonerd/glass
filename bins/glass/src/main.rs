@@ -180,6 +180,21 @@ impl PlainSlot {
     }
 }
 
+/// Whether a fade may start now: the engine's lock file is older than the
+/// fade plus a second, or absent. Touching it claims the fade.
+fn fade_lock_free(duration_s: f32) -> bool {
+    let lock = std::env::temp_dir().join("peppy_fade_lock");
+    let cooldown = std::time::Duration::from_secs_f32(duration_s.max(0.0) + 1.0);
+    let free = match std::fs::metadata(&lock).and_then(|m| m.modified()) {
+        Ok(modified) => modified.elapsed().map_or(true, |age| age > cooldown),
+        Err(_) => true,
+    };
+    if free {
+        let _ = std::fs::write(&lock, b"");
+    }
+    free
+}
+
 /// One recorded step, the form `plot` replays from `testdata/frames/`.
 #[derive(serde::Serialize)]
 struct Recorded<'a> {
@@ -258,6 +273,16 @@ fn main() -> ExitCode {
     );
     let mut assets = Assets::load(&skin);
     println!("glass: fonts loaded {} of 5", assets.fonts.loaded());
+    // The engine fades the first frame in when the player asks for a start
+    // animation, and every later meter in; a lock file shared with the
+    // player's own engine keeps two starts within the fade's time from fading twice.
+    let mut did_fade_in = false;
+    let loaded_ms = started.elapsed().as_millis() as u64;
+    if skin.transition.at_start && skin.transition.fade && fade_lock_free(skin.transition.duration_s) {
+        motion.fade.begin_in(loaded_ms, skin.transition.duration_s, skin.transition.white, skin.transition.opacity);
+        did_fade_in = true;
+    }
+    motion.ramp.begin(loaded_ms);
     let mut switched_at = Instant::now();
     let mut last_title: Option<String> = None;
     // The art picture, decoded and stretched once per file and box, cut with
@@ -313,6 +338,12 @@ fn main() -> ExitCode {
                     vinyl_slot = PlainSlot::default();
                     reel_slots = Default::default();
                     motion = Motion::default();
+                    let now = started.elapsed().as_millis() as u64;
+                    if skin.transition.fade && fade_lock_free(skin.transition.duration_s) {
+                        motion.fade.begin_in(now, skin.transition.duration_s, skin.transition.white, skin.transition.opacity);
+                        did_fade_in = true;
+                    }
+                    motion.ramp.begin(now);
                     switched_at = Instant::now();
                     println!("glass: meter={name}");
                 }
@@ -451,7 +482,21 @@ fn main() -> ExitCode {
             if let Some(window) = surface.as_mut() {
                 match window.show(&frame) {
                     Ok(true) => {}
-                    Ok(false) => break,
+                    Ok(false) => {
+                        // Leave the way the engine leaves: fade out when a fade in was shown.
+                        if did_fade_in && skin.transition.fade {
+                            let now = started.elapsed().as_millis() as u64;
+                            motion.fade.begin_out(now, skin.transition.duration_s, skin.transition.white, skin.transition.opacity);
+                            while motion.fade.running(started.elapsed().as_millis() as u64) {
+                                let frame = raster_over(&scene, Stack { screen: assets.background.as_ref(), face: assets.face.as_ref(), front: assets.front.as_ref(), needle: assets.indicator.as_ref(), needle_right: assets.indicator_right.as_ref(), face_at: skin.face_at, fonts: Some(&assets.fonts), art: art_cache.as_ref().map(|(_, frame)| frame), icon: icon_cache.as_ref().map(|(_, frame)| frame), spectrum: assets.spectrum.as_ref(), folder_pictures: &folder_pictures, fanart: (fanart_slots.0.picture.as_ref(), fanart_slots.1.picture.as_ref()), vinyl: vinyl_slot.frame.as_ref(), tonearm: assets.tonearm.as_ref(), reels: (reel_pictures.0.as_ref(), reel_pictures.1.as_ref()), indicators: assets.indicators.as_ref() }, &mut motion, started.elapsed().as_millis() as u64);
+                                if window.show(&frame).is_err() {
+                                    break;
+                                }
+                                thread::sleep(period);
+                            }
+                        }
+                        break;
+                    }
                     Err(err) => {
                         eprintln!("glass: {err}");
                         return ExitCode::from(1);

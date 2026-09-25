@@ -16,7 +16,7 @@ use lead::{
     data_source_from_config, decode_meter, decode_spectrum, fonts_from_config, format_key,
     frame_rate_from_config, meter_art, meter_at, meter_background, meter_indicator,
     folder_candidates, meter_fanart, meter_folder_layers, meter_layers, meter_needle, meter_sections, meter_spec, meter_spectrum, meter_text_at,
-    meter_indicators, meter_reels, meter_tonearm, meter_vinyl, rotation_settings,
+    meter_indicators, meter_reels, meter_tonearm, meter_vinyl, rotation_settings, transition_settings,
     meter_texts, meter_type, random_change_title_from_config, random_interval_from_config,
     screen_from_config, scroll_speeds_from_config, selection_from_config, spectrum_from_theme,
     spectrum_settings, Bins, DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec, CONFIG_TXT,
@@ -1276,6 +1276,7 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         skin.tonearm = meter_tonearm(&meters, &skin.name, &skin.theme_dir);
         skin.reels = meter_reels(&meters, &skin.name, &skin.theme_dir, &skin.rotation);
         skin.indicators = meter_indicators(&meters, &skin.name, &skin.theme_dir);
+        skin.transition = transition_settings(&text);
         let (title_at, artist_at) = meter_text_at(&meters, &skin.name);
         skin.title_at = title_at;
         skin.artist_at = artist_at;
