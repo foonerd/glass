@@ -16,6 +16,16 @@ pub struct Text {
     pub text: String,
 }
 
+/// The album art to show: the box from the skin and the file holding the picture.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Art {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+    pub file: String,
+}
+
 /// What the surface should show. Levels and bars are fractions from 0 to 1.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scene {
@@ -30,6 +40,8 @@ pub struct Scene {
     pub needle: Option<(f32, f32, f32)>,
     #[serde(default)]
     pub texts: Vec<Text>,
+    #[serde(default)]
+    pub art: Option<Art>,
 }
 
 impl Default for Scene {
@@ -45,8 +57,24 @@ impl Default for Scene {
             right_at: None,
             needle: None,
             texts: Vec::new(),
+            art: None,
         }
     }
+}
+
+/// The art box with its picture, once the picture is on disk.
+pub fn art(skin: &SkinDesc, meta: &Metadata) -> Option<Art> {
+    let spec = skin.art?;
+    if meta.art_file.is_empty() {
+        return None;
+    }
+    Some(Art {
+        x: spec.x,
+        y: spec.y,
+        w: spec.w,
+        h: spec.h,
+        file: meta.art_file.clone(),
+    })
 }
 
 /// Final ten seconds of a track, as the player colours them.
@@ -140,6 +168,7 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
         right_at: skin.right_at,
         needle: skin.needle,
         texts: texts(skin, &input.metadata),
+        art: art(skin, &input.metadata),
     }
 }
 
@@ -196,6 +225,7 @@ mod tests {
             status: "play".into(),
             duration: 218.051,
             seek: 1.995,
+            ..Metadata::default()
         };
         let lines: Vec<String> = texts(&skin, &meta).into_iter().map(|t| t.text).collect();
         assert_eq!(lines, ["Wonder", "Courtney Barnett - Creature of Habit", "44.1 kHz 16-bit", "03:36"]);
@@ -211,6 +241,19 @@ mod tests {
 
         let stream = Metadata { duration: 0.0, ..meta };
         assert!(texts(&skin, &stream).iter().all(|t| t.style != TextStyle::Digi));
+    }
+
+    #[test]
+    fn art_shows_once_its_file_exists() {
+        let mut skin = SkinDesc::basic();
+        let waiting = Metadata { albumart: "https://x/c.jpg".into(), ..Metadata::default() };
+        assert_eq!(art(&skin, &waiting), None);
+        skin.art = Some(lead::ArtSpec { x: 36, y: 25, w: 201, h: 201 });
+        assert_eq!(art(&skin, &waiting), None);
+        let ready = Metadata { art_file: "/tmp/glass-art/1.img".into(), ..waiting };
+        let placed = art(&skin, &ready).unwrap();
+        assert_eq!((placed.x, placed.y, placed.w, placed.h), (36, 25, 201, 201));
+        assert_eq!(placed.file, "/tmp/glass-art/1.img");
     }
 
     /// One recorded step: the skin and input that went in, the scene that came out.

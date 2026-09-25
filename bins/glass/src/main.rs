@@ -8,7 +8,7 @@ use std::env;
 use std::process::ExitCode;
 use std::thread;
 
-use expose::{raster_over, read_png, Fonts, Stack};
+use expose::{raster_over, read_art, read_png, Fonts, Stack};
 use intake::{PipeSource, Source};
 use lead::{frame_period, Input, SkinDesc};
 use pane::{publish, write_ppm, Surface};
@@ -94,6 +94,8 @@ fn main() -> ExitCode {
     let indicator = load_theme(&skin.theme_dir, &skin.indicator);
     let fonts = Fonts::load(&skin.fonts);
     println!("glass: fonts loaded {} of 4", fonts.loaded());
+    // The art picture, decoded and stretched once per file and box.
+    let mut art_cache: Option<(plot::Art, expose::Frame)> = None;
     let show_window = env::var_os("DISPLAY").is_some() && !headless;
     let write_file = output.is_some();
     let serving_remote = false;
@@ -135,6 +137,16 @@ fn main() -> ExitCode {
             );
         }
         if surface.is_some() || write_file {
+            match &scene.art {
+                Some(art) => {
+                    let stale = art_cache.as_ref().map_or(true, |(known, _)| known != art);
+                    if stale {
+                        art_cache = read_art(std::path::Path::new(&art.file), art.w, art.h)
+                            .map(|frame| (art.clone(), frame));
+                    }
+                }
+                None => art_cache = None,
+            }
             let frame = raster_over(
                 &scene,
                 Stack {
@@ -144,6 +156,7 @@ fn main() -> ExitCode {
                     needle: indicator.as_ref(),
                     face_at: skin.face_at,
                     fonts: Some(&fonts),
+                    art: art_cache.as_ref().map(|(_, frame)| frame),
                 },
             );
             if let Some(window) = surface.as_mut() {

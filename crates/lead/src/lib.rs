@@ -63,6 +63,21 @@ pub struct Metadata {
     /// Position in seconds at the time of this snapshot.
     #[serde(default)]
     pub seek: f32,
+    /// Album art location as the player reports it: a URL, or a path on the player.
+    #[serde(default)]
+    pub albumart: String,
+    /// Local file holding the fetched picture for `albumart`. Empty until fetched.
+    #[serde(default)]
+    pub art_file: String,
+}
+
+/// Where the album art is drawn. The picture is stretched to `w` by `h`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ArtSpec {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
 }
 
 /// Which theme font a text is set in.
@@ -153,6 +168,8 @@ pub struct SkinDesc {
     pub sample: Option<TextSpec>,
     #[serde(default)]
     pub time: Option<TextSpec>,
+    #[serde(default)]
+    pub art: Option<ArtSpec>,
 }
 
 impl Default for SkinDesc {
@@ -186,6 +203,7 @@ impl SkinDesc {
             album: None,
             sample: None,
             time: None,
+            art: None,
         }
     }
 }
@@ -753,6 +771,19 @@ pub fn meter_texts(meters_txt: &str, meter: &str) -> MeterTexts {
     }
 }
 
+/// Album art box for the selected meter: `albumart.pos` as `x,y` and
+/// `albumart.dimension` as `w,h`. Both must be present.
+pub fn meter_art(meters_txt: &str, meter: &str) -> Option<ArtSpec> {
+    let values = section_values(meters_txt, meter);
+    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+    let (x, y) = pair_pos(get("albumart.pos")?)?;
+    let (w, h) = pair_pos(get("albumart.dimension")?)?;
+    if w == 0 || h == 0 {
+        return None;
+    }
+    Some(ArtSpec { x, y, w, h })
+}
+
 /// Sleep between steps for a frame rate in frames per second.
 pub fn frame_period(rate: u32) -> std::time::Duration {
     let rate = rate.clamp(MIN_FRAME_RATE, MAX_FRAME_RATE);
@@ -837,6 +868,16 @@ mod tests {
         assert_eq!((time.style, time.size, time.color), (TextStyle::Digi, 40, [180, 180, 180]));
         assert!(texts.album.is_none());
         assert_eq!(meter_texts(text, "random").title.unwrap().x, 10);
+    }
+
+    #[test]
+    fn album_art_box_needs_position_and_dimension() {
+        let text = "[black-white]\nalbumart.pos = 36,25\nalbumart.dimension = 201,201\n";
+        assert_eq!(
+            meter_art(text, "black-white"),
+            Some(ArtSpec { x: 36, y: 25, w: 201, h: 201 })
+        );
+        assert_eq!(meter_art("[bar]\nalbumart.pos = 1,2\n", "bar"), None);
     }
 
     #[test]
