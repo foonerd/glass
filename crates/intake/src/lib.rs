@@ -1449,7 +1449,13 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
     if let (Some((name, w, h)), Some(dir)) = (placed, handlers_dir) {
         if let Ok(config) = std::fs::read_to_string(dir.join("spectrum").join("config.txt")) {
             let settings = spectrum_settings(&config);
-            let folder = Path::new(&settings.base_folder).join(&settings.folder);
+            // The spectrum theme carries the meter theme's folder name; the
+            // player keeps `spectrum.folder` in step with `meter.folder`, and
+            // the theme's own name wins when the two disagree, as after a
+            // theme override or before the player has caught up.
+            let base = Path::new(&settings.base_folder);
+            let by_theme = theme.file_name().map(|name| base.join(name)).filter(|dir| dir.join("spectrum.txt").is_file());
+            let folder = by_theme.unwrap_or_else(|| base.join(&settings.folder));
             if let Ok(spectra) = std::fs::read_to_string(folder.join("spectrum.txt")) {
                 skin.spectrum = spectrum_from_theme(&spectra, &name, (w, h), &settings, &folder.to_string_lossy());
                 skin.spectrum_max = settings.max_value;
