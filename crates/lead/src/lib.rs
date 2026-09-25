@@ -574,6 +574,192 @@ pub fn meter_spec(meters_txt: &str, meter: &str) -> MeterSpec {
     }
 }
 
+/// How a spectrum layer is filled: one colour, a vertical gradient (first
+/// colour at the bottom), a picture, or a picture stretched to the layer.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub enum Fill {
+    Color([u8; 4]),
+    Gradient(Vec<[u8; 4]>),
+    Image(String),
+    ImageExtended(String),
+}
+
+/// A spectrum analyser as the spectrum engine draws it: a box on screen,
+/// bars rising from an origin inside it, an optional reflection below the
+/// origin, a topping that falls after the bar, and pictures around them.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SpectrumSpec {
+    /// `spectrum.x/y`: the box on screen. Everything is clipped to it.
+    pub x: i32,
+    pub y: i32,
+    /// `spectrum.size` from the meter: the box.
+    pub w: u32,
+    pub h: u32,
+    /// `origin.x/y` inside the box: the first bar's left edge and the bars' baseline.
+    pub origin_x: i32,
+    pub origin_y: i32,
+    pub bar_w: u32,
+    pub bar_h: u32,
+    pub gap: u32,
+    /// `steps`: a bar rises in `bar_h / steps` pixel steps.
+    pub steps: u32,
+    /// Bins the pipe carries, `size` in the spectrum configuration.
+    pub bins: usize,
+    /// `max.value`: a raw bin of this value is a full bar.
+    pub max_value: f32,
+    /// `bgr.*`; `None` for `player.bgr` or nothing.
+    pub background: Option<Fill>,
+    pub bar: Option<Fill>,
+    pub reflection: Option<Fill>,
+    pub reflection_gap: i32,
+    /// `topping.height` and `topping.step`.
+    pub topping: Option<(u32, u32)>,
+    /// `fgr.filename` as a path, or empty.
+    pub foreground: String,
+}
+
+impl SpectrumSpec {
+    /// Pixels per step, `int(bar.height / steps)`, at least one.
+    pub fn step(&self) -> u32 {
+        (self.bar_h / self.steps.max(1)).max(1)
+    }
+
+    /// The bar height for one raw bin: the value scaled to the bar, rounded
+    /// up to a whole step.
+    pub fn bar_height(&self, raw: f32) -> u32 {
+        let unit = self.bar_h as f32 / self.max_value.max(1.0);
+        let v = raw * unit;
+        if v <= 0.0 {
+            return 0;
+        }
+        let step = self.step() as f32;
+        let n = if v % step == 0.0 { (v / step) as u32 } else { (v / step) as u32 + 1 };
+        n * self.step()
+    }
+}
+
+/// The spectrum settings of the spectrum engine's `config.txt`.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct SpectrumSettings {
+    pub base_folder: String,
+    pub folder: String,
+    pub bins: usize,
+    pub max_value: f32,
+}
+
+pub fn spectrum_settings(text: &str) -> SpectrumSettings {
+    SpectrumSettings {
+        base_folder: section_value(text, "current", "base.folder").unwrap_or_default(),
+        folder: section_value(text, "current", "spectrum.folder").unwrap_or_default(),
+        bins: section_value(text, "current", "size")
+            .and_then(|v| v.parse::<usize>().ok())
+            .filter(|&n| n > 0)
+            .unwrap_or(DEFAULT_SPECTRUM_BINS),
+        max_value: section_value(text, "current", "max.value")
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|&m| m > 0.0)
+            .unwrap_or(DEFAULT_SPECTRUM_MAX),
+    }
+}
+
+/// `spectrum.name` and `spectrum.size` of a meter that shows a spectrum:
+/// `config.extend` and `spectrum.visible` both true.
+pub fn meter_spectrum(meters_txt: &str, meter: &str) -> Option<(String, u32, u32)> {
+    let values = section_values(meters_txt, meter);
+    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+    if !truthy(get("config.extend")) || !truthy(get("spectrum.visible")) {
+        return None;
+    }
+    let name = get("spectrum.name")?.trim().to_string();
+    let mut size = get("spectrum.size")?.split(',');
+    let w = size.next()?.trim().parse().ok()?;
+    let h = size.next()?.trim().parse().ok()?;
+    if name.is_empty() {
+        return None;
+    }
+    Some((name, w, h))
+}
+
+fn color_quad(value: &str) -> Option<[u8; 4]> {
+    let parts: Vec<u8> = value
+        .split(',')
+        .map(|p| p.trim().parse::<u8>())
+        .collect::<Result<_, _>>()
+        .ok()?;
+    match parts.as_slice() {
+        [r, g, b] => Some([*r, *g, *b, 255]),
+        [r, g, b, a] => Some([*r, *g, *b, *a]),
+        _ => None,
+    }
+}
+
+fn gradient_list(value: &str) -> Option<Vec<[u8; 4]>> {
+    let colors: Vec<[u8; 4]> = value
+        .split('(')
+        .skip(1)
+        .filter_map(|part| part.split(')').next())
+        .filter_map(color_quad)
+        .collect();
+    (!colors.is_empty()).then_some(colors)
+}
+
+/// One `[name]` of a theme's `spectrum.txt`, sized by the meter's box, with
+/// picture names turned into paths under `dir`.
+pub fn spectrum_from_theme(
+    spectrum_txt: &str,
+    name: &str,
+    (w, h): (u32, u32),
+    settings: &SpectrumSettings,
+    dir: &str,
+) -> Option<SpectrumSpec> {
+    let values = section_values(spectrum_txt, name);
+    if values.is_empty() {
+        return None;
+    }
+    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str()).filter(|v| !v.is_empty());
+    let int = |key: &str| get(key).and_then(|v| v.parse::<i32>().ok());
+    let uint = |key: &str| get(key).and_then(|v| v.parse::<u32>().ok());
+    let path = |file: &str| {
+        if dir.is_empty() {
+            file.to_string()
+        } else {
+            format!("{}/{}", dir.trim_end_matches('/'), file)
+        }
+    };
+    let fill = |kind: &str, color: &str, gradient: &str, file: &str| -> Option<Fill> {
+        match get(kind).map(|v| v.to_ascii_lowercase()).as_deref() {
+            Some("color") => get(color).and_then(color_quad).map(Fill::Color),
+            Some("gradient") => get(gradient).and_then(gradient_list).map(Fill::Gradient),
+            Some("image") => get(file).map(|f| Fill::Image(path(f))),
+            Some("image.extended") => get(file).map(|f| Fill::ImageExtended(path(f))),
+            _ => None,
+        }
+    };
+    Some(SpectrumSpec {
+        x: int("spectrum.x").unwrap_or(0),
+        y: int("spectrum.y").unwrap_or(0),
+        w,
+        h,
+        origin_x: int("origin.x").unwrap_or(0),
+        origin_y: int("origin.y").unwrap_or(0),
+        bar_w: uint("bar.width").unwrap_or(1).max(1),
+        bar_h: uint("bar.height").unwrap_or(1).max(1),
+        gap: uint("bar.gap").unwrap_or(0),
+        steps: uint("steps").unwrap_or(1).max(1),
+        bins: settings.bins,
+        max_value: settings.max_value,
+        background: fill("bgr.type", "bgr.color", "bgr.gradient", "bgr.filename"),
+        bar: fill("bar.type", "bar.color", "bar.gradient", "bar.filename"),
+        reflection: fill("reflection.type", "reflection.color", "reflection.gradient", "reflection.filename"),
+        reflection_gap: int("reflection.gap").unwrap_or(0),
+        topping: match (uint("topping.height"), uint("topping.step")) {
+            (Some(height), Some(step)) if height > 0 => Some((height, step)),
+            _ => None,
+        },
+        foreground: get("fgr.filename").map(path).unwrap_or_default(),
+    })
+}
+
 /// `[data.source]` from the player configuration, with the engine's defaults.
 pub fn data_source_from_config(text: &str) -> DataSourceSpec {
     let number = |key: &str, default: f32| {
@@ -699,6 +885,8 @@ pub struct SkinDesc {
     pub data_source: DataSourceSpec,
     #[serde(default)]
     pub meter: MeterSpec,
+    #[serde(default)]
+    pub spectrum: Option<SpectrumSpec>,
 }
 
 impl Default for SkinDesc {
@@ -744,6 +932,7 @@ impl SkinDesc {
             time_total: None,
             data_source: DataSourceSpec::default(),
             meter: MeterSpec::default(),
+            spectrum: None,
         }
     }
 }
@@ -1708,6 +1897,27 @@ mod tests {
         assert_eq!((pair.left_angles, pair.right_angles, pair.flip_right), (Some((40.0, -40.0)), Some((-40.0, 40.0)), true));
         assert!(pair.visible);
         assert_eq!(meter_needle(m, "pair"), Some((40.0, -40.0, 0.0)), "the left pair stands in for missing shared angles");
+    }
+
+    #[test]
+    fn a_spectrum_is_read_from_the_meter_the_settings_and_the_theme() {
+        let meters = "[m]\nconfig.extend = True\nspectrum.visible = True\nspectrum.name = s.2\nspectrum.size = 1260,307\n[n]\nspectrum.visible = True\nspectrum.name = s.2\nspectrum.size = 1,1\n";
+        assert_eq!(meter_spectrum(meters, "m"), Some(("s.2".into(), 1260, 307)));
+        assert_eq!(meter_spectrum(meters, "n"), None, "needs config.extend");
+        let settings = spectrum_settings("[current]\nspectrum = s.7\nbase.folder = /t\nspectrum.folder = 1280x720\nmax.value = 100\nsize = 20\n");
+        assert_eq!(settings, SpectrumSettings { base_folder: "/t".into(), folder: "1280x720".into(), bins: 20, max_value: 100.0 });
+        let theme = "[s.2]\norigin.x = 123\norigin.y = 196\nspectrum.x = 10\nspectrum.y = 224\nbgr.type = image\nbgr.filename = bgr-2.png\n\
+            bar.type = image\nbar.filename = bar-2.png\nbar.width = 27\nbar.height = 210\nbar.gap = 25\nreflection.type = gradient\n\
+            reflection.gradient = (0, 0, 0, 0), (0, 0, 0, 80)\nreflection.gap = 0\ntopping.height = 3\ntopping.step = 2\nfgr.filename =\nsteps = 30\n";
+        let spec = spectrum_from_theme(theme, "s.2", (1260, 307), &settings, "/t/1280x720").unwrap();
+        assert_eq!((spec.x, spec.y, spec.w, spec.h, spec.origin_x, spec.origin_y), (10, 224, 1260, 307, 123, 196));
+        assert_eq!(spec.background, Some(Fill::Image("/t/1280x720/bgr-2.png".into())));
+        assert_eq!(spec.bar, Some(Fill::Image("/t/1280x720/bar-2.png".into())));
+        assert_eq!(spec.reflection, Some(Fill::Gradient(vec![[0, 0, 0, 0], [0, 0, 0, 80]])));
+        assert_eq!((spec.topping, spec.foreground.as_str(), spec.step()), (Some((3, 2)), "", 7));
+        // 210 / 30 = 7 px steps; a raw 50 is 105 px, exactly 15 steps; 51 rounds up to 16.
+        assert_eq!((spec.bar_height(0.0), spec.bar_height(50.0), spec.bar_height(51.0), spec.bar_height(100.0)), (0, 105, 112, 210));
+        assert_eq!(spectrum_from_theme(theme, "s.9", (1, 1), &settings, ""), None);
     }
 
     #[test]

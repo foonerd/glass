@@ -6,7 +6,7 @@ use std::path::Path;
 use std::collections::HashMap;
 
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
-use lead::{Direction, FontFiles, LinearSpec, MeterKind, ScrollDirection, TextAlign, TextStyle, TypeAlign, TypeMode};
+use lead::{Direction, Fill, FontFiles, LinearSpec, MeterKind, ScrollDirection, SpectrumSpec, TextAlign, TextStyle, TypeAlign, TypeMode};
 use plot::{Scene, Text, TypeArea};
 
 const BG: [u8; 4] = [12, 12, 16, 255];
@@ -192,8 +192,9 @@ pub fn raster(scene: &Scene) -> Frame {
             fonts: None,
             art: None,
             icon: None,
+            spectrum: None,
         },
-        &mut TextMotion::default(),
+        &mut Motion::default(),
         0,
     )
 }
@@ -255,11 +256,13 @@ pub struct Stack<'a> {
     pub art: Option<&'a Frame>,
     /// Type icon already fitted for `Scene::type_area`, tinted when it was an SVG.
     pub icon: Option<&'a Frame>,
+    /// The spectrum's pictures, built from `Scene::spectrum` once per meter.
+    pub spectrum: Option<&'a SpectrumAssets>,
 }
 
 /// Theme order: full-screen picture, album art, meter face, needles, meter
 /// foreground, then the texts. `now_ms` drives the moving texts through `motion`.
-pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut TextMotion, now_ms: u64) -> Frame {
+pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms: u64) -> Frame {
     let width = scene.width.max(1);
     let height = scene.height.max(1);
     let mut rgba = vec![0u8; (width * height * 4) as usize];
@@ -321,6 +324,9 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut TextMotion, now
             }
         }
     }
+    if let (Some(spec), Some(assets)) = (&scene.spectrum, stack.spectrum) {
+        draw_spectrum(&mut rgba, width, height, spec, &scene.bar_heights, assets, &mut motion.spectrum);
+    }
     if let Some(front) = stack.front {
         blit_at(&mut rgba, width, height, front, stack.face_at);
     }
@@ -338,7 +344,7 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut TextMotion, now
         rgba,
     };
     for text in &scene.texts {
-        draw_text_moving(&mut frame, text, stack.fonts, motion, now_ms);
+        draw_text_moving(&mut frame, text, stack.fonts, &mut motion.text, now_ms);
     }
     if let Some(area) = &scene.type_area {
         draw_type_area(&mut frame, area, stack.icon, stack.fonts);
@@ -977,6 +983,179 @@ fn draw_bar(dst: &mut [u8], dst_w: u32, dst_h: u32, sprite: &Frame, at: (i32, i3
     blit_part(dst, dst_w, dst_h, sprite, at, part);
 }
 
+/// Everything that moves between frames: text offsets and spectrum toppings.
+#[derive(Default)]
+pub struct Motion {
+    pub text: TextMotion,
+    pub spectrum: SpectrumMotion,
+}
+
+/// The topping of each spectrum bar: where it sits, or `None` before the
+/// first frame placed it.
+#[derive(Default)]
+pub struct SpectrumMotion {
+    toppings: Vec<Option<i32>>,
+}
+
+/// Pictures of a spectrum, built once per meter from its spec.
+pub struct SpectrumAssets {
+    pub background: Option<Frame>,
+    pub bar: Option<Frame>,
+    pub reflection: Option<Frame>,
+    pub foreground: Option<Frame>,
+}
+
+impl SpectrumAssets {
+    pub fn load(spec: &SpectrumSpec) -> Self {
+        let bar_box = (spec.bar_w, spec.bar_h);
+        Self {
+            background: spec.background.as_ref().and_then(|f| fill_frame(f, (spec.w, spec.h), false)),
+            bar: spec.bar.as_ref().and_then(|f| fill_frame(f, bar_box, true)),
+            reflection: spec.reflection.as_ref().and_then(|f| fill_frame(f, bar_box, true)),
+            foreground: if spec.foreground.is_empty() {
+                None
+            } else {
+                read_png(Path::new(&spec.foreground))
+            },
+        }
+    }
+}
+
+/// A layer from its fill. A plain picture keeps its own size unless `stretch`;
+/// an extended one is always stretched to the box.
+fn fill_frame(fill: &Fill, (w, h): (u32, u32), stretch: bool) -> Option<Frame> {
+    match fill {
+        Fill::Color(color) => Some(solid_frame(w, h, *color)),
+        Fill::Gradient(colors) => Some(gradient_frame(w, h, colors)),
+        Fill::Image(path) => {
+            let picture = read_png(Path::new(path))?;
+            Some(if stretch { fit_art(&picture, w, h) } else { picture })
+        }
+        Fill::ImageExtended(path) => Some(fit_art(&read_png(Path::new(path))?, w, h)),
+    }
+}
+
+fn solid_frame(w: u32, h: u32, color: [u8; 4]) -> Frame {
+    let (w, h) = (w.max(1), h.max(1));
+    Frame {
+        width: w,
+        height: h,
+        rgba: color.repeat((w * h) as usize),
+    }
+}
+
+/// A vertical gradient: the first colour at the bottom, the last at the top,
+/// blended linearly between, as the spectrum engine lays out its colour rows
+/// before stretching them.
+pub fn gradient_frame(w: u32, h: u32, colors: &[[u8; 4]]) -> Frame {
+    let (w, h) = (w.max(1), h.max(1));
+    let mut rgba = vec![0u8; (w * h * 4) as usize];
+    let last = colors.len().saturating_sub(1);
+    for y in 0..h {
+        let down = if h > 1 { y as f32 / (h - 1) as f32 } else { 0.0 };
+        let pos = (1.0 - down) * last as f32;
+        let i = (pos.floor() as usize).min(last);
+        let f = pos - i as f32;
+        let a = colors[i];
+        let b = colors[(i + 1).min(last)];
+        let mut px = [0u8; 4];
+        for k in 0..4 {
+            px[k] = (a[k] as f32 * (1.0 - f) + b[k] as f32 * f).round() as u8;
+        }
+        let row = (y * w * 4) as usize;
+        for x in 0..w as usize {
+            rgba[row + x * 4..row + x * 4 + 4].copy_from_slice(&px);
+        }
+    }
+    Frame {
+        width: w,
+        height: h,
+        rgba,
+    }
+}
+
+/// Blend the part of a picture at a position, showing only what falls inside
+/// the clip box `(x, y, w, h)`.
+fn blit_clipped(dst: &mut [u8], dst_w: u32, dst_h: u32, src: &Frame, at: (i32, i32), part: (u32, u32, u32, u32), clip: (i32, i32, i32, i32)) {
+    let (src_x, src_y, src_w, src_h) = part;
+    let x_from = clip.0.max(0);
+    let y_from = clip.1.max(0);
+    let x_to = (clip.0 + clip.2).min(dst_w as i32);
+    let y_to = (clip.1 + clip.3).min(dst_h as i32);
+    for row in 0..src_h {
+        let sy = src_y + row;
+        let dy = at.1 + row as i32;
+        if sy >= src.height || dy < y_from || dy >= y_to {
+            continue;
+        }
+        for col in 0..src_w {
+            let sx = src_x + col;
+            let dx = at.0 + col as i32;
+            if sx >= src.width || dx < x_from || dx >= x_to {
+                continue;
+            }
+            let s = (sy as usize * src.width as usize + sx as usize) * 4;
+            let d = (dy as usize * dst_w as usize + dx as usize) * 4;
+            blend(dst, d, [src.rgba[s], src.rgba[s + 1], src.rgba[s + 2], src.rgba[s + 3]]);
+        }
+    }
+}
+
+/// The spectrum as its engine draws it, clipped to its box: background
+/// centred in the box, each bar's bottom `height` rows rising from the
+/// origin, the reflection's top rows hanging below it, the topping falling
+/// `step` pixels a frame once the bar has dropped away from it, and the
+/// foreground over everything.
+pub fn draw_spectrum(dst: &mut [u8], dst_w: u32, dst_h: u32, spec: &SpectrumSpec, heights: &[u32], assets: &SpectrumAssets, motion: &mut SpectrumMotion) {
+    let clip = (spec.x, spec.y, spec.w as i32, spec.h as i32);
+    let centred = |picture: &Frame| {
+        (
+            spec.x + (spec.w as i32 - picture.width as i32) / 2,
+            spec.y + (spec.h as i32 - picture.height as i32) / 2,
+        )
+    };
+    if let Some(background) = &assets.background {
+        blit_clipped(dst, dst_w, dst_h, background, centred(background), (0, 0, background.width, background.height), clip);
+    }
+    let baseline = spec.y + spec.origin_y;
+    if motion.toppings.len() != heights.len() {
+        motion.toppings = vec![None; heights.len()];
+    }
+    for (r, &height) in heights.iter().enumerate() {
+        let height = height.min(spec.bar_h);
+        let bx = spec.x + spec.origin_x + r as i32 * (spec.bar_w + spec.gap) as i32;
+        if height > 0 {
+            if let Some(bar) = &assets.bar {
+                blit_clipped(dst, dst_w, dst_h, bar, (bx, baseline - height as i32), (0, spec.bar_h - height, spec.bar_w, height), clip);
+            }
+            if let Some(reflection) = &assets.reflection {
+                blit_clipped(dst, dst_w, dst_h, reflection, (bx, baseline + spec.reflection_gap), (0, 0, spec.bar_w, height), clip);
+            }
+        }
+        if let (Some((topping_h, topping_step)), Some(bar)) = (spec.topping, &assets.bar) {
+            let top = (baseline - height as i32).min(baseline);
+            match motion.toppings[r] {
+                None => motion.toppings[r] = Some(top),
+                Some(sitting) => {
+                    if top > sitting + topping_step as i32 + topping_h as i32 {
+                        let fallen = sitting + topping_step as i32;
+                        motion.toppings[r] = Some(fallen);
+                        let src_y = spec.bar_h as i32 - (baseline - fallen) + 1;
+                        if src_y >= 0 {
+                            blit_clipped(dst, dst_w, dst_h, bar, (bx, fallen), (0, src_y as u32, spec.bar_w, topping_h), clip);
+                        }
+                    } else {
+                        motion.toppings[r] = Some(top - topping_h as i32 - topping_step as i32);
+                    }
+                }
+            }
+        }
+    }
+    if let Some(foreground) = &assets.foreground {
+        blit_clipped(dst, dst_w, dst_h, foreground, centred(foreground), (0, 0, foreground.width, foreground.height), clip);
+    }
+}
+
 fn place(fallback: Rect, at: Option<(i32, i32)>, width: u32, height: u32) -> Rect {
     let Some((x, y)) = at else {
         return fallback;
@@ -1144,6 +1323,58 @@ mod tests {
         // mirrored picture.
         let flipped = flip_x(&pic);
         assert_eq!((flipped.rgba[0], flipped.rgba[12]), (4, 1));
+    }
+
+    #[test]
+    fn spectrum_bars_rise_from_the_origin_reflect_below_it_and_toppings_fall() {
+        let spec = SpectrumSpec {
+            x: 10,
+            y: 20,
+            w: 100,
+            h: 60,
+            origin_x: 5,
+            origin_y: 40,
+            bar_w: 2,
+            bar_h: 20,
+            gap: 1,
+            steps: 10,
+            bins: 2,
+            max_value: 100.0,
+            background: None,
+            bar: Some(Fill::Color([255, 0, 0, 255])),
+            reflection: Some(Fill::Color([0, 0, 255, 255])),
+            reflection_gap: 1,
+            topping: Some((1, 1)),
+            foreground: None.unwrap_or_default(),
+        };
+        let assets = SpectrumAssets::load(&spec);
+        let mut motion = SpectrumMotion::default();
+        let (w, h) = (120u32, 80u32);
+        let red = |dst: &[u8], x: i32, y: i32| dst[((y as u32 * w + x as u32) * 4) as usize];
+        let blue = |dst: &[u8], x: i32, y: i32| dst[((y as u32 * w + x as u32) * 4 + 2) as usize];
+        // Half height on the first bar: 10 rows up from the baseline at y 60, at x 15.
+        let mut dst = vec![0u8; (w * h * 4) as usize];
+        draw_spectrum(&mut dst, w, h, &spec, &[10, 0], &assets, &mut motion);
+        assert_eq!((red(&dst, 15, 59), red(&dst, 15, 50), red(&dst, 15, 49)), (255, 255, 0), "bar covers y 50..59");
+        assert_eq!((blue(&dst, 15, 61), blue(&dst, 15, 70), blue(&dst, 15, 71)), (255, 255, 0), "reflection hangs from the gap");
+        assert_eq!(red(&dst, 18, 59), 0, "the second bar is silent");
+        // The bar drops: the topping stays one step above where it was and falls one step a frame.
+        let mut dst = vec![0u8; (w * h * 4) as usize];
+        draw_spectrum(&mut dst, w, h, &spec, &[10, 0], &assets, &mut motion);
+        let mut dst = vec![0u8; (w * h * 4) as usize];
+        draw_spectrum(&mut dst, w, h, &spec, &[2, 0], &assets, &mut motion);
+        assert_eq!((red(&dst, 15, 49), red(&dst, 15, 55)), (255, 0), "topping drawn one step above the old top, bar gone there");
+        let mut dst = vec![0u8; (w * h * 4) as usize];
+        draw_spectrum(&mut dst, w, h, &spec, &[2, 0], &assets, &mut motion);
+        assert_eq!((red(&dst, 15, 49), red(&dst, 15, 50)), (0, 255), "a frame later it sits one step lower");
+        // Nothing outside the box: a bar past the right edge is clipped.
+        let wide = SpectrumSpec { origin_x: 95, ..spec.clone() };
+        let mut dst = vec![0u8; (w * h * 4) as usize];
+        draw_spectrum(&mut dst, w, h, &wide, &[10, 10], &assets, &mut SpectrumMotion::default());
+        assert_eq!((red(&dst, 105, 59), red(&dst, 108, 59), red(&dst, 110, 59)), (255, 255, 0), "second bar starts at 108, clipped at 110");
+        // Gradient: first colour at the bottom.
+        let g = gradient_frame(1, 3, &[[0, 0, 0, 255], [200, 0, 0, 255]]);
+        assert_eq!((g.rgba[0], g.rgba[4], g.rgba[8]), (200, 100, 0));
     }
 
     #[test]

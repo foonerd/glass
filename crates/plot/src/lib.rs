@@ -2,8 +2,8 @@
 //! Pure: no files, no devices, no pixels.
 
 use lead::{
-    format_key, format_label, Input, Metadata, MeterSpec, ScrollDirection, SkinDesc, TextAlign,
-    TextSpec, TextStyle, TypeAlign, TypeMode,
+    format_key, format_label, Input, Metadata, MeterSpec, ScrollDirection, SkinDesc, SpectrumSpec,
+    TextAlign, TextSpec, TextStyle, TypeAlign, TypeMode,
 };
 use serde::{Deserialize, Serialize};
 
@@ -92,6 +92,11 @@ pub struct Scene {
     pub mono: f32,
     #[serde(default)]
     pub meter: MeterSpec,
+    /// The spectrum the meter shows, and each bin's bar height in pixels.
+    #[serde(default)]
+    pub spectrum: Option<SpectrumSpec>,
+    #[serde(default)]
+    pub bar_heights: Vec<u32>,
 }
 
 impl Default for Scene {
@@ -111,6 +116,8 @@ impl Default for Scene {
             type_area: None,
             mono: 0.0,
             meter: MeterSpec::default(),
+            spectrum: None,
+            bar_heights: Vec::new(),
         }
     }
 }
@@ -329,6 +336,12 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
         type_area: type_area(skin, &input.metadata),
         mono: (input.levels.mono / meter_max).clamp(0.0, 1.0),
         meter: skin.meter.clone(),
+        bar_heights: skin
+            .spectrum
+            .as_ref()
+            .map(|spec| input.bins.values.iter().map(|&raw| spec.bar_height(raw)).collect())
+            .unwrap_or_default(),
+        spectrum: skin.spectrum.clone(),
     }
 }
 

@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use std::thread;
 use std::time::Instant;
 
-use expose::{flip_x, raster_over, read_art, read_icon, read_png, Fonts, Stack, TextMotion};
+use expose::{flip_x, raster_over, read_art, read_icon, read_png, Fonts, Motion, SpectrumAssets, Stack};
 use intake::{PipeSource, Selector, Source};
 use lead::{frame_period, Input, MeterKind, SkinDesc, TypeMode};
 use pane::{publish, write_ppm, Surface};
@@ -33,6 +33,8 @@ struct Assets {
     indicator_right: Option<expose::Frame>,
     fonts: Fonts,
     art_mask: Option<expose::Frame>,
+    /// The spectrum's pictures when the meter shows one.
+    spectrum: Option<SpectrumAssets>,
 }
 
 impl Assets {
@@ -67,6 +69,7 @@ impl Assets {
                 .as_ref()
                 .filter(|art| !art.mask.is_empty())
                 .and_then(|art| read_png(std::path::Path::new(&art.mask))),
+            spectrum: skin.spectrum.as_ref().map(SpectrumAssets::load),
         }
     }
 }
@@ -134,7 +137,7 @@ fn main() -> ExitCode {
     let mut source = PipeSource::installed().with_skin(&skin);
     let frame_rate = intake::installed_frame_rate();
     let started = Instant::now();
-    let mut motion = TextMotion::default();
+    let mut motion = Motion::default();
     let period = frame_period(frame_rate);
     println!(
         "glass: frame.rate={frame_rate} size={}x{} theme={} meter={}",
@@ -191,7 +194,7 @@ fn main() -> ExitCode {
                     assets = Assets::load(&skin);
                     art_cache = None;
                     icon_cache = None;
-                    motion = TextMotion::default();
+                    motion = Motion::default();
                     switched_at = Instant::now();
                     println!("glass: meter={name}");
                 }
@@ -266,6 +269,7 @@ fn main() -> ExitCode {
                     fonts: Some(&assets.fonts),
                     art: art_cache.as_ref().map(|(_, frame)| frame),
                     icon: icon_cache.as_ref().map(|(_, frame)| frame),
+                    spectrum: assets.spectrum.as_ref(),
                 },
                 &mut motion,
                 started.elapsed().as_millis() as u64,
