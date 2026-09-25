@@ -92,6 +92,13 @@ pub struct Metadata {
     /// Seconds left of the persist period.
     #[serde(default)]
     pub persist_left: u32,
+    /// The track's location as the player reports it.
+    #[serde(default)]
+    pub uri: String,
+    /// One entry per folder layer of the skin: the file found in the track's
+    /// folder, or empty.
+    #[serde(default)]
+    pub folder_files: Vec<String>,
 }
 
 /// Where a text sits inside its box when it fits.
@@ -760,6 +767,133 @@ pub fn spectrum_from_theme(
     })
 }
 
+/// How a picture is placed in a box: kept in proportion and centred, or
+/// stretched to fill it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Scale {
+    #[default]
+    Fit,
+    Stretch,
+}
+
+/// Where a decorative layer sits: under the meters, or over everything but
+/// the foreground.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ZOrder {
+    Background,
+    #[default]
+    Overlay,
+}
+
+/// A decorative picture from the playing track's folder, `folderlayer.N.*`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FolderLayerSpec {
+    /// File names tried in order inside the track's folder.
+    pub files: Vec<String>,
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+    pub scale: Scale,
+    pub zorder: ZOrder,
+    /// Border width in pixels around the box, in `font.color`. Zero is none.
+    pub border: u32,
+    pub border_color: [u8; 3],
+}
+
+/// The default candidates when a layer names no files.
+pub const FOLDER_LAYER_FILES: [&str; 6] = ["back.png", "Back.png", "back.jpg", "Back.jpg", "logo.png", "Logo.png"];
+
+/// The folder layers a meter declares: the legacy `folderlayer.*` when
+/// `folderlayer.enabled` is true, then `folderlayer.1.*` to `folderlayer.5.*`,
+/// each needing a position and a dimension.
+pub fn meter_folder_layers(meters_txt: &str, meter: &str) -> Vec<FolderLayerSpec> {
+    let values = section_values(meters_txt, meter);
+    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+    let font_color = get("font.color").and_then(color_triplet).unwrap_or([255, 255, 255]);
+    let pair = |key: &str| -> Option<(u32, u32)> {
+        let mut parts = get(key)?.split(',');
+        let a = parts.next()?.trim().parse().ok()?;
+        let b = parts.next()?.trim().parse().ok()?;
+        Some((a, b))
+    };
+    let mut prefixes = Vec::new();
+    if truthy(get("folderlayer.enabled")) {
+        prefixes.push("folderlayer".to_string());
+    }
+    prefixes.extend((1..=5).map(|n| format!("folderlayer.{n}")));
+    prefixes
+        .iter()
+        .filter_map(|prefix| {
+            let (x, y) = pair(&format!("{prefix}.pos"))?;
+            let (w, h) = pair(&format!("{prefix}.dimension"))?;
+            let files: Vec<String> = get(&format!("{prefix}.files"))
+                .map(|list| list.split(',').map(|f| f.trim().to_string()).filter(|f| !f.is_empty()).collect())
+                .filter(|files: &Vec<String>| !files.is_empty())
+                .unwrap_or_else(|| FOLDER_LAYER_FILES.iter().map(|f| f.to_string()).collect());
+            Some(FolderLayerSpec {
+                files,
+                x,
+                y,
+                w,
+                h,
+                scale: match get(&format!("{prefix}.scale")).map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+                    Some("stretch") => Scale::Stretch,
+                    _ => Scale::Fit,
+                },
+                zorder: match get(&format!("{prefix}.zorder")).map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+                    Some("background") => ZOrder::Background,
+                    _ => ZOrder::Overlay,
+                },
+                border: get(&format!("{prefix}.border")).and_then(|v| v.trim().parse().ok()).unwrap_or(0),
+                border_color: font_color,
+            })
+        })
+        .collect()
+}
+
+/// The files a folder layer may show for a track, as paths on the player,
+/// in the order to try them. The track's location is its folder under
+/// `/mnt`, after the player's `music-library/` or `mnt/` prefix; a name with
+/// a slash, a `..`, or an extension other than png, jpg, jpeg, gif or webp is
+/// skipped. Empty for a source that is not a file.
+pub fn folder_candidates(uri: &str, files: &[String]) -> Vec<String> {
+    let uri = uri.trim();
+    if uri.is_empty() {
+        return Vec::new();
+    }
+    let stripped = uri
+        .strip_prefix("music-library/")
+        .or_else(|| uri.strip_prefix("music-library"))
+        .unwrap_or(uri);
+    let stripped = stripped
+        .strip_prefix("mnt/")
+        .or_else(|| stripped.strip_prefix("mnt"))
+        .unwrap_or(stripped);
+    let base = if stripped.starts_with('/') {
+        format!("/mnt{stripped}")
+    } else {
+        format!("/mnt/{stripped}")
+    };
+    let Some(slash) = base.rfind('/') else {
+        return Vec::new();
+    };
+    let folder = &base[..slash];
+    if !folder.starts_with("/mnt") {
+        return Vec::new();
+    }
+    files
+        .iter()
+        .map(|f| f.trim())
+        .filter(|f| !f.is_empty() && !f.contains('/') && !f.contains(".."))
+        .filter(|f| {
+            let lower = f.to_ascii_lowercase();
+            [".png", ".jpg", ".jpeg", ".gif", ".webp"].iter().any(|ext| lower.ends_with(ext))
+        })
+        .map(|f| format!("{folder}/{f}"))
+        .collect()
+}
+
 /// `[data.source]` from the player configuration, with the engine's defaults.
 pub fn data_source_from_config(text: &str) -> DataSourceSpec {
     let number = |key: &str, default: f32| {
@@ -887,6 +1021,8 @@ pub struct SkinDesc {
     pub meter: MeterSpec,
     #[serde(default)]
     pub spectrum: Option<SpectrumSpec>,
+    #[serde(default)]
+    pub folder_layers: Vec<FolderLayerSpec>,
 }
 
 impl Default for SkinDesc {
@@ -933,6 +1069,7 @@ impl SkinDesc {
             data_source: DataSourceSpec::default(),
             meter: MeterSpec::default(),
             spectrum: None,
+            folder_layers: Vec::new(),
         }
     }
 }
@@ -1918,6 +2055,23 @@ mod tests {
         // 210 / 30 = 7 px steps; a raw 50 is 105 px, exactly 15 steps; 51 rounds up to 16.
         assert_eq!((spec.bar_height(0.0), spec.bar_height(50.0), spec.bar_height(51.0), spec.bar_height(100.0)), (0, 105, 112, 210));
         assert_eq!(spectrum_from_theme(theme, "s.9", (1, 1), &settings, ""), None);
+    }
+
+    #[test]
+    fn folder_layers_need_a_box_and_look_in_the_track_folder() {
+        let m = "[m]\nfont.color = 1,2,3\nfolderlayer.enabled = True\nfolderlayer.pos = 40,40\nfolderlayer.dimension = 300,300\nfolderlayer.zorder = background\n\
+            folderlayer.2.files = logo.png, Logo.png\nfolderlayer.2.pos = 980,40\nfolderlayer.2.dimension = 240,120\nfolderlayer.2.scale = stretch\nfolderlayer.2.border = 2\n\
+            folderlayer.3.pos = 1,1\n";
+        let layers = meter_folder_layers(m, "m");
+        assert_eq!(layers.len(), 2, "the third has no dimension");
+        assert_eq!((layers[0].x, layers[0].y, layers[0].w, layers[0].h, layers[0].zorder, layers[0].scale, layers[0].border), (40, 40, 300, 300, ZOrder::Background, Scale::Fit, 0));
+        assert_eq!(layers[0].files, FOLDER_LAYER_FILES.map(String::from).to_vec());
+        assert_eq!((layers[1].files.clone(), layers[1].scale, layers[1].zorder, layers[1].border, layers[1].border_color), (vec!["logo.png".to_string(), "Logo.png".to_string()], Scale::Stretch, ZOrder::Overlay, 2, [1, 2, 3]));
+        let files = ["back.png".to_string(), "../x.png".to_string(), "a/b.png".to_string(), "logo.txt".to_string(), "Logo.JPG".to_string()];
+        assert_eq!(folder_candidates("mnt/INTERNAL/U2/War (1983)/02. Seconds.flac", &files), ["/mnt/INTERNAL/U2/War (1983)/back.png", "/mnt/INTERNAL/U2/War (1983)/Logo.JPG"]);
+        assert_eq!(folder_candidates("music-library/NAS/a/b.flac", &files)[0], "/mnt/NAS/a/back.png");
+        assert!(folder_candidates("", &files).is_empty());
+        assert_eq!(folder_candidates("rp2/channel@id=0", &files), ["/mnt/rp2/back.png", "/mnt/rp2/Logo.JPG"], "a stream maps under /mnt too and simply is not found");
     }
 
     #[test]

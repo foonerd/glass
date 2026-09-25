@@ -9,7 +9,7 @@ use std::process::ExitCode;
 use std::thread;
 use std::time::Instant;
 
-use expose::{flip_x, raster_over, read_art, read_icon, read_png, Fonts, Motion, SpectrumAssets, Stack};
+use expose::{flip_x, raster_over, read_art, read_icon, read_png, FolderPicture, Fonts, Motion, SpectrumAssets, Stack};
 use intake::{PipeSource, Selector, Source};
 use lead::{frame_period, Input, MeterKind, SkinDesc, TypeMode};
 use pane::{publish, write_ppm, Surface};
@@ -159,6 +159,8 @@ fn main() -> ExitCode {
     let mut art_cache: Option<(plot::Art, expose::Frame)> = None;
     // The type icon, decoded once per file, box and tint.
     let mut icon_cache: Option<((String, u32, u32, Option<[u8; 3]>), expose::Frame)> = None;
+    // Folder layer pictures, decoded once per file and box, one slot per layer.
+    let mut folder_cache: Vec<(String, Option<FolderPicture>)> = Vec::new();
     let show_window = env::var_os("DISPLAY").is_some() && !headless;
     let write_file = output.is_some();
     let serving_remote = false;
@@ -194,6 +196,7 @@ fn main() -> ExitCode {
                     assets = Assets::load(&skin);
                     art_cache = None;
                     icon_cache = None;
+                    folder_cache.clear();
                     motion = Motion::default();
                     switched_at = Instant::now();
                     println!("glass: meter={name}");
@@ -257,6 +260,20 @@ fn main() -> ExitCode {
                 }
                 None => icon_cache = None,
             }
+            if folder_cache.len() != scene.folder_layers.len() {
+                folder_cache = scene.folder_layers.iter().map(|_| (String::new(), None)).collect();
+            }
+            for (slot, layer) in folder_cache.iter_mut().zip(scene.folder_layers.iter()) {
+                if slot.0 != layer.file {
+                    slot.1 = if layer.file.is_empty() {
+                        None
+                    } else {
+                        FolderPicture::load(std::path::Path::new(&layer.file), &layer.spec)
+                    };
+                    slot.0 = layer.file.clone();
+                }
+            }
+            let folder_pictures: Vec<Option<FolderPicture>> = folder_cache.iter().map(|(_, p)| p.clone()).collect();
             let frame = raster_over(
                 &scene,
                 Stack {
@@ -270,6 +287,7 @@ fn main() -> ExitCode {
                     art: art_cache.as_ref().map(|(_, frame)| frame),
                     icon: icon_cache.as_ref().map(|(_, frame)| frame),
                     spectrum: assets.spectrum.as_ref(),
+                    folder_pictures: &folder_pictures,
                 },
                 &mut motion,
                 started.elapsed().as_millis() as u64,

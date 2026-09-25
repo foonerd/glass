@@ -15,7 +15,7 @@ use std::collections::VecDeque;
 use lead::{
     data_source_from_config, decode_meter, decode_spectrum, fonts_from_config, format_key,
     frame_rate_from_config, meter_art, meter_at, meter_background, meter_indicator,
-    meter_layers, meter_needle, meter_sections, meter_spec, meter_spectrum, meter_text_at,
+    folder_candidates, meter_folder_layers, meter_layers, meter_needle, meter_sections, meter_spec, meter_spectrum, meter_text_at,
     meter_texts, meter_type, random_change_title_from_config, random_interval_from_config,
     screen_from_config, scroll_speeds_from_config, selection_from_config, spectrum_from_theme,
     spectrum_settings, Bins, DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec, CONFIG_TXT,
@@ -541,6 +541,11 @@ pub struct PipeSource {
     /// Whether the skin shows the next track, which costs a queue read per refresh.
     wants_next: bool,
     conditioner: Conditioner,
+    /// The skin's folder layers' file lists, and the files found for the
+    /// current track folder, resolved once per folder.
+    folder_layers: Vec<Vec<String>>,
+    folder_key: String,
+    folder_files: Vec<String>,
 }
 
 impl PipeSource {
@@ -581,6 +586,9 @@ impl PipeSource {
             plugin_icons: String::new(),
             icon_cache: (String::new(), String::new()),
             wants_next: false,
+            folder_layers: Vec::new(),
+            folder_key: String::new(),
+            folder_files: Vec::new(),
             conditioner: Conditioner::new(DataSourceSpec {
                 max_ui: meter_max,
                 max_pipe: meter_max,
@@ -603,6 +611,29 @@ impl PipeSource {
         self
     }
 
+    /// The folder layer files for a track, looked up once per track folder:
+    /// for each layer, the first of its candidates that exists, or empty.
+    fn folder_files_for(&mut self, uri: &str) -> Vec<String> {
+        if self.folder_layers.is_empty() {
+            return Vec::new();
+        }
+        let key = uri.rfind('/').map(|i| &uri[..i]).unwrap_or(uri).to_string();
+        if key != self.folder_key || self.folder_files.len() != self.folder_layers.len() {
+            self.folder_key = key;
+            self.folder_files = self
+                .folder_layers
+                .iter()
+                .map(|files| {
+                    folder_candidates(uri, files)
+                        .into_iter()
+                        .find(|candidate| Path::new(candidate).is_file())
+                        .unwrap_or_default()
+                })
+                .collect();
+        }
+        self.folder_files.clone()
+    }
+
     /// Follow another skin: its icon folders, whether it wants the next
     /// track, and its level conditioning. The type icon is resolved afresh.
     pub fn set_skin(&mut self, skin: &SkinDesc) {
@@ -615,6 +646,9 @@ impl PipeSource {
         self.conditioner = Conditioner::new(skin.data_source.clone());
         self.icon_cache = (String::new(), String::new());
         self.metadata_at = None;
+        self.folder_layers = skin.folder_layers.iter().map(|l| l.files.clone()).collect();
+        self.folder_key = String::new();
+        self.folder_files = Vec::new();
         if let Some(bins) = skin.spectrum.as_ref().map(|s| s.bins.max(1)) {
             if bins != self.spectrum_bins {
                 self.spectrum_bins = bins;
@@ -709,6 +743,8 @@ impl Source for PipeSource {
                     next_album,
                     persist_mode: String::new(),
                     persist_left: 0,
+                    folder_files: self.folder_files_for(&playing.uri),
+                    uri: playing.uri,
                 };
                 self.metadata_at = Some(Instant::now());
             }
@@ -799,6 +835,7 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         skin.face_at = face_at;
         skin.needle = meter_needle(&meters, &skin.name);
         skin.meter = meter_spec(&meters, &skin.name);
+        skin.folder_layers = meter_folder_layers(&meters, &skin.name);
         let (title_at, artist_at) = meter_text_at(&meters, &skin.name);
         skin.title_at = title_at;
         skin.artist_at = artist_at;
@@ -864,6 +901,7 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
 
 #[derive(Debug, Default)]
 pub struct NowPlaying {
+    pub uri: String,
     pub title: String,
     pub artist: String,
     pub album: String,
@@ -908,6 +946,7 @@ pub fn now_playing() -> NowPlaying {
     playing.duration = json_number(body, "duration").unwrap_or(0.0);
     playing.seek = json_number(body, "seek").unwrap_or(0.0) / 1000.0;
     playing.albumart = json_string(body, "albumart");
+    playing.uri = json_string(body, "uri");
     playing.track_type = json_string(body, "trackType");
     playing.bitrate = json_string(body, "bitrate");
     playing.position = json_number(body, "position").map(|p| p as i64).unwrap_or(0);

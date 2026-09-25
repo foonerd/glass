@@ -6,7 +6,7 @@ use std::path::Path;
 use std::collections::HashMap;
 
 use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
-use lead::{Direction, Fill, FontFiles, LinearSpec, MeterKind, ScrollDirection, SpectrumSpec, TextAlign, TextStyle, TypeAlign, TypeMode};
+use lead::{Direction, Fill, FolderLayerSpec, FontFiles, LinearSpec, MeterKind, Scale, ScrollDirection, SpectrumSpec, TextAlign, TextStyle, TypeAlign, TypeMode, ZOrder};
 use plot::{Scene, Text, TypeArea};
 
 const BG: [u8; 4] = [12, 12, 16, 255];
@@ -193,6 +193,7 @@ pub fn raster(scene: &Scene) -> Frame {
             art: None,
             icon: None,
             spectrum: None,
+            folder_pictures: &[],
         },
         &mut Motion::default(),
         0,
@@ -258,10 +259,12 @@ pub struct Stack<'a> {
     pub icon: Option<&'a Frame>,
     /// The spectrum's pictures, built from `Scene::spectrum` once per meter.
     pub spectrum: Option<&'a SpectrumAssets>,
+    /// One entry per `Scene::folder_layers`, the picture fitted to its box.
+    pub folder_pictures: &'a [Option<FolderPicture>],
 }
 
-/// Theme order: full-screen picture, album art, meter face, needles, meter
-/// foreground, then the texts. `now_ms` drives the moving texts through `motion`.
+/// Theme order: full-screen picture, meter face, album art, folder layers, needles, meter
+/// spectrum, texts, overlay folder layers, and the meter foreground last. `now_ms` drives the moving texts through `motion`.
 pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms: u64) -> Frame {
     let width = scene.width.max(1);
     let height = scene.height.max(1);
@@ -272,6 +275,12 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
     if let Some(screen) = stack.screen {
         blit(&mut rgba, width, height, screen);
     }
+    // The meter engine composes the screen picture and the meter face into
+    // one static background; album art and background folder layers go over
+    // that, under the needles.
+    if let Some(face) = stack.face {
+        blit_at(&mut rgba, width, height, face, stack.face_at);
+    }
     if let (Some(art), Some(place)) = (stack.art, &scene.art) {
         blit_at(&mut rgba, width, height, art, (place.x, place.y));
         if place.border > 0 {
@@ -279,9 +288,7 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
             draw_border(&mut rgba, width, height, (place.x, place.y, place.w, place.h), place.border, color);
         }
     }
-    if let Some(face) = stack.face {
-        blit_at(&mut rgba, width, height, face, stack.face_at);
-    }
+    draw_folder_layers(&mut rgba, width, height, scene, stack.folder_pictures, ZOrder::Background);
     if scene.meter.visible {
         let right_sprite = stack.needle_right.or(stack.needle);
         match (scene.meter.kind, &scene.meter.linear) {
@@ -327,9 +334,6 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
     if let (Some(spec), Some(assets)) = (&scene.spectrum, stack.spectrum) {
         draw_spectrum(&mut rgba, width, height, spec, &scene.bar_heights, assets, &mut motion.spectrum);
     }
-    if let Some(front) = stack.front {
-        blit_at(&mut rgba, width, height, front, stack.face_at);
-    }
     if stack.screen.is_none() && stack.face.is_none() {
         let layout = layout(width, height);
         let left_meter = place(layout.left_meter, scene.left_at, width, height);
@@ -348,6 +352,12 @@ pub fn raster_over(scene: &Scene, stack: Stack<'_>, motion: &mut Motion, now_ms:
     }
     if let Some(area) = &scene.type_area {
         draw_type_area(&mut frame, area, stack.icon, stack.fonts);
+    }
+    // Overlay folder layers sit above everything but the meter foreground,
+    // which the meter engine draws last of all.
+    draw_folder_layers(&mut frame.rgba, width, height, scene, stack.folder_pictures, ZOrder::Overlay);
+    if let Some(front) = stack.front {
+        blit_at(&mut frame.rgba, width, height, front, stack.face_at);
     }
     frame
 }
@@ -1153,6 +1163,57 @@ pub fn draw_spectrum(dst: &mut [u8], dst_w: u32, dst_h: u32, spec: &SpectrumSpec
     }
     if let Some(foreground) = &assets.foreground {
         blit_clipped(dst, dst_w, dst_h, foreground, centred(foreground), (0, 0, foreground.width, foreground.height), clip);
+    }
+}
+
+/// A folder layer's picture, scaled for its box, and where it is drawn.
+#[derive(Debug, Clone, PartialEq)]
+pub struct FolderPicture {
+    pub frame: Frame,
+    pub at: (u32, u32),
+}
+
+impl FolderPicture {
+    /// Decode a picture and place it in the layer's box: stretched to fill it,
+    /// or kept in proportion and centred.
+    pub fn load(path: &Path, layer: &FolderLayerSpec) -> Option<Self> {
+        let picture = read_png(path)?;
+        if picture.width == 0 || picture.height == 0 {
+            return None;
+        }
+        let (bw, bh) = (layer.w.max(1), layer.h.max(1));
+        Some(match layer.scale {
+            Scale::Stretch => Self {
+                frame: fit_art(&picture, bw, bh),
+                at: (layer.x, layer.y),
+            },
+            Scale::Fit => {
+                let ratio = (bw as f32 / picture.width as f32).min(bh as f32 / picture.height as f32);
+                let nw = ((picture.width as f32 * ratio) as u32).max(1);
+                let nh = ((picture.height as f32 * ratio) as u32).max(1);
+                Self {
+                    frame: fit_art(&picture, nw, nh),
+                    at: (layer.x + (bw - nw) / 2, layer.y + (bh - nh) / 2),
+                }
+            }
+        })
+    }
+}
+
+/// The folder layers of one z-order, each with its border when it has a picture.
+fn draw_folder_layers(dst: &mut [u8], dst_w: u32, dst_h: u32, scene: &Scene, pictures: &[Option<FolderPicture>], zorder: ZOrder) {
+    for (layer, picture) in scene.folder_layers.iter().zip(pictures.iter()) {
+        if layer.spec.zorder != zorder {
+            continue;
+        }
+        let Some(picture) = picture else {
+            continue;
+        };
+        blit_at(dst, dst_w, dst_h, &picture.frame, picture.at);
+        if layer.spec.border > 0 {
+            let c = layer.spec.border_color;
+            draw_border(dst, dst_w, dst_h, (layer.spec.x, layer.spec.y, layer.spec.w, layer.spec.h), layer.spec.border, [c[0], c[1], c[2], 255]);
+        }
     }
 }
 

@@ -2,8 +2,8 @@
 //! Pure: no files, no devices, no pixels.
 
 use lead::{
-    format_key, format_label, Input, Metadata, MeterSpec, ScrollDirection, SkinDesc, SpectrumSpec,
-    TextAlign, TextSpec, TextStyle, TypeAlign, TypeMode,
+    format_key, format_label, FolderLayerSpec, Input, Metadata, MeterSpec, ScrollDirection, SkinDesc,
+    SpectrumSpec, TextAlign, TextSpec, TextStyle, TypeAlign, TypeMode,
 };
 use serde::{Deserialize, Serialize};
 
@@ -97,6 +97,16 @@ pub struct Scene {
     pub spectrum: Option<SpectrumSpec>,
     #[serde(default)]
     pub bar_heights: Vec<u32>,
+    /// The skin's folder layers, each with the file found for this track, or empty.
+    #[serde(default)]
+    pub folder_layers: Vec<FolderLayer>,
+}
+
+/// One folder layer of the scene: its box and the picture file to show.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FolderLayer {
+    pub spec: FolderLayerSpec,
+    pub file: String,
 }
 
 impl Default for Scene {
@@ -118,6 +128,7 @@ impl Default for Scene {
             meter: MeterSpec::default(),
             spectrum: None,
             bar_heights: Vec::new(),
+            folder_layers: Vec::new(),
         }
     }
 }
@@ -342,6 +353,15 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
             .map(|spec| input.bins.values.iter().map(|&raw| spec.bar_height(raw)).collect())
             .unwrap_or_default(),
         spectrum: skin.spectrum.clone(),
+        folder_layers: skin
+            .folder_layers
+            .iter()
+            .enumerate()
+            .map(|(i, spec)| FolderLayer {
+                spec: spec.clone(),
+                file: input.metadata.folder_files.get(i).cloned().unwrap_or_default(),
+            })
+            .collect(),
     }
 }
 
