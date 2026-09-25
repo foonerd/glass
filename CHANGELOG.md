@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.13] - 2026-09-25
+
+Spectrum analyser. A meter with `config.extend` and `spectrum.visible` shows the spectrum `spectrum.name` names in the theme's `spectrum.txt`, in a `spectrum.size` box placed by the section's `spectrum.x/y` and clipped to it. Backgrounds, bars and reflections come from `color`, `gradient` (first colour at the bottom), `image` or `image.extended` fills; the background and `fgr.filename` are centred in the box. Bars rise from `origin.x/y` in `bar.height / steps` pixel steps, a raw bin rounded up to a whole step against `max.value`; reflections hang `reflection.gap` below the baseline; toppings stay a step above a dropping bar and fall `topping.step` pixels a frame. The pipe record length follows the spectrum configuration's `size`.
+
 ## [0.4.12] - 2026-09-25
 
 Meter types. A circular meter may have one channel (`channels = 1`, needle at `mono.origin.x/y` for the mono level), per-channel angles (`left.start.angle`, `left.stop.angle`, `right.start.angle`, `right.stop.angle`, the left pair standing in when the shared `start.angle` and `stop.angle` are absent) and a mirrored needle per channel (`left.needle.flip`, `right.needle.flip`). Origins may lie off screen. A linear meter (`meter.type = linear`) shows the indicator picture up to the width its steps reach: `position.regular` steps of `step.width.regular` pixels, then `position.overload` steps of `step.width.overload`; `direction` is `left-right`, `right-left`, `bottom-top`, `top-bottom`, `edges-center` or `center-edges`; `indicator.type = single` moves the whole picture instead; `flip.left.x` and `flip.right.x` mirror a channel's picture; `mono.x/y` places a one-channel bar. `meter.visible = False` now hides bars as well as needles. A frame written with `--output` is renamed into place, never seen half written.

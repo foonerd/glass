@@ -15,10 +15,10 @@ use std::collections::VecDeque;
 use lead::{
     data_source_from_config, decode_meter, decode_spectrum, fonts_from_config, format_key,
     frame_rate_from_config, meter_art, meter_at, meter_background, meter_indicator,
-    meter_layers, meter_needle, meter_sections, meter_spec, meter_text_at, meter_texts,
-    meter_type, random_change_title_from_config, random_interval_from_config,
-    screen_from_config, scroll_speeds_from_config, selection_from_config, Bins,
-    DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec, CONFIG_TXT,
+    meter_layers, meter_needle, meter_sections, meter_spec, meter_spectrum, meter_text_at,
+    meter_texts, meter_type, random_change_title_from_config, random_interval_from_config,
+    screen_from_config, scroll_speeds_from_config, selection_from_config, spectrum_from_theme,
+    spectrum_settings, Bins, DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec, CONFIG_TXT,
     DEFAULT_FRAME_RATE, DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO,
     STOCK_ICONS, current_value,
 };
@@ -615,6 +615,13 @@ impl PipeSource {
         self.conditioner = Conditioner::new(skin.data_source.clone());
         self.icon_cache = (String::new(), String::new());
         self.metadata_at = None;
+        if let Some(bins) = skin.spectrum.as_ref().map(|s| s.bins.max(1)) {
+            if bins != self.spectrum_bins {
+                self.spectrum_bins = bins;
+                self.spectrum_buf = RecordBuf::new(bins * 4);
+                self.spectrum_held.clear();
+            }
+        }
     }
 
     fn try_open(slot: &mut Option<File>, path: &str) {
@@ -837,6 +844,21 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
     skin.fonts = fonts_from_config(&text, &digi_default, &italic_default);
     skin.data_source = data_source_from_config(&text);
     skin.meter_max = skin.data_source.max_ui;
+    // The spectrum engine's own configuration sits beside the handlers; the
+    // meter names which of the theme's spectra it shows and how big.
+    let placed = std::fs::read_to_string(theme.join("meters.txt"))
+        .ok()
+        .and_then(|meters| meter_spectrum(&meters, &skin.name));
+    if let (Some((name, w, h)), Some(dir)) = (placed, handlers_dir) {
+        if let Ok(config) = std::fs::read_to_string(dir.join("spectrum").join("config.txt")) {
+            let settings = spectrum_settings(&config);
+            let folder = Path::new(&settings.base_folder).join(&settings.folder);
+            if let Ok(spectra) = std::fs::read_to_string(folder.join("spectrum.txt")) {
+                skin.spectrum = spectrum_from_theme(&spectra, &name, (w, h), &settings, &folder.to_string_lossy());
+                skin.spectrum_max = settings.max_value;
+            }
+        }
+    }
     skin
 }
 
