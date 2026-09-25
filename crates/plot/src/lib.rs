@@ -2,9 +2,10 @@
 //! Pure: no files, no devices, no pixels.
 
 use lead::{Input, SkinDesc};
+use serde::{Deserialize, Serialize};
 
 /// What the surface should show. Levels and bars are fractions from 0 to 1.
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Scene {
     pub skin: String,
     pub width: u32,
@@ -79,5 +80,41 @@ mod tests {
         assert_eq!(scene.right, 0.0);
         assert_eq!(scene.bars, vec![1.0, 0.0]);
         assert_eq!((scene.width, scene.height), (800, 480));
+    }
+
+    /// One recorded step: the skin and input that went in, the scene that came out.
+    /// `glass --record` writes these under `testdata/frames/`.
+    #[derive(Deserialize)]
+    struct Recorded {
+        skin: SkinDesc,
+        input: Input,
+        scene: Scene,
+    }
+
+    #[test]
+    fn recorded_frames_replay() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../testdata/frames");
+        let mut paths: Vec<_> = std::fs::read_dir(&dir)
+            .map(|entries| {
+                entries
+                    .flatten()
+                    .map(|entry| entry.path())
+                    .filter(|path| path.extension().is_some_and(|ext| ext == "json"))
+                    .collect()
+            })
+            .unwrap_or_default();
+        paths.sort();
+        for path in &paths {
+            let text = std::fs::read_to_string(path).unwrap();
+            let recorded: Recorded = serde_json::from_str(&text)
+                .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+            assert_eq!(
+                step(&recorded.skin, &recorded.input),
+                recorded.scene,
+                "{}",
+                path.display()
+            );
+        }
+        println!("recorded frames replayed: {}", paths.len());
     }
 }

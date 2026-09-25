@@ -8,3 +8,7 @@ description = "Input and a skin become a Scene"
 
 [dependencies]
 lead = { path = "../lead" }
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
