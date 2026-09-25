@@ -398,6 +398,8 @@ fn main() -> ExitCode {
     let profiling = env::var_os("GLASS_PROFILE").is_some();
     let mut profile_sum: Vec<(&'static str, u64)> = Vec::new();
     let mut profile_loop = [0u64; 4];
+    let mut profile_painted = 0u64;
+    let mut profile_boxes = 0u64;
     let mut profile_frames = 0u32;
     let mut profile_window = Instant::now();
     // The art picture, decoded and stretched once per file and box, cut with
@@ -624,7 +626,7 @@ fn main() -> ExitCode {
             if profiling {
                 motion.profile = Some(Vec::new());
             }
-            let frame = raster_over(
+            let painted = raster_over(
                 &scene,
                 Stack {
                     screen: None,
@@ -648,9 +650,10 @@ fn main() -> ExitCode {
                 &mut motion,
                 started.elapsed().as_millis() as u64,
             );
+            let frame = painted.frame;
             rastered_at = Instant::now();
             if let Some(window) = surface.as_mut() {
-                match window.show(frame) {
+                match window.show(frame, painted.damage) {
                     Ok(Shown::Kept) => {}
                     Ok(Shown::Closed) => leave = Some("window closed"),
                     Ok(Shown::Touched) => {
@@ -699,8 +702,8 @@ fn main() -> ExitCode {
                 let now = started.elapsed().as_millis() as u64;
                 motion.fade.begin_out(now, skin.transition.duration_s, skin.transition.white, skin.transition.opacity);
                 while motion.fade.running(started.elapsed().as_millis() as u64) {
-                    let frame = raster_over(&scene, Stack { screen: None, face: None, front: assets.front.as_ref(), needle: assets.indicator.as_ref(), needle_right: assets.indicator_right.as_ref(), face_at: skin.face_at, fonts: Some(&assets.fonts), art: art_cache.as_ref().map(|(_, frame)| frame), icon: icon_cache.as_ref().map(|(_, frame)| frame), spectrum: assets.spectrum.as_ref(), folder_pictures: &folder_pictures, fanart: (fanart_slots.0.picture.as_ref(), fanart_slots.1.picture.as_ref()), vinyl: vinyl_slot.frame.as_ref(), tonearm: assets.tonearm.as_ref(), reels: (reel_pictures.0.as_ref(), reel_pictures.1.as_ref()), indicators: assets.indicators.as_ref(), base: Some(&assets.base) }, &mut motion, started.elapsed().as_millis() as u64);
-                    if window.show(frame).is_err() {
+                    let painted = raster_over(&scene, Stack { screen: None, face: None, front: assets.front.as_ref(), needle: assets.indicator.as_ref(), needle_right: assets.indicator_right.as_ref(), face_at: skin.face_at, fonts: Some(&assets.fonts), art: art_cache.as_ref().map(|(_, frame)| frame), icon: icon_cache.as_ref().map(|(_, frame)| frame), spectrum: assets.spectrum.as_ref(), folder_pictures: &folder_pictures, fanart: (fanart_slots.0.picture.as_ref(), fanart_slots.1.picture.as_ref()), vinyl: vinyl_slot.frame.as_ref(), tonearm: assets.tonearm.as_ref(), reels: (reel_pictures.0.as_ref(), reel_pictures.1.as_ref()), indicators: assets.indicators.as_ref(), base: Some(&assets.base) }, &mut motion, started.elapsed().as_millis() as u64);
+                    if window.show(painted.frame, painted.damage).is_err() {
                         break;
                     }
                     thread::sleep(period);
@@ -718,6 +721,8 @@ fn main() -> ExitCode {
                 }
             }
             let shown_at = Instant::now();
+            profile_painted += motion.damage().iter().map(|r| u64::from(r.w) * u64::from(r.h)).sum::<u64>();
+            profile_boxes += motion.damage().len() as u64;
             profile_loop[0] += polled_at.duration_since(frame_started).as_micros() as u64;
             profile_loop[1] += stepped_at.duration_since(polled_at).as_micros() as u64;
             profile_loop[2] += rastered_at.duration_since(stepped_at).as_micros() as u64;
@@ -729,11 +734,13 @@ fn main() -> ExitCode {
                 let achieved = n as f64 / profile_window.elapsed().as_secs_f64();
                 profile_window = Instant::now();
                 println!(
-                    "glass: profile per frame: {achieved:.1} fps, painters {}, poll {}us, step {}us, raster {}us [{}], show {}us",
-                    motion.painters(), profile_loop[0] / n, profile_loop[1] / n, profile_loop[2] / n, stages.join(", "), profile_loop[3] / n
+                    "glass: profile per frame: {achieved:.1} fps, painters {}, painted {}% in {:.1} boxes, poll {}us, step {}us, raster {}us [{}], show {}us",
+                    motion.painters(), profile_painted * 100 / (n * u64::from(skin.width.max(1)) * u64::from(skin.height.max(1))), profile_boxes as f64 / n as f64, profile_loop[0] / n, profile_loop[1] / n, profile_loop[2] / n, stages.join(", "), profile_loop[3] / n
                 );
                 profile_sum.clear();
                 profile_loop = [0; 4];
+                profile_painted = 0;
+                profile_boxes = 0;
                 profile_frames = 0;
             }
         }

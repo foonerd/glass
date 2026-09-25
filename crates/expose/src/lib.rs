@@ -9,6 +9,10 @@ use ab_glyph::{Font, FontVec, PxScale, ScaleFont};
 use lead::{Direction, Fill, FolderLayerSpec, FontFiles, LinearSpec, MeterKind, Scale, ScrollDirection, SpectrumSpec, TextAlign, TextStyle, TypeAlign, TypeMode, ZOrder};
 use lead::{GaugeSpec, GaugeStyle, StateIndicator, StateLook, TonearmSpec};
 use plot::{Fanart, Indicators, Scene, Text, TypeArea};
+#[cfg(test)]
+use lead::MeterSpec;
+#[cfg(test)]
+use plot::Art;
 
 const BG: [u8; 4] = [12, 12, 16, 255];
 
@@ -210,6 +214,7 @@ pub fn raster(scene: &Scene) -> Frame {
         &mut motion,
         0,
     )
+    .frame
     .clone()
 }
 
@@ -295,7 +300,7 @@ pub struct Stack<'a> {
 /// every line of text is set in type, which is where `motion` changes. Then
 /// the drawing steps, which only read, are painted over the base in row
 /// bands shared among the threads `motion` allows.
-pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, now_ms: u64) -> &'m Frame {
+pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, now_ms: u64) -> Painted<'m> {
     // A start ramps the levels up over the engine's first frames.
     let ramp = motion.ramp.factor(now_ms);
     let ramped;
@@ -315,7 +320,7 @@ pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, 
     let height = scene.height.max(1);
     let mut taken = motion.profile.take();
     let mut stages = Stages::new(taken.as_mut());
-    let Motion { text, spectrum, vinyl, tonearm, reels, fade, needles, labels, canvas, painters, profile, .. } = motion;
+    let Motion { text, spectrum, vinyl, tonearm, reels, fade, needles, labels, canvas, painters, profile, last_steps, last_base, damage, paint_all, reaches, .. } = motion;
     // The meter engine composes the screen picture and the meter face into
     // one static background; the frame starts as a copy of it. A prepared
     // base is used as it is, otherwise it is composed here.
@@ -383,12 +388,14 @@ pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, 
     if let Some(spec) = &scene.reels {
         for (i, (side, picture)) in [(&spec.spec.left, stack.reels.0), (&spec.spec.right, stack.reels.1)].into_iter().enumerate() {
             if let (Some(side), Some(picture)) = (side, picture) {
-                ops.push(Op::Turn { src: picture, pivot_image: centre_of(picture), pivot_screen: (side.center.0 as f32, side.center.1 as f32), degrees: -reel_angles[i], smooth: false });
+                let reach = reaches.reach(picture, centre_of(picture));
+                ops.push(Op::Turn { src: picture, pivot_image: centre_of(picture), pivot_screen: (side.center.0 as f32, side.center.1 as f32), degrees: -reel_angles[i], smooth: false, reach });
             }
         }
     }
     if let (Some(v), Some(picture)) = (&scene.vinyl, stack.vinyl) {
-        ops.push(Op::Turn { src: picture, pivot_image: centre_of(picture), pivot_screen: (v.spec.center.0 as f32, v.spec.center.1 as f32), degrees: -angle, smooth: false });
+        let reach = reaches.reach(picture, centre_of(picture));
+        ops.push(Op::Turn { src: picture, pivot_image: centre_of(picture), pivot_screen: (v.spec.center.0 as f32, v.spec.center.1 as f32), degrees: -angle, smooth: false, reach });
     }
     if let (Some(art), Some(place)) = (stack.art, &scene.art) {
         let color = [place.border_color[0], place.border_color[1], place.border_color[2], 255];
@@ -399,7 +406,8 @@ pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, 
                 .as_ref()
                 .map(|v| (v.spec.center.0 as f32, v.spec.center.1 as f32))
                 .unwrap_or((place.x as f32 + place.w as f32 / 2.0, place.y as f32 + place.h as f32 / 2.0));
-            ops.push(Op::Turn { src: art, pivot_image: centre_of(art), pivot_screen: centre, degrees: -angle, smooth: false });
+            let reach = reaches.reach(art, centre_of(art));
+            ops.push(Op::Turn { src: art, pivot_image: centre_of(art), pivot_screen: centre, degrees: -angle, smooth: false, reach });
             let (cx, cy) = (centre.0.round() as i32, centre.1.round() as i32);
             if place.border > 0 {
                 ops.push(Op::Ring { cx, cy, r: (place.w.min(place.h) / 2) as i32, thickness: place.border as i32, color });
@@ -471,17 +479,37 @@ pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, 
     if let Some((color, alpha)) = overlay {
         ops.push(Op::Fade { color, alpha });
     }
+    // Only the boxes of steps that differ from the last frame's are
+    // painted; the canvas keeps the rest. A new base or size repaints all.
+    let steps: Vec<(u64, Option<Box4>)> = ops.iter().map(|op| (op.key(), op.bounds(width, height))).collect();
+    let base_id = (base.rgba.as_ptr() as usize, base.rgba.len());
+    let whole = *paint_all || last_steps.is_empty() || *last_base != base_id || canvas.width != width || canvas.height != height;
+    let rects: Vec<Rect> = if whole {
+        vec![Rect { x: 0, y: 0, w: width, h: height }]
+    } else {
+        merge_boxes(changed_boxes(last_steps, &steps)).into_iter().map(box_rect).collect()
+    };
+    *last_steps = steps;
+    *last_base = base_id;
     stages.mark("prep");
     canvas.width = width;
     canvas.height = height;
     canvas.rgba.resize((width * height * 4) as usize, 0);
     let painting = std::time::Instant::now();
-    paint(canvas, base, &ops, painters.active);
+    paint(canvas, base, &ops, &rects, painters.active);
     painters.settle(painting.elapsed().as_micros() as u64, now_ms);
+    *damage = rects;
     stages.mark("paint");
     drop(stages);
     *profile = taken;
-    canvas
+    Painted { frame: canvas, damage }
+}
+
+/// A finished frame and the boxes of it that this raster painted; the rest
+/// is as the frame before. Empty boxes mean the frame is the one before.
+pub struct Painted<'m> {
+    pub frame: &'m Frame,
+    pub damage: &'m [Rect],
 }
 
 /// The needle turns of this frame, each turned once and kept: the cache key
@@ -515,12 +543,17 @@ fn needle_turns(scene: &Scene, stack: &Stack<'_>, needles: &mut Turned, tick: u6
     turns
 }
 
-/// A horizontal strip of a frame: rows `y0..y1`, each `width` pixels of
-/// RGBA. Every primitive draws through a band and clips to its rows, so
-/// the bands of one frame can be painted at the same time.
+/// A strip of a frame's rows with the box being painted in it: columns
+/// `x0..x1` of rows `y0..y1`. Every primitive draws through a band and
+/// clips to its box, so the bands of one frame can be painted at the same
+/// time, and only the boxes that changed need painting at all.
 pub struct Band<'a> {
     rgba: &'a mut [u8],
     width: u32,
+    /// The frame row the slice starts at.
+    top: u32,
+    x0: u32,
+    x1: u32,
     y0: u32,
     y1: u32,
 }
@@ -528,7 +561,7 @@ pub struct Band<'a> {
 impl<'a> Band<'a> {
     /// A whole buffer of `width` by `height` pixels.
     pub fn over(rgba: &'a mut [u8], width: u32, height: u32) -> Self {
-        Self { rgba, width, y0: 0, y1: height }
+        Self { rgba, width, top: 0, x0: 0, x1: width, y0: 0, y1: height }
     }
 
     /// A whole frame.
@@ -537,23 +570,7 @@ impl<'a> Band<'a> {
         Self::over(&mut frame.rgba, width, height)
     }
 
-    /// Cut a frame into `count` bands of near-equal height.
-    fn split(frame: &'a mut Frame, count: usize) -> Vec<Band<'a>> {
-        let (width, height) = (frame.width, frame.height);
-        let stride = width.max(1) as usize * 4;
-        let rows = (height as usize).div_ceil(count.max(1)).max(1);
-        frame
-            .rgba
-            .chunks_mut(rows * stride)
-            .enumerate()
-            .map(|(i, chunk)| {
-                let y0 = (i * rows) as u32;
-                Band { y0, y1: y0 + (chunk.len() / stride) as u32, rgba: chunk, width }
-            })
-            .collect()
-    }
-
-    /// The rows in `from..to` that fall in this band.
+    /// The rows in `from..to` that fall in this band's box.
     fn rows(&self, from: i32, to: i32) -> std::ops::Range<u32> {
         let from = from.max(self.y0 as i32);
         let to = to.min(self.y1 as i32);
@@ -564,11 +581,137 @@ impl<'a> Band<'a> {
         }
     }
 
+    /// The columns in `from..to` that fall in this band's box.
+    fn cols(&self, from: i32, to: i32) -> std::ops::Range<u32> {
+        let from = from.max(self.x0 as i32);
+        let to = to.min(self.x1 as i32);
+        if to <= from {
+            0..0
+        } else {
+            from as u32..to as u32
+        }
+    }
+
     /// One row, `width` pixels. `y` comes from `rows`.
     fn row(&mut self, y: u32) -> &mut [u8] {
         let stride = self.width as usize * 4;
-        let start = (y - self.y0) as usize * stride;
+        let start = (y - self.top) as usize * stride;
         &mut self.rgba[start..start + stride]
+    }
+}
+
+/// A box on the frame: x0, y0, x1, y1, the last two exclusive.
+type Box4 = (i32, i32, i32, i32);
+
+fn clip_box(b: Box4, width: u32, height: u32) -> Option<Box4> {
+    let clipped = (b.0.max(0), b.1.max(0), b.2.min(width as i32), b.3.min(height as i32));
+    (clipped.2 > clipped.0 && clipped.3 > clipped.1).then_some(clipped)
+}
+
+fn boxes_meet(a: Box4, b: Box4) -> bool {
+    a.0 < b.2 && b.0 < a.2 && a.1 < b.3 && b.1 < a.3
+}
+
+fn box_union(a: Box4, b: Box4) -> Box4 {
+    (a.0.min(b.0), a.1.min(b.1), a.2.max(b.2), a.3.max(b.3))
+}
+
+fn box_area(b: Box4) -> i64 {
+    (b.2 - b.0) as i64 * (b.3 - b.1) as i64
+}
+
+fn box_rect(b: Box4) -> Rect {
+    Rect { x: b.0 as u32, y: b.1 as u32, w: (b.2 - b.0) as u32, h: (b.3 - b.1) as u32 }
+}
+
+/// How far a picture reaches from its pivot when turned, plus a pixel.
+fn reach_of(src: &Frame, pivot: (f32, f32)) -> f32 {
+    let (px, py) = pivot;
+    let (sw, sh) = (src.width as f32, src.height as f32);
+    [(0.0, 0.0), (sw, 0.0), (0.0, sh), (sw, sh)]
+        .iter()
+        .map(|(x, y)| ((x - px).powi(2) + (y - py).powi(2)).sqrt())
+        .fold(0.0f32, f32::max)
+        + 1.0
+}
+
+/// How far from its pivot each turning picture has pixels, measured once
+/// per picture, so the box a turn paints is the picture's, not its
+/// diagonal's: a round record in a square picture claims a box the size
+/// of the record.
+#[derive(Default)]
+pub struct Reaches {
+    known: Vec<((usize, usize, u32, u32), f32)>,
+}
+
+impl Reaches {
+    fn reach(&mut self, src: &Frame, pivot: (f32, f32)) -> f32 {
+        let key = (src.rgba.as_ptr() as usize, src.rgba.len(), pivot.0.to_bits(), pivot.1.to_bits());
+        if let Some((_, reach)) = self.known.iter().find(|(k, _)| *k == key) {
+            return *reach;
+        }
+        let mut furthest = 0.0f32;
+        for y in 0..src.height {
+            let row = &src.rgba[(y * src.width * 4) as usize..((y + 1) * src.width * 4) as usize];
+            let dy = y as f32 + 0.5 - pivot.1;
+            // The first and last pixel of the row with any alpha are its furthest.
+            let first = (0..src.width).find(|&x| row[(x * 4 + 3) as usize] != 0);
+            let last = (0..src.width).rev().find(|&x| row[(x * 4 + 3) as usize] != 0);
+            for x in [first, last].into_iter().flatten() {
+                for edge in [x as f32, x as f32 + 1.0] {
+                    furthest = furthest.max(((edge - pivot.0).powi(2) + (dy.abs() + 0.5).powi(2)).sqrt());
+                }
+            }
+        }
+        let reach = (furthest + 1.0).min(reach_of(src, pivot));
+        if self.known.len() >= 16 {
+            self.known.remove(0);
+        }
+        self.known.push((key, reach));
+        reach
+    }
+}
+
+/// FNV-1a over a step's fields, the pictures by where their pixels live.
+struct Fnv(u64);
+
+impl Default for Fnv {
+    fn default() -> Self {
+        Fnv(0xcbf2_9ce4_8422_2325)
+    }
+}
+
+impl Fnv {
+    fn bytes(&mut self, bytes: &[u8]) {
+        for &b in bytes {
+            self.0 ^= b as u64;
+            self.0 = self.0.wrapping_mul(0x0100_0000_01b3);
+        }
+    }
+    fn tag(&mut self, tag: u8) {
+        self.bytes(&[tag]);
+    }
+    fn i32s(&mut self, values: &[i32]) {
+        for v in values {
+            self.bytes(&v.to_le_bytes());
+        }
+    }
+    fn u32s(&mut self, values: &[u32]) {
+        for v in values {
+            self.bytes(&v.to_le_bytes());
+        }
+    }
+    fn f32s(&mut self, values: &[f32]) {
+        for v in values {
+            self.bytes(&v.to_bits().to_le_bytes());
+        }
+    }
+    /// A picture is the same picture while its pixels live at the same
+    /// place with the same length; a replacement is made before the old
+    /// one goes, so it never takes the old place.
+    fn pic(&mut self, picture: &Frame) {
+        self.bytes(&(picture.rgba.as_ptr() as usize).to_le_bytes());
+        self.bytes(&picture.rgba.len().to_le_bytes());
     }
 }
 
@@ -579,7 +722,8 @@ enum Op<'a> {
     /// `alpha`, showing only what falls inside `clip` (x, y, w, h).
     Blit { src: &'a Frame, at: (i32, i32), part: (u32, u32, u32, u32), clip: Option<(i32, i32, i32, i32)>, alpha: u8 },
     /// A picture turned about `pivot_image`, that point on `pivot_screen`.
-    Turn { src: &'a Frame, pivot_image: (f32, f32), pivot_screen: (f32, f32), degrees: f32, smooth: bool },
+    /// `reach` is how far from the pivot the picture has pixels.
+    Turn { src: &'a Frame, pivot_image: (f32, f32), pivot_screen: (f32, f32), degrees: f32, smooth: bool, reach: f32 },
     /// A rectangle outline inside the box.
     Border { rect: (u32, u32, u32, u32), thickness: u32, color: [u8; 4] },
     /// A ring of `thickness` inside radius `r`; a thickness past `r` fills the disc.
@@ -595,10 +739,98 @@ enum Op<'a> {
 }
 
 impl Op<'_> {
+    /// The box the step may paint, clipped to the frame.
+    fn bounds(&self, width: u32, height: u32) -> Option<Box4> {
+        let b = match *self {
+            Op::Blit { src, at, part, clip, .. } => {
+                let mut b = (at.0, at.1, at.0.saturating_add(part.2.min(src.width) as i32), at.1.saturating_add(part.3.min(src.height) as i32));
+                if let Some((cx, cy, cw, ch)) = clip {
+                    b = (b.0.max(cx), b.1.max(cy), b.2.min(cx.saturating_add(cw)), b.3.min(cy.saturating_add(ch)));
+                }
+                b
+            }
+            Op::Turn { pivot_screen, reach, .. } => {
+                ((pivot_screen.0 - reach).floor() as i32, (pivot_screen.1 - reach).floor() as i32, (pivot_screen.0 + reach).ceil() as i32 + 1, (pivot_screen.1 + reach).ceil() as i32 + 1)
+            }
+            Op::Border { rect, .. } => (rect.0 as i32, rect.1 as i32, rect.0.saturating_add(rect.2) as i32, rect.1.saturating_add(rect.3) as i32),
+            Op::Ring { cx, cy, r, .. } => (cx - r, cy - r, cx + r + 1, cy + r + 1),
+            Op::RoundRect { x, y, w, h, .. } => (x, y, x.saturating_add(w), y.saturating_add(h)),
+            Op::Arc { x, y, w, h, .. } => (x, y, x.saturating_add(w as i32), y.saturating_add(h as i32)),
+            Op::Column { rect, .. } => (rect.x as i32, rect.y as i32, (rect.x + rect.w) as i32, (rect.y + rect.h) as i32),
+            Op::Front { spans, at } => (at.0 as i32, at.1 as i32, (at.0 + spans.frame.width) as i32, (at.1 + spans.frame.height) as i32),
+            Op::Fade { .. } => (0, 0, width as i32, height as i32),
+        };
+        clip_box(b, width, height)
+    }
+
+    /// A key that tells one step from another: the same step keyed twice
+    /// paints the same pixels.
+    fn key(&self) -> u64 {
+        let mut h = Fnv::default();
+        match *self {
+            Op::Blit { src, at, part, clip, alpha } => {
+                h.tag(1);
+                h.pic(src);
+                h.i32s(&[at.0, at.1]);
+                h.u32s(&[part.0, part.1, part.2, part.3]);
+                match clip {
+                    Some(c) => h.i32s(&[c.0, c.1, c.2, c.3]),
+                    None => h.tag(0),
+                }
+                h.tag(alpha);
+            }
+            Op::Turn { src, pivot_image, pivot_screen, degrees, smooth, .. } => {
+                h.tag(2);
+                h.pic(src);
+                h.f32s(&[pivot_image.0, pivot_image.1, pivot_screen.0, pivot_screen.1, degrees]);
+                h.tag(smooth as u8);
+            }
+            Op::Border { rect, thickness, color } => {
+                h.tag(3);
+                h.u32s(&[rect.0, rect.1, rect.2, rect.3, thickness]);
+                h.bytes(&color);
+            }
+            Op::Ring { cx, cy, r, thickness, color } => {
+                h.tag(4);
+                h.i32s(&[cx, cy, r, thickness]);
+                h.bytes(&color);
+            }
+            Op::RoundRect { x, y, w, h: hh, radius, color } => {
+                h.tag(5);
+                h.i32s(&[x, y, w, hh, radius]);
+                h.bytes(&color);
+            }
+            Op::Arc { x, y, w, h: hh, start, stop, ring, color } => {
+                h.tag(6);
+                h.i32s(&[x, y]);
+                h.u32s(&[w, hh, ring]);
+                h.f32s(&[start, stop]);
+                h.bytes(&color);
+            }
+            Op::Column { rect, level, color } => {
+                h.tag(7);
+                h.u32s(&[rect.x, rect.y, rect.w, rect.h]);
+                h.f32s(&[level]);
+                h.bytes(&color);
+            }
+            Op::Front { spans, at } => {
+                h.tag(8);
+                h.pic(&spans.frame);
+                h.u32s(&[at.0, at.1]);
+            }
+            Op::Fade { color, alpha } => {
+                h.tag(9);
+                h.bytes(&color);
+                h.tag(alpha);
+            }
+        }
+        h.0
+    }
+
     fn paint(&self, band: &mut Band) {
         match *self {
             Op::Blit { src, at, part, clip, alpha } => blit_into(band, src, at, part, clip, alpha),
-            Op::Turn { src, pivot_image, pivot_screen, degrees, smooth } => turn_onto(band, src, pivot_image, pivot_screen, degrees, smooth, false),
+            Op::Turn { src, pivot_image, pivot_screen, degrees, smooth, .. } => turn_onto(band, src, pivot_image, pivot_screen, degrees, smooth, false),
             Op::Border { rect, thickness, color } => draw_border(band, rect, thickness, color),
             Op::Ring { cx, cy, r, thickness, color } => draw_ring(band, cx, cy, r, thickness, color),
             Op::RoundRect { x, y, w, h, radius, color } => fill_round_rect(band, x, y, w, h, radius, color),
@@ -610,35 +842,158 @@ impl Op<'_> {
     }
 }
 
-/// How many bands each thread gets on average; more than one lets a thread
-/// that finished a light strip take another.
-const BANDS_PER_THREAD: usize = 4;
+/// Rows in one unit of painting; a frame is many units, so the threads
+/// share the heavy strips as well as the light ones.
+const BAND_ROWS: usize = 16;
 
-/// Copy the base into the canvas and paint the steps over it, in row bands
-/// shared among `threads` threads. One thread paints in place.
-fn paint(canvas: &mut Frame, base: &Frame, ops: &[Op], threads: usize) {
-    let threads = threads.max(1);
-    if threads == 1 || canvas.height < 2 {
-        canvas.rgba.copy_from_slice(&base.rgba);
-        paint_onto(&mut Band::whole(canvas), ops);
+/// Copy the base into the canvas inside `rects` and paint the steps that
+/// touch them, in row bands shared among `threads` threads. One thread
+/// paints in place. Nothing outside the rectangles is touched.
+fn paint(canvas: &mut Frame, base: &Frame, ops: &[Op], rects: &[Rect], threads: usize) {
+    if rects.is_empty() {
         return;
     }
-    let stride = base.width as usize * 4;
-    let queue = std::sync::Mutex::new(Band::split(canvas, threads * BANDS_PER_THREAD));
-    let work = || loop {
-        let next = queue.lock().map(|mut bands| bands.pop()).unwrap_or(None);
-        let Some(mut band) = next else { break };
-        let from = band.y0 as usize * stride;
-        let len = band.rgba.len();
-        band.rgba.copy_from_slice(&base.rgba[from..from + len]);
-        paint_onto(&mut band, ops);
+    let width = canvas.width;
+    let stride = width as usize * 4;
+    if stride == 0 {
+        return;
+    }
+    let boxes: Vec<Option<Box4>> = ops.iter().map(|op| op.bounds(width, canvas.height)).collect();
+    // The row strips some rectangle touches, each with its pieces of them.
+    let units: Vec<(Band, Vec<Box4>)> = canvas
+        .rgba
+        .chunks_mut(BAND_ROWS * stride)
+        .enumerate()
+        .filter_map(|(i, chunk)| {
+            let top = (i * BAND_ROWS) as u32;
+            let bottom = top + (chunk.len() / stride) as u32;
+            let pieces: Vec<Box4> = rects
+                .iter()
+                .filter_map(|r| {
+                    let (y0, y1) = (r.y.max(top), (r.y + r.h).min(bottom));
+                    (y1 > y0 && r.w > 0).then_some((r.x as i32, y0 as i32, (r.x + r.w).min(width) as i32, y1 as i32))
+                })
+                .collect();
+            (!pieces.is_empty()).then_some((Band { rgba: chunk, width, top, x0: 0, x1: width, y0: top, y1: bottom }, pieces))
+        })
+        .collect();
+    let work = |band: &mut Band, pieces: &[Box4]| {
+        for &piece in pieces {
+            let (x0, y0, x1, y1) = piece;
+            if x1 <= x0 {
+                continue;
+            }
+            band.x0 = x0 as u32;
+            band.x1 = x1 as u32;
+            band.y0 = y0 as u32;
+            band.y1 = y1 as u32;
+            let (from_x, bytes) = (x0 as usize * 4, (x1 - x0) as usize * 4);
+            for y in y0 as u32..y1 as u32 {
+                let from = y as usize * stride + from_x;
+                band.row(y)[from_x..from_x + bytes].copy_from_slice(&base.rgba[from..from + bytes]);
+            }
+            for (op, bounds) in ops.iter().zip(&boxes) {
+                if bounds.is_some_and(|b| boxes_meet(b, piece)) {
+                    op.paint(band);
+                }
+            }
+        }
+    };
+    let threads = threads.clamp(1, units.len().max(1));
+    if threads == 1 {
+        for (band, pieces) in units.into_iter() {
+            let mut band = band;
+            work(&mut band, &pieces);
+        }
+        return;
+    }
+    let queue = std::sync::Mutex::new(units);
+    let pull = || loop {
+        let next = queue.lock().map(|mut q| q.pop()).unwrap_or(None);
+        let Some((mut band, pieces)) = next else { break };
+        work(&mut band, &pieces);
     };
     std::thread::scope(|scope| {
         for _ in 1..threads {
-            scope.spawn(&work);
+            scope.spawn(&pull);
         }
-        work();
+        pull();
     });
+}
+
+/// The boxes that differ between the last frame's steps and this frame's:
+/// steps that appeared, went, or changed, told apart by their keys.
+fn changed_boxes(prev: &[(u64, Option<Box4>)], cur: &[(u64, Option<Box4>)]) -> Vec<Box4> {
+    let mut a = prev.to_vec();
+    a.sort_by_key(|e| e.0);
+    let mut b = cur.to_vec();
+    b.sort_by_key(|e| e.0);
+    let (mut i, mut j) = (0, 0);
+    let mut out = Vec::new();
+    loop {
+        match (a.get(i), b.get(j)) {
+            (Some(x), Some(y)) if x.0 == y.0 => {
+                i += 1;
+                j += 1;
+            }
+            (Some(x), Some(y)) if x.0 < y.0 => {
+                out.extend(x.1);
+                i += 1;
+            }
+            (Some(_), Some(y)) => {
+                out.extend(y.1);
+                j += 1;
+            }
+            (Some(x), None) => {
+                out.extend(x.1);
+                i += 1;
+            }
+            (None, Some(y)) => {
+                out.extend(y.1);
+                j += 1;
+            }
+            (None, None) => break,
+        }
+    }
+    out
+}
+
+/// Boxes that meet become one when their union is no more to paint than
+/// both, since an overlap painted twice comes out the same; past eight,
+/// the pair whose union wastes the least is merged until eight remain.
+fn merge_boxes(mut boxes: Vec<Box4>) -> Vec<Box4> {
+    loop {
+        let mut merged = false;
+        'pairs: for i in 0..boxes.len() {
+            for j in i + 1..boxes.len() {
+                if boxes_meet(boxes[i], boxes[j]) && box_area(box_union(boxes[i], boxes[j])) <= box_area(boxes[i]) + box_area(boxes[j]) {
+                    let union = box_union(boxes[i], boxes[j]);
+                    boxes.swap_remove(j);
+                    boxes[i] = union;
+                    merged = true;
+                    break 'pairs;
+                }
+            }
+        }
+        if !merged {
+            break;
+        }
+    }
+    while boxes.len() > 8 {
+        let mut best = (i64::MAX, 0, 1);
+        for i in 0..boxes.len() {
+            for j in i + 1..boxes.len() {
+                let waste = box_area(box_union(boxes[i], boxes[j])) - box_area(boxes[i]) - box_area(boxes[j]);
+                if waste < best.0 {
+                    best = (waste, i, j);
+                }
+            }
+        }
+        let union = box_union(boxes[best.1], boxes[best.2]);
+        boxes.swap_remove(best.2);
+        boxes[best.1] = union;
+    }
+    boxes
 }
 
 fn paint_onto(band: &mut Band, ops: &[Op]) {
@@ -648,8 +1003,9 @@ fn paint_onto(band: &mut Band, ops: &[Op]) {
 }
 
 fn fade_band(band: &mut Band, color: [u8; 3], alpha: u8) {
+    let (x0, x1) = (band.x0 as usize * 4, band.x1 as usize * 4);
     for y in band.y0..band.y1 {
-        for px in band.row(y).chunks_exact_mut(4) {
+        for px in band.row(y)[x0..x1].chunks_exact_mut(4) {
             blend(px, 0, [color[0], color[1], color[2], alpha]);
         }
     }
@@ -794,15 +1150,16 @@ fn draw_border(band: &mut Band, rect: (u32, u32, u32, u32), thickness: u32, colo
         return;
     }
     let t = thickness.min(w / 2).min(h / 2).max(1);
-    let width = band.width;
+    let cols = band.cols(x as i32, x.saturating_add(w) as i32);
     for py in band.rows(y as i32, y.saturating_add(h) as i32) {
         let row_index = py - y;
         let edge_row = row_index < t || row_index + t >= h;
         let row = band.row(py);
-        for col in 0..w.min(width.saturating_sub(x)) {
+        for px in cols.clone() {
+            let col = px - x;
             if edge_row || col < t || col + t >= w {
-                let px = ((x + col) * 4) as usize;
-                row[px..px + 4].copy_from_slice(&color);
+                let i = (px * 4) as usize;
+                row[i..i + 4].copy_from_slice(&color);
             }
         }
     }
@@ -1031,11 +1388,11 @@ pub fn sample(frame: &Frame, x: u32, y: u32) -> [u8; 4] {
 
 fn fill_column(band: &mut Band, rect: &Rect, level: f32, color: [u8; 4]) {
     let lit = ((level.clamp(0.0, 1.0) * rect.h as f32).round() as u32).min(rect.h);
-    let width = band.width;
     let bottom = rect.y + rect.h;
+    let cols = band.cols(rect.x as i32, (rect.x + rect.w) as i32);
     for y in band.rows((bottom - lit) as i32, bottom as i32) {
         let row = band.row(y);
-        for x in rect.x..(rect.x + rect.w).min(width) {
+        for x in cols.clone() {
             let i = (x * 4) as usize;
             row[i..i + 4].copy_from_slice(&color);
         }
@@ -1073,7 +1430,7 @@ fn blit_into(band: &mut Band, src: &Frame, at: (i32, i32), part: (u32, u32, u32,
     if src_w == 0 || src_h == 0 {
         return;
     }
-    let (mut x_lo, mut x_hi) = (0i32, band.width as i32);
+    let (mut x_lo, mut x_hi) = (band.x0 as i32, band.x1 as i32);
     let (mut y_lo, mut y_hi) = (i32::MIN / 2, i32::MAX / 2);
     if let Some((cx, cy, cw, ch)) = clip {
         x_lo = x_lo.max(cx);
@@ -1194,19 +1551,14 @@ fn blit_rotated(band: &mut Band, src: &Frame, at: (i32, i32), degrees: f32, dist
 /// turned pixel with its own alpha into a transparent canvas, for a picture
 /// kept turned; otherwise pixels blend onto the opaque frame.
 fn turn_onto(band: &mut Band, src: &Frame, pivot_image: (f32, f32), pivot_screen: (f32, f32), degrees: f32, smooth: bool, store: bool) {
-    let dst_w = band.width;
-    if src.width == 0 || src.height == 0 || dst_w == 0 {
+    if src.width == 0 || src.height == 0 || band.x1 <= band.x0 {
         return;
     }
     let rad = degrees.to_radians();
     let (sin, cos) = rad.sin_cos();
     let (px, py) = pivot_image;
     let (sw, sh) = (src.width as f32, src.height as f32);
-    let reach = [(0.0, 0.0), (sw, 0.0), (0.0, sh), (sw, sh)]
-        .iter()
-        .map(|(x, y)| ((x - px).powi(2) + (y - py).powi(2)).sqrt())
-        .fold(0.0f32, f32::max)
-        + 1.0;
+    let reach = reach_of(src, pivot_image);
     let y_from = (pivot_screen.1 - reach).floor() as i32;
     let y_to = (pivot_screen.1 + reach).ceil() as i32;
     // A source coordinate is linear in the frame column: sx = a_x + vx cos,
@@ -1230,8 +1582,8 @@ fn turn_onto(band: &mut Band, src: &Frame, pivot_image: (f32, f32), pivot_screen
         if hi < lo {
             continue;
         }
-        let x_from = ((lo + pivot_screen.0 - 0.5).ceil() as i32).max(0);
-        let x_to = ((hi + pivot_screen.0 - 0.5).floor() as i32).min(dst_w as i32 - 1);
+        let x_from = ((lo + pivot_screen.0 - 0.5).ceil() as i32).max(band.x0 as i32);
+        let x_to = ((hi + pivot_screen.0 - 0.5).floor() as i32).min(band.x1 as i32 - 1);
         if x_to < x_from {
             continue;
         }
@@ -1310,11 +1662,11 @@ fn draw_ring(band: &mut Band, cx: i32, cy: i32, r: i32, thickness: i32, color: [
     }
     let inner = (r - thickness).max(0) as f32;
     let outer = r as f32;
-    let width = band.width as i32;
+    let cols = band.cols(cx - r, cx.saturating_add(r).saturating_add(1));
     for y in band.rows(cy - r, cy.saturating_add(r).saturating_add(1)) {
         let row = band.row(y);
-        for x in (cx - r).max(0)..=(cx + r).min(width - 1) {
-            let d = (((x - cx) as f32).powi(2) + ((y as i32 - cy) as f32).powi(2)).sqrt();
+        for x in cols.clone() {
+            let d = (((x as i32 - cx) as f32).powi(2) + ((y as i32 - cy) as f32).powi(2)).sqrt();
             if d <= outer && d >= inner {
                 blend(row, x as usize * 4, color);
             }
@@ -1693,6 +2045,17 @@ pub struct Motion {
     painters: Painters,
     /// The frame buffer, kept between frames so no frame allocates one.
     canvas: Frame,
+    /// The last frame's steps by key and box, and the base they went over,
+    /// so the next frame paints only what differs.
+    last_steps: Vec<(u64, Option<Box4>)>,
+    last_base: (usize, usize),
+    /// The boxes the last frame painted; empty when nothing changed.
+    damage: Vec<Rect>,
+    /// How far each turning picture reaches from its pivot.
+    reaches: Reaches,
+    /// Paint every frame whole, for tests that check what changed-box
+    /// painting must equal.
+    paint_all: bool,
 }
 
 impl Motion {
@@ -1706,6 +2069,12 @@ impl Motion {
     /// How many threads paint the next frame.
     pub fn painters(&self) -> usize {
         self.painters.active
+    }
+
+    /// The boxes the last frame painted, in frame pixels; nothing else in
+    /// the frame changed. Empty when the frame is the one before.
+    pub fn damage(&self) -> &[Rect] {
+        &self.damage
     }
 }
 
@@ -1954,19 +2323,18 @@ impl Spans {
     }
 
     fn blit(&self, band: &mut Band, at: (u32, u32)) {
-        let width = band.width;
         for dy in band.rows(at.1 as i32, at.1.saturating_add(self.rows.len() as u32) as i32) {
             let y = dy - at.1;
             let (x0, x1) = self.rows[y as usize];
-            let x1 = x1.min(width.saturating_sub(at.0));
-            if x1 <= x0 {
+            let cols = band.cols((at.0 + x0) as i32, (at.0 + x1) as i32);
+            if cols.is_empty() {
                 continue;
             }
-            let s = ((y * self.frame.width + x0) * 4) as usize;
-            let d = ((at.0 + x0) * 4) as usize;
-            let cols = ((x1 - x0) * 4) as usize;
+            let s = ((y * self.frame.width + (cols.start - at.0)) * 4) as usize;
+            let d = (cols.start * 4) as usize;
+            let n = ((cols.end - cols.start) * 4) as usize;
             let row = band.row(dy);
-            for (dp, sp) in row[d..d + cols].chunks_exact_mut(4).zip(self.frame.rgba[s..s + cols].chunks_exact(4)) {
+            for (dp, sp) in row[d..d + n].chunks_exact_mut(4).zip(self.frame.rgba[s..s + n].chunks_exact(4)) {
                 blend(dp, 0, [sp[0], sp[1], sp[2], sp[3]]);
             }
         }
@@ -2498,10 +2866,10 @@ fn fill_round_rect(band: &mut Band, x: i32, y: i32, w: i32, h: i32, radius: i32,
         return;
     }
     let r = radius.clamp(0, w.min(h) / 2) as f32;
-    let width = band.width as i32;
+    let cols = band.cols(x, x.saturating_add(w));
     for py in band.rows(y, y.saturating_add(h)) {
         let row = band.row(py);
-        for px in x.max(0)..(x + w).min(width) {
+        for px in cols.clone() {
             if r > 0.0 {
                 let fx = px as f32 + 0.5;
                 let fy = py as f32 + 0.5;
@@ -2534,10 +2902,10 @@ fn fill_arc(band: &mut Band, x: i32, y: i32, w: u32, h: u32, start: f32, stop: f
     let (cx, cy) = (x as f32 + w as f32 / 2.0, y as f32 + h as f32 / 2.0);
     let (rx, ry) = (w as f32 / 2.0, h as f32 / 2.0);
     let (rx_in, ry_in) = ((rx - ring as f32).max(0.0), (ry - ring as f32).max(0.0));
-    let width = band.width as i32;
+    let cols = band.cols(x, x.saturating_add(w as i32));
     for py in band.rows(y, y.saturating_add(h as i32)) {
         let row = band.row(py);
-        for px in x.max(0)..(x + w as i32).min(width) {
+        for px in cols.clone() {
             let mut hits = 0;
             for (sx, sy) in [(0.25, 0.25), (0.75, 0.25), (0.25, 0.75), (0.75, 0.75)] {
                 let dx = px as f32 + sx - cx;
@@ -2670,7 +3038,7 @@ fn plan_gauge<'a>(g: &GaugeSpec, value: u32, assets: &'a GaugeAssets, labels: &'
             if let Some(knob) = &assets.knob {
                 let angle = g.knob_start - value as f32 / 100.0 * (g.knob_start - g.knob_end);
                 let centre = (g.x as f32 + g.w as f32 / 2.0, g.y as f32 + g.h as f32 / 2.0);
-                ops.push(Op::Turn { src: knob, pivot_image: centre_of(knob), pivot_screen: centre, degrees: angle, smooth: false });
+                ops.push(Op::Turn { src: knob, pivot_image: centre_of(knob), pivot_screen: centre, degrees: angle, smooth: false, reach: reach_of(knob, centre_of(knob)) });
             } else {
                 plan_arc_gauge(g, value, ops);
             }
@@ -3085,6 +3453,11 @@ mod tests {
         let base = sprite(97, 61, [30, 40, 50, 255]);
         let needle = sprite(3, 30, [255, 0, 0, 200]);
         let layer = sprite(50, 20, [0, 200, 0, 128]);
+        // A disc in a square picture: its measured reach is the disc's, not the square's diagonal.
+        let disc = apply_circle(&sprite(30, 30, [120, 0, 200, 255]));
+        let measured = Reaches::default().reach(&disc, (15.0, 15.0));
+        assert!(measured < 17.5 && measured > 15.0, "reach of a 30 px disc is its radius and a little: {measured}");
+        assert!(reach_of(&disc, (15.0, 15.0)) > 22.0, "the diagonal reach is larger");
         let mut stripe = empty_frame(97, 61);
         for y in 20..25u32 {
             for x in 0..97u32 {
@@ -3095,8 +3468,9 @@ mod tests {
         let spans = Spans::new(stripe);
         let ops = vec![
             Op::Blit { src: &layer, at: (10, 5), part: (0, 0, 50, 20), clip: Some((15, 0, 30, 100)), alpha: 180 },
-            Op::Turn { src: &needle, pivot_image: (1.5, 25.0), pivot_screen: (48.0, 40.0), degrees: 33.0, smooth: true },
-            Op::Turn { src: &layer, pivot_image: (25.0, 10.0), pivot_screen: (30.0, 30.0), degrees: -70.0, smooth: false },
+            Op::Turn { src: &needle, pivot_image: (1.5, 25.0), pivot_screen: (48.0, 40.0), degrees: 33.0, smooth: true, reach: reach_of(&needle, (1.5, 25.0)) },
+            Op::Turn { src: &layer, pivot_image: (25.0, 10.0), pivot_screen: (30.0, 30.0), degrees: -70.0, smooth: false, reach: reach_of(&layer, (25.0, 10.0)) },
+            Op::Turn { src: &disc, pivot_image: (15.0, 15.0), pivot_screen: (75.0, 45.0), degrees: 45.0, smooth: false, reach: Reaches::default().reach(&disc, (15.0, 15.0)) },
             Op::Ring { cx: 60, cy: 30, r: 12, thickness: 3, color: [9, 9, 200, 255] },
             Op::Border { rect: (2, 2, 20, 20), thickness: 2, color: [1, 2, 3, 255] },
             Op::RoundRect { x: 70, y: 40, w: 20, h: 15, radius: 4, color: [200, 200, 0, 128] },
@@ -3105,13 +3479,43 @@ mod tests {
             Op::Front { spans: &spans, at: (0, 0) },
             Op::Fade { color: [0, 0, 0], alpha: 60 },
         ];
+        let all = [Rect { x: 0, y: 0, w: 97, h: 61 }];
         let mut one = Frame { width: 97, height: 61, rgba: vec![0; 97 * 61 * 4] };
-        paint(&mut one, &base, &ops, 1);
+        paint(&mut one, &base, &ops, &all, 1);
         assert_ne!(one.rgba, base.rgba, "something was painted");
         for threads in [2usize, 3, 7] {
             let mut many = Frame { width: 97, height: 61, rgba: vec![0; 97 * 61 * 4] };
-            paint(&mut many, &base, &ops, threads);
+            paint(&mut many, &base, &ops, &all, threads);
             assert!(many == one, "{threads} threads paint the same frame");
+        }
+        // Every step stays inside the box it declares.
+        for (i, op) in ops.iter().enumerate() {
+            let mut alone = Frame { width: 97, height: 61, rgba: vec![0; 97 * 61 * 4] };
+            paint(&mut alone, &base, std::slice::from_ref(op), &all, 1);
+            let bounds = op.bounds(97, 61).expect("the step paints something");
+            for y in 0..61i32 {
+                for x in 0..97i32 {
+                    let i4 = ((y * 97 + x) * 4) as usize;
+                    if alone.rgba[i4..i4 + 4] != base.rgba[i4..i4 + 4] {
+                        assert!(x >= bounds.0 && x < bounds.2 && y >= bounds.1 && y < bounds.3, "step {i} painted ({x}, {y}) outside {bounds:?}");
+                    }
+                }
+            }
+        }
+        // Painting two boxes touches nothing outside them.
+        let mut boxed = Frame { width: 97, height: 61, rgba: vec![7; 97 * 61 * 4] };
+        let rects = [Rect { x: 10, y: 5, w: 30, h: 20 }, Rect { x: 50, y: 30, w: 40, h: 25 }];
+        paint(&mut boxed, &base, &ops, &rects, 3);
+        for y in 0..61u32 {
+            for x in 0..97u32 {
+                let i4 = ((y * 97 + x) * 4) as usize;
+                let inside = rects.iter().any(|r| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+                if inside {
+                    assert_eq!(boxed.rgba[i4..i4 + 4], one.rgba[i4..i4 + 4], "({x}, {y}) inside a box is painted as the whole frame is");
+                } else {
+                    assert_eq!(boxed.rgba[i4..i4 + 4], [7, 7, 7, 7], "({x}, {y}) outside the boxes is untouched");
+                }
+            }
         }
         // Through the raster too: texts in the bitmap font, meters, and a fade.
         let scene = Scene {
@@ -3129,10 +3533,59 @@ mod tests {
         for now in [0u64, 250, 700] {
             single.fade.begin_in(0, 2.0, false, 1.0);
             several.fade.begin_in(0, 2.0, false, 1.0);
-            let a = raster_over(&scene, Stack { screen: None, face: None, front: None, needle: None, needle_right: None, face_at: (0, 0), fonts: None, art: None, icon: None, spectrum: None, folder_pictures: &[], fanart: (None, None), vinyl: None, tonearm: None, reels: (None, None), indicators: None, base: None }, &mut single, now).clone();
-            let b = raster_over(&scene, Stack { screen: None, face: None, front: None, needle: None, needle_right: None, face_at: (0, 0), fonts: None, art: None, icon: None, spectrum: None, folder_pictures: &[], fanart: (None, None), vinyl: None, tonearm: None, reels: (None, None), indicators: None, base: None }, &mut several, now).clone();
+            let a = raster_over(&scene, Stack { screen: None, face: None, front: None, needle: None, needle_right: None, face_at: (0, 0), fonts: None, art: None, icon: None, spectrum: None, folder_pictures: &[], fanart: (None, None), vinyl: None, tonearm: None, reels: (None, None), indicators: None, base: None }, &mut single, now).frame.clone();
+            let b = raster_over(&scene, Stack { screen: None, face: None, front: None, needle: None, needle_right: None, face_at: (0, 0), fonts: None, art: None, icon: None, spectrum: None, folder_pictures: &[], fanart: (None, None), vinyl: None, tonearm: None, reels: (None, None), indicators: None, base: None }, &mut several, now).frame.clone();
             assert!(a == b, "frame at {now} ms is the same on one and three threads");
         }
+    }
+
+    #[test]
+    fn painting_what_changed_matches_painting_everything() {
+        // A moving scene rastered twice: one motion paints only the boxes that
+        // changed since its last frame, the other paints every frame whole.
+        let needle = sprite(3, 40, [255, 0, 0, 255]);
+        let mut art_a = sprite(60, 60, [0, 120, 255, 255]);
+        art_a.rgba[0] = 1;
+        let art_b = sprite(60, 60, [255, 120, 0, 255]);
+        let mut scene = Scene {
+            skin: "test".into(),
+            width: 240,
+            height: 120,
+            left: 0.2,
+            right: 0.6,
+            left_at: Some((60, 90)),
+            right_at: Some((180, 90)),
+            needle: Some((-40.0, 40.0, 20.0)),
+            meter: MeterSpec { visible: true, channels: 2, ..MeterSpec::default() },
+            art: Some(Art { x: 90, y: 30, w: 60, h: 60, file: String::new(), mask: String::new(), border: 2, border_color: [255, 255, 255], rotation: true, rpm: 45.0 }),
+            playing: true,
+            texts: vec![Text { x: 10, y: 5, style: TextStyle::Regular, size: 16, color: [255, 255, 255], max_width: 60, text: "A long line of bitmap text".into(), align: TextAlign::Left, speed: 80.0, direction: ScrollDirection::Bounce, loop_thirds: false, font_file: String::new() }],
+            ..Scene::default()
+        };
+        let mut changed = Motion::new(2, None);
+        let mut everything = Motion::new(1, None);
+        everything.paint_all = true;
+        changed.fade.begin_in(0, 0.5, false, 1.0);
+        everything.fade.begin_in(0, 0.5, false, 1.0);
+        let mut art: &Frame = &art_a;
+        let mut painted_boxes = 0usize;
+        for step in 0..30u64 {
+            let now = step * 100;
+            if step == 12 {
+                scene.left = 0.9;
+                scene.texts[0].text = "Another".into();
+            }
+            if step == 20 {
+                art = &art_b;
+            }
+            let stack = || Stack { screen: None, face: None, front: None, needle: Some(&needle), needle_right: None, face_at: (0, 0), fonts: None, art: Some(art), icon: None, spectrum: None, folder_pictures: &[], fanart: (None, None), vinyl: None, tonearm: None, reels: (None, None), indicators: None, base: None };
+            let a = raster_over(&scene, stack(), &mut changed, now).frame.clone();
+            let b = raster_over(&scene, stack(), &mut everything, now).frame.clone();
+            assert!(a == b, "frame at {now} ms painted by boxes equals the whole repaint");
+            painted_boxes += changed.damage().iter().map(|r| (r.w * r.h) as usize).sum::<usize>();
+        }
+        let whole = 240 * 120 * 30;
+        assert!(painted_boxes < whole / 2, "boxes painted {painted_boxes} of {whole} pixels");
     }
 
     #[test]
