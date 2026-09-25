@@ -1250,6 +1250,51 @@ pub fn transition_settings(text: &str) -> TransitionSettings {
     }
 }
 
+/// How the player runs on the glass: whether a touch ends it, and where
+/// the frame sits in the window.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct RunSettings {
+    /// `exit.on.touch` or `stop.display.on.touch`: a touch or click ends the player.
+    pub exit_on_touch: bool,
+    /// `position.type`: `center` (default) centres the frame; anything else
+    /// puts its top left at `position.x`, `position.y`.
+    pub centered: bool,
+    pub x: i32,
+    pub y: i32,
+}
+
+impl Default for RunSettings {
+    fn default() -> Self {
+        Self { exit_on_touch: false, centered: true, x: 0, y: 0 }
+    }
+}
+
+pub fn run_settings(text: &str) -> RunSettings {
+    RunSettings {
+        exit_on_touch: truthy(current_value(text, "exit.on.touch").as_deref()) || truthy(current_value(text, "stop.display.on.touch").as_deref()),
+        centered: current_value(text, "position.type").map_or(true, |v| v.eq_ignore_ascii_case("center")),
+        x: current_value(text, "position.x").and_then(|v| v.parse().ok()).unwrap_or(0),
+        y: current_value(text, "position.y").and_then(|v| v.parse().ok()).unwrap_or(0),
+    }
+}
+
+/// The player's run flag: the plugin removes it to stop the player, and the
+/// player creates it while it runs.
+pub const RUN_FLAG: &str = "/tmp/peppyrunning";
+
+/// The marker the launcher names in this variable; written on a real touch
+/// so the plugin re-arms its timeout instead of restarting at once.
+pub const DISMISS_FILE_VAR: &str = "PEPPY_USER_DISMISS_FILE";
+
+/// Whether a touch should leave the dismiss marker: only when the launcher
+/// asked for one, the stop is not the plugin's, and the run flag still stands.
+pub fn should_mark_dismiss(marker_path: Option<&str>, external_stop: bool, run_flag_exists: bool) -> bool {
+    if external_stop || !run_flag_exists {
+        return false;
+    }
+    marker_path.is_some_and(|p| !p.is_empty())
+}
+
 /// `[data.source]` from the player configuration, with the engine's defaults.
 pub fn data_source_from_config(text: &str) -> DataSourceSpec {
     let number = |key: &str, default: f32| {
@@ -1393,6 +1438,8 @@ pub struct SkinDesc {
     pub indicators: Option<IndicatorsSpec>,
     #[serde(default)]
     pub transition: TransitionSettings,
+    #[serde(default)]
+    pub run: RunSettings,
 }
 
 impl Default for SkinDesc {
@@ -1447,6 +1494,7 @@ impl SkinDesc {
             reels: None,
             indicators: None,
             transition: TransitionSettings::default(),
+            run: RunSettings::default(),
         }
     }
 }
@@ -2757,6 +2805,17 @@ mod tests {
         assert_eq!(s, TransitionSettings { at_start: true, fade: true, duration_s: 1.5, white: true, opacity: 0.6 });
         assert_eq!(transition_settings("[current]\ntransition.type = none\n"), TransitionSettings { fade: false, ..TransitionSettings::default() });
         assert_eq!(transition_settings(""), TransitionSettings::default());
+    }
+
+    #[test]
+    fn the_run_settings_and_the_dismiss_rule_follow_the_player() {
+        let s = run_settings("[current]\nexit.on.touch = False\nstop.display.on.touch = True\nposition.type = custom\nposition.x = 10\nposition.y = 20\n");
+        assert_eq!(s, RunSettings { exit_on_touch: true, centered: false, x: 10, y: 20 });
+        assert_eq!(run_settings(""), RunSettings::default());
+        assert!(should_mark_dismiss(Some("/tmp/peppy_user_dismiss"), false, true));
+        assert!(!should_mark_dismiss(Some("/tmp/peppy_user_dismiss"), true, true), "the plugin's own stop is not a dismiss");
+        assert!(!should_mark_dismiss(Some("/tmp/peppy_user_dismiss"), false, false), "no run flag, no plugin to re-arm");
+        assert!(!should_mark_dismiss(None, false, true), "a remote launcher sets no marker");
     }
 
     #[test]

@@ -12,8 +12,8 @@ use std::time::Instant;
 
 use expose::{apply_circle, compose_base, fit_art, flip_x, raster_over, read_art, read_icon, read_png, FolderPicture, Fonts, IndicatorAssets, Motion, Spans, SpectrumAssets, Stack};
 use intake::{PipeSource, Selector, Source};
-use lead::{frame_period, FolderLayerSpec, Input, MeterKind, SkinDesc, TypeMode};
-use pane::{publish, write_ppm, Surface};
+use lead::{frame_period, should_mark_dismiss, FolderLayerSpec, Input, MeterKind, SkinDesc, TypeMode, DISMISS_FILE_VAR, RUN_FLAG};
+use pane::{publish, write_ppm, Shown, Surface};
 use plot::{step, Scene};
 
 fn load_theme(dir: &str, file: &str) -> Option<expose::Frame> {
@@ -314,7 +314,12 @@ fn main() -> ExitCode {
     let serving_remote = false;
     let mut surface = if show_window {
         match Surface::open(skin.width, skin.height) {
-            Ok(surface) => Some(surface),
+            Ok(mut surface) => {
+                if !skin.run.centered {
+                    surface.place_at(skin.run.x, skin.run.y);
+                }
+                Some(surface)
+            }
             Err(err) => {
                 eprintln!("glass: {err}");
                 return ExitCode::from(1);
@@ -323,6 +328,16 @@ fn main() -> ExitCode {
     } else {
         None
     };
+    // The run flag: the player stands it up while it runs, the plugin takes
+    // it down to stop the player. A touch, when the theme wants one, leaves
+    // the dismiss marker the launcher named so the plugin re-arms its timeout.
+    let running_for_plugin = !once && show_window;
+    if running_for_plugin {
+        let _ = std::fs::write(RUN_FLAG, b"");
+        let _ = std::fs::set_permissions(RUN_FLAG, std::os::unix::fs::PermissionsExt::from_mode(0o777));
+    }
+    let mut run_flag_checked = Instant::now();
+    let mut leave: Option<&'static str> = None;
 
     loop {
         let frame_started = Instant::now();
@@ -387,6 +402,8 @@ fn main() -> ExitCode {
                 scene.bars.len()
             );
         }
+        let mut folder_pictures: Vec<Option<FolderPicture>> = Vec::new();
+        let mut reel_pictures: (Option<expose::Frame>, Option<expose::Frame>) = (None, None);
         if surface.is_some() || write_file {
             match &scene.art {
                 Some(art) => {
@@ -428,7 +445,7 @@ fn main() -> ExitCode {
             for (slot, layer) in folder_slots.iter_mut().zip(scene.folder_layers.iter()) {
                 slot.want(&layer.file, &layer.spec, None);
             }
-            let folder_pictures: Vec<Option<FolderPicture>> = folder_slots.iter().map(|s| s.picture.clone()).collect();
+            folder_pictures = folder_slots.iter().map(|s| s.picture.clone()).collect();
             if let Some(fanart) = &scene.fanart {
                 let spec = FolderLayerSpec {
                     files: Vec::new(),
@@ -453,7 +470,7 @@ fn main() -> ExitCode {
                 None => vinyl_slot = PlainSlot::default(),
             }
             // A reel from the album is scaled to the theme reel's size; the theme reel itself needs no slot.
-            let reel_pictures = match &scene.reels {
+            reel_pictures = match &scene.reels {
                 Some(reels) => {
                     let side = |slot: &mut PlainSlot, file: &str, spec: Option<&lead::ReelSpec>, theme: Option<&expose::Frame>| -> Option<expose::Frame> {
                         let spec = spec?;
@@ -501,21 +518,16 @@ fn main() -> ExitCode {
             rastered_at = Instant::now();
             if let Some(window) = surface.as_mut() {
                 match window.show(frame) {
-                    Ok(true) => {}
-                    Ok(false) => {
-                        // Leave the way the engine leaves: fade out when a fade in was shown.
-                        if did_fade_in && skin.transition.fade {
-                            let now = started.elapsed().as_millis() as u64;
-                            motion.fade.begin_out(now, skin.transition.duration_s, skin.transition.white, skin.transition.opacity);
-                            while motion.fade.running(started.elapsed().as_millis() as u64) {
-                                let frame = raster_over(&scene, Stack { screen: assets.background.as_ref(), face: assets.face.as_ref(), front: assets.front.as_ref(), needle: assets.indicator.as_ref(), needle_right: assets.indicator_right.as_ref(), face_at: skin.face_at, fonts: Some(&assets.fonts), art: art_cache.as_ref().map(|(_, frame)| frame), icon: icon_cache.as_ref().map(|(_, frame)| frame), spectrum: assets.spectrum.as_ref(), folder_pictures: &folder_pictures, fanart: (fanart_slots.0.picture.as_ref(), fanart_slots.1.picture.as_ref()), vinyl: vinyl_slot.frame.as_ref(), tonearm: assets.tonearm.as_ref(), reels: (reel_pictures.0.as_ref(), reel_pictures.1.as_ref()), indicators: assets.indicators.as_ref(), base: Some(&assets.base) }, &mut motion, started.elapsed().as_millis() as u64);
-                                if window.show(frame).is_err() {
-                                    break;
-                                }
-                                thread::sleep(period);
+                    Ok(Shown::Kept) => {}
+                    Ok(Shown::Closed) => leave = Some("window closed"),
+                    Ok(Shown::Touched) => {
+                        if skin.run.exit_on_touch {
+                            let marker = env::var(DISMISS_FILE_VAR).ok();
+                            if should_mark_dismiss(marker.as_deref(), false, std::path::Path::new(RUN_FLAG).exists()) {
+                                let _ = std::fs::write(marker.as_deref().unwrap_or_default(), b"1");
                             }
+                            leave = Some("touched");
                         }
-                        break;
                     }
                     Err(err) => {
                         eprintln!("glass: {err}");
@@ -532,6 +544,28 @@ fn main() -> ExitCode {
         }
         if serving_remote {
             publish(&scene);
+        }
+        if running_for_plugin && leave.is_none() && run_flag_checked.elapsed() >= std::time::Duration::from_millis(500) {
+            run_flag_checked = Instant::now();
+            if !std::path::Path::new(RUN_FLAG).exists() {
+                leave = Some("run flag removed");
+            }
+        }
+        if let Some(why) = leave {
+            println!("glass: leaving ({why})");
+            // Leave the way the engine leaves: fade out when a fade in was shown.
+            if let (Some(window), true) = (surface.as_mut(), did_fade_in && skin.transition.fade) {
+                let now = started.elapsed().as_millis() as u64;
+                motion.fade.begin_out(now, skin.transition.duration_s, skin.transition.white, skin.transition.opacity);
+                while motion.fade.running(started.elapsed().as_millis() as u64) {
+                    let frame = raster_over(&scene, Stack { screen: assets.background.as_ref(), face: assets.face.as_ref(), front: assets.front.as_ref(), needle: assets.indicator.as_ref(), needle_right: assets.indicator_right.as_ref(), face_at: skin.face_at, fonts: Some(&assets.fonts), art: art_cache.as_ref().map(|(_, frame)| frame), icon: icon_cache.as_ref().map(|(_, frame)| frame), spectrum: assets.spectrum.as_ref(), folder_pictures: &folder_pictures, fanart: (fanart_slots.0.picture.as_ref(), fanart_slots.1.picture.as_ref()), vinyl: vinyl_slot.frame.as_ref(), tonearm: assets.tonearm.as_ref(), reels: (reel_pictures.0.as_ref(), reel_pictures.1.as_ref()), indicators: assets.indicators.as_ref(), base: Some(&assets.base) }, &mut motion, started.elapsed().as_millis() as u64);
+                    if window.show(frame).is_err() {
+                        break;
+                    }
+                    thread::sleep(period);
+                }
+            }
+            break;
         }
         if profiling {
             if let Some(stages) = motion.profile.take() {
@@ -564,6 +598,9 @@ fn main() -> ExitCode {
             break;
         }
         thread::sleep(period);
+    }
+    if running_for_plugin {
+        let _ = std::fs::remove_file(RUN_FLAG);
     }
     ExitCode::SUCCESS
 }

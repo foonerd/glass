@@ -51,6 +51,8 @@ if [ -z "$ARCH" ]; then
 fi
 
 export DISPLAY=${DISPLAY:-:0}
+# A real finger or click writes this marker; the plugin reads it after the player ends.
+export PEPPY_USER_DISMISS_FILE=${PEPPY_USER_DISMISS_FILE:-/tmp/peppy_user_dismiss}
 
 if [ -z "$XAUTHORITY" ] || [ ! -f "$XAUTHORITY" ]; then
   X_PID=$(pgrep -xo Xorg 2>/dev/null || true)
