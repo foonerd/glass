@@ -10,14 +10,281 @@ use std::time::{Duration, Instant};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 
+use std::collections::VecDeque;
+
 use lead::{
-    decode_meter, decode_spectrum, fonts_from_config, format_key, frame_rate_from_config,
-    meter_art, meter_at, meter_background, meter_indicator, meter_layers, meter_needle,
-    meter_text_at, meter_texts, meter_type, mono_average, scale_level, screen_from_config,
-    scroll_speeds_from_config, Bins, Input, Levels, SkinDesc, CONFIG_TXT, DEFAULT_FRAME_RATE,
-    DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO, STOCK_ICONS,
-    current_value,
+    data_source_from_config, decode_meter, decode_spectrum, fonts_from_config, format_key,
+    frame_rate_from_config, meter_art, meter_at, meter_background, meter_indicator,
+    meter_layers, meter_needle, meter_sections, meter_text_at, meter_texts, meter_type,
+    meter_visible, random_change_title_from_config, random_interval_from_config,
+    screen_from_config, scroll_speeds_from_config, selection_from_config, Bins,
+    DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec, CONFIG_TXT,
+    DEFAULT_FRAME_RATE, DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO,
+    STOCK_ICONS, current_value,
 };
+
+/// The theme's meter rotation as the player configures it: which names, in
+/// what order, and what moves it on. No names means one fixed meter.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Rotation {
+    pub names: Vec<String>,
+    pub random: bool,
+    pub interval: Duration,
+    pub on_title: bool,
+}
+
+/// Walk the rotation the way the meter engine does: random draws every name
+/// once before starting over, a list cycles in order.
+pub struct Selector {
+    rotation: Rotation,
+    remaining: Vec<String>,
+    index: usize,
+    seed: u64,
+}
+
+impl Selector {
+    pub fn new(rotation: Rotation) -> Self {
+        let seed = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0x9E37_79B9_7F4A_7C15);
+        Self::seeded(rotation, seed)
+    }
+
+    pub fn seeded(rotation: Rotation, seed: u64) -> Self {
+        Self {
+            rotation,
+            remaining: Vec::new(),
+            index: 0,
+            seed: seed | 1,
+        }
+    }
+
+    /// Whether there is anything to move on to.
+    pub fn rotates(&self) -> bool {
+        !self.rotation.names.is_empty()
+    }
+
+    pub fn interval(&self) -> Duration {
+        self.rotation.interval
+    }
+
+    pub fn on_title(&self) -> bool {
+        self.rotation.on_title
+    }
+
+    fn rand(&mut self) -> u64 {
+        // xorshift64*: enough to pick a meter, no crate needed.
+        let mut x = self.seed;
+        x ^= x >> 12;
+        x ^= x << 25;
+        x ^= x >> 27;
+        self.seed = x;
+        x.wrapping_mul(0x2545_F491_4F6C_DD1D)
+    }
+
+    /// The next meter name, or `None` for a fixed meter.
+    pub fn next(&mut self) -> Option<String> {
+        if self.rotation.names.is_empty() {
+            return None;
+        }
+        if self.rotation.random {
+            if self.remaining.is_empty() {
+                self.remaining = self.rotation.names.clone();
+            }
+            let i = (self.rand() % self.remaining.len() as u64) as usize;
+            Some(self.remaining.remove(i))
+        } else {
+            if self.index >= self.rotation.names.len() {
+                self.index = 0;
+            }
+            let name = self.rotation.names[self.index].clone();
+            self.index += 1;
+            Some(name)
+        }
+    }
+}
+
+/// The theme folder the configuration names, or `None` without one.
+fn theme_dir_from(text: &str, config_path: &str) -> Option<PathBuf> {
+    let folder = current_value(text, "meter.folder").unwrap_or_default();
+    if folder.is_empty() {
+        return None;
+    }
+    let base = current_value(text, "base.folder").unwrap_or_default();
+    let root = if base.is_empty() {
+        Path::new(config_path)
+            .parent()
+            .map(Path::to_path_buf)
+            .unwrap_or_else(|| PathBuf::from("."))
+    } else {
+        PathBuf::from(base)
+    };
+    Some(root.join(folder))
+}
+
+fn config_path() -> String {
+    std::env::var("GLASS_CONFIG").unwrap_or_else(|_| CONFIG_TXT.to_string())
+}
+
+/// The meter rotation from the installed configuration. `random` walks every
+/// section of the theme's meters file.
+pub fn installed_rotation() -> Rotation {
+    let path = config_path();
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let (names, random) = match selection_from_config(&text) {
+        Selection::Named(_) => (Vec::new(), false),
+        Selection::List(names) => (names, false),
+        Selection::Random => {
+            let sections = theme_dir_from(&text, &path)
+                .and_then(|dir| std::fs::read_to_string(dir.join("meters.txt")).ok())
+                .map(|meters| meter_sections(&meters))
+                .unwrap_or_default();
+            (sections, true)
+        }
+    };
+    Rotation {
+        names,
+        random,
+        interval: Duration::from_secs(u64::from(random_interval_from_config(&text))),
+        on_title: random_change_title_from_config(&text),
+    }
+}
+
+/// The plugin's persist file: `duration:start_ms:mode`.
+pub const PERSIST_FILE: &str = "/tmp/peppy_persist";
+
+/// Persist mode and seconds left, from the plugin's file and the wall clock.
+/// Empty mode and zero when the file is absent or malformed.
+pub fn persist_state(path: &str, now_epoch_ms: u64) -> (String, u32) {
+    let Ok(text) = std::fs::read_to_string(path) else {
+        return (String::new(), 0);
+    };
+    let mut parts = text.trim().split(':');
+    let (Some(duration), Some(start)) = (parts.next(), parts.next()) else {
+        return (String::new(), 0);
+    };
+    let (Ok(duration), Ok(start)) = (duration.trim().parse::<u64>(), start.trim().parse::<u64>()) else {
+        return (String::new(), 0);
+    };
+    let mode = parts.next().unwrap_or("freeze").trim().to_ascii_lowercase();
+    let elapsed = now_epoch_ms.saturating_sub(start) / 1000;
+    (mode, duration.saturating_sub(elapsed) as u32)
+}
+
+/// Turn the pipe's raw levels into UI levels the way the meter engine does:
+/// scale from the pipe's full scale to the UI's, apply the gain in dB and the
+/// live gain file, run the stereo algorithm against the previous values,
+/// average the last `smooth` snapshots, and derive mono.
+pub struct Conditioner {
+    spec: DataSourceSpec,
+    gain_mult: f32,
+    source_mult: f32,
+    source_at: Option<Instant>,
+    previous: Levels,
+    window: VecDeque<Levels>,
+}
+
+impl Conditioner {
+    pub fn new(spec: DataSourceSpec) -> Self {
+        let gain_mult = 10f32.powf(spec.gain_db / 20.0);
+        // The engine's buffer starts full of silence, so the first readings
+        // rise over `smooth` snapshots.
+        let window = std::iter::repeat(Levels::default()).take(spec.smooth).collect();
+        Self {
+            spec,
+            gain_mult,
+            source_mult: 1.0,
+            source_at: None,
+            previous: Levels::default(),
+            window,
+        }
+    }
+
+    fn refresh_source(&mut self) {
+        if self.spec.gain_source.is_empty() {
+            return;
+        }
+        if self.source_at.is_some_and(|at| at.elapsed() < Duration::from_secs(1)) {
+            return;
+        }
+        self.source_at = Some(Instant::now());
+        self.source_mult = std::fs::read_to_string(&self.spec.gain_source)
+            .ok()
+            .and_then(|t| t.trim().parse::<f32>().ok())
+            .map(|db| 10f32.powf(db / 20.0))
+            .unwrap_or(1.0);
+    }
+
+    fn channel(&self, previous: f32, new: f32) -> f32 {
+        match self.spec.stereo.as_str() {
+            "average" => (previous + new) / 2.0,
+            "logarithm" => {
+                if previous == 0.0 {
+                    0.0
+                } else {
+                    let db = (20.0 * (new / previous).log10()).clamp(-20.0, 3.0);
+                    (db + 20.0) * (100.0 / 23.0)
+                }
+            }
+            _ => new,
+        }
+    }
+
+    /// One raw stereo record from the pipe becomes the levels to plot.
+    pub fn condition(&mut self, raw_left: u16, raw_right: u16) -> Levels {
+        self.refresh_source();
+        let gain = self.gain_mult * self.source_mult;
+        let scale = |raw: u16| (self.spec.max_ui * (f32::from(raw) / self.spec.max_pipe) * gain).floor();
+        let new_left = scale(raw_left);
+        let new_right = scale(raw_right);
+        let new_mono = match self.spec.mono.as_str() {
+            "maximum" => new_left.max(new_right),
+            _ => (new_left + new_right) / 2.0,
+        };
+        let mut levels = Levels {
+            left: self.channel(self.previous.left, new_left),
+            right: self.channel(self.previous.right, new_right),
+            mono: self.channel(self.previous.mono, new_mono),
+        };
+        if self.spec.smooth > 0 {
+            self.window.push_back(levels);
+            self.window.pop_front();
+            let n = self.spec.smooth as f32;
+            levels = Levels {
+                left: self.window.iter().map(|l| l.left).sum::<f32>() / n,
+                right: self.window.iter().map(|l| l.right).sum::<f32>() / n,
+                mono: self.window.iter().map(|l| l.mono).sum::<f32>() / n,
+            };
+        }
+        self.previous = levels;
+        levels
+    }
+}
+
+/// A time field's font file as the player finds it: an absolute path that
+/// exists, else the file inside the theme folder, else under `font.path`.
+/// Not found means the clock font, so the field is left empty.
+pub fn resolve_time_font(spec: &mut TextSpec, theme_dir: &str, font_path: &str) {
+    if spec.font_file.is_empty() {
+        return;
+    }
+    let value = spec.font_file.clone();
+    let mut candidates = Vec::new();
+    if value.starts_with('/') {
+        candidates.push(PathBuf::from(&value));
+    }
+    for base in [theme_dir, font_path] {
+        if !base.is_empty() {
+            candidates.push(Path::new(base.trim_end_matches('/')).join(value.trim_start_matches('/')));
+        }
+    }
+    spec.font_file = candidates
+        .into_iter()
+        .find(|p| p.is_file())
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default();
+}
 
 /// One HTTP GET against the player on localhost. `None` when it does not answer.
 fn player_get(path: &str) -> Option<String> {
@@ -257,7 +524,6 @@ pub struct PipeSource {
     meter_buf: RecordBuf,
     spectrum_buf: RecordBuf,
     spectrum_bins: usize,
-    meter_max: f32,
     spectrum_held: Vec<f32>,
     levels_held: Levels,
     metadata_held: lead::Metadata,
@@ -274,6 +540,7 @@ pub struct PipeSource {
     icon_cache: (String, String),
     /// Whether the skin shows the next track, which costs a queue read per refresh.
     wants_next: bool,
+    conditioner: Conditioner,
 }
 
 impl PipeSource {
@@ -303,7 +570,6 @@ impl PipeSource {
             meter_buf: RecordBuf::new(4),
             spectrum_buf: RecordBuf::new(bins * 4),
             spectrum_bins: bins,
-            meter_max,
             spectrum_held: Vec::new(),
             levels_held: Levels::default(),
             metadata_held: lead::Metadata::default(),
@@ -315,6 +581,11 @@ impl PipeSource {
             plugin_icons: String::new(),
             icon_cache: (String::new(), String::new()),
             wants_next: false,
+            conditioner: Conditioner::new(DataSourceSpec {
+                max_ui: meter_max,
+                max_pipe: meter_max,
+                ..DataSourceSpec::default()
+            }),
         }
     }
 
@@ -328,13 +599,22 @@ impl PipeSource {
     /// What the skin needs from the player beyond the state: icon
     /// directories, and the queue when a next line or the ticker shows it.
     pub fn with_skin(mut self, skin: &SkinDesc) -> Self {
+        self.set_skin(skin);
+        self
+    }
+
+    /// Follow another skin: its icon folders, whether it wants the next
+    /// track, and its level conditioning. The type icon is resolved afresh.
+    pub fn set_skin(&mut self, skin: &SkinDesc) {
         self.skin_icons = skin.skin_icons.clone();
         self.plugin_icons = skin.plugin_icons.clone();
         self.wants_next = skin.next_title.is_some()
             || skin.next_artist.is_some()
             || skin.next_album.is_some()
             || skin.ticker.as_ref().is_some_and(|t| t.append_next);
-        self
+        self.conditioner = Conditioner::new(skin.data_source.clone());
+        self.icon_cache = (String::new(), String::new());
+        self.metadata_at = None;
     }
 
     fn try_open(slot: &mut Option<File>, path: &str) {
@@ -378,13 +658,7 @@ impl Source for PipeSource {
 
         if let Some(record) = self.meter_buf.latest.take() {
             if let Some((left, right)) = decode_meter(&record) {
-                let left = scale_level(left, self.meter_max, self.meter_max);
-                let right = scale_level(right, self.meter_max, self.meter_max);
-                self.levels_held = Levels {
-                    mono: mono_average(left, right),
-                    left,
-                    right,
-                };
+                self.levels_held = self.conditioner.condition(left, right);
             }
         }
         if let Some(record) = self.spectrum_buf.latest.take() {
@@ -426,6 +700,8 @@ impl Source for PipeSource {
                     next_title,
                     next_artist,
                     next_album,
+                    persist_mode: String::new(),
+                    persist_left: 0,
                 };
                 self.metadata_at = Some(Instant::now());
             }
@@ -441,6 +717,13 @@ impl Source for PipeSource {
         }
         if self.metadata_every.is_some() {
             metadata.art_file = self.art.file();
+            let now_epoch_ms = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            let (mode, left) = persist_state(PERSIST_FILE, now_epoch_ms);
+            metadata.persist_mode = mode;
+            metadata.persist_left = left;
         }
 
         Input {
@@ -466,7 +749,13 @@ pub fn installed_frame_rate() -> u32 {
 /// selected theme. With no config file the size stays 800×480 and there is
 /// no theme background.
 pub fn installed_skin() -> SkinDesc {
-    let path = std::env::var("GLASS_CONFIG").unwrap_or_else(|_| CONFIG_TXT.to_string());
+    installed_skin_named(None)
+}
+
+/// The installed skin for one meter of the theme, `None` for the meter the
+/// configuration names. Rotation calls this once per switch.
+pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
+    let path = config_path();
     let mut skin = SkinDesc::basic();
     let Ok(text) = std::fs::read_to_string(&path) else {
         return skin;
@@ -474,24 +763,15 @@ pub fn installed_skin() -> SkinDesc {
     let (width, height) = screen_from_config(&text);
     skin.width = width;
     skin.height = height;
-    let folder = current_value(&text, "meter.folder").unwrap_or_default();
-    let base = current_value(&text, "base.folder").unwrap_or_default();
-    let meter = current_value(&text, "meter").unwrap_or_default();
+    let meter = meter
+        .map(str::to_string)
+        .unwrap_or_else(|| current_value(&text, "meter").unwrap_or_default());
     if !meter.is_empty() {
         skin.name = meter;
     }
-    if folder.is_empty() {
+    let Some(theme) = theme_dir_from(&text, &path) else {
         return skin;
-    }
-    let root = if base.is_empty() {
-        Path::new(&path)
-            .parent()
-            .map(Path::to_path_buf)
-            .unwrap_or_else(|| PathBuf::from("."))
-    } else {
-        PathBuf::from(base)
     };
-    let theme = root.join(&folder);
     skin.theme_dir = theme.to_string_lossy().into_owned();
     if let Ok(meters) = std::fs::read_to_string(theme.join("meters.txt")) {
         if let Some(file) = meter_background(&meters, &skin.name) {
@@ -510,7 +790,7 @@ pub fn installed_skin() -> SkinDesc {
         skin.face = face;
         skin.front = front;
         skin.face_at = face_at;
-        skin.needle = meter_needle(&meters, &skin.name);
+        skin.needle = meter_needle(&meters, &skin.name).filter(|_| meter_visible(&meters, &skin.name));
         let (title_at, artist_at) = meter_text_at(&meters, &skin.name);
         skin.title_at = title_at;
         skin.artist_at = artist_at;
@@ -520,7 +800,16 @@ pub fn installed_skin() -> SkinDesc {
         skin.artist = texts.artist;
         skin.album = texts.album;
         skin.sample = texts.sample;
-        skin.time = texts.time;
+        let font_path = current_value(&text, "font.path").unwrap_or_default();
+        let mut time = texts.time;
+        let mut time_elapsed = texts.time_elapsed;
+        let mut time_total = texts.time_total;
+        for field in [&mut time, &mut time_elapsed, &mut time_total].into_iter().flatten() {
+            resolve_time_font(field, &skin.theme_dir, &font_path);
+        }
+        skin.time = time;
+        skin.time_elapsed = time_elapsed;
+        skin.time_total = time_total;
         skin.next_title = texts.next_title;
         skin.next_artist = texts.next_artist;
         skin.next_album = texts.next_album;
@@ -545,6 +834,8 @@ pub fn installed_skin() -> SkinDesc {
         .map(|dir| dir.join("format-icons").to_string_lossy().into_owned())
         .unwrap_or_default();
     skin.fonts = fonts_from_config(&text, &digi_default, &italic_default);
+    skin.data_source = data_source_from_config(&text);
+    skin.meter_max = skin.data_source.max_ui;
     skin
 }
 
@@ -647,13 +938,12 @@ pub fn input_from_records(
 ) -> Input {
     let levels = decode_meter(meter)
         .map(|(left, right)| {
-            let left = scale_level(left, meter_max, meter_max);
-            let right = scale_level(right, meter_max, meter_max);
-            Levels {
-                mono: mono_average(left, right),
-                left,
-                right,
-            }
+            Conditioner::new(DataSourceSpec {
+                max_ui: meter_max,
+                max_pipe: meter_max,
+                ..DataSourceSpec::default()
+            })
+            .condition(left, right)
         })
         .unwrap_or_default();
     let bins = decode_spectrum(spectrum, spectrum_bins).unwrap_or_default();
@@ -690,6 +980,60 @@ mod tests {
         assert_eq!(json_number(body, "missing"), None);
         assert_eq!(json_string(body, "status"), "play");
         assert_eq!(json_string(body, "samplerate"), "44.1 kHz");
+    }
+
+    #[test]
+    fn levels_are_conditioned_as_the_engine_conditions_them() {
+        let mut plain = Conditioner::new(DataSourceSpec::default());
+        assert_eq!(plain.condition(80, 40), Levels { left: 80.0, right: 40.0, mono: 60.0 });
+        let mut quiet = Conditioner::new(DataSourceSpec { gain_db: -6.0, ..DataSourceSpec::default() });
+        let l = quiet.condition(80, 40);
+        assert_eq!((l.left, l.right), (40.0, 20.0), "-6 dB halves, floored as the engine floors");
+        let mut smooth = Conditioner::new(DataSourceSpec { smooth: 2, mono: "maximum".into(), ..DataSourceSpec::default() });
+        smooth.condition(0, 0);
+        let l = smooth.condition(80, 40);
+        assert_eq!((l.left, l.right, l.mono), (40.0, 20.0, 40.0), "mean of the last two; mono is the maximum");
+        let mut averaged = Conditioner::new(DataSourceSpec { stereo: "average".into(), ..DataSourceSpec::default() });
+        averaged.condition(80, 80);
+        assert_eq!(averaged.condition(0, 0).left, 20.0, "average with the previous averaged value");
+    }
+
+    #[test]
+    fn the_selector_draws_every_name_before_repeating_and_cycles_a_list() {
+        let names: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
+        let rotation = |random: bool, names: Vec<String>| Rotation {
+            names,
+            random,
+            interval: Duration::from_secs(1),
+            on_title: false,
+        };
+        let mut random = Selector::seeded(rotation(true, names.clone()), 7);
+        for round in 0..3 {
+            let mut drawn: Vec<String> = (0..3).map(|_| random.next().unwrap()).collect();
+            drawn.sort();
+            assert_eq!(drawn, names, "round {round} draws each name once");
+        }
+        let mut list = Selector::seeded(rotation(false, names.clone()), 1);
+        let walk: Vec<String> = (0..4).map(|_| list.next().unwrap()).collect();
+        assert_eq!(walk, ["a", "b", "c", "a"]);
+        let mut fixed = Selector::seeded(rotation(true, Vec::new()), 1);
+        assert!(!fixed.rotates());
+        assert_eq!(fixed.next(), None);
+    }
+
+    #[test]
+    fn the_persist_file_gives_mode_and_seconds_left() {
+        let dir = std::env::temp_dir().join(format!("glass-persist-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("persist");
+        std::fs::write(&file, "15:1000000:countdown").unwrap();
+        let path = file.to_string_lossy().into_owned();
+        assert_eq!(persist_state(&path, 1_004_000), ("countdown".into(), 11));
+        assert_eq!(persist_state(&path, 1_020_000), ("countdown".into(), 0));
+        std::fs::write(&file, "30:1000000").unwrap();
+        assert_eq!(persist_state(&path, 1_000_000), ("freeze".into(), 30));
+        assert_eq!(persist_state(&dir.join("none").to_string_lossy(), 1), (String::new(), 0));
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

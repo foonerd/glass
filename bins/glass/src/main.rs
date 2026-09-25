@@ -9,10 +9,9 @@ use std::process::ExitCode;
 use std::thread;
 use std::time::Instant;
 
-use expose::{raster_over, read_art, read_icon, read_png, Fonts, Stack};
-use lead::TypeMode;
-use intake::{PipeSource, Source};
-use lead::{frame_period, Input, SkinDesc};
+use expose::{raster_over, read_art, read_icon, read_png, Fonts, Stack, TextMotion};
+use intake::{PipeSource, Selector, Source};
+use lead::{frame_period, Input, SkinDesc, TypeMode};
 use pane::{publish, write_ppm, Surface};
 use plot::{step, Scene};
 
@@ -21,6 +20,37 @@ fn load_theme(dir: &str, file: &str) -> Option<expose::Frame> {
         return None;
     }
     read_png(std::path::Path::new(dir).join(file).as_path())
+}
+
+/// Everything decoded once per meter: its pictures, fonts and art mask.
+struct Assets {
+    background: Option<expose::Frame>,
+    face: Option<expose::Frame>,
+    front: Option<expose::Frame>,
+    indicator: Option<expose::Frame>,
+    fonts: Fonts,
+    art_mask: Option<expose::Frame>,
+}
+
+impl Assets {
+    fn load(skin: &SkinDesc) -> Self {
+        let mut fonts = Fonts::load(&skin.fonts);
+        for field in [&skin.time, &skin.time_elapsed, &skin.time_total].into_iter().flatten() {
+            fonts.add_file(&field.font_file);
+        }
+        Self {
+            background: load_theme(&skin.theme_dir, &skin.background),
+            face: load_theme(&skin.theme_dir, &skin.face),
+            front: load_theme(&skin.theme_dir, &skin.front),
+            indicator: load_theme(&skin.theme_dir, &skin.indicator),
+            fonts,
+            art_mask: skin
+                .art
+                .as_ref()
+                .filter(|art| !art.mask.is_empty())
+                .and_then(|art| read_png(std::path::Path::new(&art.mask))),
+        }
+    }
 }
 
 /// One recorded step, the form `plot` replays from `testdata/frames/`.
@@ -76,35 +106,35 @@ fn main() -> ExitCode {
         }
     }
 
-    let skin = intake::installed_skin();
+    // A theme in random or list mode moves to its next meter on the timer,
+    // or with the next title when the player says so.
+    let mut selector = Selector::new(intake::installed_rotation());
+    let mut skin = match selector.next() {
+        Some(name) => intake::installed_skin_named(Some(&name)),
+        None => intake::installed_skin(),
+    };
     let mut source = PipeSource::installed().with_skin(&skin);
     let frame_rate = intake::installed_frame_rate();
     let started = Instant::now();
-    let mut motion = expose::TextMotion::default();
+    let mut motion = TextMotion::default();
     let period = frame_period(frame_rate);
     println!(
-        "glass: frame.rate={frame_rate} size={}x{} theme={}",
+        "glass: frame.rate={frame_rate} size={}x{} theme={} meter={}",
         skin.width,
         skin.height,
         if skin.theme_dir.is_empty() {
             "none"
         } else {
             &skin.theme_dir
-        }
+        },
+        skin.name
     );
-    let background = load_theme(&skin.theme_dir, &skin.background);
-    let face = load_theme(&skin.theme_dir, &skin.face);
-    let front = load_theme(&skin.theme_dir, &skin.front);
-    let indicator = load_theme(&skin.theme_dir, &skin.indicator);
-    let fonts = Fonts::load(&skin.fonts);
-    println!("glass: fonts loaded {} of 5", fonts.loaded());
+    let mut assets = Assets::load(&skin);
+    println!("glass: fonts loaded {} of 5", assets.fonts.loaded());
+    let mut switched_at = Instant::now();
+    let mut last_title: Option<String> = None;
     // The art picture, decoded and stretched once per file and box, cut with
     // the theme's mask when it has one.
-    let art_mask = skin
-        .art
-        .as_ref()
-        .filter(|art| !art.mask.is_empty())
-        .and_then(|art| read_png(std::path::Path::new(&art.mask)));
     let mut art_cache: Option<(plot::Art, expose::Frame)> = None;
     // The type icon, decoded once per file, box and tint.
     let mut icon_cache: Option<((String, u32, u32, Option<[u8; 3]>), expose::Frame)> = None;
@@ -125,6 +155,30 @@ fn main() -> ExitCode {
 
     loop {
         let input = source.poll();
+        if selector.rotates() {
+            let due = if selector.on_title() {
+                let title = &input.metadata.title;
+                let changed = last_title.as_ref().is_some_and(|known| known != title);
+                if last_title.as_ref() != Some(title) {
+                    last_title = Some(title.clone());
+                }
+                changed
+            } else {
+                switched_at.elapsed() >= selector.interval()
+            };
+            if due {
+                if let Some(name) = selector.next() {
+                    skin = intake::installed_skin_named(Some(&name));
+                    source.set_skin(&skin);
+                    assets = Assets::load(&skin);
+                    art_cache = None;
+                    icon_cache = None;
+                    motion = TextMotion::default();
+                    switched_at = Instant::now();
+                    println!("glass: meter={name}");
+                }
+            }
+        }
         let scene = step(&skin, &input);
         if let Some(path) = &record {
             let recorded = Recorded {
@@ -153,7 +207,7 @@ fn main() -> ExitCode {
                 Some(art) => {
                     let stale = art_cache.as_ref().map_or(true, |(known, _)| known != art);
                     if stale {
-                        art_cache = read_art(std::path::Path::new(&art.file), art.w, art.h, art_mask.as_ref())
+                        art_cache = read_art(std::path::Path::new(&art.file), art.w, art.h, assets.art_mask.as_ref())
                             .map(|frame| (art.clone(), frame));
                     }
                 }
@@ -185,12 +239,12 @@ fn main() -> ExitCode {
             let frame = raster_over(
                 &scene,
                 Stack {
-                    screen: background.as_ref(),
-                    face: face.as_ref(),
-                    front: front.as_ref(),
-                    needle: indicator.as_ref(),
+                    screen: assets.background.as_ref(),
+                    face: assets.face.as_ref(),
+                    front: assets.front.as_ref(),
+                    needle: assets.indicator.as_ref(),
                     face_at: skin.face_at,
-                    fonts: Some(&fonts),
+                    fonts: Some(&assets.fonts),
                     art: art_cache.as_ref().map(|(_, frame)| frame),
                     icon: icon_cache.as_ref().map(|(_, frame)| frame),
                 },

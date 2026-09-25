@@ -85,6 +85,13 @@ pub struct Metadata {
     pub next_artist: String,
     #[serde(default)]
     pub next_album: String,
+    /// The plugin's persist file while the display is kept after a pause:
+    /// `freeze` or `countdown`, empty when there is none.
+    #[serde(default)]
+    pub persist_mode: String,
+    /// Seconds left of the persist period.
+    #[serde(default)]
+    pub persist_left: u32,
 }
 
 /// Where a text sits inside its box when it fits.
@@ -292,6 +299,152 @@ pub struct TextSpec {
     /// Pixels per second when the text does not fit. Zero clips instead.
     #[serde(default)]
     pub speed: f32,
+    /// A font file of its own, or empty for the style's font. Time fields
+    /// name one with `time.*.font`.
+    #[serde(default)]
+    pub font_file: String,
+}
+
+/// The meter engine's `[data.source]` conditioning of the pipe levels.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DataSourceSpec {
+    /// `volume.max`: full scale in UI units.
+    pub max_ui: f32,
+    /// `volume.max.in.pipe`: full scale as the pipe writes it.
+    pub max_pipe: f32,
+    /// `volume.gain.db`: gain applied to every level, 0 is unity.
+    pub gain_db: f32,
+    /// `volume.gain.db.source`: a file holding a live gain in dB, or empty.
+    pub gain_source: String,
+    /// `smooth.buffer.size`: levels are the mean of this many snapshots. Zero is none.
+    pub smooth: usize,
+    /// `stereo.algorithm`: `new`, `average` or `logarithm`.
+    pub stereo: String,
+    /// `mono.algorithm`: `average` or `maximum`.
+    pub mono: String,
+}
+
+impl Default for DataSourceSpec {
+    fn default() -> Self {
+        Self {
+            max_ui: DEFAULT_METER_MAX,
+            max_pipe: DEFAULT_METER_MAX,
+            gain_db: 0.0,
+            gain_source: String::new(),
+            smooth: 0,
+            stereo: "new".into(),
+            mono: "average".into(),
+        }
+    }
+}
+
+/// Value of one key in a named section of the player configuration.
+pub fn section_value(text: &str, section: &str, wanted: &str) -> Option<String> {
+    let mut inside = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            inside = line.eq_ignore_ascii_case(&format!("[{section}]"));
+            continue;
+        }
+        if !inside || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if key.trim() == wanted {
+            return Some(value.trim().to_string());
+        }
+    }
+    None
+}
+
+/// Names of every `[section]` in a theme's meters file, in file order.
+pub fn meter_sections(meters_txt: &str) -> Vec<String> {
+    meters_txt
+        .lines()
+        .filter_map(|line| {
+            let line = line.trim();
+            line.strip_prefix('[')
+                .and_then(|s| s.strip_suffix(']'))
+                .map(|s| s.trim().to_string())
+        })
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+/// Which meter of the theme to show: one by name, a random walk over all of
+/// them, or a list to cycle in order.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Selection {
+    Named(String),
+    Random,
+    List(Vec<String>),
+}
+
+/// `meter` from `[current]`: `random`, a comma list, or one name.
+pub fn selection_from_config(text: &str) -> Selection {
+    let meter = current_value(text, "meter").unwrap_or_default();
+    if meter.eq_ignore_ascii_case("random") {
+        Selection::Random
+    } else if meter.contains(',') {
+        Selection::List(
+            meter
+                .split(',')
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect(),
+        )
+    } else {
+        Selection::Named(meter)
+    }
+}
+
+/// Seconds a meter stays up in random and list mode, `random.meter.interval`.
+pub fn random_interval_from_config(text: &str) -> u32 {
+    current_value(text, "random.meter.interval")
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60)
+}
+
+/// `random.change.title`: the next meter comes with the next title, not the timer.
+pub fn random_change_title_from_config(text: &str) -> bool {
+    truthy(current_value(text, "random.change.title").as_deref())
+}
+
+/// `meter.visible` of a meter under `config.extend`. False hides the needles.
+pub fn meter_visible(meters_txt: &str, meter: &str) -> bool {
+    let values = section_values(meters_txt, meter);
+    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+    if !truthy(get("config.extend")) {
+        return true;
+    }
+    get("meter.visible").map(|v| truthy(Some(v))).unwrap_or(true)
+}
+
+/// `[data.source]` from the player configuration, with the engine's defaults.
+pub fn data_source_from_config(text: &str) -> DataSourceSpec {
+    let number = |key: &str, default: f32| {
+        section_value(text, "data.source", key)
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(default)
+    };
+    let word = |key: &str, default: &str| {
+        section_value(text, "data.source", key)
+            .filter(|v| !v.is_empty())
+            .map(|v| v.to_ascii_lowercase())
+            .unwrap_or_else(|| default.to_string())
+    };
+    DataSourceSpec {
+        max_ui: number("volume.max", DEFAULT_METER_MAX).max(1.0),
+        max_pipe: number("volume.max.in.pipe", DEFAULT_METER_MAX).max(1.0),
+        gain_db: number("volume.gain.db", 0.0),
+        gain_source: section_value(text, "data.source", "volume.gain.db.source").unwrap_or_default(),
+        smooth: number("smooth.buffer.size", 0.0).max(0.0) as usize,
+        stereo: word("stereo.algorithm", "new"),
+        mono: word("mono.algorithm", "average"),
+    }
 }
 
 /// Font files the theme text is set in. An empty string is no file.
@@ -313,6 +466,8 @@ pub struct MeterTexts {
     pub album: Option<TextSpec>,
     pub sample: Option<TextSpec>,
     pub time: Option<TextSpec>,
+    pub time_elapsed: Option<TextSpec>,
+    pub time_total: Option<TextSpec>,
     pub next_title: Option<TextSpec>,
     pub next_artist: Option<TextSpec>,
     pub next_album: Option<TextSpec>,
@@ -384,6 +539,12 @@ pub struct SkinDesc {
     pub next_album: Option<TextSpec>,
     #[serde(default)]
     pub ticker: Option<TickerSpec>,
+    #[serde(default)]
+    pub time_elapsed: Option<TextSpec>,
+    #[serde(default)]
+    pub time_total: Option<TextSpec>,
+    #[serde(default)]
+    pub data_source: DataSourceSpec,
 }
 
 impl Default for SkinDesc {
@@ -425,6 +586,9 @@ impl SkinDesc {
             next_artist: None,
             next_album: None,
             ticker: None,
+            time_elapsed: None,
+            time_total: None,
+            data_source: DataSourceSpec::default(),
         }
     }
 }
@@ -1053,8 +1217,48 @@ pub fn meter_texts(meters_txt: &str, meter: &str, screen_w: u32, speeds: &Scroll
             max_width,
             align,
             speed,
+            font_file: String::new(),
         })
     };
+    // Time fields: none or `digi` picks the clock font, which `time.*.font`
+    // and `time.*.fontsize` may replace per field; `light` and `bold` pick
+    // those text fonts, any other word the regular one.
+    let time_field = |field: &str, fallback_color: [u8; 3]| -> Option<TextSpec> {
+        let pos = get(&format!("time.{field}.pos"))?;
+        let mut parts = pos.split(',');
+        let x = parts.next()?.trim().parse().ok()?;
+        let y = parts.next()?.trim().parse().ok()?;
+        let style = match parts.next().map(|w| w.trim().to_ascii_lowercase()) {
+            None => TextStyle::Digi,
+            Some(word) if word.is_empty() || word == "digi" => TextStyle::Digi,
+            Some(word) if word == "light" => TextStyle::Light,
+            Some(word) if word == "bold" => TextStyle::Bold,
+            Some(_) => TextStyle::Regular,
+        };
+        let (size, font_file) = if style == TextStyle::Digi {
+            (
+                number(&format!("time.{field}.fontsize"), size_of(TextStyle::Digi)),
+                get(&format!("time.{field}.font")).unwrap_or("").trim().to_string(),
+            )
+        } else {
+            (size_of(style), String::new())
+        };
+        Some(TextSpec {
+            x,
+            y,
+            style,
+            size,
+            color: get(&format!("time.{field}.color")).and_then(color_triplet).unwrap_or(fallback_color),
+            max_width: 0,
+            align: TextAlign::Left,
+            speed: 0.0,
+            font_file,
+        })
+    };
+    let time = time_field("remaining", font_color);
+    let time_color = time.as_ref().map(|t| t.color).unwrap_or(font_color);
+    let time_elapsed = time_field("elapsed", time_color);
+    let time_total = time_field("total", time_color);
     // The samplerate line takes the type colour before the font colour.
     let type_color = get("playinfo.type.color").and_then(color_triplet).unwrap_or(font_color);
     let mut sample = spec("playinfo.samplerate.pos", "playinfo.samplerate.color", TextStyle::Light, None);
@@ -1103,7 +1307,9 @@ pub fn meter_texts(meters_txt: &str, meter: &str, screen_w: u32, speeds: &Scroll
         artist: spec("playinfo.artist.pos", "playinfo.artist.color", TextStyle::Light, Some(("playinfo.artist.maxwidth", "artist"))),
         album: spec("playinfo.album.pos", "playinfo.album.color", TextStyle::Light, Some(("playinfo.album.maxwidth", "album"))),
         sample,
-        time: spec("time.remaining.pos", "time.remaining.color", TextStyle::Digi, None),
+        time,
+        time_elapsed,
+        time_total,
         next_title: spec("playinfo.next.title.pos", "playinfo.next.title.color", TextStyle::Regular, Some(("playinfo.next.title.maxwidth", "title"))),
         next_artist: spec("playinfo.next.artist.pos", "playinfo.next.artist.color", TextStyle::Regular, Some(("playinfo.next.artist.maxwidth", "artist"))),
         next_album: spec("playinfo.next.album.pos", "playinfo.next.album.color", TextStyle::Regular, Some(("playinfo.next.album.maxwidth", "album"))),
@@ -1285,6 +1491,47 @@ mod tests {
         assert_eq!((time.style, time.size, time.color, time.max_width), (TextStyle::Digi, 40, [180, 180, 180], 0));
         assert!(texts.album.is_none() && texts.ticker.is_none());
         assert_eq!(meter_texts(text, "random", 1280, &speeds).title.unwrap().x, 10);
+    }
+
+    #[test]
+    fn time_fields_pick_their_font_and_inherit_the_remaining_colour() {
+        let text = "[m]\ntime.remaining.pos = 585,605\ntime.remaining.color = 180,180,180\ntime.remaining.font = fonts/MyDigi.ttf\n\
+            time.remaining.fontsize = 32\ntime.elapsed.pos = 400,605,italic\ntime.total.pos = 520,605,digi\n\
+            time.total.color = 1,2,3\nfont.size.digi = 40\nfont.size.regular = 22\n";
+        let texts = meter_texts(text, "m", 1280, &ScrollSpeeds::default());
+        let remaining = texts.time.unwrap();
+        assert_eq!((remaining.style, remaining.size, remaining.font_file.as_str()), (TextStyle::Digi, 32, "fonts/MyDigi.ttf"));
+        let elapsed = texts.time_elapsed.unwrap();
+        assert_eq!((elapsed.style, elapsed.size, elapsed.color, elapsed.font_file.as_str()), (TextStyle::Regular, 22, [180, 180, 180], ""), "an unknown style word is the regular font");
+        let total = texts.time_total.unwrap();
+        assert_eq!((total.style, total.size, total.color), (TextStyle::Digi, 40, [1, 2, 3]));
+    }
+
+    #[test]
+    fn the_selection_names_random_or_a_list_and_visibility_needs_the_extension() {
+        assert_eq!(selection_from_config("[current]\nmeter = gold\n"), Selection::Named("gold".into()));
+        assert_eq!(selection_from_config("[current]\nmeter = Random\n"), Selection::Random);
+        assert_eq!(
+            selection_from_config("[current]\nmeter = gold, red ,dash\n"),
+            Selection::List(vec!["gold".into(), "red".into(), "dash".into()])
+        );
+        assert_eq!(random_interval_from_config("[current]\nrandom.meter.interval = 15\n"), 15);
+        assert_eq!(random_interval_from_config(""), 60);
+        assert!(random_change_title_from_config("[current]\nrandom.change.title = True\n"));
+        assert!(!random_change_title_from_config("[current]\nrandom.change.title = False\n"));
+        assert_eq!(meter_sections("[gold]\nx=1\n[ red ]\n\n[dash]\n"), ["gold", "red", "dash"]);
+        let m = "[a]\nconfig.extend = True\nmeter.visible = False\n[b]\nmeter.visible = False\n[c]\nconfig.extend = True\n";
+        assert!(!meter_visible(m, "a"));
+        assert!(meter_visible(m, "b"), "meter.visible needs config.extend");
+        assert!(meter_visible(m, "c"));
+    }
+
+    #[test]
+    fn the_data_source_section_has_the_engine_defaults() {
+        let spec = data_source_from_config("[current]\nmeter = x\n\n[data.source]\nvolume.max = 100.0\nvolume.gain.db = -6\nsmooth.buffer.size = 2\nstereo.algorithm = average\n");
+        assert_eq!((spec.max_ui, spec.max_pipe, spec.gain_db, spec.smooth), (100.0, 100.0, -6.0, 2));
+        assert_eq!((spec.stereo.as_str(), spec.mono.as_str(), spec.gain_source.as_str()), ("average", "average", ""));
+        assert_eq!(data_source_from_config(""), DataSourceSpec::default());
     }
 
     #[test]
