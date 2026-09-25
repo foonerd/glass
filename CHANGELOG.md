@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.20] - 2026-09-25
+
+Performance. The screen picture and meter face are composed once per meter and copied into a frame buffer that is kept between frames; rendered text lines are kept per position until the text, style, size, colour or font changes; needle sprites are kept turned per half degree, so a holding or slowly moving needle costs one plain blit; the meter foreground blends only the opaque span of each row; the window keeps one streaming texture instead of making one per frame. On a Raspberry Pi 5 with a 32-bit system at 1280 by 720 and 30 frames a second, the player's CPU share fell from about 36 percent to about 10 percent of one core. `GLASS_PROFILE=1` prints, every 60 frames, how long the poll, the step, each stage of the raster and the upload take.
+
 ## [0.4.19] - 2026-09-25
 
 Start and stop. With `start.animation` the first frame fades in from `transition.color` over `transition.duration` seconds at `transition.opacity`, unless `transition.type` is `none`; every later meter of a rotation fades in the same way; a fade lock file shared with the player's engine keeps two starts within the fade time from fading twice. When the window closes after a fade in, the frame fades out before the player exits. After every start the levels and spectrum bars rise to their values over 0.7 seconds in ten steps, as the engine raises its full scale.
