@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.12] - 2026-09-25
+
+Meter types. A circular meter may have one channel (`channels = 1`, needle at `mono.origin.x/y` for the mono level), per-channel angles (`left.start.angle`, `left.stop.angle`, `right.start.angle`, `right.stop.angle`, the left pair standing in when the shared `start.angle` and `stop.angle` are absent) and a mirrored needle per channel (`left.needle.flip`, `right.needle.flip`). Origins may lie off screen. A linear meter (`meter.type = linear`) shows the indicator picture up to the width its steps reach: `position.regular` steps of `step.width.regular` pixels, then `position.overload` steps of `step.width.overload`; `direction` is `left-right`, `right-left`, `bottom-top`, `top-bottom`, `edges-center` or `center-edges`; `indicator.type = single` moves the whole picture instead; `flip.left.x` and `flip.right.x` mirror a channel's picture; `mono.x/y` places a one-channel bar. `meter.visible = False` now hides bars as well as needles. A frame written with `--output` is renamed into place, never seen half written.
+
 ## [0.4.11] - 2026-09-25
 
 Time fields and the data source. `time.remaining`, `time.elapsed` and `time.total` each take a position with an optional style word, a colour (elapsed and total default to the remaining colour), and for the clock style a font of their own through `time.*.font`, found as an absolute path, in the theme folder or under `font.path`, and `time.*.fontsize`. Elapsed and total show `mm:ss` of the position and the length. While the display persists after a pause, the plugin's persist file drives the remaining field: `countdown` counts the persist period down in orange, `freeze` keeps the track time. The pipe levels are conditioned as the meter engine conditions them, from `[data.source]`: full scales, `volume.gain.db` and the live `volume.gain.db.source` file, the stereo algorithm, the smoothing buffer and the mono algorithm.
