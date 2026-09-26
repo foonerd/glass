@@ -512,6 +512,8 @@
     "MANAGER_RM_PORTS_INVALID": "Ports müssen Zahlen von 1024 bis 65535 sein.",
     "MANAGER_RM_PORTS_CLASH": "Die drei Ports und der Manager-Port müssen sich alle unterscheiden.",
     "MANAGER_RM_APPLIED": "Angewendet.",
-    "MANAGER_RM_PROBLEM": "Problem:"
+    "MANAGER_RM_PROBLEM": "Problem:",
+    "MANAGER_ST_REMOTES": "Fernanzeigen",
+    "MANAGER_ST_RECEIVING": "empfangen Frames"
   }
 }

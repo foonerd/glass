@@ -504,8 +504,21 @@ class Manager {
     } catch (e) { /* unknown */ }
     const rings = await readRings();
     const playing = !!(info.channel && info.channel.status === 'play');
+    let remotes = null;
+    try {
+      const r = plugin.remoteInfo();
+      remotes = {
+        enabled: !!(r.ports && r.ports.enabled),
+        serving: !!r.serving,
+        ports: r.ports,
+        receiving: r.serve && Array.isArray(r.serve.subscribers) ? r.serve.subscribers.length : 0,
+        connected: Array.isArray(r.remotes) ? r.remotes.length : 0,
+        problem: (r.errors && (r.errors.serve || r.errors.channel)) || null
+      };
+    } catch (e) { /* the plugin has no remotes to report */ }
     return Object.assign(info, {
       measured: playing && rings.some(function (r) { return r.live; }),
+      remotes: remotes,
       manager: { port: this.port, url: this.url(), uptimeS: Math.round(process.uptime()) },
       catalog: {
         fetchedAt: this.catalog.fetchedAt,

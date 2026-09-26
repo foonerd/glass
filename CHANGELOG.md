@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.2] - 2026-09-26
+
+The status tab says whether remote displays are served, on which ports, how many receive frames, and any problem the daemon or the channel reported.
+
 ## [0.7.1] - 2026-09-26
 
 Serving remote displays is off until the manager's Remotes tab turns it on, and the three ports are set there, pre-filled with 5580, 5581 and 5579 and checked against each other and the manager's port; a change applies at once, and a port something else holds is reported on the tab. A player with no screen of its own says so in the display setting ("no screen of its own, remote displays only"): it opens no window and serves the remotes, PeppyMeter's server mode. A remote named by hand asks the player's manager for the ports first (`--manager-port` when the manager's port was moved), so moved ports work without a beacon.

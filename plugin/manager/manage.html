@@ -1054,6 +1054,9 @@
         ['MANAGER_ST_PLAYER', (s.channel.status || '-') + (s.channel.service ? ' · ' + s.channel.service : '') + (s.channel.title ? ' · ' + (s.channel.artist ? s.channel.artist + ' - ' : '') + s.channel.title : '') +
           (s.channel.status === 'play' ? ' · ' + (s.measured ? t('MANAGER_ST_MEASURED') : t('MANAGER_ST_NOT_MEASURED')) : '')],
         ['MANAGER_ST_CHANNEL', s.channel.clients + ' ' + t('MANAGER_ST_CLIENTS')],
+        ['MANAGER_ST_REMOTES', !s.remotes || !s.remotes.enabled ? t('MANAGER_RM_OFF') :
+          (s.remotes.serving ? t('MANAGER_RM_SERVING_UP') : t('MANAGER_RM_SERVING_DOWN')) + ' · ' + t('MANAGER_RM_FRAMES') + ' ' + s.remotes.ports.frames + ' · ' + t('MANAGER_RM_CHANNEL') + ' ' + s.remotes.ports.channel + ' · ' + t('MANAGER_RM_BEACON') + ' ' + s.remotes.ports.beacon +
+          ' · ' + s.remotes.receiving + ' ' + t('MANAGER_ST_RECEIVING') + (s.remotes.problem ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + s.remotes.problem : '')],
         ['MANAGER_ST_RINGS', s.rings.length ? s.rings.map(function (r) { return r.name + ' (' + r.rate + ' Hz, ' + r.channels + ' ch, ' + (r.live ? t('MANAGER_ST_RING_LIVE') : t('MANAGER_ST_RING_QUIET') + (r.writtenAgoMs !== null ? ' ' + Math.round(r.writtenAgoMs / 1000) + ' s' : '')) + ')'; }).join('; ') : t('MANAGER_ST_NONE')],
         ['MANAGER_ST_CATALOG', s.catalog.count + ' ' + t('MANAGER_CATALOG_ENTRIES') + (s.catalog.updated ? ' · ' + t('MANAGER_CATALOG_UPDATED') + ' ' + fmtDate(s.catalog.updated) : '') + ' · ' + s.catalog.installed + ' ' + t('MANAGER_ST_INSTALLED_FROM')],
         ['MANAGER_ST_DISK', s.diskFree !== null ? fmtBytes(s.diskFree) + ' ' + t('MANAGER_ST_FREE') : '-'],
