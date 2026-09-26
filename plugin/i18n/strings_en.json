@@ -467,6 +467,7 @@
     "MANAGER_ERR_NO_RELEASE": "No release with a plugin zip was found.",
     "MANAGER_ERR_NO_DIGEST": "The release carries no checksum for its zip.",
     "MANAGER_ERR_APPLY": "The player’s plugin manager could not replace the plugin.",
-    "MANAGER_ERR_BUSY": "An upgrade is already running."
+    "MANAGER_ERR_BUSY": "An upgrade is already running.",
+    "MANAGER_UPD_BADGE": "Glass update:"
   }
 }

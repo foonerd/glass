@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.2] - 2026-09-26
+
+The manager looks for a new release on its own, a minute after it starts and once a day after, and says so in its header on every tab; the header's notice opens the status tab where the upgrade is. A job left in `restarting` for minutes no longer blocks another upgrade.
+
 ## [0.6.1] - 2026-09-26
 
 Glass upgrades itself from the manager's status tab. The latest release is read from GitHub, at most once a day unless asked; when it is newer, one press downloads its plugin zip, checks it against the digest the release carries, writes a settings backup, keeps the installed plugin as a zip for going back, snapshots the meter and spectrum configurations, hands the zip to the player's own plugin manager (which replaces the plugin and runs its install script, keeping the settings), puts the configurations back, and restarts the player's backend so the new code loads. The page follows the job, waits for the new version to answer, and reloads. The kept version goes back the same way. `node --test` covers the version order, the release parsing and the zip writer.

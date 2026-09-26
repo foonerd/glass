@@ -467,6 +467,7 @@
     "MANAGER_ERR_NO_RELEASE": "Keine Version mit einem Plugin-Zip gefunden.",
     "MANAGER_ERR_NO_DIGEST": "Die Version trägt keine Prüfsumme für ihr Zip.",
     "MANAGER_ERR_APPLY": "Der Plugin-Manager des Players konnte das Plugin nicht ersetzen.",
-    "MANAGER_ERR_BUSY": "Eine Aktualisierung läuft bereits."
+    "MANAGER_ERR_BUSY": "Eine Aktualisierung läuft bereits.",
+    "MANAGER_UPD_BADGE": "Glass-Update:"
   }
 }

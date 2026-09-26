@@ -111,6 +111,7 @@
     <h1 id="title">Glass Manager</h1>
     <div class="sub" id="subtitle"></div>
   </div>
+  <button class="badge orange hidden" id="upd-badge" style="border:none;cursor:pointer;padding:5px 10px"></button>
   <div class="grow"></div>
   <button id="btn-close" class="hidden"></button>
 </div>
@@ -961,8 +962,16 @@
       else $('upd-body').textContent = errorText(e);
     });
   }
+  // The header says when a newer release is known, wherever the page is.
+  function updateBadge(u) {
+    var badge = $('upd-badge');
+    badge.classList.toggle('hidden', !(u && u.available));
+    if (u && u.available) badge.textContent = t('MANAGER_UPD_BADGE') + ' ' + u.latest.version;
+  }
+  $('upd-badge').onclick = function () { showView('status'); };
   function renderUpdate(u) {
     state.update = u;
+    updateBadge(u);
     var lines = [];
     lines.push('<div>' + esc(t('MANAGER_UPD_CURRENT')) + ' <b>' + esc(u.current) + '</b></div>');
     if (u.latest) {
@@ -1062,6 +1071,7 @@
     applyStrings();
     loadThemes().then(loadSettings);
     loadStatus();
+    api('GET', '/api/update').then(updateBadge).catch(function () {});
     // The tab: from the address (#catalog), else the one last looked at.
     var saved = (window.location.hash || '').slice(1);
     if (!saved) { try { saved = localStorage.getItem('glass-manager-tab'); } catch (e) {} }

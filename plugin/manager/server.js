@@ -90,11 +90,34 @@ class Manager {
       server.on('error', reject);
     });
     self.logger.info('glass: manager listening on port ' + self.port);
+    // A look at the latest release a minute after start and once a day after.
+    self.scheduleCheck(60000);
+  }
+
+  scheduleCheck(delayMs) {
+    const self = this;
+    if (self.checkTimer) clearTimeout(self.checkTimer);
+    self.checkTimer = setTimeout(function () {
+      self.checkTimer = null;
+      if (!self.server) return;
+      self.updater.check(false).then(function (view) {
+        if (view.available) self.logger.info('glass: manager: Glass ' + view.latest.version + ' is available (running ' + view.current + ')');
+      }, function (e) {
+        self.logger.warn('glass: manager: release check: ' + (e && e.message ? e.message : e));
+      }).then(function () {
+        if (self.server) self.scheduleCheck(24 * 60 * 60 * 1000);
+      });
+    }, delayMs);
+    if (self.checkTimer.unref) self.checkTimer.unref();
   }
 
   async stop() {
     const server = this.server;
     this.server = null;
+    if (this.checkTimer) {
+      clearTimeout(this.checkTimer);
+      this.checkTimer = null;
+    }
     if (!server) return;
     await new Promise(function (resolve) {
       server.close(function () { resolve(); });
