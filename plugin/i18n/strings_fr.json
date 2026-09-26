@@ -480,6 +480,10 @@
     "MANAGER_PORT_INVALID": "Le port du gestionnaire doit être un nombre de 1024 à 65535.",
     "MANAGER_PORT_IN_USE": "Ce port est déjà utilisé par autre chose sur ce lecteur. Le gestionnaire reste sur le port",
     "MANAGER_HOST_INVALID": "L'adresse du gestionnaire doit être un nom d'hôte ou une adresse IP, sans http:// ni port.",
-    "MANAGER_MOVED": "Le gestionnaire écoute maintenant sur le port"
+    "MANAGER_MOVED": "Le gestionnaire écoute maintenant sur le port",
+    "MANAGER_ST_MEASURED": "mesuré",
+    "MANAGER_ST_NOT_MEASURED": "non mesuré : la source joue en aval de la prise",
+    "MANAGER_ST_RING_LIVE": "actif",
+    "MANAGER_ST_RING_QUIET": "silencieux depuis"
   }
 }
