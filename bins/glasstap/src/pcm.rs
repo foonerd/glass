@@ -12,7 +12,7 @@
 use std::collections::VecDeque;
 use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 
@@ -121,6 +121,7 @@ mod ext {
             val: *mut c_ulong,
             dir: *mut c_int,
         ) -> c_int;
+        pub fn snd_pcm_delay(pcm: *mut snd_pcm_t, delayp: *mut c_long) -> c_int;
     }
 }
 
@@ -142,8 +143,14 @@ struct Shared {
     /// The stream's shape, from hw_params to the measuring thread.
     shape: Mutex<Option<Shape>>,
     /// Frames the player keeps ahead of what is heard, as the buffer and
-    /// period it asked for say: a period written is heard after them.
+    /// period it asked for say: a period written is heard after them. The
+    /// fallback when the PCM cannot say its delay.
     lead: AtomicU32,
+    /// The tap's own PCM, for the measuring thread to ask how many frames
+    /// stand between the last one written and the sound. libasound locks
+    /// each PCM for the call, so the audio thread's transfer and this
+    /// thread's question take turns; the transfer itself never asks.
+    pcm: AtomicPtr<snd_pcm_t>,
     /// Bumped by every hw_params; the measuring thread starts afresh.
     generation: AtomicU32,
     reset: AtomicBool,
@@ -404,16 +411,32 @@ fn run(shared: Arc<Shared>, settings: Settings) {
                         1
                     };
                 let hop_ns = measure.hop() as u64 * 1_000_000_000 / rate;
+                // The PCM says how many frames stand between the last one
+                // written and the sound; from that the moment the last of
+                // these chunks ends is known, and every chunk before it.
+                let pcm = shared.pcm.load(Ordering::Acquire);
+                let mut delay: c_long = -1;
+                let told =
+                    !pcm.is_null() && unsafe { snd_pcm_delay(pcm, &mut delay) } == 0 && delay >= 0;
+                let total: u64 = chunks.iter().map(|c| c.samples as u64).sum::<u64>() / per_frame;
+                let end_of_all = now_ns() + delay.max(0) as u64 * 1_000_000_000 / rate;
+                let mut before = 0u64;
                 let mut offset = 0usize;
                 for chunk in &chunks {
                     let n = chunk.samples as usize;
                     let samples = &buf[offset..offset + n];
                     offset += n;
-                    // Heard after whatever the buffer holds ahead of it: the
-                    // lead once the player has filled the buffer, less before.
-                    let ahead = written.min(lead);
-                    let heard_from = chunk.time_ns + ahead * 1_000_000_000 / rate;
-                    written += n as u64 / per_frame;
+                    let frames = n as u64 / per_frame;
+                    let heard_from = if told {
+                        end_of_all.saturating_sub((total - before) * 1_000_000_000 / rate)
+                    } else {
+                        // Heard after whatever the buffer holds ahead of it:
+                        // the lead once the player has filled the buffer,
+                        // less before.
+                        chunk.time_ns + written.min(lead) * 1_000_000_000 / rate
+                    };
+                    before += frames;
+                    written += frames;
                     measure.take(samples, &mut |frame, frames_in| {
                         let due = (heard_from + frames_in as u64 * 1_000_000_000 / rate)
                             .max(last_due + hop_ns);
@@ -474,11 +497,13 @@ pub unsafe extern "C" fn _snd_pcm_glasstap_open(
             relay,
             shape: Mutex::new(None),
             lead: AtomicU32::new(0),
+            pcm: AtomicPtr::new(std::ptr::null_mut()),
             generation: AtomicU32::new(0),
             reset: AtomicBool::new(false),
             stop: AtomicBool::new(false),
         });
         let worker_shared = shared.clone();
+        let pcm_slot = shared.clone();
         let worker = match std::thread::Builder::new()
             .name("glasstap".into())
             .spawn(move || run(worker_shared, settings))
@@ -525,6 +550,7 @@ pub unsafe extern "C" fn _snd_pcm_glasstap_open(
             drop(Box::from_raw(ext as *mut snd_pcm_extplug_t));
             return err;
         }
+        pcm_slot.pcm.store(ext.pcm, Ordering::Release);
         *pcmp = ext.pcm;
         0
     }));
