@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Glass Remote Settings
+Comment=Choose the player, the theme and the window of this remote display
+Exec=@BIN@ --remote --settings
+Icon=glass-remote
+Terminal=false
+Categories=AudioVideo;Audio;Settings;
+Keywords=Glass;Volumio;meter;remote;settings;
+StartupNotify=false

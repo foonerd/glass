@@ -1,0 +1,14 @@
+# Glass as a remote display, started with this user's session and kept
+# running. Install with: remote/linux/install.sh --service
+[Unit]
+Description=Glass remote display
+After=default.target
+
+[Service]
+ExecStart=@BIN@ --remote
+Restart=always
+RestartSec=5
+Environment=DISPLAY=:0
+
+[Install]
+WantedBy=default.target

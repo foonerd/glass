@@ -1062,6 +1062,10 @@ pub struct Taken {
 /// remote display.
 pub trait Hops {
     fn take(&mut self) -> Taken;
+    /// Datagrams received and refused, for a source that counts them.
+    fn stats(&self) -> (u64, u64) {
+        (0, 0)
+    }
 }
 
 /// The tap's ring under `/dev/shm`, looked for again when it goes.
@@ -1237,6 +1241,16 @@ impl TapSource {
     /// its version, the theme on show and the meter.
     pub fn take_config(&mut self) -> Option<(String, String, String)> {
         self.config_seen.take()
+    }
+
+    /// Whether the channel to the player is up.
+    pub fn channel_connected(&self) -> bool {
+        self.channel.as_ref().is_some_and(Channel::connected)
+    }
+
+    /// What the hops counted: datagrams received and refused, on a wire.
+    pub fn hop_stats(&self) -> (u64, u64) {
+        self.hops.stats()
     }
     pub fn new(spectrum_bins: usize, meter_max: f32) -> Self {
         let bins = spectrum_bins.max(1);

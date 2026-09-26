@@ -83,6 +83,9 @@ pub struct RemoteHello {
     pub name: String,
     pub release: String,
     pub screen: [u32; 2],
+    /// The remote's own settings page, when it serves one.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub page: String,
 }
 
 impl RemoteHello {
@@ -494,6 +497,7 @@ mod tests {
             name: "Kitchen".into(),
             release: "0.7.0".into(),
             screen: [1280, 720],
+            page: "http://10.0.0.7:5583/".into(),
         });
         assert!(channel.connected());
         assert_eq!(channel.name(), address.to_string());
@@ -510,7 +514,7 @@ mod tests {
         let (hello, command) = server.join().unwrap();
         assert_eq!(
             hello,
-            "{\"kind\":\"hello\",\"remote\":{\"id\":\"kitchen\",\"name\":\"Kitchen\",\"release\":\"0.7.0\",\"screen\":[1280,720]}}\n"
+            "{\"kind\":\"hello\",\"remote\":{\"id\":\"kitchen\",\"name\":\"Kitchen\",\"page\":\"http://10.0.0.7:5583/\",\"release\":\"0.7.0\",\"screen\":[1280,720]}}\n"
         );
         assert_eq!(command, "{\"kind\":\"command\",\"name\":\"toggle\"}\n");
     }

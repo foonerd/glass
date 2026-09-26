@@ -14,15 +14,41 @@ use expose::{
     apply_circle, compose_base, fit_art, flip_x, raster_over, read_art, read_icon, read_png,
     write_png, FolderPicture, Fonts, IndicatorAssets, Motion, Spans, SpectrumAssets, Stack,
 };
-use intake::remote::{Beacon, NetHops, Sync, DEFAULT_BEACON_PORT};
-use intake::{Command, Overrides, RemoteHello, Selector, Source, TapSource};
+use intake::{Overrides, Selector, Source, TapSource};
 use lead::{
     frame_period, should_mark_dismiss, FolderLayerSpec, Input, MeterKind, SkinDesc, TypeMode,
     DISMISS_FILE_VAR, RUN_FLAG,
 };
-use pane::{publish, write_ppm, Shown, Surface};
+use pane::{publish, write_ppm, Shown, Surface, WindowOptions};
 use plot::{step, Scene};
 use std::time::Duration;
+
+mod remote;
+
+use remote::run::RemoteSession;
+
+/// What the command line asked of this run.
+struct Run {
+    once: bool,
+    headless: bool,
+    print_scene: bool,
+    output: Option<String>,
+    record: Option<String>,
+    overrides: Overrides,
+    snapshot: Option<String>,
+    thumb: Option<u32>,
+    settle_s: f32,
+    threads: Option<usize>,
+    /// Where a remote keeps what it brought from players.
+    cache: Option<String>,
+    manager_port: u16,
+}
+
+/// How a session ended: the program leaves, or a session starts again.
+enum Outcome {
+    Exit(ExitCode),
+    Reload(&'static str),
+}
 
 fn load_theme(dir: &str, file: &str) -> Option<expose::Frame> {
     if dir.is_empty() || file.is_empty() {
@@ -284,8 +310,10 @@ fn main() -> ExitCode {
     let mut remote: Option<String> = None;
     let mut remote_name: Option<String> = None;
     let mut cache: Option<String> = None;
+    let mut config_file: Option<String> = None;
+    let mut open_settings = false;
     let mut manager_port: u16 = intake::remote::DEFAULT_MANAGER_PORT;
-    let mut args = env::args().skip(1);
+    let mut args = env::args().skip(1).peekable();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--once" => once = true,
@@ -361,13 +389,20 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
-            "--remote" => match args.next() {
-                Some(target) => remote = Some(target),
+            // A remote: of a player named here, found by discovery, or as its
+            // configuration says when nothing follows.
+            "--remote" => match args.peek() {
+                Some(next) if !next.starts_with("--") => remote = args.next(),
+                _ => remote = Some("auto".to_string()),
+            },
+            "--config" => match args.next() {
+                Some(path) => config_file = Some(path),
                 None => {
-                    eprintln!("glass: --remote needs a player's host name or address, or discover");
+                    eprintln!("glass: --config needs a file");
                     return ExitCode::from(2);
                 }
             },
+            "--settings" => open_settings = true,
             "--name" => match args.next() {
                 Some(name) => remote_name = Some(name),
                 None => {
@@ -395,7 +430,7 @@ fn main() -> ExitCode {
                     "glass [--once] [--headless] [--print] [--output frame.png|frame.ppm] [--record step.json]\n      \
                      [--theme FOLDER] [--meter NAME|random|a,b,c] [--interval SECONDS] [--fps N] [--threads N]\n      \
                      [--list] [--snapshot DIR [--settle SECONDS] [--thumb WIDTH]]\n      \
-                     [--remote HOST|discover [--name NAME] [--cache DIR] [--manager-port N]]\n\
+                     [--remote [HOST|discover] [--name NAME] [--cache DIR] [--config FILE] [--manager-port N] [--settings]]\n\
                      Reads the tap's ring under /dev/shm and the player's state.\n\
                      A window opens when DISPLAY is set. --headless skips it.\n\
                      --output writes every frame as a PNG or PPM and still rasters.\n\
@@ -408,7 +443,11 @@ fn main() -> ExitCode {
                      --thumb writes DIR/<theme>/<meter>.thumb.png beside each snapshot, WIDTH pixels wide.\n\
                      --remote shows a player's meters from here: its configuration, theme, fonts and icons\n\
                      are brought into a home under --cache, the frames come over the network, and the\n\
-                     display starts again when the player's theme changes. discover listens for players."
+                     display follows the player's theme or shows one of its own. HOST adds that player,\n\
+                     discover listens for players, and nothing after --remote runs as the remote's\n\
+                     configuration says. The remote's settings page is served on its own port; --config\n\
+                     names the configuration file, and --settings opens the page in a browser (of a remote\n\
+                     already running, or of the one this starts)."
                 );
                 return ExitCode::SUCCESS;
             }
@@ -419,78 +458,30 @@ fn main() -> ExitCode {
         }
     }
 
-    // A remote display: the player found or named, its configuration and
-    // theme brought into a home of this display's own, which the rest of
-    // this program then reads as it reads the player's.
-    let cache_dir = cache_dir(cache.as_deref());
-    let mut remote_theme = String::new();
-    let remote_beacon: Option<Beacon> = match remote.as_deref() {
-        None => None,
-        Some(target) => {
-            let beacon = if target == "discover" {
-                println!("glass: listening for players on port {DEFAULT_BEACON_PORT} for 10 s");
-                match intake::remote::discover(DEFAULT_BEACON_PORT, Duration::from_secs(10)) {
-                    Ok(list) if !list.is_empty() => {
-                        for b in &list {
-                            println!(
-                                "glass: player {} at {} ({})",
-                                b.name,
-                                b.address(),
-                                b.release
-                            );
-                        }
-                        list.into_iter().next().unwrap_or_default()
-                    }
-                    Ok(_) => {
-                        eprintln!("glass: no player announced itself; name one with --remote HOST");
-                        return ExitCode::from(1);
-                    }
-                    Err(err) => {
-                        eprintln!("glass: discovery on port {DEFAULT_BEACON_PORT}: {err}");
-                        return ExitCode::from(1);
-                    }
-                }
-            } else {
-                // A player named by hand: its manager says which ports it uses.
-                let (beacon, note) = Beacon::ask_manager(target, manager_port);
-                if let Some(note) = note {
-                    println!("glass: the player's manager did not answer, using the default ports: {note}");
-                }
-                beacon
-            };
-            let home = cache_dir.join(beacon.address().replace([':', '/'], "_"));
-            let player = format!("http://{}:{}", beacon.address(), beacon.player_port);
-            let mut sync = Sync::new(&home, &beacon.manager_url(), &player);
-            match sync.run() {
-                Ok(synced) => {
-                    println!(
-                        "glass: synced from {}: theme {} ({} fetched, {} kept, configuration {})",
-                        beacon.address(),
-                        synced.theme,
-                        synced.fetched,
-                        synced.kept,
-                        synced.version
-                    );
-                    remote_theme = synced.theme;
-                }
-                Err(err) => {
-                    eprintln!("glass: sync from {}: {err}", beacon.address());
-                    if !home.join("config/meter.txt").is_file() {
-                        return ExitCode::from(1);
-                    }
-                    eprintln!("glass: showing what was brought before");
-                }
-            }
-            for line in sync.log() {
-                println!("glass: {line}");
-            }
-            env::set_var(lead::HOME_VAR, &home);
-            env::remove_var("GLASS_CONFIG");
-            intake::set_player(&beacon.address(), beacon.player_port);
-            Some(beacon)
-        }
+    let run = Run {
+        once,
+        headless,
+        print_scene,
+        output,
+        record,
+        overrides,
+        snapshot,
+        thumb,
+        settle_s,
+        threads,
+        cache,
+        manager_port,
     };
-    intake::set_overrides(overrides.clone());
+    if let Some(target) = remote {
+        return remote::run::remote_main(
+            run,
+            &target,
+            remote_name,
+            config_file.as_deref(),
+            open_settings,
+        );
+    }
+    intake::set_overrides(run.overrides.clone());
     if list {
         // Written through a lock so a closed pipe (`| head`) ends the listing quietly.
         use std::io::Write;
@@ -508,9 +499,39 @@ fn main() -> ExitCode {
         }
         return ExitCode::SUCCESS;
     }
+    match session(&run, None, &mut None) {
+        Outcome::Exit(code) => code,
+        Outcome::Reload(_) => ExitCode::SUCCESS,
+    }
+}
+
+/// One session of the display: a theme's meters shown from a source until
+/// the window closes, the player says stop, or (on a remote) the theme or
+/// the settings change and a session starts again. A remote's window is
+/// handed in and kept between sessions.
+fn session(
+    run: &Run,
+    mut remote: Option<&mut RemoteSession>,
+    window: &mut Option<(WindowOptions, Surface)>,
+) -> Outcome {
+    let Run {
+        once,
+        headless,
+        print_scene,
+        output,
+        record,
+        overrides,
+        snapshot,
+        thumb,
+        settle_s,
+        threads,
+        ..
+    } = run;
+    let (once, headless, print_scene, thumb, settle_s, threads) =
+        (*once, *headless, *print_scene, *thumb, *settle_s, *threads);
     // A snapshot walks the meters in turn; the first stands in for the
     // configuration's meter so the rotation below stays still.
-    let snapshot_names: Vec<String> = match (&snapshot, &overrides.meter) {
+    let snapshot_names: Vec<String> = match (snapshot, &overrides.meter) {
         (Some(_), Some(meter)) if meter != "random" => meter
             .split(',')
             .map(|m| m.trim().to_string())
@@ -527,7 +548,7 @@ fn main() -> ExitCode {
             }),
             None => {
                 eprintln!("glass: --snapshot found no meters in the theme");
-                return ExitCode::from(2);
+                return Outcome::Exit(ExitCode::from(2));
             }
         }
     }
@@ -541,53 +562,18 @@ fn main() -> ExitCode {
         Some(name) => intake::installed_skin_named(Some(&name)),
         None => intake::installed_skin(),
     };
-    if remote_theme.is_empty() {
-        remote_theme = std::path::Path::new(&skin.theme_dir)
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default();
-    }
-    let mut source = match &remote_beacon {
+    let mut source = match remote.as_deref_mut() {
         None => TapSource::installed().with_skin(&skin),
-        Some(beacon) => {
-            let frames = match intake::remote::frames_address(beacon) {
-                Ok(address) => address,
-                Err(err) => {
-                    eprintln!("glass: {}: {err}", beacon.address());
-                    return ExitCode::from(1);
-                }
-            };
-            let id = intake::remote::remote_id(&cache_dir);
-            let name = remote_name.clone().unwrap_or_else(|| id.clone());
-            let release = env!("CARGO_PKG_VERSION").to_string();
-            let hops = match NetHops::new(frames, &id, &name, &release) {
-                Ok(hops) => hops,
-                Err(err) => {
-                    eprintln!("glass: frames socket: {err}");
-                    return ExitCode::from(1);
-                }
-            };
-            let channel =
-                intake::Channel::tcp(format!("{}:{}", beacon.address(), beacon.channel_port))
-                    .with_hello(RemoteHello {
-                        id,
-                        name: name.clone(),
-                        release,
-                        screen: [skin.width, skin.height],
-                    });
-            println!(
-                "glass: remote {name} of {}: frames from {frames}, channel {}:{}",
-                beacon.name,
-                beacon.address(),
-                beacon.channel_port
-            );
-            TapSource::installed()
-                .with_hops(Box::new(hops))
-                .with_channel(channel)
-                .with_skin(&skin)
-        }
+        Some(remote) => match remote.source(&skin) {
+            Ok(source) => source,
+            Err(err) => {
+                eprintln!("glass: {err}");
+                return Outcome::Exit(ExitCode::from(1));
+            }
+        },
     };
-    let mut start_again = false;
+    // Why a session starts again, when it does.
+    let mut reload: Option<&'static str> = None;
     let frame_rate = intake::installed_frame_rate();
     let started = Instant::now();
     // GLASS_PROFILE prints where each frame's time goes, averaged over 60 frames, and what is kept in memory.
@@ -668,26 +654,53 @@ fn main() -> ExitCode {
     let show_window = env::var_os("DISPLAY").is_some() && !headless;
     let write_file = output.is_some() || snapshot.is_some();
     let serving_remote = false;
-    let mut surface = if show_window {
-        match Surface::open(skin.width, skin.height) {
-            Ok(mut surface) => {
-                if !skin.run.centered {
-                    surface.place_at(skin.run.x, skin.run.y);
+    // The window: the player's is full screen at the theme's size; a
+    // remote's is as its settings say, and stays up between sessions when
+    // those settings hold, following the theme's size.
+    if show_window {
+        let options = match remote.as_deref() {
+            Some(remote) => remote.window_options(),
+            None => WindowOptions::default(),
+        };
+        // The same window serves when only its title differs.
+        let kept = matches!(
+            window.as_ref(),
+            Some((known, _)) if WindowOptions { title: options.title.clone(), ..known.clone() } == options
+        );
+        if kept {
+            if let Some((known, surface)) = window.as_mut() {
+                if known.title != options.title {
+                    surface.set_title(&options.title);
+                    known.title = options.title.clone();
                 }
-                Some(surface)
+                if let Err(err) = surface.fit_to(skin.width, skin.height) {
+                    eprintln!("glass: {err}");
+                    return Outcome::Exit(ExitCode::from(1));
+                }
             }
-            Err(err) => {
-                eprintln!("glass: {err}");
-                return ExitCode::from(1);
+        } else {
+            *window = None;
+            match Surface::open_with(skin.width, skin.height, &options) {
+                Ok(mut surface) => {
+                    if remote.is_none() && !skin.run.centered {
+                        surface.place_at(skin.run.x, skin.run.y);
+                    }
+                    *window = Some((options, surface));
+                }
+                Err(err) => {
+                    eprintln!("glass: {err}");
+                    return Outcome::Exit(ExitCode::from(1));
+                }
             }
         }
     } else {
-        None
-    };
+        *window = None;
+    }
+    let mut surface: Option<&mut Surface> = window.as_mut().map(|(_, surface)| surface);
     // The run flag: the player stands it up while it runs, the plugin takes
     // it down to stop the player. A touch, when the theme wants one, leaves
     // the dismiss marker the launcher named so the plugin re-arms its timeout.
-    let running_for_plugin = !once && show_window && remote_beacon.is_none();
+    let running_for_plugin = !once && show_window && remote.is_none();
     if running_for_plugin {
         let _ = std::fs::write(RUN_FLAG, b"");
         let _ = std::fs::set_permissions(
@@ -731,18 +744,24 @@ fn main() -> ExitCode {
         let frame_started = Instant::now();
         let input = source.poll();
         let polled_at = Instant::now();
-        // The player's theme changed: this display starts again and brings it.
-        if remote_beacon.is_some() {
+        // On a remote: the player's theme changed and this one follows it,
+        // or the settings changed on the page. The session starts again.
+        if let Some(remote) = remote.as_deref_mut() {
             if let Some((_, theme, _)) = source.take_config() {
-                if !theme.is_empty() && theme != remote_theme {
+                if remote.follow && !theme.is_empty() && theme != remote.theme {
                     println!("glass: the player's theme is now {theme}");
-                    start_again = true;
+                    reload = Some("theme changed");
                     leave = Some("theme changed");
                 }
             }
+            if leave.is_none() && remote.settings_changed() {
+                reload = Some("settings changed");
+                leave = Some("settings changed");
+            }
+            remote.note(&source, &skin);
         }
         // A snapshot saves the settled frame of the meter on show and moves on.
-        if let Some(dir) = &snapshot {
+        if let Some(dir) = snapshot {
             if switched_at.elapsed() >= settle {
                 if let Some(frame) = &snapshot_last {
                     let theme = std::path::Path::new(&skin.theme_dir)
@@ -798,7 +817,7 @@ fn main() -> ExitCode {
         let scene = step(&skin, &input);
         let stepped_at = Instant::now();
         let mut rastered_at = stepped_at;
-        if let Some(path) = &record {
+        if let Some(path) = record {
             let recorded = Recorded {
                 skin: &skin,
                 input: &input,
@@ -809,7 +828,7 @@ fn main() -> ExitCode {
                 .and_then(|text| std::fs::write(path, text).map_err(|err| err.to_string()));
             if let Err(err) = written {
                 eprintln!("glass: --record {path}: {err}");
-                return ExitCode::from(1);
+                return Outcome::Exit(ExitCode::from(1));
             }
         }
         if print_scene {
@@ -978,9 +997,9 @@ fn main() -> ExitCode {
                     Ok(Shown::Kept) => {}
                     Ok(Shown::Closed) => leave = Some("window closed"),
                     Ok(Shown::Touched) => {
-                        if remote_beacon.is_some() {
+                        if let Some(remote) = remote.as_deref() {
                             // A touch on a remote plays or pauses the player.
-                            source.command(&Command::new("toggle"));
+                            remote.touched(&mut source);
                         } else if skin.run.exit_on_touch {
                             let marker = env::var(DISMISS_FILE_VAR).ok();
                             if should_mark_dismiss(
@@ -995,11 +1014,11 @@ fn main() -> ExitCode {
                     }
                     Err(err) => {
                         eprintln!("glass: {err}");
-                        return ExitCode::from(1);
+                        return Outcome::Exit(ExitCode::from(1));
                     }
                 }
             }
-            if let Some(path) = &output {
+            if let Some(path) = output {
                 let written = if path.to_ascii_lowercase().ends_with(".png") {
                     write_png(std::path::Path::new(path), frame)
                 } else {
@@ -1007,7 +1026,7 @@ fn main() -> ExitCode {
                 };
                 if let Err(err) = written {
                     eprintln!("glass: {err}");
-                    return ExitCode::from(1);
+                    return Outcome::Exit(ExitCode::from(1));
                 }
             }
             if snapshot.is_some() {
@@ -1158,10 +1177,10 @@ fn main() -> ExitCode {
     if running_for_plugin {
         let _ = std::fs::remove_file(RUN_FLAG);
     }
-    if start_again {
-        start_over();
+    match reload {
+        Some(why) => Outcome::Reload(why),
+        None => Outcome::Exit(ExitCode::SUCCESS),
     }
-    ExitCode::SUCCESS
 }
 
 /// Where a remote display keeps what it brought from players: `--cache`,
@@ -1179,29 +1198,6 @@ fn cache_dir(given: Option<&str>) -> std::path::PathBuf {
             .join("glass-remote");
     }
     env::temp_dir().join("glass-remote")
-}
-
-/// Run this program again with the same arguments, in this process.
-fn start_over() {
-    println!("glass: starting again");
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        if let Ok(exe) = env::current_exe() {
-            let err = std::process::Command::new(exe)
-                .args(env::args_os().skip(1))
-                .exec();
-            eprintln!("glass: could not start again: {err}");
-        }
-    }
-    #[cfg(not(unix))]
-    {
-        if let Ok(exe) = env::current_exe() {
-            let _ = std::process::Command::new(exe)
-                .args(env::args_os().skip(1))
-                .spawn();
-        }
-    }
 }
 
 /// Stores and their sizes in kB, with the total first.
