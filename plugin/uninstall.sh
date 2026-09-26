@@ -6,8 +6,14 @@ PLUGIN_DIR="/data/plugins/user_interface/glass"
 DATA_DIR="/data/INTERNAL/glass"
 RENDER_MARKER="/etc/glass_render_group_added"
 
-rm -f /tmp/glass_running /tmp/glass_dismiss /tmp/glass_persist
+rm -f /tmp/glass_running /tmp/glass_dismiss /tmp/glass_persist /tmp/glass_channel
+
+# What earlier releases put beside the tap: the MPD side output's include and
+# the copies mounted over the player templates.
 rm -f /data/configuration/music_service/mpd/mpd_custom.conf
+umount /volumio/app/plugins/music_service/mpd/mpd.conf.tmpl 2>/dev/null || true
+umount /volumio/app/plugins/music_service/airplay_emulation/shairport-sync.conf.tmpl 2>/dev/null || true
+rm -f /tmp/mpd.conf.tmpl /tmp/shairport-sync.conf.tmpl
 
 if [ -f /etc/X11/Xsession.d/50-glass-xhost ]; then
   rm -f /etc/X11/Xsession.d/50-glass-xhost

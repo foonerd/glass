@@ -4,11 +4,10 @@ This directory is the Volumio plugin that ships the `glass` display. It is packa
 
 What is here:
 
-- `index.js`: the plugin. It keeps the audio path up (the ALSA chain with the tap, the MPD side output, Spotify, AirPlay and DSP handling), starts the display after the screensaver timeout while music plays, keeps it up through a pause for the persist time, stops it when the run flag goes, serves the display the player's state over a local socket and takes its commands, and serves the settings page and the artist fanart cascade. The audio path, the fanart cascade and the settings backups are carried over from PeppyMeter Screensaver (MIT).
+- `index.js`: the plugin. It writes the ALSA contribution with the tap, takes back what earlier releases put beside it, starts the display after the screensaver timeout while music plays, keeps it up through a pause for the persist time, stops it when the run flag goes, serves the display the player's state over a local socket and takes its commands, and serves the settings page and the artist fanart cascade. The audio path, the fanart cascade and the settings backups are carried over from PeppyMeter Screensaver (MIT).
 - `run_glass.sh`: the launcher. It sets up the X display and starts the `glass` binary for the machine's architecture with `GLASS_HOME` pointing at the plugin and `GLASS_CHANNEL` naming the socket.
 - `config/meter.txt.tmpl` and `config/spectrum.txt.tmpl`: the configurations the display reads, copied to `config/*.txt` on the first install and kept across upgrades.
-- `Glass.postGlass.5.conf.tmpl` and the x64 variant: the ALSA contribution, written into `asound/` at runtime. The tap heads it as a PCM plugin every source's stream passes through byte for byte, Spotify's and AirPlay's own PCMs are the same tap, and the side outputs of earlier releases remain as names that play nowhere.
-- `mpd_custom.conf`: the MPD side output of earlier releases, kept so an existing player configuration still loads; it stays disabled.
+- `Glass.postGlass.5.conf.tmpl` and the x64 variant: the ALSA contribution, written into `asound/` at start. The tap heads it as a PCM plugin every source's stream passes through byte for byte; the PCMs Spotify and AirPlay named in earlier releases are the same tap, and the side outputs of those releases remain as names that play nowhere.
 - `templates` and `templates_spectrum`: the bundled default themes from PeppyMeter and PeppySpectrum, moved into `/data/INTERNAL/glass` on install.
 - `fonts` and `format-icons`: the clock font, the fallback face for scripts the theme fonts lack, and the player's icon set.
 - `install.sh` and `uninstall.sh`: the install steps Volumio runs as root.

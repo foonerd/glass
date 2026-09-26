@@ -1,28 +1,4 @@
 {
-  "alsaSelection": {
-    "value": "1",
-    "type": "number"
-  },
-  "useSpotify": {
-    "value": false,
-    "type": "boolean"
-  },
-  "useSoloist": {
-    "value": true,
-    "type": "boolean"
-  },
-  "useUSBDAC": {
-    "value": false,
-    "type": "boolean"
-  },
-  "useAirplay": {
-    "value": false,
-    "type": "boolean"
-  },
-  "useDSP": {
-    "value": false,
-    "type": "boolean"
-  },
   "timeout": {
     "value": "60",
     "type": "number"

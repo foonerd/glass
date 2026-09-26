@@ -16,8 +16,8 @@ jobs:
       - uses: actions/checkout@v7
       - name: Toolchain from rust-toolchain.toml
         run: rustup toolchain install && rustup show active-toolchain
-      - name: System libraries the display and the tap link against
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsdl2-dev libasound2-dev
+      - name: System libraries the display and the tap link against, and aplay for the template check
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsdl2-dev libasound2-dev alsa-utils
       - uses: Swatinem/rust-cache@v2
       - run: scripts/check.sh
 
