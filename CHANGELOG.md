@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.11] - 2026-09-26
+
+The meters move as the audio does again. A player that writes a whole period at a time (MPD for local files, NAS and DLNA, the radio's aplay) handed the tap five or six hops in a burst every eighth of a second, and the display, reading the latest hop each frame, saw only one of them; with a half-second buffer the hops also ran ahead of what was heard. The tap's measuring thread now places every hop in time, from when its transfer arrived and the buffer and period the player asked for, and puts it into the ring when its audio plays. One-bit audio is measured a hop at a time too. The relay holds two thirds of a second of stereo at 384 kHz.
+
 ## [0.5.10] - 2026-09-26
 
 The plugin sheds what the tap made redundant. The audio selection (modular alsa or DSD native) and the Spotify, Soloist, USB DAC, AirPlay and DSP switches are gone from the settings page and the configuration: every source meters through the tap on the main path, bit-perfect. The MPD side output and its include, the copies mounted over MPD's and AirPlay's configuration templates, Spotify's own PCM and Soloist's metering device are taken back once on the first start after the upgrade, so Spotify, AirPlay and Soloist play to `volumio` again, and on uninstall. The Dummy and Loopback cards are no longer loaded, and the display starts for every service that plays. The ALSA template no longer varies with the settings.

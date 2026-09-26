@@ -9,6 +9,7 @@
 //! Configuration keys beside `slave`: `ring`, `fft_size`, `hop`, `slots`,
 //! as for the scope.
 
+use std::collections::VecDeque;
 use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -17,7 +18,8 @@ use std::thread::JoinHandle;
 
 use tap::fifo::ignore_sigpipe;
 use tap::measure::{self, Measure, Shape};
-use tap::relay::Relay;
+use tap::relay::{Chunk, Relay};
+use tap::ring::{now_ns, Frame};
 use tap::sample::Layout;
 
 use crate::ffi::{snd_config_t, snd_pcm_t};
@@ -110,22 +112,38 @@ mod ext {
             key: *const c_char,
             result: *mut *mut snd_config_t,
         ) -> c_int;
+        pub fn snd_pcm_hw_params_get_buffer_size(
+            params: *const snd_pcm_hw_params_t,
+            val: *mut c_ulong,
+        ) -> c_int;
+        pub fn snd_pcm_hw_params_get_period_size(
+            params: *const snd_pcm_hw_params_t,
+            val: *mut c_ulong,
+            dir: *mut c_int,
+        ) -> c_int;
     }
 }
 
 use ext::*;
 
-/// Samples the relay holds: a fifth of a second of DSD256, longer for
-/// anything lighter; the measuring thread drains it every hop.
-const RELAY_SAMPLES: usize = 1 << 17;
+/// Samples the relay holds: two thirds of a second of stereo at 384 kHz,
+/// a fifth of a second of DSD256; a player writes at most its buffer
+/// ahead, and the measuring thread drains as the hops fall due.
+const RELAY_SAMPLES: usize = 1 << 19;
 /// How long the measuring thread sleeps between looks when nothing comes.
 const WAIT_MS: c_int = 100;
+/// Hops held back for their time, at most; beyond that the stream has
+/// stalled and the oldest go.
+const PENDING_MAX: usize = 1024;
 
 /// What the two threads share.
 struct Shared {
     relay: Relay,
     /// The stream's shape, from hw_params to the measuring thread.
     shape: Mutex<Option<Shape>>,
+    /// Frames the player keeps ahead of what is heard, as the buffer and
+    /// period it asked for say: a period written is heard after them.
+    lead: AtomicU32,
     /// Bumped by every hw_params; the measuring thread starts afresh.
     generation: AtomicU32,
     reset: AtomicBool,
@@ -166,6 +184,8 @@ impl Tap {
         let Some(layout) = self.layout else {
             return;
         };
+        // The whole transfer arrived now; its hops are placed from here.
+        let now = now_ns();
         let width = layout.bytes();
         let dsd = layout.is_dsd();
         let capacity = self.scratch.capacity();
@@ -178,14 +198,14 @@ impl Tap {
                 if dsd {
                     for b in bytes {
                         if self.scratch.len() == capacity {
-                            self.shared.relay.push(&self.scratch);
+                            self.shared.relay.push(&self.scratch, now);
                             self.scratch.clear();
                         }
                         self.scratch.push(*b as i16);
                     }
                 } else {
                     if self.scratch.len() == capacity {
-                        self.shared.relay.push(&self.scratch);
+                        self.shared.relay.push(&self.scratch, now);
                         self.scratch.clear();
                     }
                     self.scratch.push(layout.to_i16(bytes));
@@ -193,7 +213,7 @@ impl Tap {
             }
         }
         if !self.scratch.is_empty() {
-            self.shared.relay.push(&self.scratch);
+            self.shared.relay.push(&self.scratch, now);
             self.scratch.clear();
         }
     }
@@ -236,7 +256,7 @@ unsafe extern "C" fn transfer(
 
 unsafe extern "C" fn hw_params(
     ext: *mut snd_pcm_extplug_t,
-    _params: *mut snd_pcm_hw_params_t,
+    params: *mut snd_pcm_hw_params_t,
 ) -> c_int {
     let Some(t) = tap(ext) else {
         return 0;
@@ -249,6 +269,21 @@ unsafe extern "C" fn hw_params(
         if t.layout.is_none() {
             note(&format!("format {} passes unmeasured", e.format));
         }
+        // A player writes a period when one has played: what it writes is
+        // heard after the rest of its buffer.
+        let mut buffer: c_ulong = 0;
+        let mut period: c_ulong = 0;
+        let mut dir: c_int = 0;
+        let lead = if snd_pcm_hw_params_get_buffer_size(params, &mut buffer) == 0
+            && snd_pcm_hw_params_get_period_size(params, &mut period, &mut dir) == 0
+        {
+            buffer.saturating_sub(period)
+        } else {
+            0
+        };
+        t.shared
+            .lead
+            .store(lead.min(u32::MAX as c_ulong) as u32, Ordering::Release);
         let shape = t.layout.map(|layout| Shape {
             rate: e.rate,
             channels: e.channels,
@@ -305,7 +340,10 @@ static CALLBACKS: snd_pcm_extplug_callback_t = snd_pcm_extplug_callback_t {
 static NAME: &[u8] = b"glasstap\0";
 
 /// The measuring thread: takes what the relay holds, measures it for the
-/// stream's shape, publishes into the ring.
+/// stream's shape, and puts each hop into the ring when its audio is
+/// heard: a chunk is heard from the lead after it arrived, and a hop when
+/// its last frame plays. So a period written at once fills the ring
+/// evenly, and the meters keep step with the sound.
 fn run(shared: Arc<Shared>, settings: Settings) {
     let mut measure = Measure::new(
         tap::ring::DIR,
@@ -318,14 +356,25 @@ fn run(shared: Arc<Shared>, settings: Settings) {
     );
     let mut seen = 0u32;
     let mut buf: Vec<i16> = Vec::with_capacity(shared.relay.capacity());
+    let mut chunks: Vec<Chunk> = Vec::with_capacity(256);
+    let mut pending: VecDeque<(u64, Frame)> = VecDeque::with_capacity(PENDING_MAX);
     while !shared.stop.load(Ordering::Acquire) {
-        shared.relay.wait(WAIT_MS);
+        let now = now_ns();
+        let timeout = match pending.front() {
+            Some((due, _)) => {
+                (due.saturating_sub(now) / 1_000_000).clamp(1, WAIT_MS as u64) as c_int
+            }
+            None => WAIT_MS,
+        };
+        shared.relay.wait(timeout);
         let generation = shared.generation.load(Ordering::Acquire);
         if generation != seen {
             seen = generation;
             // What the old stream left behind is not the new stream's.
             buf.clear();
-            shared.relay.drain(&mut buf);
+            chunks.clear();
+            shared.relay.drain(&mut buf, &mut chunks);
+            pending.clear();
             let shape = shared.shape.lock().ok().and_then(|s| *s);
             if let Err(e) = measure.set_shape(shape) {
                 note(&e);
@@ -335,8 +384,32 @@ fn run(shared: Arc<Shared>, settings: Settings) {
             measure.reset();
         }
         buf.clear();
-        if shared.relay.drain(&mut buf) > 0 {
-            measure.take(&buf);
+        chunks.clear();
+        if shared.relay.drain(&mut buf, &mut chunks) > 0 {
+            if let Some(shape) = measure.shape() {
+                let rate = shape.rate.max(1) as u64;
+                let lead = shared.lead.load(Ordering::Acquire) as u64;
+                let mut offset = 0usize;
+                for chunk in &chunks {
+                    let n = chunk.samples as usize;
+                    let samples = &buf[offset..offset + n];
+                    offset += n;
+                    let heard_from = chunk.time_ns + lead * 1_000_000_000 / rate;
+                    measure.take(samples, &mut |frame, frames_in| {
+                        let due = heard_from + frames_in as u64 * 1_000_000_000 / rate;
+                        if pending.len() >= PENDING_MAX {
+                            pending.pop_front();
+                        }
+                        pending.push_back((due, frame.clone()));
+                    });
+                }
+            }
+        }
+        let now = now_ns();
+        while pending.front().is_some_and(|(due, _)| *due <= now) {
+            if let Some((_, frame)) = pending.pop_front() {
+                measure.publish(&frame);
+            }
         }
     }
 }
@@ -379,6 +452,7 @@ pub unsafe extern "C" fn _snd_pcm_glasstap_open(
         let shared = Arc::new(Shared {
             relay,
             shape: Mutex::new(None),
+            lead: AtomicU32::new(0),
             generation: AtomicU32::new(0),
             reset: AtomicBool::new(false),
             stop: AtomicBool::new(false),

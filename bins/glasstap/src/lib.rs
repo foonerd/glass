@@ -398,7 +398,7 @@ unsafe fn measure(st: &mut State) {
     let mut writer = writer;
     let mut spectrum_fifo = spectrum_fifo;
     let chans: [&[i16]; 2] = [left, right];
-    analyser.feed(&chans[..channels.max(1)], size, &mut |frame| {
+    analyser.feed(&chans[..channels.max(1)], size, &mut |frame, _| {
         if let Some(w) = writer.as_mut() {
             w.publish(frame);
         }
