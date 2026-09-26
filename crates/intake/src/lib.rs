@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 
 use std::collections::{HashMap, VecDeque};
 
+use serde_json::Value;
+
 use lead::{
     current_value, data_source_from_config, decode_meter, decode_spectrum, folder_candidates,
     fonts_from_config, format_key, frame_rate_from_config, meter_art, meter_at, meter_background,
@@ -22,6 +24,9 @@ use lead::{
     DEFAULT_FRAME_RATE, DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_CONFIG, SPECTRUM_CONFIG,
     STOCK_ICONS,
 };
+
+mod channel;
+pub use channel::{Channel, Command, Event};
 
 /// The theme's meter rotation as the player configures it: which names, in
 /// what order, and what moves it on. No names means one fixed meter.
@@ -139,6 +144,13 @@ fn config_path() -> String {
 }
 
 /// The spectrum configuration beside the meter configuration.
+/// The plugin's channel socket: `GLASS_CHANNEL`, or the default path.
+fn channel_path() -> PathBuf {
+    std::env::var_os(lead::CHANNEL_VAR)
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(lead::CHANNEL_PATH))
+}
+
 fn spectrum_config_path() -> PathBuf {
     let config = PathBuf::from(config_path());
     match config.parent() {
@@ -783,7 +795,7 @@ pub fn queue_next(position: i64) -> (String, String, String) {
     let Some(body) = player_get("/api/v1/getQueue") else {
         return Default::default();
     };
-    let value: serde_json::Value = match serde_json::from_str(&body) {
+    let value: Value = match serde_json::from_str(&body) {
         Ok(v) => v,
         Err(_) => return Default::default(),
     };
@@ -822,7 +834,7 @@ pub fn queue_lengths() -> Vec<f32> {
     let Some(body) = player_get("/api/v1/getQueue") else {
         return Vec::new();
     };
-    let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) else {
+    let Ok(value) = serde_json::from_str::<Value>(&body) else {
         return Vec::new();
     };
     let items = value
@@ -1048,6 +1060,16 @@ pub struct TapSource {
     queue_mode: bool,
     queue_lengths: Vec<f32>,
     queue_read_at: Option<Instant>,
+    /// The plugin's channel, when the player runs under it: the state
+    /// arrives as it changes and the player is not asked.
+    channel: Option<Channel>,
+    channel_was_live: bool,
+    /// Infinity playback, which only the channel reports.
+    infinity_held: bool,
+    /// The last state, and whether the skin's needs are to be derived from
+    /// it again.
+    playing_held: NowPlaying,
+    rederive: bool,
 }
 
 /// The meter falls no faster than this from full scale, as the old scope had it.
@@ -1066,6 +1088,12 @@ impl TapSource {
     }
     pub fn new(spectrum_bins: usize, meter_max: f32) -> Self {
         let bins = spectrum_bins.max(1);
+        // The plugin's channel, when it serves one: the first state is
+        // waited for briefly so the first frame is not painted from nothing.
+        let mut channel = Channel::at(channel_path());
+        if channel.connected() {
+            channel.await_state(Duration::from_millis(300));
+        }
         Self {
             ring: None,
             ring_looked_at: None,
@@ -1105,6 +1133,11 @@ impl TapSource {
             queue_mode: false,
             queue_lengths: Vec::new(),
             queue_read_at: None,
+            channel: Some(channel),
+            channel_was_live: false,
+            infinity_held: false,
+            playing_held: NowPlaying::default(),
+            rederive: false,
             conditioner: Conditioner::new(DataSourceSpec {
                 max_ui: meter_max,
                 max_pipe: meter_max,
@@ -1113,10 +1146,11 @@ impl TapSource {
         }
     }
 
-    /// Never ask the player for now-playing text. For tests and recordings on
-    /// a host without Volumio.
+    /// Never ask the player for now-playing text, nor listen for it. For
+    /// tests and recordings on a host without Volumio.
     pub fn without_player(mut self) -> Self {
         self.metadata_every = None;
+        self.channel = None;
         self
     }
 
@@ -1228,7 +1262,7 @@ impl TapSource {
             || skin.ticker.as_ref().is_some_and(|t| t.append_next);
         self.conditioner = Conditioner::new(skin.data_source.clone());
         self.icon_cache = (String::new(), String::new());
-        self.metadata_at = None;
+        self.rederive = true;
         self.folder_layers = skin.folder_layers.iter().map(|l| l.files.clone()).collect();
         self.folder_key = String::new();
         self.folder_files = Vec::new();
@@ -1347,11 +1381,47 @@ impl Source for TapSource {
             }
         }
 
-        if let Some(every) = self.metadata_every {
-            let due = self.metadata_at.is_none_or(|at| at.elapsed() >= every);
-            if due {
-                let playing = now_playing();
-                self.seek_polled = playing.seek;
+        // The player's state: pushed by the plugin's channel as it changes,
+        // or asked of the player once a second while there is no channel.
+        let mut arrived: Option<NowPlaying> = None;
+        if let Some(channel) = self.channel.as_mut() {
+            for event in channel.pump() {
+                match event {
+                    Event::State(state) => arrived = Some(NowPlaying::from_value(&state)),
+                    Event::Infinity(on) => self.infinity_held = on,
+                    Event::Hello { .. } => {}
+                }
+            }
+            let live = channel.connected();
+            if live != self.channel_was_live {
+                self.channel_was_live = live;
+                if live {
+                    println!("glass: channel {}", channel.path().display());
+                } else {
+                    println!("glass: channel gone, asking the player");
+                }
+            }
+        }
+        if arrived.is_none() && !self.channel_was_live {
+            if let Some(every) = self.metadata_every {
+                let due = self.metadata_at.is_none_or(|at| at.elapsed() >= every);
+                if due {
+                    arrived = Some(now_playing());
+                }
+            }
+        }
+        if let Some(playing) = arrived {
+            self.seek_polled = playing.seek;
+            self.metadata_at = Some(Instant::now());
+            self.playing_held = playing;
+            self.rederive = true;
+        }
+        // What the skin needs from the state is derived when a state arrives
+        // and again when the skin changes.
+        {
+            if self.rederive {
+                self.rederive = false;
+                let playing = self.playing_held.clone();
                 self.art.want(&playing.albumart);
                 let key = format_key(&playing.track_type);
                 if key != self.icon_cache.0 {
@@ -1396,6 +1466,7 @@ impl Source for TapSource {
                     random: playing.random,
                     repeat: playing.repeat,
                     repeat_single: playing.repeat_single,
+                    infinity: self.infinity_held,
                     uri: playing.uri,
                     fanart_file: String::new(),
                     fanart_prev_file: String::new(),
@@ -1403,13 +1474,13 @@ impl Source for TapSource {
                     fanart_transition_ms: 0,
                     fanart_elapsed_ms: 0,
                 };
-                self.metadata_at = Some(Instant::now());
             }
         }
 
-        // The player reports its position once a second; while it plays,
+        // The player reports its position with its state; while it plays,
         // the snapshot moves on from that report by the time since.
         let mut metadata = self.metadata_held.clone();
+        metadata.infinity = self.infinity_held;
         if metadata.status == "play" {
             if let Some(at) = self.metadata_at {
                 metadata.seek = self.seek_polled + at.elapsed().as_secs_f32();
@@ -1589,7 +1660,7 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
     skin
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct NowPlaying {
     pub volume: u32,
     pub mute: bool,
@@ -1616,8 +1687,51 @@ pub struct NowPlaying {
     pub position: i64,
 }
 
-/// Current track from Volumio. Empty strings when the player does not answer.
-/// One HTTP request; [`TapSource`] calls this once a second.
+impl NowPlaying {
+    /// The fields Glass shows, read leniently from the player's state as
+    /// the player pushes it or answers with it: a number may come as a
+    /// string, and a missing or null field is its default.
+    pub fn from_value(state: &Value) -> Self {
+        let text = |key: &str| match state.get(key) {
+            Some(Value::String(s)) => s.clone(),
+            Some(Value::Number(n)) => n.to_string(),
+            _ => String::new(),
+        };
+        let number = |key: &str| -> Option<f32> {
+            match state.get(key)? {
+                Value::Number(n) => n.as_f64().map(|n| n as f32),
+                Value::String(s) => s.trim().parse().ok(),
+                _ => None,
+            }
+        };
+        let flag = |key: &str| state.get(key).and_then(Value::as_bool);
+        NowPlaying {
+            volume: number("volume").unwrap_or(0.0).clamp(0.0, 100.0) as u32,
+            mute: flag("mute").unwrap_or(false),
+            random: flag("random").unwrap_or(false),
+            repeat: flag("repeat").unwrap_or(false),
+            repeat_single: flag("repeatSingle").unwrap_or(false),
+            volatile: flag("volatile"),
+            uri: text("uri"),
+            title: text("title"),
+            artist: text("artist"),
+            album: text("album"),
+            samplerate: text("samplerate"),
+            bitdepth: text("bitdepth"),
+            status: text("status"),
+            duration: number("duration").unwrap_or(0.0),
+            seek: number("seek").unwrap_or(0.0) / 1000.0,
+            albumart: text("albumart"),
+            track_type: text("trackType"),
+            bitrate: text("bitrate"),
+            position: number("position").map(|p| p as i64).unwrap_or(0),
+        }
+    }
+}
+
+/// Current track from Volumio, asked over HTTP. Empty strings when the
+/// player does not answer. [`TapSource`] asks once a second while the
+/// plugin's channel is not there.
 pub fn now_playing() -> NowPlaying {
     let mut playing = NowPlaying::default();
     let address = std::net::SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -1636,81 +1750,12 @@ pub fn now_playing() -> NowPlaying {
         .split_once("\r\n\r\n")
         .map(|(_, body)| body)
         .unwrap_or(&buf);
-    playing.title = json_string(body, "title");
-    playing.artist = json_string(body, "artist");
-    playing.album = json_string(body, "album");
-    playing.samplerate = json_string(body, "samplerate");
-    playing.bitdepth = json_string(body, "bitdepth");
-    playing.status = json_string(body, "status");
-    playing.duration = json_number(body, "duration").unwrap_or(0.0);
-    playing.seek = json_number(body, "seek").unwrap_or(0.0) / 1000.0;
-    playing.albumart = json_string(body, "albumart");
-    playing.uri = json_string(body, "uri");
-    playing.volatile = json_bool(body, "volatile");
-    playing.volume = json_number(body, "volume").unwrap_or(0.0).clamp(0.0, 100.0) as u32;
-    playing.mute = json_bool(body, "mute").unwrap_or(false);
-    playing.random = json_bool(body, "random").unwrap_or(false);
-    playing.repeat = json_bool(body, "repeat").unwrap_or(false);
-    playing.repeat_single = json_bool(body, "repeatSingle").unwrap_or(false);
-    playing.track_type = json_string(body, "trackType");
-    playing.bitrate = json_string(body, "bitrate");
-    playing.position = json_number(body, "position").map(|p| p as i64).unwrap_or(0);
+    if let Ok(state) = serde_json::from_str::<Value>(body) {
+        playing = NowPlaying::from_value(&state);
+    }
     playing
 }
 
-/// A bare JSON number after `"key":`. `None` when the key is absent or the
-/// value is not a number.
-fn json_number(body: &str, key: &str) -> Option<f32> {
-    let pattern = format!("\"{key}\"");
-    let start = body.find(&pattern)?;
-    let rest = body[start + pattern.len()..].trim_start();
-    let rest = rest.strip_prefix(':')?.trim_start();
-    let end = rest
-        .find(|c: char| !(c.is_ascii_digit() || matches!(c, '-' | '+' | '.' | 'e' | 'E')))
-        .unwrap_or(rest.len());
-    rest[..end].parse().ok()
-}
-
-/// A boolean field of the state, `None` when absent or not a boolean.
-fn json_bool(body: &str, key: &str) -> Option<bool> {
-    let needle = format!("\"{key}\":");
-    let start = body.find(&needle)? + needle.len();
-    let rest = body[start..].trim_start();
-    if rest.starts_with("true") {
-        Some(true)
-    } else if rest.starts_with("false") {
-        Some(false)
-    } else {
-        None
-    }
-}
-
-fn json_string(body: &str, key: &str) -> String {
-    let pattern = format!("\"{key}\"");
-    let Some(start) = body.find(&pattern) else {
-        return String::new();
-    };
-    let rest = body[start + pattern.len()..].trim_start();
-    let rest = rest.trim_start_matches(':').trim_start();
-    let Some(rest) = rest.strip_prefix('"') else {
-        return String::new();
-    };
-    let mut out = String::new();
-    let mut chars = rest.chars();
-    while let Some(ch) = chars.next() {
-        if ch == '\\' {
-            if let Some(next) = chars.next() {
-                out.push(next);
-            }
-            continue;
-        }
-        if ch == '"' {
-            break;
-        }
-        out.push(ch);
-    }
-    out
-}
 pub fn input_from_records(
     meter: &[u8],
     spectrum: &[u8],
@@ -1749,13 +1794,28 @@ mod tests {
     }
 
     #[test]
-    fn player_state_numbers_and_words_are_read() {
-        let body = r#"{"status":"play","title":"Wonder","duration":218.051,"seek":1994.96,"samplerate":"44.1 kHz","bitdepth":"16-bit"}"#;
-        assert_eq!(json_number(body, "duration"), Some(218.051));
-        assert_eq!(json_number(body, "seek"), Some(1994.96));
-        assert_eq!(json_number(body, "missing"), None);
-        assert_eq!(json_string(body, "status"), "play");
-        assert_eq!(json_string(body, "samplerate"), "44.1 kHz");
+    fn player_state_is_read_leniently() {
+        let state: Value = serde_json::from_str(
+            r#"{"status":"play","title":"Wonder","artist":null,"duration":218.051,"seek":1994.96,"volume":"46","mute":false,"repeatSingle":true,"position":3,"samplerate":"44.1 kHz","bitdepth":"16-bit","bitrate":320,"trackType":"flac"}"#,
+        )
+        .unwrap();
+        let playing = NowPlaying::from_value(&state);
+        assert_eq!(playing.status, "play");
+        assert_eq!(playing.title, "Wonder");
+        assert_eq!(playing.artist, "", "null reads as empty");
+        assert_eq!(playing.duration, 218.051);
+        assert!(
+            (playing.seek - 1.99496).abs() < 1e-5,
+            "seek comes in milliseconds"
+        );
+        assert_eq!(playing.volume, 46, "a number in a string still counts");
+        assert!(playing.repeat_single);
+        assert!(!playing.repeat);
+        assert_eq!(playing.position, 3);
+        assert_eq!(playing.samplerate, "44.1 kHz");
+        assert_eq!(playing.bitrate, "320", "a number reads as its text");
+        assert_eq!(playing.track_type, "flac");
+        assert_eq!(playing.volatile, None);
     }
 
     #[test]

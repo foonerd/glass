@@ -13,6 +13,7 @@ var execSync = require('child_process').execSync;
 var sizeOf = require('image-size');
 var crypto = require('crypto');
 const lineReader = require('line-reader');
+const net = require('net');
 const io = require('socket.io-client');
 const socket = io.connect('http://localhost:3000');
 const path = require('path');
@@ -39,6 +40,101 @@ const SpectrumFolderStr = 'spectrum.folder';
 const LEGACY_PLUGIN = 'peppy_screensaver';
 const LEGACY_CONFIG = '/data/configuration/user_interface/peppy_screensaver/config.json';
 const LEGACY_METER_CONFIG = '/data/plugins/user_interface/peppy_screensaver/screensaver/peppymeter/config.txt';
+
+// The channel to the display: a local socket the plugin serves, one JSON
+// object per line. A display that connects gets a greeting, then the player's
+// state and the infinity flag last seen, then every change as it comes; it
+// sends commands for the player back.
+const channelPath = '/tmp/glass_channel';
+const CHANNEL_PROTOCOL = 1;
+const CHANNEL_LINE_MAX = 65536;
+
+function Channel(logger, onAttach, onCommand) {
+    this.logger = logger;
+    this.onAttach = onAttach;
+    this.onCommand = onCommand;
+    this.path = null;
+    this.server = null;
+    this.clients = [];
+    this.state = null;
+    this.infinity = null;
+}
+
+Channel.prototype.listen = function (path) {
+    var self = this;
+    self.path = path;
+    try { if (fs.existsSync(path)) fs.unlinkSync(path); } catch (e) {}
+    self.server = net.createServer(function (conn) { self.attach(conn); });
+    self.server.on('error', function (err) {
+        self.logger.error(id + 'channel: ' + (err && err.message ? err.message : err));
+    });
+    self.server.listen(path, function () {
+        self.logger.info(id + 'channel: serving ' + path);
+    });
+};
+
+Channel.prototype.attach = function (conn) {
+    var self = this;
+    var pending = '';
+    conn.setEncoding('utf8');
+    self.clients.push(conn);
+    self.logger.info(id + 'channel: a display connected');
+    self.tell(conn, { kind: 'hello', protocol: CHANNEL_PROTOCOL, plugin: pluginVersion });
+    if (self.state) { self.tell(conn, { kind: 'state', state: self.state }); }
+    if (self.infinity !== null) { self.tell(conn, { kind: 'infinity', on: self.infinity }); }
+    conn.on('data', function (chunk) {
+        pending += chunk;
+        if (pending.length > CHANNEL_LINE_MAX) {
+            self.logger.warn(id + 'channel: a line too long was dropped');
+            pending = '';
+            return;
+        }
+        var lines = pending.split('\n');
+        pending = lines.pop();
+        lines.forEach(function (line) {
+            line = line.trim();
+            if (!line) { return; }
+            var message = null;
+            try { message = JSON.parse(line); } catch (e) {}
+            if (message && message.kind === 'command') {
+                self.onCommand(message);
+            } else {
+                self.logger.warn(id + 'channel: not a command: ' + line.slice(0, 80));
+            }
+        });
+    });
+    var detach = function () {
+        var at = self.clients.indexOf(conn);
+        if (at !== -1) {
+            self.clients.splice(at, 1);
+            self.logger.info(id + 'channel: the display left');
+        }
+    };
+    conn.on('error', detach);
+    conn.on('close', detach);
+    self.onAttach();
+};
+
+Channel.prototype.tell = function (conn, message) {
+    try { conn.write(JSON.stringify(message) + '\n'); } catch (e) {}
+};
+
+// Every connected display hears this.
+Channel.prototype.push = function (message) {
+    var self = this;
+    self.clients.slice().forEach(function (conn) { self.tell(conn, message); });
+};
+
+Channel.prototype.close = function () {
+    var self = this;
+    self.clients.slice().forEach(function (conn) { try { conn.destroy(); } catch (e) {} });
+    self.clients = [];
+    if (self.server) {
+        try { self.server.close(); } catch (e) {}
+        self.server = null;
+    }
+    try { if (self.path && fs.existsSync(self.path)) fs.unlinkSync(self.path); } catch (e) {}
+};
 
 // A user dismiss re-arms the full screensaver timeout. A clean exit without
 // the marker (a settings reload) restarts now. A failed exit restarts now.
@@ -229,8 +325,38 @@ Glass.prototype.launchEnv = function () {
     return Object.assign({}, process.env, {
         DISPLAY: ':' + display,
         GLASS_HOME: PluginPath,
-        GLASS_DISMISS_FILE: dismissFile
+        GLASS_DISMISS_FILE: dismissFile,
+        GLASS_CHANNEL: channelPath
     });
+};
+
+// A command from the display, run through the player's command router.
+// `seek` takes seconds, `volume` a number from 0 to 100 or one of the
+// player's words (`+`, `-`, `mute`, `unmute`, `toggle`), `random` a
+// boolean, `repeat` one of `off`, `all`, `single`.
+Glass.prototype.runCommand = function (message) {
+    var self = this;
+    var router = self.commandRouter;
+    var name = String(message.name || '');
+    var value = message.value;
+    self.logger.info(id + 'channel: command ' + name + (value !== undefined ? ' ' + JSON.stringify(value) : ''));
+    try {
+        switch (name) {
+            case 'play': router.volumioPlay(); break;
+            case 'pause': router.volumioPause(); break;
+            case 'toggle': router.volumioToggle(); break;
+            case 'stop': router.volumioStop(); break;
+            case 'next': router.volumioNext(); break;
+            case 'previous': router.volumioPrevious(); break;
+            case 'seek': router.volumioSeek(Number(value) || 0); break;
+            case 'volume': router.volumiosetvolume(typeof value === 'number' ? Math.round(value) : String(value)); break;
+            case 'random': router.volumioRandom(!!value); break;
+            case 'repeat': router.volumioRepeat(value === 'all' || value === 'single', value === 'single'); break;
+            default: self.logger.warn(id + 'channel: unknown command ' + name);
+        }
+    } catch (e) {
+        self.logger.error(id + 'channel: command ' + name + ' failed: ' + (e && e.message ? e.message : e));
+    }
 };
 
 Glass.prototype.onStart = function () {
@@ -257,6 +383,16 @@ Glass.prototype.onStart = function () {
     if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
     try { if (fs.existsSync(dismissFile)) fs.removeSync(dismissFile); } catch (e) {}
     try { if (fs.existsSync(persistFile)) fs.removeSync(persistFile); } catch (e) {}
+
+    // The channel the display reads the player's state from. A display that
+    // connects gets fresh values asked of the player.
+    self.channel = new Channel(self.logger, function () {
+        socket.emit('getState', '');
+        socket.emit('getInfinityPlayback', '');
+    }, function (message) {
+        self.runCommand(message);
+    });
+    self.channel.listen(channelPath);
 
     self.loadConfigs();
     if (!meterConfig) {
@@ -335,8 +471,17 @@ Glass.prototype.onStart = function () {
     // music plays, stays through a pause for the persist time, and leaves
     // when the run flag goes.
     socket.emit('getState', '');
+    socket.emit('getInfinityPlayback', '');
     var lastService = '';
     var lastUri = '';
+
+    socket.on('pushInfinityPlayback', function (data) {
+        var on = !!(data && data.enabled);
+        if (self.channel) {
+            self.channel.infinity = on;
+            self.channel.push({ kind: 'infinity', on: on });
+        }
+    });
 
     socket.on('pushState', function (state) {
         if (!state || typeof state !== 'object') {
@@ -349,6 +494,10 @@ Glass.prototype.onStart = function () {
             return;
         }
         self.lastState = state;
+        if (self.channel) {
+            self.channel.state = state;
+            self.channel.push({ kind: 'state', state: state });
+        }
         self.logger.info(id + 'pushState: status=' + status + ' service=' + state.service + ' volatile=' + state.volatile);
         var DSP_ON = fs.existsSync(dsp_config) && self.config.get('useDSP');
         var Spotify_ON = fs.existsSync(spotify_config) && self.getPluginStatus('music_service', 'spop') === 'STARTED' && self.config.get('useSpotify') && state.service === 'spop';
@@ -572,6 +721,11 @@ Glass.prototype.onStop = function () {
 
         self.commandRouter.removePluginRestEndpoint({ endpoint: 'glass_artistfanart' });
         socket.off('pushState');
+        socket.off('pushInfinityPlayback');
+        if (self.channel) {
+            self.channel.close();
+            self.channel = null;
+        }
     });
 
     return libQ.resolve();

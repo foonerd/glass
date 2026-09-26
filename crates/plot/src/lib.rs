@@ -504,14 +504,15 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
     }
 }
 
-/// The indicator states the player's handler derives. The player has no
-/// infinity event here, so infinity never shows.
+/// The indicator states the player's handler derives. Infinity, which the
+/// plugin's channel reports, lands on the repeat indicator when the skin
+/// gives it a fourth state, else on the shuffle indicator's legacy third.
 fn indicators(spec: &IndicatorsSpec, meta: &Metadata, progress_pct: f32) -> Indicators {
     let repeat_has_infinity = spec.repeat.as_ref().is_some_and(|r| match &r.look {
         StateLook::Icons { files } => files.len() >= 4 && !files[3].is_empty(),
         StateLook::Led { colors, .. } => colors.len() >= 4,
     });
-    let infinity = false;
+    let infinity = meta.infinity;
     Indicators {
         spec: spec.clone(),
         volume: meta.volume.min(100),
@@ -573,6 +574,55 @@ fn progress(meta: &Metadata) -> (f32, Option<f32>) {
 mod tests {
     use super::*;
     use lead::{Bins, Input, Levels, SkinDesc};
+
+    #[test]
+    fn infinity_lands_on_repeat_with_a_fourth_state_else_on_shuffle() {
+        use lead::{IndicatorsSpec, StateIndicator};
+        let led = |states: usize| StateIndicator {
+            x: 0,
+            y: 0,
+            look: StateLook::Led {
+                w: 4,
+                h: 4,
+                circle: true,
+                colors: vec![[0, 0, 0]; states],
+            },
+            glow: 0,
+            glow_intensity: 0.5,
+            glow_colors: Vec::new(),
+        };
+        let meta = Metadata {
+            infinity: true,
+            random: true,
+            repeat: true,
+            ..Metadata::default()
+        };
+        let four = IndicatorsSpec {
+            repeat: Some(led(4)),
+            shuffle: Some(led(3)),
+            ..IndicatorsSpec::default()
+        };
+        let states = indicators(&four, &meta, 0.0);
+        assert_eq!(states.repeat_state, 3);
+        assert_eq!(
+            states.shuffle_state, 1,
+            "shuffle shows random when repeat owns infinity"
+        );
+        let three = IndicatorsSpec {
+            repeat: Some(led(3)),
+            shuffle: Some(led(3)),
+            ..IndicatorsSpec::default()
+        };
+        let states = indicators(&three, &meta, 0.0);
+        assert_eq!(states.repeat_state, 1, "repeat all");
+        assert_eq!(states.shuffle_state, 2, "the legacy third shuffle state");
+        let off = Metadata {
+            random: true,
+            ..Metadata::default()
+        };
+        assert_eq!(indicators(&three, &off, 0.0).shuffle_state, 1);
+        assert_eq!(indicators(&four, &off, 0.0).repeat_state, 0);
+    }
 
     #[test]
     fn half_scale_levels_and_a_full_bar() {
