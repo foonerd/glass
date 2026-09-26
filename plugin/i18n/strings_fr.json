@@ -467,6 +467,7 @@
     "MANAGER_ERR_NO_RELEASE": "Aucune version avec un zip de plugin trouvée.",
     "MANAGER_ERR_NO_DIGEST": "La version ne porte pas de somme de contrôle pour son zip.",
     "MANAGER_ERR_APPLY": "Le gestionnaire de plugins du lecteur n'a pas pu remplacer le plugin.",
-    "MANAGER_ERR_BUSY": "Une mise à jour est déjà en cours."
+    "MANAGER_ERR_BUSY": "Une mise à jour est déjà en cours.",
+    "MANAGER_UPD_BADGE": "Mise à jour de Glass :"
   }
 }
