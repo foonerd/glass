@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3] - 2026-09-26
+
+The restart after an upgrade is handed to systemd as one restart job, which it carries out on its own. The stop-then-start of 0.6.1 and 0.6.2 was issued from inside the player's service, and the stop took the process waiting to start it again with it, so the backend stayed down until started by hand. A player that upgraded to 0.6.2 that way needs one `volumio vstart`; from 0.6.3 on the backend comes back by itself. The kept-plugin zip writer no longer leaves an error listener behind per drained write.
+
 ## [0.6.2] - 2026-09-26
 
 The manager looks for a new release on its own, a minute after it starts and once a day after, and says so in its header on every tab; the header's notice opens the status tab where the upgrade is. A job left in `restarting` for minutes no longer blocks another upgrade.

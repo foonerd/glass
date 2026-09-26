@@ -3138,13 +3138,16 @@ Glass.prototype.updateApply = function (stagedName) {
     });
 };
 
-// Restart the player's backend a moment from now, from a process of its
-// own so the restart outlives this one.
+// Restart the player's backend a moment from now. The request goes to
+// systemd as one restart job, which it carries out on its own once
+// queued: a stop followed by a start from inside the service would end
+// with the stop, since the stop takes every process of the service with
+// it, the one waiting to start it again included.
 Glass.prototype.restartBackend = function () {
     var self = this;
     self.logger.info(id + 'upgrade: restarting the backend');
     try {
-        var child = require('child_process').spawn('/bin/sh', ['-c', 'sleep 3; /usr/local/bin/volumio vrestart'], { detached: true, stdio: 'ignore' });
+        var child = require('child_process').spawn('/bin/sh', ['-c', 'sleep 3; sudo -n /bin/systemctl --no-block restart volumio'], { detached: true, stdio: 'ignore' });
         child.unref();
     } catch (e) {
         self.logger.error(id + 'upgrade: restart: ' + (e && e.message ? e.message : e));

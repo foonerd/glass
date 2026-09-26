@@ -14,8 +14,10 @@ const MAX_FILES = 60000;
 function write(stream, buffer) {
   return new Promise(function (resolve, reject) {
     if (stream.write(buffer)) return resolve();
-    stream.once('drain', resolve);
-    stream.once('error', reject);
+    var onDrain = function () { stream.off('error', onError); resolve(); };
+    var onError = function (e) { stream.off('drain', onDrain); reject(e); };
+    stream.once('drain', onDrain);
+    stream.once('error', onError);
   });
 }
 
