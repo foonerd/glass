@@ -747,11 +747,19 @@ fn session(
         // On a remote: the player's theme changed and this one follows it,
         // or the settings changed on the page. The session starts again.
         if let Some(remote) = remote.as_deref_mut() {
-            if let Some((_, theme, _)) = source.take_config() {
-                if remote.follow && !theme.is_empty() && theme != remote.theme {
-                    println!("glass: the player's theme is now {theme}");
-                    reload = Some("theme changed");
-                    leave = Some("theme changed");
+            if let Some((version, theme, _)) = source.take_config() {
+                let other_theme = !theme.is_empty() && theme != remote.theme;
+                let other_version = !version.is_empty()
+                    && !remote.config_version.is_empty()
+                    && version != remote.config_version;
+                if remote.follow && (other_theme || other_version) {
+                    if other_theme {
+                        println!("glass: the player's theme is now {theme}");
+                    } else {
+                        println!("glass: the player's configuration is now {version}");
+                    }
+                    reload = Some("the player's configuration changed");
+                    leave = Some("the player's configuration changed");
                 }
             }
             if leave.is_none() && remote.settings_changed() {

@@ -162,7 +162,7 @@
       ['Channel', st.connected ? 'connected' : 'not connected'],
       ['Frames', st.frames_per_s ? st.frames_per_s.toFixed(0) + ' a second' : 'none' + (st.received ? '' : '') + (st.refused ? ' (' + st.refused + ' refused)' : '')],
       ['Theme', st.theme ? st.theme + (st.meter ? ' · ' + st.meter : '') : ''],
-      ['Screen', st.screen && st.screen[0] ? st.screen[0] + '×' + st.screen[1] : ''],
+      ['Screen', st.screen && st.screen[0] ? st.screen[0] + 'x' + st.screen[1] : ''],
       ['Synced', st.synced || ''],
       ['This page', st.page || '']
     ];
@@ -220,7 +220,7 @@
   function renderOwn() {
     var own = currentOwn();
     var sel = $('own-theme'); var chosen = sel.value || (own && own.folder) || '';
-    sel.innerHTML = state.themes.map(function (t) { return '<option value="' + esc(t.folder) + '">' + esc(t.folder) + (t.width ? ' (' + t.width + '×' + t.height + ')' : '') + (t.active ? ' • on the player' : '') + '</option>'; }).join('');
+    sel.innerHTML = state.themes.map(function (t) { return '<option value="' + esc(t.folder) + '">' + esc(t.folder) + (t.width ? ' (' + t.width + 'x' + t.height + ')' : '') + (t.active ? ' (on the player)' : '') + '</option>'; }).join('');
     if (chosen && state.themes.some(function (t) { return t.folder === chosen; })) sel.value = chosen;
     renderNames();
   }

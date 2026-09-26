@@ -26,6 +26,8 @@ pub struct RemoteSession {
     pub beacon: Beacon,
     /// The theme folder shown.
     pub theme: String,
+    /// The player's configuration version the session was brought with.
+    pub config_version: String,
     /// Whether the player's theme is followed.
     pub follow: bool,
     generation: u64,
@@ -551,8 +553,10 @@ pub fn remote_main(
         let home = cache_dir.join(beacon.address().replace([':', '/'], "_"));
         let player_http = format!("http://{}:{}", beacon.address(), beacon.player_port);
         let mut sync = Sync::new(&home, &beacon.manager_url(), &player_http);
+        let mut config_version = String::new();
         let theme = match sync.run_with(&choice) {
             Ok(synced) => {
+                config_version = synced.version.clone();
                 println!(
                     "glass: synced from {}: theme {} ({} fetched, {} kept, configuration {})",
                     beacon.address(),
@@ -617,6 +621,7 @@ pub fn remote_main(
             app: app.clone(),
             beacon: beacon.clone(),
             theme: theme.clone(),
+            config_version,
             follow,
             generation,
             status_at: Instant::now(),

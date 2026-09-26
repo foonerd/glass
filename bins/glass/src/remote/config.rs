@@ -373,9 +373,9 @@ mod tests {
         assert!(config.player().is_none());
         let mut config = config;
         let id = config.put_player(Player {
-            host: "hanger.local".into(),
+            host: "kitchen.local".into(),
             manager_port: 5582,
-            name: "hanger".into(),
+            name: "kitchen".into(),
             theme: ThemeChoice::Own {
                 folder: "1280x720_x".into(),
                 meter: MeterChoice::List {
@@ -385,14 +385,14 @@ mod tests {
                 },
             },
         });
-        assert_eq!(id, "hanger");
+        assert_eq!(id, "kitchen");
         config.gain_db = 3.5;
         config.save(&path).unwrap();
         let (back, note) = RemoteConfig::load(&path);
         assert!(note.is_none());
         assert_eq!(back, config);
-        assert_eq!(back.player().unwrap().0, "hanger");
-        if let ThemeChoice::Own { meter, .. } = &back.players["hanger"].theme {
+        assert_eq!(back.player().unwrap().0, "kitchen");
+        if let ThemeChoice::Own { meter, .. } = &back.players["kitchen"].theme {
             assert_eq!(meter.meter_value(), "gold,blue");
             assert_eq!(meter.interval_s(), 30);
             assert!(meter.on_title());
@@ -460,22 +460,22 @@ mod tests {
     #[test]
     fn ids_come_from_names_and_a_known_host_is_replaced() {
         assert_eq!(
-            RemoteConfig::id_for("Hanger (Living Room)"),
-            "hanger-living-room"
+            RemoteConfig::id_for("Kitchen (Ground Floor)"),
+            "kitchen-ground-floor"
         );
         assert_eq!(RemoteConfig::id_for("  "), "player");
         let mut config = RemoteConfig::default();
         let a = config.put_player(Player {
-            host: "hanger.local".into(),
+            host: "kitchen.local".into(),
             manager_port: 5582,
             name: String::new(),
             theme: ThemeChoice::Follow,
         });
-        assert_eq!(a, "hanger-local");
+        assert_eq!(a, "kitchen-local");
         let b = config.put_player(Player {
-            host: "HANGER.local".into(),
+            host: "KITCHEN.local".into(),
             manager_port: 5590,
-            name: "Hanger".into(),
+            name: "Kitchen".into(),
             theme: ThemeChoice::Follow,
         });
         assert_eq!(b, a, "the same host keeps its id");

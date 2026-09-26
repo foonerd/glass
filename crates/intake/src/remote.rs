@@ -854,11 +854,11 @@ mod tests {
 
     #[test]
     fn the_hosts_addresses_are_read_from_a_routing_trie() {
-        let trie = "Main:\n  +-- 0.0.0.0/0 3 0 5\n     |-- 0.0.0.0\n        /0 universe UNICAST\n     +-- 127.0.0.0/8 2 0 2\n        +-- 127.0.0.0/31 1 0 0\n           |-- 127.0.0.0\n              /32 link BROADCAST\n              /8 host LOCAL\n           |-- 127.0.0.1\n              /32 host LOCAL\n     +-- 192.168.30.0/24 2 0 2\n        |-- 192.168.30.0\n           /32 link BROADCAST\n           /24 link UNICAST\n        |-- 192.168.30.10\n           /32 host LOCAL\n        |-- 192.168.30.255\n           /32 link BROADCAST\nLocal:\n  +-- 192.168.30.0/24 2 0 2\n        |-- 192.168.30.10\n           /32 host LOCAL\n";
+        let trie = "Main:\n  +-- 0.0.0.0/0 3 0 5\n     |-- 0.0.0.0\n        /0 universe UNICAST\n     +-- 127.0.0.0/8 2 0 2\n        +-- 127.0.0.0/31 1 0 0\n           |-- 127.0.0.0\n              /32 link BROADCAST\n              /8 host LOCAL\n           |-- 127.0.0.1\n              /32 host LOCAL\n     +-- 192.168.1.0/24 2 0 2\n        |-- 192.168.1.0\n           /32 link BROADCAST\n           /24 link UNICAST\n        |-- 192.168.1.10\n           /32 host LOCAL\n        |-- 192.168.1.255\n           /32 link BROADCAST\nLocal:\n  +-- 192.168.1.0/24 2 0 2\n        |-- 192.168.1.10\n           /32 host LOCAL\n";
         let found = local_addresses_in(trie);
         assert_eq!(
             found,
-            vec!["192.168.30.10".parse::<std::net::Ipv4Addr>().unwrap()]
+            vec!["192.168.1.10".parse::<std::net::Ipv4Addr>().unwrap()]
         );
     }
 
@@ -1013,33 +1013,33 @@ mod tests {
     fn a_beacon_is_parsed_and_the_rest_ignored() {
         let ip: IpAddr = "192.168.1.5".parse().unwrap();
         let beacon = Beacon::parse(
-            br#"{"glass":"player","protocol":1,"name":"hanger","host":"hanger.local","frames_port":5580,"channel_port":5581,"manager_port":5582,"release":"0.7.0","config":"abcd1234","theme":"1280x720_x","meter":"random"}"#,
+            br#"{"glass":"player","protocol":1,"name":"player","host":"player.local","frames_port":5580,"channel_port":5581,"manager_port":5582,"release":"0.7.0","config":"abcd1234","theme":"1280x720_x","meter":"random"}"#,
             ip,
         )
         .unwrap();
-        assert_eq!(beacon.name, "hanger");
+        assert_eq!(beacon.name, "player");
         assert_eq!(beacon.address(), "192.168.1.5");
         assert_eq!(beacon.manager_url(), "http://192.168.1.5:5582");
         assert!(Beacon::parse(br#"{"glass":"player","protocol":2}"#, ip).is_none());
         assert!(Beacon::parse(br#"{"service":"peppy_level_server"}"#, ip).is_none());
         let bare = Beacon::parse(br#"{"glass":"player","protocol":1,"name":"x"}"#, ip).unwrap();
         assert_eq!(bare.frames_port, DEFAULT_FRAMES_PORT);
-        assert_eq!(Beacon::named("hanger.local").address(), "hanger.local");
+        assert_eq!(Beacon::named("player.local").address(), "player.local");
     }
 
     #[test]
     fn the_managers_status_names_the_ports_and_the_defaults_fill_the_rest() {
         let status: Value = serde_json::from_str(
             r#"{"ports":{"enabled":true,"frames":6580,"channel":6581,"beacon":6579,"manager":5582},
-                "beacon":{"glass":"player","name":"hanger","release":"0.7.1","theme":"1280x720_x","meter":"random","player_port":3000}}"#,
+                "beacon":{"glass":"player","name":"player","release":"0.7.1","theme":"1280x720_x","meter":"random","player_port":3000}}"#,
         )
         .unwrap();
-        let beacon = Beacon::from_status(&status, "hanger.local", 5582);
+        let beacon = Beacon::from_status(&status, "player.local", 5582);
         assert_eq!(beacon.frames_port, 6580);
         assert_eq!(beacon.channel_port, 6581);
         assert_eq!(beacon.manager_port, 5582);
-        assert_eq!(beacon.name, "hanger");
-        assert_eq!(beacon.address(), "hanger.local");
+        assert_eq!(beacon.name, "player");
+        assert_eq!(beacon.address(), "player.local");
         let bare = Beacon::from_status(&Value::Null, "10.0.0.5", 5590);
         assert_eq!(bare.frames_port, DEFAULT_FRAMES_PORT);
         assert_eq!(bare.manager_port, 5590);
