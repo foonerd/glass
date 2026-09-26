@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-09-26
+
+Serving remote displays is off until the manager's Remotes tab turns it on, and the three ports are set there, pre-filled with 5580, 5581 and 5579 and checked against each other and the manager's port; a change applies at once, and a port something else holds is reported on the tab. A player with no screen of its own says so in the display setting ("no screen of its own, remote displays only"): it opens no window and serves the remotes, PeppyMeter's server mode. A remote named by hand asks the player's manager for the ports first (`--manager-port` when the manager's port was moved), so moved ports work without a beacon.
+
 ## [0.7.0] - 2026-09-26
 
 Remote displays: Glass on another machine shows a player's meters with the player's theme, fonts and icons, drawn by the same pipeline. `glass --remote <player>` (or `discover`) brings the player's configuration, the theme on show, the fonts and the format icons into a home of its own from the manager, each file kept by checksum; subscribes to the player's frames, which `glass-serve` on the player sends over UDP from the tap's ring, one datagram per hop with the peaks and RMS exact and the spectrum in quarter-decibel steps; hears the player over the channel on TCP and says who it is; starts itself again when the player's theme changes; and plays or pauses the player on a touch. The plugin starts the frames daemon, serves the channel over TCP, announces the player with a beacon, and shows the remotes on the manager's Remotes tab. The wire is documented on the wiki's Remotes page. The old peppy_remote is not fed: it ran the Python engine on the remote, and this is its replacement.

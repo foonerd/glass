@@ -284,6 +284,7 @@ fn main() -> ExitCode {
     let mut remote: Option<String> = None;
     let mut remote_name: Option<String> = None;
     let mut cache: Option<String> = None;
+    let mut manager_port: u16 = intake::remote::DEFAULT_MANAGER_PORT;
     let mut args = env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -381,13 +382,20 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
+            "--manager-port" => match args.next().and_then(|s| s.parse::<u16>().ok()) {
+                Some(port) if port > 0 => manager_port = port,
+                _ => {
+                    eprintln!("glass: --manager-port needs a port number");
+                    return ExitCode::from(2);
+                }
+            },
             "--list" => list = true,
             "--help" => {
                 println!(
                     "glass [--once] [--headless] [--print] [--output frame.png|frame.ppm] [--record step.json]\n      \
                      [--theme FOLDER] [--meter NAME|random|a,b,c] [--interval SECONDS] [--fps N] [--threads N]\n      \
                      [--list] [--snapshot DIR [--settle SECONDS] [--thumb WIDTH]]\n      \
-                     [--remote HOST|discover [--name NAME] [--cache DIR]]\n\
+                     [--remote HOST|discover [--name NAME] [--cache DIR] [--manager-port N]]\n\
                      Reads the tap's ring under /dev/shm and the player's state.\n\
                      A window opens when DISPLAY is set. --headless skips it.\n\
                      --output writes every frame as a PNG or PPM and still rasters.\n\
@@ -443,7 +451,12 @@ fn main() -> ExitCode {
                     }
                 }
             } else {
-                Beacon::named(target)
+                // A player named by hand: its manager says which ports it uses.
+                let (beacon, note) = Beacon::ask_manager(target, manager_port);
+                if let Some(note) = note {
+                    println!("glass: the player's manager did not answer, using the default ports: {note}");
+                }
+                beacon
             };
             let home = cache_dir.join(beacon.address().replace([':', '/'], "_"));
             let player = format!("http://{}:{}", beacon.address(), beacon.player_port);

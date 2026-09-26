@@ -394,6 +394,16 @@ class Manager {
       res.json(self.plugin.remoteInfo());
     });
 
+    app.get('/api/remote/settings', function (req, res) {
+      res.json(self.plugin.remoteSettings());
+    });
+
+    app.post('/api/remote/settings', wrap(async function (req, res) {
+      const result = await self.plugin.setRemoteSettings(req.body || {});
+      if (result.error) return res.status(400).json(result);
+      res.json(Object.assign({ ok: true, changed: result.changed }, self.plugin.remoteSettings()));
+    }));
+
     app.get('/api/remote/config', function (req, res) {
       res.json(self.plugin.remoteConfig());
     });

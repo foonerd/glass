@@ -501,6 +501,17 @@
     "MANAGER_RM_SINCE": "depuis",
     "MANAGER_RM_SUBSCRIBED": "reçoit les trames",
     "MANAGER_RM_NOT_SUBSCRIBED": "connecté, pas encore de trames",
-    "MANAGER_RM_SCREEN": "écran"
+    "MANAGER_RM_SCREEN": "écran",
+    "DISPLAY_OUTPUT_NONE": "Pas d'écran propre : écrans distants seulement",
+    "MANAGER_RM_SETTINGS": "Diffusion",
+    "MANAGER_RM_ENABLE": "Servir les écrans distants",
+    "MANAGER_RM_ENABLE_DOC": "Activé, ce lecteur envoie ses trames aux écrans distants qui s'abonnent, leur sert le canal et s'annonce sur le réseau. Désactivé, rien ne sort du lecteur. Les ports s'appliquent aussitôt ; un port occupé par autre chose est signalé ici.",
+    "MANAGER_RM_PORT_FRAMES": "Port des trames (UDP)",
+    "MANAGER_RM_PORT_CHANNEL": "Port du canal (TCP)",
+    "MANAGER_RM_PORT_BEACON": "Port de la balise (UDP)",
+    "MANAGER_RM_PORTS_INVALID": "Les ports doivent être des nombres de 1024 à 65535.",
+    "MANAGER_RM_PORTS_CLASH": "Les trois ports et celui du gestionnaire doivent tous différer.",
+    "MANAGER_RM_APPLIED": "Appliqué.",
+    "MANAGER_RM_PROBLEM": "Problème :"
   }
 }

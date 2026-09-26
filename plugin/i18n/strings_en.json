@@ -501,6 +501,17 @@
     "MANAGER_RM_SINCE": "since",
     "MANAGER_RM_SUBSCRIBED": "receiving frames",
     "MANAGER_RM_NOT_SUBSCRIBED": "connected, no frames yet",
-    "MANAGER_RM_SCREEN": "screen"
+    "MANAGER_RM_SCREEN": "screen",
+    "DISPLAY_OUTPUT_NONE": "No screen of its own: remote displays only",
+    "MANAGER_RM_SETTINGS": "Serving",
+    "MANAGER_RM_ENABLE": "Serve remote displays",
+    "MANAGER_RM_ENABLE_DOC": "When on, this player sends its frames to remote displays that subscribe, serves them the channel, and announces itself on the network. Off, nothing leaves the player. Ports are taken at once when applied; a port something else holds is reported here.",
+    "MANAGER_RM_PORT_FRAMES": "Frames port (UDP)",
+    "MANAGER_RM_PORT_CHANNEL": "Channel port (TCP)",
+    "MANAGER_RM_PORT_BEACON": "Beacon port (UDP)",
+    "MANAGER_RM_PORTS_INVALID": "Ports must be numbers from 1024 to 65535.",
+    "MANAGER_RM_PORTS_CLASH": "The three ports and the manager's port must all differ.",
+    "MANAGER_RM_APPLIED": "Applied.",
+    "MANAGER_RM_PROBLEM": "Problem:"
   }
 }

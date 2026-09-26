@@ -250,6 +250,19 @@
       <div class="help" id="rm-help" style="margin:10px 0"></div>
       <table class="kv" id="rm-table"></table>
     </div>
+    <div class="panel">
+      <h2 id="rm-settings-title"></h2>
+      <div class="form">
+        <div class="full">
+          <label class="switch"><input type="checkbox" id="rm-enabled"><span id="rm-enabled-label"></span></label>
+          <div class="help" id="rm-enabled-help"></div>
+        </div>
+        <div><label id="rm-frames-label"></label><input type="number" id="rm-frames" min="1024" max="65535"></div>
+        <div><label id="rm-channel-label"></label><input type="number" id="rm-channel" min="1024" max="65535"></div>
+        <div><label id="rm-beacon-label"></label><input type="number" id="rm-beacon" min="1024" max="65535"></div>
+        <div class="full row"><button class="primary" id="btn-rm-apply"></button><span class="help" id="rm-problem"></span></div>
+      </div>
+    </div>
     <div class="list" id="rm-list"></div>
   </section>
 
@@ -417,6 +430,13 @@
     $('rm-title').textContent = t('MANAGER_RM_TITLE');
     $('rm-help').textContent = t('MANAGER_RM_HELP');
     $('btn-rm-refresh').textContent = t('MANAGER_REFRESH');
+    $('rm-settings-title').textContent = t('MANAGER_RM_SETTINGS');
+    $('rm-enabled-label').textContent = t('MANAGER_RM_ENABLE');
+    $('rm-enabled-help').textContent = t('MANAGER_RM_ENABLE_DOC');
+    $('rm-frames-label').textContent = t('MANAGER_RM_PORT_FRAMES');
+    $('rm-channel-label').textContent = t('MANAGER_RM_PORT_CHANNEL');
+    $('rm-beacon-label').textContent = t('MANAGER_RM_PORT_BEACON');
+    $('btn-rm-apply').textContent = t('MANAGER_SAVE');
     document.querySelectorAll('.tab').forEach(function (b) { b.textContent = t(tabs[b.dataset.view]); });
     $('themes-search').placeholder = t('MANAGER_SEARCH');
     $('btn-upload').textContent = t('MANAGER_UPLOAD');
@@ -500,7 +520,22 @@
   }
 
   // ---- remote displays -----------------------------------------------
+  function fillRemoteSettings(s) {
+    $('rm-enabled').checked = !!s.enabled;
+    $('rm-frames').value = s.framesPort;
+    $('rm-channel').value = s.channelPort;
+    $('rm-beacon').value = s.beaconPort;
+  }
+  $('btn-rm-apply').onclick = function () {
+    $('rm-problem').textContent = '';
+    api('POST', '/api/remote/settings', { enabled: $('rm-enabled').checked, framesPort: parseInt($('rm-frames').value, 10), channelPort: parseInt($('rm-channel').value, 10), beaconPort: parseInt($('rm-beacon').value, 10) }).then(function (s) {
+      fillRemoteSettings(s);
+      toast(t('MANAGER_RM_APPLIED'));
+      setTimeout(loadRemotes, 2500);
+    }).catch(function (e) { $('rm-problem').textContent = errorText(e); toast(errorText(e), 'error'); });
+  };
   function loadRemotes() {
+    api('GET', '/api/remote/settings').then(fillRemoteSettings).catch(function () {});
     api('GET', '/api/remote/status').then(function (r) {
       var rows = [];
       if (!r.ports.enabled) {
@@ -509,7 +544,11 @@
         return;
       }
       rows.push(['MANAGER_RM_PORTS', t('MANAGER_RM_FRAMES') + ' ' + r.ports.frames + ' · ' + t('MANAGER_RM_CHANNEL') + ' ' + r.ports.channel + ' · ' + t('MANAGER_RM_BEACON') + ' ' + r.ports.beacon]);
-      rows.push(['MANAGER_RM_SERVING', (r.serving ? t('MANAGER_RM_SERVING_UP') : t('MANAGER_RM_SERVING_DOWN')) + (r.serve ? ' · ' + r.serve.sent + ' ' + t('MANAGER_RM_SENT') : '')]);
+      var problems = [];
+      if (r.errors && r.errors.serve) problems.push(r.errors.serve);
+      if (r.errors && r.errors.channel) problems.push(r.errors.channel);
+      rows.push(['MANAGER_RM_SERVING', (r.serving ? t('MANAGER_RM_SERVING_UP') : t('MANAGER_RM_SERVING_DOWN')) + (r.serve ? ' · ' + r.serve.sent + ' ' + t('MANAGER_RM_SENT') : '') + (problems.length ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + problems.join('; ') : '')]);
+      if (r.headless) rows.push(['MANAGER_ST_DISPLAY', t('DISPLAY_OUTPUT_NONE')]);
       $('rm-table').innerHTML = rows.map(function (x) { return '<tr><td>' + esc(t(x[0])) + '</td><td>' + esc(x[1]) + '</td></tr>'; }).join('');
       var subs = {};
       ((r.serve && r.serve.subscribers) || []).forEach(function (s) { subs[s.address.split(':')[0]] = s; });
@@ -1010,7 +1049,7 @@
       $('subtitle').textContent = (s.hostname || '') + ' · Glass ' + s.version;
       var rows = [
         ['MANAGER_ST_VERSION', s.version + ' (' + s.arch + (s.binary ? '' : ', ' + t('MANAGER_ST_NO_BINARY')) + ')'],
-        ['MANAGER_ST_DISPLAY', (s.running ? t('MANAGER_ST_RUNNING') : t('MANAGER_ST_IDLE')) + ' · DISPLAY=:' + s.display + ' · ' + t('MANAGER_ST_TIMEOUT') + ' ' + s.timeout + ' s'],
+        ['MANAGER_ST_DISPLAY', s.headless ? t('DISPLAY_OUTPUT_NONE') : (s.running ? t('MANAGER_ST_RUNNING') : t('MANAGER_ST_IDLE')) + ' · DISPLAY=:' + s.display + ' · ' + t('MANAGER_ST_TIMEOUT') + ' ' + s.timeout + ' s'],
         ['MANAGER_ST_THEME', s.activeTheme + ' · ' + ({ random: t('MANAGER_MODE_RANDOM'), list: t('MANAGER_MODE_LIST'), single: t('MANAGER_MODE_SINGLE') }[s.meter.mode] || s.meter.mode) + (s.meter.mode !== 'random' ? ': ' + s.meter.names.join(', ') : '')],
         ['MANAGER_ST_PLAYER', (s.channel.status || '-') + (s.channel.service ? ' · ' + s.channel.service : '') + (s.channel.title ? ' · ' + (s.channel.artist ? s.channel.artist + ' - ' : '') + s.channel.title : '') +
           (s.channel.status === 'play' ? ' · ' + (s.measured ? t('MANAGER_ST_MEASURED') : t('MANAGER_ST_NOT_MEASURED')) : '')],

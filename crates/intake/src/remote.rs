@@ -214,6 +214,76 @@ impl Beacon {
     }
 }
 
+impl Beacon {
+    /// A player named by hand, its ports asked of its manager: what
+    /// `/api/remote/status` says, or the defaults when it does not answer.
+    pub fn ask_manager(host: &str, manager_port: u16) -> (Self, Option<String>) {
+        let url = format!("http://{host}:{manager_port}/api/remote/status");
+        let agent = ureq::Agent::config_builder()
+            .timeout_global(Some(Duration::from_secs(5)))
+            .build()
+            .new_agent();
+        let answer = agent
+            .get(&url)
+            .call()
+            .map_err(|e| e.to_string())
+            .and_then(|mut r| r.body_mut().read_to_string().map_err(|e| e.to_string()))
+            .and_then(|text| serde_json::from_str::<Value>(&text).map_err(|e| e.to_string()));
+        match answer {
+            Ok(value) => (Self::from_status(&value, host, manager_port), None),
+            Err(err) => (
+                Self {
+                    manager_port,
+                    ..Self::named(host)
+                },
+                Some(format!("{url}: {err}")),
+            ),
+        }
+    }
+
+    /// The manager's `/api/remote/status` as a beacon for `host`.
+    pub fn from_status(status: &Value, host: &str, manager_port: u16) -> Self {
+        let ports = status.get("ports").cloned().unwrap_or(Value::Null);
+        let port = |key: &str, fallback: u16| {
+            ports
+                .get(key)
+                .and_then(Value::as_u64)
+                .filter(|p| (1..=65535).contains(p))
+                .map(|p| p as u16)
+                .unwrap_or(fallback)
+        };
+        let beacon = status.get("beacon").cloned().unwrap_or(Value::Null);
+        let text = |key: &str| {
+            beacon
+                .get(key)
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string()
+        };
+        Self {
+            name: if text("name").is_empty() {
+                host.to_string()
+            } else {
+                text("name")
+            },
+            host: host.to_string(),
+            frames_port: port("frames", DEFAULT_FRAMES_PORT),
+            channel_port: port("channel", DEFAULT_CHANNEL_PORT),
+            manager_port: port("manager", manager_port),
+            player_port: beacon
+                .get("player_port")
+                .and_then(Value::as_u64)
+                .map(|p| p as u16)
+                .unwrap_or(DEFAULT_PLAYER_PORT),
+            release: text("release"),
+            config: text("config"),
+            theme: text("theme"),
+            meter: text("meter"),
+            from: None,
+        }
+    }
+}
+
 /// Listen for players' beacons for `wait`, one entry per player.
 pub fn discover(port: u16, wait: Duration) -> std::io::Result<Vec<Beacon>> {
     let socket = UdpSocket::bind(("0.0.0.0", port))?;
@@ -693,6 +763,29 @@ mod tests {
         let bare = Beacon::parse(br#"{"glass":"player","protocol":1,"name":"x"}"#, ip).unwrap();
         assert_eq!(bare.frames_port, DEFAULT_FRAMES_PORT);
         assert_eq!(Beacon::named("hanger.local").address(), "hanger.local");
+    }
+
+    #[test]
+    fn the_managers_status_names_the_ports_and_the_defaults_fill_the_rest() {
+        let status: Value = serde_json::from_str(
+            r#"{"ports":{"enabled":true,"frames":6580,"channel":6581,"beacon":6579,"manager":5582},
+                "beacon":{"glass":"player","name":"hanger","release":"0.7.1","theme":"1280x720_x","meter":"random","player_port":3000}}"#,
+        )
+        .unwrap();
+        let beacon = Beacon::from_status(&status, "hanger.local", 5582);
+        assert_eq!(beacon.frames_port, 6580);
+        assert_eq!(beacon.channel_port, 6581);
+        assert_eq!(beacon.manager_port, 5582);
+        assert_eq!(beacon.name, "hanger");
+        assert_eq!(beacon.address(), "hanger.local");
+        let bare = Beacon::from_status(&Value::Null, "10.0.0.5", 5590);
+        assert_eq!(bare.frames_port, DEFAULT_FRAMES_PORT);
+        assert_eq!(bare.manager_port, 5590);
+        assert_eq!(bare.name, "10.0.0.5");
+        let (unreachable, note) = Beacon::ask_manager("127.0.0.1", 1);
+        assert!(note.is_some(), "a manager that does not answer is said");
+        assert_eq!(unreachable.frames_port, DEFAULT_FRAMES_PORT);
+        assert_eq!(unreachable.manager_port, 1);
     }
 
     #[test]
