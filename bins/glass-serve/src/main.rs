@@ -202,6 +202,9 @@ fn main() -> ExitCode {
     let mut pending: Option<Frame> = None;
     let mut pending_hops: Vec<Frame> = Vec::new();
     let mut last_sent_at: Option<Instant> = None;
+    // The ring counts frames from the start of the stream; the wire carries
+    // the frames in the hop, so the count last sent is kept to subtract.
+    let mut last_sent_frames: u64 = 0;
     let mut silence_sent = false;
     let mut sent: u64 = 0;
     let mut status_at = Instant::now() - STATUS_EVERY;
@@ -297,7 +300,10 @@ fn main() -> ExitCode {
         let mut to_send: Option<Vec<u8>> = None;
         if let (Some(frame), true) = (pending.as_ref(), due) {
             let info = ring.as_ref().map(|r| r.info()).unwrap_or_default();
-            to_send = Some(wire::encode(frame, info.rate, info.channels, 0));
+            let mut on_wire = frame.clone();
+            on_wire.frames = frame.frames.saturating_sub(last_sent_frames).max(1);
+            last_sent_frames = frame.frames;
+            to_send = Some(wire::encode(&on_wire, info.rate, info.channels, 0));
         } else if quiet && !silence_sent && ring.is_some() {
             let info = ring.as_ref().map(|r| r.info()).unwrap_or_default();
             let silence = Frame {
