@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.6] - 2026-09-26
+
+The cross builds survive a restored CI cache, which keeps the links of the unpacked sysroot and drops the files behind them: the ship script looks for each target's SDL and ALSA library at its own path and unpacks it again when the file is gone, and the tap's build script runs again when the library it links appears, changes or goes.
+
 ## [0.5.5] - 2026-09-26
 
 The chain names the tap. The ALSA contribution puts `glasstap` on the meter PCMs, the display reads the tap's ring instead of the two pipes, and nothing of peppyalsa is left: no library in the package, no pipes made or held by the plugin, no peppy names in the PCMs or the MPD side output, which is `mpd_glass` now and is rewritten on the first start after this release. The meter keeps its fall and the spectrum its bins and smoothing, made in the display from the raw measurements. `tapdump` stays as the way to look at the tap.

@@ -16,13 +16,16 @@ fn main() {
     let root = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap()).join("../..");
     let mut candidates = Vec::new();
     if !deb.is_empty() {
-        candidates.push(
-            root.join("target/sysroot")
-                .join(deb)
-                .join("usr/lib")
-                .join(multiarch)
-                .join("libasound.so.2"),
-        );
+        let unpacked = root
+            .join("target/sysroot")
+            .join(deb)
+            .join("usr/lib")
+            .join(multiarch)
+            .join("libasound.so.2");
+        // Run again when the unpacked library appears, changes or goes, so
+        // a build never links by a choice made for another sysroot.
+        println!("cargo:rerun-if-changed={}", unpacked.display());
+        candidates.push(unpacked);
         candidates.push(
             PathBuf::from("/usr/lib")
                 .join(multiarch)
