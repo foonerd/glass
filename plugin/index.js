@@ -453,6 +453,9 @@ Glass.prototype.onStart = function () {
     self.channel = new Channel(self.logger, function () {
         socket.emit('getState', '');
         socket.emit('getInfinityPlayback', '');
+        // A remote that connects hears the configuration as it stands, so a
+        // change made while it was away is not missed.
+        self.pushRemoteConfig();
     }, function (message) {
         self.runCommand(message);
     });
@@ -1760,6 +1763,14 @@ Glass.prototype.saveRotationConf = function (confData) {
 // Debug settings save handler
 //-------------------------------------------------------------
 
+// The configuration as the remotes follow it: its version, the theme on
+// show and the meter selection, on the channel to every display connected.
+Glass.prototype.pushRemoteConfig = function () {
+  var self = this;
+  if (!self.channel || !remoteConfigVersion) { return; }
+  self.channel.push({ kind: 'config', version: remoteConfigVersion, theme: self.activeTheme(), meter: String((meterConfig && meterConfig.current && meterConfig.current.meter) || '') });
+};
+
 Glass.prototype.updateConfigVersion = function () {
   const self = this;
   
@@ -1772,9 +1783,7 @@ Glass.prototype.updateConfigVersion = function () {
         remoteConfigVersion = newHash;
         self.logger.info(id + 'Config version updated: ' + remoteConfigVersion);
         // The remotes hear of it at once, and the beacon carries it from now.
-        if (self.channel) {
-          self.channel.push({ kind: 'config', version: newHash, theme: self.activeTheme(), meter: String((meterConfig && meterConfig.current && meterConfig.current.meter) || '') });
-        }
+        self.pushRemoteConfig();
         self.sendBeacon();
       }
     }
@@ -1802,7 +1811,7 @@ function fanartArtistSlug(artist) {
   if (ascii) {
     return ascii;
   }
-  // Non-Latin names (Thai, CJK, Cyrillic, …): ASCII slug would be empty and
+  // Non-Latin names (Thai, CJK, Cyrillic and so on): ASCII slug would be empty and
   // blocked fanart entirely; use a stable hashed cache directory instead.
   return 'u-' + crypto.createHash('sha256').update(raw, 'utf8').digest('hex').slice(0, 16);
 }

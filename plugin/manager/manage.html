@@ -568,7 +568,7 @@
         var el = document.createElement('div');
         el.className = 'item';
         el.innerHTML = '<div class="grow"><div class="name">' + esc(m.name) + ' <span class="muted" style="font-weight:normal">' + esc(m.address) + (m.release ? ' · ' + esc(m.release) : '') + '</span></div>' +
-          '<div class="muted" style="font-size:13px">' + (m.screen && m.screen[0] ? esc(t('MANAGER_RM_SCREEN')) + ' ' + m.screen[0] + '×' + m.screen[1] + ' · ' : '') +
+          '<div class="muted" style="font-size:13px">' + (m.screen && m.screen[0] ? esc(t('MANAGER_RM_SCREEN')) + ' ' + m.screen[0] + 'x' + m.screen[1] + ' · ' : '') +
           esc(m.frames ? t('MANAGER_RM_SUBSCRIBED') + ' (' + m.sent + ')' : t('MANAGER_RM_NOT_SUBSCRIBED')) + (m.since ? ' · ' + esc(t('MANAGER_RM_SINCE')) + ' ' + esc(fmtDate(m.since)) : '') + '</div></div>' +
           // The remote's own settings page opens in this window: on the player's own display a new tab cannot be closed.
           (m.page ? '<a href="' + esc(m.page) + '" style="text-decoration:none"><button class="small">' + esc(t('MANAGER_RM_PAGE')) + '</button></a>' : '') +
@@ -591,7 +591,7 @@
       return Promise.all(loads).then(renderThemes);
     }).catch(function (e) { toast(errorText(e), 'error'); });
   }
-  function themeSize(th) { return th.width && th.height ? th.width + '×' + th.height : ''; }
+  function themeSize(th) { return th.width && th.height ? th.width + 'x' + th.height : ''; }
   function renderThemes() {
     var q = $('themes-search').value.trim().toLowerCase();
     var grid = $('themes-grid');
@@ -880,7 +880,7 @@
     var keys = Object.keys(sizes).sort(function (a, b) { var pa = a.split('x'), pb = b.split('x'); return (pa[0] - pb[0]) || (pa[1] - pb[1]); });
     var current = sel.value;
     sel.innerHTML = '<option value="">' + esc(t('MANAGER_ALL_SIZES')) + '</option>';
-    keys.forEach(function (k) { sel.innerHTML += '<option value="' + k + '">' + k.replace('x', '×') + ' (' + sizes[k] + ')</option>'; });
+    keys.forEach(function (k) { sel.innerHTML += '<option value="' + k + '">' + k.replace('x', 'x') + ' (' + sizes[k] + ')</option>'; });
     if (!sizesFilled) {
       sizesFilled = true;
       var active = (state.themes || []).find(function (x) { return x.active; });
@@ -926,7 +926,7 @@
         '<div class="thumb">' + (e.thumb ? '<img loading="lazy" src="' + esc(e.thumb) + '" alt="">' : '<div class="placeholder">' + esc(t('MANAGER_NO_PREVIEW')) + '</div>') + (stateBadge ? '<div style="position:absolute;top:8px;left:8px">' + stateBadge + '</div>' : '') + '</div>' +
         '<div class="body">' +
           '<div class="title">' + esc(e.name) + '</div>' +
-          '<div class="meta"><span>' + e.width + '×' + e.height + '</span><span>' + esc({ meter: t('MANAGER_KIND_METER'), 'meter+spectrum': t('MANAGER_KIND_BOTH'), spectrum: t('MANAGER_KIND_SPECTRUM') }[e.kind] || e.kind) + '</span>' + (meters ? '<span>' + meters + ' ' + esc(t('MANAGER_METERS_N')) + '</span>' : '') + '<span>' + esc(fmtBytes(e.bytes)) + '</span></div>' +
+          '<div class="meta"><span>' + e.width + 'x' + e.height + '</span><span>' + esc({ meter: t('MANAGER_KIND_METER'), 'meter+spectrum': t('MANAGER_KIND_BOTH'), spectrum: t('MANAGER_KIND_SPECTRUM') }[e.kind] || e.kind) + '</span>' + (meters ? '<span>' + meters + ' ' + esc(t('MANAGER_METERS_N')) + '</span>' : '') + '<span>' + esc(fmtBytes(e.bytes)) + '</span></div>' +
           '<div class="actions">' + button + (e.preview ? '<button class="small" data-act="preview">' + esc(t('MANAGER_PREVIEW')) + '</button>' : '') + '</div>' +
         '</div>';
       if (e.preview) card.querySelector('.thumb').onclick = function () { lightbox(e.preview); };
@@ -1097,8 +1097,8 @@
     }
     if (u.checkedAt) lines.push('<div class="help">' + esc(t('MANAGER_CATALOG_FETCHED')) + ' ' + esc(fmtDate(u.checkedAt)) + '</div>');
     if (u.error) lines.push('<div class="help">' + esc(t('MANAGER_UPD_CHECK_FAILED')) + ' ' + esc(u.error.message || u.error.error) + '</div>');
-    if (u.last && u.last.phase === 'done') lines.push('<div class="help">' + esc(u.last.ok ? t('MANAGER_UPD_LAST') : t('MANAGER_UPD_LAST_FAILED')) + ' ' + esc(u.last.from) + ' → ' + esc(u.last.to) + ' (' + esc(fmtDate(u.last.endedAt || u.last.at)) + ')</div>');
-    if (u.last && u.last.phase === 'failed') lines.push('<div class="help">' + esc(t('MANAGER_UPD_LAST_FAILED')) + ' ' + esc(u.last.from) + ' → ' + esc(u.last.to) + ': ' + esc(u.last.error || '') + '</div>');
+    if (u.last && u.last.phase === 'done') lines.push('<div class="help">' + esc(u.last.ok ? t('MANAGER_UPD_LAST') : t('MANAGER_UPD_LAST_FAILED')) + ' ' + esc(u.last.from) + ' to ' + esc(u.last.to) + ' (' + esc(fmtDate(u.last.endedAt || u.last.at)) + ')</div>');
+    if (u.last && u.last.phase === 'failed') lines.push('<div class="help">' + esc(t('MANAGER_UPD_LAST_FAILED')) + ' ' + esc(u.last.from) + ' to ' + esc(u.last.to) + ': ' + esc(u.last.error || '') + '</div>');
     lines.push('<div class="help">' + esc(u.previous ? t('MANAGER_UPD_PREVIOUS') + ' ' + u.previous.version + ' (' + fmtBytes(u.previous.bytes) + ')' : t('MANAGER_UPD_NONE')) + '</div>');
     $('upd-body').innerHTML = lines.join('');
     $('btn-upd-install').classList.toggle('hidden', !u.available);

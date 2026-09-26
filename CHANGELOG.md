@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.5] - 2026-09-26
+
+A remote that follows the player follows its whole configuration: a change of the meter selection, the rotation or any other value of the player's meter configuration starts the remote's session again with it, not only a change of theme; and the player sends its configuration to every display that connects to the channel, so a change made while a remote was away is taken up when it returns. The wiki is rewritten around a Quick Start, with Settings, Themes, Meters Reference, Spectrum, Catalog, Backups, Artwork, Troubleshooting and Logging pages, screenshots and diagrams. Names of the development machines, private addresses, dashes and other glyphs are gone from the code's fixtures, the plugin's strings and the pages.
+
 ## [0.7.4] - 2026-09-26
 
 A remote's needles and bars move as the player's own do. The frames daemon put the ring's running frame count on the wire, where the field holds the frames in the hop and is sixteen bits wide, so every packet after the first second claimed 65535 frames and the remote's meter decay let the needles fall to each new peak at once. The daemon now sends the frames in the hop, and the remote times its decay by the player's stamps on the packets, which spans a dropped datagram and holds against a daemon of an earlier release. A frame of silence from the daemon is taken as a stop, so the needles fall the way they fall on the player.
@@ -258,7 +262,7 @@ The frame size follows the selected theme folder. `screen.width` and `screen.hei
 
 ## [0.2.0] - 2026-09-24
 
-`pane` opens a window when `DISPLAY` is set and uploads one RGBA frame. `plugin/run_glass.sh` sets the X11 driver, and on x64 turns MIT-SHM off, before the process starts. The loop sleeps for `[current] frame.rate` from the plugin `config.txt` (10–60, default 30). `--headless` skips that window. `--output` still writes a PPM.
+`pane` opens a window when `DISPLAY` is set and uploads one RGBA frame. `plugin/run_glass.sh` sets the X11 driver, and on x64 turns MIT-SHM off, before the process starts. The loop sleeps for `[current] frame.rate` from the plugin `config.txt` (10-60, default 30). `--headless` skips that window. `--output` still writes a PPM.
 
 ## [0.1.0] - 2026-09-24
 
