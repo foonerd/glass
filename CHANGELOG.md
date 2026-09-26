@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.7] - 2026-09-26
+
+The settings backups an upgrade or rollback writes on its own are kept to the newest five, pruned after each one is written and when the manager starts; they are marked in their manifest, and the ones earlier releases named `before-<version>` count too. Named backups are never touched.
+
 ## [0.6.6] - 2026-09-26
 
 "Open the manager here" opens the manager in this window, inside Volumio's own page with its title bar and way back, instead of a new tab; on the player's own display a new tab had no way to close. Volumio's interface opens every link button in a new tab, so the button now goes through the one button type the interface navigates in place. Inside Volumio's page the manager's inputs take the kiosk's on-screen keyboard, the way the radio plugin's page does.

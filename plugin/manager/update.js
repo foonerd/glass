@@ -20,6 +20,8 @@ const MAX_ZIP_BYTES = 256 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 const ASSET = /^glass-(\d+\.\d+\.\d+)\.zip$/;
 const CONFIG_FILES = ['meter.txt', 'spectrum.txt'];
+// The automatic settings backups kept: the newest five.
+const KEEP_AUTOMATIC_BACKUPS = 5;
 
 class UpdateError extends Error {
   constructor(code, message) {
@@ -110,6 +112,9 @@ class Updater {
       last.endedAt = new Date().toISOString();
       await this.saveState();
       this.logger.info('glass: manager upgrade from ' + last.from + ' to ' + last.to + (last.ok ? ' took' : ' did not take, running ' + this.version));
+    }
+    if (typeof this.plugin.backupPruneAutomatic === 'function') {
+      try { this.plugin.backupPruneAutomatic(KEEP_AUTOMATIC_BACKUPS); } catch (e) { /* said in the log */ }
     }
   }
 
@@ -221,8 +226,11 @@ class Updater {
   async apply(job, staged) {
     const self = this;
     job.state = 'backing-up';
-    const backup = self.plugin.backupCreate(self.backupName(staged.version));
+    const backup = self.plugin.backupCreate(self.backupName(staged.version), { automatic: true });
     if (backup.error) self.logger.warn('glass: manager upgrade: settings backup ' + backup.error);
+    if (typeof self.plugin.backupPruneAutomatic === 'function') {
+      try { self.plugin.backupPruneAutomatic(KEEP_AUTOMATIC_BACKUPS); } catch (e) { /* said in the log */ }
+    }
     for (const name of CONFIG_FILES) {
       try { await fsp.copyFile(path.join(self.pluginPath, 'config', name), path.join(self.dir, 'config', name)); } catch (e) { /* not there */ }
     }
@@ -268,4 +276,4 @@ class Updater {
   }
 }
 
-module.exports = { Updater: Updater, UpdateError: UpdateError, compareVersions: compareVersions, parseRelease: parseRelease, RELEASES_URL: RELEASES_URL };
+module.exports = { Updater: Updater, UpdateError: UpdateError, compareVersions: compareVersions, parseRelease: parseRelease, RELEASES_URL: RELEASES_URL, KEEP_AUTOMATIC_BACKUPS: KEEP_AUTOMATIC_BACKUPS };
