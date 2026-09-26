@@ -17,6 +17,7 @@ const express = require('express');
 const { Zip, ZipError, unitsOf, extractUnit, safeFolderName } = require('./zip');
 const { Catalog, CatalogError } = require('./catalog');
 const { Previews } = require('./previews');
+const { Updater, UpdateError } = require('./update');
 
 const DEFAULT_PORT = 5582;
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
@@ -46,6 +47,13 @@ class Manager {
       uid: 1000,
       gid: 1000
     });
+    this.updater = new Updater({
+      dir: path.join(paths.dataDir, 'upgrade'),
+      version: paths.version,
+      pluginPath: paths.pluginPath,
+      plugin: plugin,
+      logger: this.logger
+    });
   }
 
   // The port the manager listens on, and where it is reached from a browser.
@@ -59,6 +67,7 @@ class Manager {
     self.port = parseInt(port, 10) || DEFAULT_PORT;
     await self.catalog.init();
     await self.previews.init();
+    await self.updater.init();
     const app = express();
     app.disable('x-powered-by');
     app.use(express.json({ limit: '1mb' }));
@@ -320,6 +329,54 @@ class Manager {
       res.json({ ok: true, backups: self.plugin.backupList() });
     }));
 
+    // Upgrading Glass itself.
+    app.get('/api/update', wrap(async function (req, res) {
+      try {
+        res.json(await self.updater.check(false));
+      } catch (e) {
+        res.json(Object.assign(self.updater.view(), { error: failure(e) }));
+      }
+    }));
+
+    app.post('/api/update/check', wrap(async function (req, res) {
+      try {
+        res.json(await self.updater.check(true));
+      } catch (e) {
+        res.status(502).json(Object.assign(self.updater.view(), { error: failure(e) }));
+      }
+    }));
+
+    // One upgrade at a time. A job left in `restarting` for minutes means
+    // the restart did not happen; it no longer stands in the way.
+    const upgrading = function () {
+      return self.jobs.some(function (j) {
+        if (j.kind !== 'upgrade' && j.kind !== 'rollback') return false;
+        if (j.state === 'done' || j.state === 'failed') return false;
+        if (j.state === 'restarting' && Date.now() - Date.parse(j.endedAt || j.startedAt) > 180000) return false;
+        return true;
+      });
+    };
+
+    app.post('/api/update/install', wrap(async function (req, res) {
+      const view = self.updater.view();
+      if (!view.available) return res.status(400).json({ error: 'up-to-date' });
+      if (upgrading()) return res.status(409).json({ error: 'busy' });
+      const job = self.newJob('upgrade', 'Glass ' + view.latest.version);
+      job.target = view.latest.version;
+      self.runUpgrade(job, false);
+      res.status(202).json({ ok: true, job: job });
+    }));
+
+    app.post('/api/update/rollback', wrap(async function (req, res) {
+      const previous = self.updater.previous();
+      if (!previous) return res.status(400).json({ error: 'no-previous' });
+      if (upgrading()) return res.status(409).json({ error: 'busy' });
+      const job = self.newJob('rollback', 'Glass ' + previous.version);
+      job.target = previous.version;
+      self.runUpgrade(job, true);
+      res.status(202).json({ ok: true, job: job });
+    }));
+
     app.use('/api', function (req, res) {
       res.status(404).json({ error: 'not-found' });
     });
@@ -495,6 +552,23 @@ class Manager {
     });
   }
 
+  // Replace the plugin with the latest release, or with the kept previous
+  // version. The job ends in `restarting`: the backend goes down with this
+  // process's state, and the page waits for the new version to answer.
+  runUpgrade(job, rollback) {
+    const self = this;
+    self.exclusive(async function () {
+      try {
+        const staged = rollback ? await self.updater.stagePrevious(job) : await self.updater.download(job);
+        const result = await self.updater.apply(job, staged);
+        job.endedAt = new Date().toISOString();
+        self.logger.info('glass: manager ' + job.kind + ' from ' + result.from + ' to ' + result.to + ': plugin replaced, backend restarting');
+      } catch (e) {
+        self.finish(job, e);
+      }
+    });
+  }
+
   runUpload(job, file, name) {
     const self = this;
     self.exclusive(async function () {
@@ -609,7 +683,7 @@ function sameUnits(found, expected) {
 
 function failure(e) {
   if (!e) return { error: 'unknown', message: '' };
-  const code = (e instanceof ZipError || e instanceof CatalogError || e.code) ? String(e.code) : 'error';
+  const code = (e instanceof ZipError || e instanceof CatalogError || e instanceof UpdateError || e.code) ? String(e.code) : 'error';
   return { error: code, message: String(e.message || e) };
 }
 

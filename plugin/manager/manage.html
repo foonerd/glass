@@ -245,6 +245,20 @@
       </div>
       <table class="kv" id="st-table" style="margin-top:10px"></table>
     </div>
+    <div class="panel" id="upd-panel">
+      <div class="row" style="justify-content:space-between">
+        <h2 id="upd-title" style="margin:0"></h2>
+        <button class="small" id="btn-upd-check"></button>
+      </div>
+      <div id="upd-body" style="margin-top:10px"></div>
+      <div class="jobs" id="jobs-update" style="margin-top:10px"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="primary hidden" id="btn-upd-install"></button>
+        <button class="hidden" id="btn-upd-rollback"></button>
+        <button class="small hidden" id="btn-upd-notes"></button>
+      </div>
+      <pre id="upd-notes" class="hidden" style="white-space:pre-wrap;margin-top:10px;font:inherit;font-size:13px;color:#ccc;background:#1a1a1a;border:1px solid var(--line);border-radius:8px;padding:10px"></pre>
+    </div>
   </section>
 </div>
 
@@ -350,7 +364,8 @@
       var key = code.slice(6);
       return t(key) + (e.data && e.data.message ? ' ' + e.data.message : '');
     }
-    var known = { 'checksum': 'MANAGER_ERR_CHECKSUM', 'size': 'MANAGER_ERR_SIZE', 'units-differ': 'MANAGER_ERR_UNITS', 'bad-theme': 'MANAGER_ERR_BAD_THEME', 'not-a-zip': 'MANAGER_ERR_NOT_ZIP', 'timeout': 'MANAGER_ERR_NETWORK', 'network': 'MANAGER_ERR_NETWORK', 'too-large': 'MANAGER_ERR_TOO_LARGE', 'render-failed': 'MANAGER_ERR_RENDER' };
+    var known = { 'checksum': 'MANAGER_ERR_CHECKSUM', 'size': 'MANAGER_ERR_SIZE', 'units-differ': 'MANAGER_ERR_UNITS', 'bad-theme': 'MANAGER_ERR_BAD_THEME', 'not-a-zip': 'MANAGER_ERR_NOT_ZIP', 'timeout': 'MANAGER_ERR_NETWORK', 'network': 'MANAGER_ERR_NETWORK', 'too-large': 'MANAGER_ERR_TOO_LARGE', 'render-failed': 'MANAGER_ERR_RENDER',
+      'no-release': 'MANAGER_ERR_NO_RELEASE', 'bad-release': 'MANAGER_ERR_NO_RELEASE', 'up-to-date': 'MANAGER_UPD_UPTODATE', 'no-previous': 'MANAGER_UPD_NONE', 'no-digest': 'MANAGER_ERR_NO_DIGEST', 'apply': 'MANAGER_ERR_APPLY', 'busy': 'MANAGER_ERR_BUSY' };
     if (known[code]) return t(known[code]) + (e.message && e.message !== code ? ' (' + e.message + ')' : '');
     return e.message || t('MANAGER_ERROR');
   }
@@ -422,6 +437,9 @@
     $('btn-bk-create').textContent = t('BACKUP_CREATE');
     $('st-title').textContent = t('MANAGER_TAB_STATUS');
     $('btn-status-refresh').textContent = t('MANAGER_REFRESH');
+    $('upd-title').textContent = t('MANAGER_UPD_TITLE');
+    $('btn-upd-check').textContent = t('MANAGER_UPD_CHECK');
+    $('btn-upd-notes').textContent = t('MANAGER_UPD_NOTES');
     $('tm-close').textContent = t('MANAGER_CLOSE');
     $('tm-activate').textContent = t('MANAGER_ACTIVATE');
     $('tm-render').textContent = t('MANAGER_RENDER');
@@ -456,7 +474,7 @@
     if (name === 'catalog' && !state.catalog) loadCatalog(false);
     if (name === 'artwork') loadArtwork();
     if (name === 'backups') loadBackups();
-    if (name === 'status') loadStatus();
+    if (name === 'status') { loadStatus(); loadUpdate(false); }
   }
 
   // ---- themes -----------------------------------------------------------
@@ -932,7 +950,105 @@
       $('st-table').innerHTML = rows.map(function (r) { return '<tr><td>' + esc(t(r[0])) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
     }).catch(function (e) { toast(errorText(e), 'error'); });
   }
-  $('btn-status-refresh').onclick = loadStatus;
+  $('btn-status-refresh').onclick = function () { loadStatus(); loadUpdate(false); };
+
+  // ---- upgrading Glass ---------------------------------------------------
+  function loadUpdate(force) {
+    var call = force ? api('POST', '/api/update/check') : api('GET', '/api/update');
+    $('upd-body').textContent = t('MANAGER_LOADING');
+    return call.then(renderUpdate).catch(function (e) {
+      if (e.data && e.data.current) renderUpdate(e.data);
+      else $('upd-body').textContent = errorText(e);
+    });
+  }
+  function renderUpdate(u) {
+    state.update = u;
+    var lines = [];
+    lines.push('<div>' + esc(t('MANAGER_UPD_CURRENT')) + ' <b>' + esc(u.current) + '</b></div>');
+    if (u.latest) {
+      lines.push('<div>' + esc(t('MANAGER_UPD_LATEST')) + ' <b>' + esc(u.latest.version) + '</b>' + (u.latest.publishedAt ? ' <span class="muted">(' + esc(fmtDate(u.latest.publishedAt)) + ')</span>' : '') +
+        (u.available ? ' <span class="badge orange">' + esc(t('MANAGER_STATE_UPDATE')) + '</span>' : ' <span class="badge green">' + esc(t('MANAGER_UPD_UPTODATE')) + '</span>') + '</div>');
+    }
+    if (u.checkedAt) lines.push('<div class="help">' + esc(t('MANAGER_CATALOG_FETCHED')) + ' ' + esc(fmtDate(u.checkedAt)) + '</div>');
+    if (u.error) lines.push('<div class="help">' + esc(t('MANAGER_UPD_CHECK_FAILED')) + ' ' + esc(u.error.message || u.error.error) + '</div>');
+    if (u.last && u.last.phase === 'done') lines.push('<div class="help">' + esc(u.last.ok ? t('MANAGER_UPD_LAST') : t('MANAGER_UPD_LAST_FAILED')) + ' ' + esc(u.last.from) + ' → ' + esc(u.last.to) + ' (' + esc(fmtDate(u.last.endedAt || u.last.at)) + ')</div>');
+    if (u.last && u.last.phase === 'failed') lines.push('<div class="help">' + esc(t('MANAGER_UPD_LAST_FAILED')) + ' ' + esc(u.last.from) + ' → ' + esc(u.last.to) + ': ' + esc(u.last.error || '') + '</div>');
+    lines.push('<div class="help">' + esc(u.previous ? t('MANAGER_UPD_PREVIOUS') + ' ' + u.previous.version + ' (' + fmtBytes(u.previous.bytes) + ')' : t('MANAGER_UPD_NONE')) + '</div>');
+    $('upd-body').innerHTML = lines.join('');
+    $('btn-upd-install').classList.toggle('hidden', !u.available);
+    $('btn-upd-install').textContent = u.available ? t('MANAGER_UPD_UPGRADE') + ' ' + u.latest.version : '';
+    $('btn-upd-rollback').classList.toggle('hidden', !u.previous);
+    $('btn-upd-rollback').textContent = u.previous ? t('MANAGER_UPD_ROLLBACK') + ' ' + u.previous.version : '';
+    $('btn-upd-notes').classList.toggle('hidden', !(u.latest && u.latest.notes));
+    $('upd-notes').textContent = u.latest && u.latest.notes ? u.latest.notes : '';
+  }
+  $('btn-upd-check').onclick = function () { loadUpdate(true); };
+  $('btn-upd-notes').onclick = function () { $('upd-notes').classList.toggle('hidden'); };
+  $('btn-upd-install').onclick = function () {
+    var u = state.update;
+    if (!u || !u.available) return;
+    confirmDialog(t('MANAGER_UPD_CONFIRM_TITLE') + ' ' + u.latest.version, t('MANAGER_UPD_CONFIRM_MSG'), t('MANAGER_UPD_UPGRADE') + ' ' + u.latest.version).then(function (ok) {
+      if (!ok) return;
+      api('POST', '/api/update/install').then(function (data) { followUpgrade(data.job); }).catch(function (e) { toast(errorText(e), 'error'); });
+    });
+  };
+  $('btn-upd-rollback').onclick = function () {
+    var u = state.update;
+    if (!u || !u.previous) return;
+    confirmDialog(t('MANAGER_UPD_ROLLBACK') + ' ' + u.previous.version, t('MANAGER_UPD_ROLLBACK_MSG'), t('MANAGER_UPD_ROLLBACK') + ' ' + u.previous.version).then(function (ok) {
+      if (!ok) return;
+      api('POST', '/api/update/rollback').then(function (data) { followUpgrade(data.job); }).catch(function (e) { toast(errorText(e), 'error'); });
+    });
+  };
+  // The job runs until the backend restarts; then the page waits for the target version to answer.
+  function followUpgrade(job) {
+    var target = job.target;
+    $('btn-upd-install').disabled = true;
+    $('btn-upd-rollback').disabled = true;
+    var draw = function (j, extra) {
+      var pct = j.progress && j.progress.total ? Math.round(j.progress.done * 100 / j.progress.total) : 0;
+      var label = { queued: 'MANAGER_JOB_QUEUED', downloading: 'MANAGER_JOB_DOWNLOADING', verifying: 'MANAGER_JOB_CHECKING', 'backing-up': 'MANAGER_JOB_BACKING_UP', applying: 'MANAGER_JOB_APPLYING', restarting: 'MANAGER_UPD_RESTARTING', failed: 'MANAGER_JOB_FAILED' }[j.state] || j.state;
+      $('jobs-update').innerHTML = '<div class="job"><b>' + esc(j.name) + '</b> · ' + esc(t(label)) + (extra ? ' · ' + esc(extra) : '') +
+        (j.state === 'downloading' || j.state === 'backing-up' ? ' ' + pct + '%<div class="progress"><div style="width:' + pct + '%"></div></div>' : '') +
+        (j.state === 'failed' && j.error ? ' <span class="muted">' + esc(errorText({ code: j.error.error, message: j.error.message })) + '</span>' : '') + '</div>';
+    };
+    draw(job);
+    var restarting = false;
+    var started = Date.now();
+    var tick = function () {
+      if (!restarting) {
+        api('GET', '/api/jobs/' + job.id).then(function (data) {
+          draw(data.job);
+          if (data.job.state === 'failed') { $('btn-upd-install').disabled = false; $('btn-upd-rollback').disabled = false; loadUpdate(false); return; }
+          if (data.job.state === 'restarting') { restarting = true; started = Date.now(); }
+          setTimeout(tick, 1000);
+        }).catch(function () {
+          // The plugin manager stopped the plugin, and this page's server with it.
+          restarting = true;
+          started = Date.now();
+          draw({ name: job.name, state: 'restarting' });
+          setTimeout(tick, 3000);
+        });
+        return;
+      }
+      api('GET', '/api/status').then(function (s) {
+        if (s.version === target) {
+          draw({ name: job.name, state: 'restarting' }, t('MANAGER_UPD_DONE') + ' ' + s.version);
+          toast(t('MANAGER_UPD_DONE') + ' ' + s.version);
+          setTimeout(function () { window.location.reload(); }, 2500);
+          return;
+        }
+        draw({ name: job.name, state: 'restarting' }, t('MANAGER_UPD_WAITING'));
+        if (Date.now() - started > 240000) { draw({ name: job.name, state: 'restarting' }, t('MANAGER_UPD_NOT_BACK')); return; }
+        setTimeout(tick, 3000);
+      }).catch(function () {
+        draw({ name: job.name, state: 'restarting' }, t('MANAGER_UPD_WAITING'));
+        if (Date.now() - started > 240000) { draw({ name: job.name, state: 'restarting' }, t('MANAGER_UPD_NOT_BACK')); return; }
+        setTimeout(tick, 3000);
+      });
+    };
+    setTimeout(tick, 1000);
+  }
 
   // ---- start ------------------------------------------------------------
   if (window.parent === window) {

@@ -3119,6 +3119,38 @@ Glass.prototype.backupList = function () {
     });
 };
 
+// Replace this plugin with a zip staged under /tmp/plugins, through the
+// player's own plugin manager: it stops this plugin, removes its
+// directory, unpacks the zip, runs the install script and enables the
+// plugin again. The settings in /data/configuration stay. The code that
+// then runs is still this module until the backend restarts.
+Glass.prototype.updateApply = function (stagedName) {
+    var self = this;
+    var name = String(stagedName || '');
+    if (!/^[A-Za-z0-9._-]+\.zip$/.test(name)) { return Promise.reject(new Error('bad zip name')); }
+    self.logger.info(id + 'upgrade: handing ' + name + ' to the plugin manager');
+    return new Promise(function (resolve, reject) {
+        self.commandRouter.updatePlugin({
+            url: 'http://127.0.0.1:3000/plugin-serve/' + name,
+            category: 'user_interface',
+            name: 'glass'
+        }).then(function () { resolve(); }, function (e) { reject(e instanceof Error ? e : new Error(String(e))); });
+    });
+};
+
+// Restart the player's backend a moment from now, from a process of its
+// own so the restart outlives this one.
+Glass.prototype.restartBackend = function () {
+    var self = this;
+    self.logger.info(id + 'upgrade: restarting the backend');
+    try {
+        var child = require('child_process').spawn('/bin/sh', ['-c', 'sleep 3; /usr/local/bin/volumio vrestart'], { detached: true, stdio: 'ignore' });
+        child.unref();
+    } catch (e) {
+        self.logger.error(id + 'upgrade: restart: ' + (e && e.message ? e.message : e));
+    }
+};
+
 // What the status page shows about the plugin and the display.
 Glass.prototype.statusInfo = function () {
     var self = this;
