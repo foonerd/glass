@@ -1,0 +1,443 @@
+//! The tap as an ALSA PCM: `type glasstap` in the player's chain, with a
+//! `slave` like any filter plugin. The stream passes through byte for byte
+//! in the format the player and the slave agreed, so PCM, DoP and native
+//! DSD stay bit-perfect. On the way the audio thread copies the samples
+//! across the relay, and a thread of the tap's own measures them and
+//! publishes into the ring: peak, RMS and the spectrum of linear audio,
+//! the density level of one-bit audio.
+//!
+//! Configuration keys beside `slave`: `ring`, `fft_size`, `hop`, `slots`,
+//! as for the scope.
+
+use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void, CString};
+use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::{Arc, Mutex};
+use std::thread::JoinHandle;
+
+use tap::fifo::ignore_sigpipe;
+use tap::measure::{self, Measure, Shape};
+use tap::relay::Relay;
+use tap::sample::Layout;
+
+use crate::ffi::{snd_config_t, snd_pcm_t};
+use crate::{note, settings_from, Settings};
+
+#[allow(non_camel_case_types)]
+mod ext {
+    use super::*;
+
+    #[repr(C)]
+    pub struct snd_pcm_hw_params_t {
+        _private: [u8; 0],
+    }
+    #[repr(C)]
+    pub struct snd_output_t {
+        _private: [u8; 0],
+    }
+    #[repr(C)]
+    pub struct snd_pcm_channel_area_t {
+        pub addr: *mut c_void,
+        pub first: c_uint,
+        pub step: c_uint,
+    }
+
+    /// The filter plugin handle, as libasound lays it out (protocol 1.0.2).
+    #[repr(C)]
+    pub struct snd_pcm_extplug_t {
+        pub version: c_uint,
+        pub name: *const c_char,
+        pub callback: *const snd_pcm_extplug_callback_t,
+        pub private_data: *mut c_void,
+        pub pcm: *mut snd_pcm_t,
+        pub stream: c_int,
+        pub format: c_int,
+        pub subformat: c_int,
+        pub channels: c_uint,
+        pub rate: c_uint,
+        pub slave_format: c_int,
+        pub slave_subformat: c_int,
+        pub slave_channels: c_uint,
+    }
+
+    pub type Transfer = unsafe extern "C" fn(
+        *mut snd_pcm_extplug_t,
+        *const snd_pcm_channel_area_t,
+        c_ulong,
+        *const snd_pcm_channel_area_t,
+        c_ulong,
+        c_ulong,
+    ) -> c_long;
+
+    /// The callbacks, in the order libasound declares them.
+    #[repr(C)]
+    pub struct snd_pcm_extplug_callback_t {
+        pub transfer: Option<Transfer>,
+        pub close: Option<unsafe extern "C" fn(*mut snd_pcm_extplug_t) -> c_int>,
+        pub hw_params:
+            Option<unsafe extern "C" fn(*mut snd_pcm_extplug_t, *mut snd_pcm_hw_params_t) -> c_int>,
+        pub hw_free: Option<unsafe extern "C" fn(*mut snd_pcm_extplug_t) -> c_int>,
+        pub dump: Option<unsafe extern "C" fn(*mut snd_pcm_extplug_t, *mut snd_output_t)>,
+        pub init: Option<unsafe extern "C" fn(*mut snd_pcm_extplug_t) -> c_int>,
+        pub query_chmaps: Option<unsafe extern "C" fn(*mut snd_pcm_extplug_t) -> *mut c_void>,
+        pub get_chmap: Option<unsafe extern "C" fn(*mut snd_pcm_extplug_t) -> *mut c_void>,
+        pub set_chmap: Option<unsafe extern "C" fn(*mut snd_pcm_extplug_t, *const c_void) -> c_int>,
+    }
+
+    pub const SND_PCM_EXTPLUG_VERSION: c_uint = (1 << 16) | 2;
+    pub const SND_PCM_STREAM_PLAYBACK: c_int = 0;
+
+    extern "C" {
+        pub fn snd_pcm_extplug_create(
+            ext: *mut snd_pcm_extplug_t,
+            name: *const c_char,
+            root: *mut snd_config_t,
+            slave_conf: *mut snd_config_t,
+            stream: c_int,
+            mode: c_int,
+        ) -> c_int;
+        pub fn snd_pcm_areas_copy(
+            dst: *const snd_pcm_channel_area_t,
+            dst_offset: c_ulong,
+            src: *const snd_pcm_channel_area_t,
+            src_offset: c_ulong,
+            channels: c_uint,
+            frames: c_ulong,
+            format: c_int,
+        ) -> c_int;
+        pub fn snd_config_search(
+            config: *mut snd_config_t,
+            key: *const c_char,
+            result: *mut *mut snd_config_t,
+        ) -> c_int;
+    }
+}
+
+use ext::*;
+
+/// Samples the relay holds: a fifth of a second of DSD256, longer for
+/// anything lighter; the measuring thread drains it every hop.
+const RELAY_SAMPLES: usize = 1 << 17;
+/// How long the measuring thread sleeps between looks when nothing comes.
+const WAIT_MS: c_int = 100;
+
+/// What the two threads share.
+struct Shared {
+    relay: Relay,
+    /// The stream's shape, from hw_params to the measuring thread.
+    shape: Mutex<Option<Shape>>,
+    /// Bumped by every hw_params; the measuring thread starts afresh.
+    generation: AtomicU32,
+    reset: AtomicBool,
+    stop: AtomicBool,
+}
+
+/// The plugin's private data: what the audio thread keeps.
+struct Tap {
+    shared: Arc<Shared>,
+    worker: Option<JoinHandle<()>>,
+    layout: Option<Layout>,
+    channels: usize,
+    playback: bool,
+    /// Samples of one transfer on their way to the relay, never grown.
+    scratch: Vec<i16>,
+    /// Set after a panic: the tap copies and nothing more.
+    failed: bool,
+}
+
+fn tap<'a>(ext: *mut snd_pcm_extplug_t) -> Option<&'a mut Tap> {
+    let p = unsafe { (*ext).private_data } as *mut Tap;
+    if p.is_null() {
+        None
+    } else {
+        Some(unsafe { &mut *p })
+    }
+}
+
+impl Tap {
+    /// The samples of `frames` frames from `areas`, on the 16-bit scale or
+    /// as DSD bytes, across the relay.
+    unsafe fn hand_over(
+        &mut self,
+        areas: *const snd_pcm_channel_area_t,
+        offset: usize,
+        frames: usize,
+    ) {
+        let Some(layout) = self.layout else {
+            return;
+        };
+        let width = layout.bytes();
+        let dsd = layout.is_dsd();
+        let capacity = self.scratch.capacity();
+        for f in 0..frames {
+            for ch in 0..self.channels {
+                let a = &*areas.add(ch);
+                let step = a.step as usize;
+                let base = (a.addr as *const u8).add((a.first as usize + (offset + f) * step) / 8);
+                let bytes = std::slice::from_raw_parts(base, width);
+                if dsd {
+                    for b in bytes {
+                        if self.scratch.len() == capacity {
+                            self.shared.relay.push(&self.scratch);
+                            self.scratch.clear();
+                        }
+                        self.scratch.push(*b as i16);
+                    }
+                } else {
+                    if self.scratch.len() == capacity {
+                        self.shared.relay.push(&self.scratch);
+                        self.scratch.clear();
+                    }
+                    self.scratch.push(layout.to_i16(bytes));
+                }
+            }
+        }
+        if !self.scratch.is_empty() {
+            self.shared.relay.push(&self.scratch);
+            self.scratch.clear();
+        }
+    }
+}
+
+unsafe extern "C" fn transfer(
+    ext: *mut snd_pcm_extplug_t,
+    dst_areas: *const snd_pcm_channel_area_t,
+    dst_offset: c_ulong,
+    src_areas: *const snd_pcm_channel_area_t,
+    src_offset: c_ulong,
+    size: c_ulong,
+) -> c_long {
+    // The audio first: it goes through whatever else happens.
+    let err = snd_pcm_areas_copy(
+        dst_areas,
+        dst_offset,
+        src_areas,
+        src_offset,
+        (*ext).channels,
+        size,
+        (*ext).format,
+    );
+    if err < 0 {
+        return err as c_long;
+    }
+    if let Some(t) = tap(ext) {
+        if !t.failed && t.playback {
+            let outcome = catch_unwind(AssertUnwindSafe(|| {
+                t.hand_over(src_areas, src_offset as usize, size as usize)
+            }));
+            if outcome.is_err() {
+                t.failed = true;
+                note("hand-over failed; the tap copies and measures no more");
+            }
+        }
+    }
+    size as c_long
+}
+
+unsafe extern "C" fn hw_params(
+    ext: *mut snd_pcm_extplug_t,
+    _params: *mut snd_pcm_hw_params_t,
+) -> c_int {
+    let Some(t) = tap(ext) else {
+        return 0;
+    };
+    let e = &*ext;
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        t.playback = e.stream == SND_PCM_STREAM_PLAYBACK;
+        t.channels = (e.channels as usize).max(1);
+        t.layout = Layout::from_alsa(e.format);
+        if t.layout.is_none() {
+            note(&format!("format {} passes unmeasured", e.format));
+        }
+        let shape = t.layout.map(|layout| Shape {
+            rate: e.rate,
+            channels: e.channels,
+            layout,
+        });
+        if let Ok(mut s) = t.shared.shape.lock() {
+            *s = shape;
+        }
+        t.shared.generation.fetch_add(1, Ordering::Release);
+        t.shared.relay.wake();
+    }));
+    if outcome.is_err() {
+        t.failed = true;
+        note("hw_params failed; the tap copies and measures no more");
+    }
+    0
+}
+
+unsafe extern "C" fn init(ext: *mut snd_pcm_extplug_t) -> c_int {
+    if let Some(t) = tap(ext) {
+        t.shared.reset.store(true, Ordering::Release);
+    }
+    0
+}
+
+unsafe extern "C" fn close(ext: *mut snd_pcm_extplug_t) -> c_int {
+    let p = (*ext).private_data as *mut Tap;
+    if !p.is_null() {
+        (*ext).private_data = std::ptr::null_mut();
+        let mut t = Box::from_raw(p);
+        t.shared.stop.store(true, Ordering::Release);
+        t.shared.relay.wake();
+        if let Some(worker) = t.worker.take() {
+            let _ = worker.join();
+        }
+    }
+    // Made by Box::leak in the open function; libasound is done with it.
+    drop(Box::from_raw(ext));
+    0
+}
+
+static CALLBACKS: snd_pcm_extplug_callback_t = snd_pcm_extplug_callback_t {
+    transfer: Some(transfer),
+    close: Some(close),
+    hw_params: Some(hw_params),
+    hw_free: None,
+    dump: None,
+    init: Some(init),
+    query_chmaps: None,
+    get_chmap: None,
+    set_chmap: None,
+};
+
+static NAME: &[u8] = b"glasstap\0";
+
+/// The measuring thread: takes what the relay holds, measures it for the
+/// stream's shape, publishes into the ring.
+fn run(shared: Arc<Shared>, settings: Settings) {
+    let mut measure = Measure::new(
+        tap::ring::DIR,
+        measure::Settings {
+            ring: settings.ring.clone(),
+            fft_size: settings.fft_size,
+            hop: settings.hop,
+            slots: settings.slots,
+        },
+    );
+    let mut seen = 0u32;
+    let mut buf: Vec<i16> = Vec::with_capacity(shared.relay.capacity());
+    while !shared.stop.load(Ordering::Acquire) {
+        shared.relay.wait(WAIT_MS);
+        let generation = shared.generation.load(Ordering::Acquire);
+        if generation != seen {
+            seen = generation;
+            // What the old stream left behind is not the new stream's.
+            buf.clear();
+            shared.relay.drain(&mut buf);
+            let shape = shared.shape.lock().ok().and_then(|s| *s);
+            if let Err(e) = measure.set_shape(shape) {
+                note(&e);
+            }
+        }
+        if shared.reset.swap(false, Ordering::AcqRel) {
+            measure.reset();
+        }
+        buf.clear();
+        if shared.relay.drain(&mut buf) > 0 {
+            measure.take(&buf);
+        }
+    }
+}
+
+/// The mark libasound looks for beside the entry point to accept its
+/// protocol version; what it holds does not matter.
+#[no_mangle]
+pub static __snd_pcm_glasstap_open_dlsym_pcm_001: [usize; 3] = [0; 3];
+
+/// The entry point libasound looks for when a PCM's `type` is `glasstap`.
+///
+/// # Safety
+/// Called by libasound with live configuration nodes; `pcmp` receives the
+/// PCM on success.
+#[no_mangle]
+pub unsafe extern "C" fn _snd_pcm_glasstap_open(
+    pcmp: *mut *mut snd_pcm_t,
+    name: *const c_char,
+    root: *mut snd_config_t,
+    conf: *mut snd_config_t,
+    stream: c_int,
+    mode: c_int,
+) -> c_int {
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        let settings = settings_from(conf);
+        let key = CString::new("slave").unwrap();
+        let mut slave: *mut snd_config_t = std::ptr::null_mut();
+        if snd_config_search(conf, key.as_ptr(), &mut slave) < 0 || slave.is_null() {
+            note("a glasstap PCM needs a slave");
+            return -libc::EINVAL;
+        }
+        ignore_sigpipe();
+        let relay = match Relay::new(RELAY_SAMPLES) {
+            Ok(r) => r,
+            Err(e) => {
+                note(&format!("no relay: {e}"));
+                return -libc::EIO;
+            }
+        };
+        let shared = Arc::new(Shared {
+            relay,
+            shape: Mutex::new(None),
+            generation: AtomicU32::new(0),
+            reset: AtomicBool::new(false),
+            stop: AtomicBool::new(false),
+        });
+        let worker_shared = shared.clone();
+        let worker = match std::thread::Builder::new()
+            .name("glasstap".into())
+            .spawn(move || run(worker_shared, settings))
+        {
+            Ok(h) => h,
+            Err(e) => {
+                note(&format!("no measuring thread: {e}"));
+                return -libc::EIO;
+            }
+        };
+        let tap = Box::new(Tap {
+            shared,
+            worker: Some(worker),
+            layout: None,
+            channels: 2,
+            playback: stream == SND_PCM_STREAM_PLAYBACK,
+            scratch: Vec::with_capacity(RELAY_SAMPLES / 4),
+            failed: false,
+        });
+        let ext = Box::leak(Box::new(snd_pcm_extplug_t {
+            version: SND_PCM_EXTPLUG_VERSION,
+            name: NAME.as_ptr() as *const c_char,
+            callback: &CALLBACKS,
+            private_data: Box::into_raw(tap) as *mut c_void,
+            pcm: std::ptr::null_mut(),
+            stream,
+            format: 0,
+            subformat: 0,
+            channels: 0,
+            rate: 0,
+            slave_format: 0,
+            slave_subformat: 0,
+            slave_channels: 0,
+        }));
+        let err = snd_pcm_extplug_create(ext, name, root, slave, stream, mode);
+        if err < 0 {
+            // Nothing of libasound's holds the handle yet: take it all back.
+            let mut t = Box::from_raw(ext.private_data as *mut Tap);
+            t.shared.stop.store(true, Ordering::Release);
+            t.shared.relay.wake();
+            if let Some(worker) = t.worker.take() {
+                let _ = worker.join();
+            }
+            drop(Box::from_raw(ext as *mut snd_pcm_extplug_t));
+            return err;
+        }
+        *pcmp = ext.pcm;
+        0
+    }));
+    match outcome {
+        Ok(code) => code,
+        Err(_) => {
+            note("open failed");
+            -libc::EINVAL
+        }
+    }
+}

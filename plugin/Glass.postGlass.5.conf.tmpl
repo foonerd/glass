@@ -1,106 +1,43 @@
 #------ Glass section -------
 
-# ---> pass throught audio pipeline
-# if separat alsa pipeline enabled (DSD direct)
-pcm.${alsaDirect} {
-  type empty
-  slave.pcm "postglass"
-}
-
-# ---> inline meter for Fusion bridge (no multi, no rate constraint)
-pcm.${alsaInlineMeter} {
-  type meter
-  slave.pcm "postglass"
-  scopes.0 glasstap
-}
-
-# ---> input from modular alsa 
-# duplicate route for meters to play also DSD files
-pcm.${alsaMeter} {
-  type plug
-  route_policy "duplicate"
-  slave.channels 4
-  slave.pcm {
-    type multi
-
-    slaves.a.pcm "postglass"
-    slaves.a.channels 2
-    slaves.b.pcm "mpd_glass"
-    slaves.b.channels 2
-
-    bindings.0 { slave a; channel 0; }
-    bindings.1 { slave a; channel 1; }
-    bindings.2 { slave b; channel 0; }
-    bindings.3 { slave b; channel 1; }
-  }
-}
-
-# ---> input from the MPD side output
-# without audio output (dummy)
-pcm.mpd_glass{
-	type meter
-	slave.pcm "dummy"
-	scopes.0 glasstap
-}
-
-# ---> separate airplay input
-pcm.airplay {
-	type meter
-	slave.pcm "postglass"
-	scopes.0 glasstap
-}
-
-# ---> separate spotify input
-pcm.${spotDirect} {
-  type empty
-  slave.pcm "postglass"
-}
-
-# spotify with meter using multi/duplicate pattern
-# main audio bypasses meter, meter receives duplicate to dummy
-# this avoids hw_params issues when meter is inline with main audio
-pcm.${spotMeter} {
-  type plug
-  route_policy "duplicate"
-  slave.channels 4
-  slave.pcm {
-    type multi
-
-    slaves.a.pcm "postglass"
-    slaves.a.channels 2
-    slaves.b.pcm "spd_glass"
-    slaves.b.channels 2
-
-    bindings.0 { slave a; channel 0; }
-    bindings.1 { slave a; channel 1; }
-    bindings.2 { slave b; channel 0; }
-    bindings.3 { slave b; channel 1; }
-  }
-}
-
-# spotify meter to dummy - side path for meter data only
-pcm.spd_glass {
-  type meter
-  slave.pcm "dummy"
-  scopes.0 glasstap
-}
-
-# the tap: peak, RMS and the spectrum of what plays, into a ring under /dev/shm
-pcm_scope.glasstap {
+# The tap. Every source's stream passes through it byte for byte, in the
+# format the player and the output agreed, so PCM, DoP and native DSD stay
+# bit-perfect; on the way it is measured, and the peak, RMS and spectrum
+# go into a ring under /dev/shm for the display.
+pcm.Glass {
   type glasstap
-  fft_size 2048
+  slave.pcm "postglass"
   ring "glass"
+  fft_size 2048
 }
 
-pcm_scope_type.glasstap {
-    lib /data/plugins/user_interface/glass/lib/libglasstap.so
+pcm_type.glasstap {
+  lib /data/plugins/user_interface/glass/lib/libglasstap.so
 }
 
-# null output
-pcm.dummy {
-  type hw
-	card Dummy
-	device 0
+# ---> Spotify and AirPlay name their own PCMs: the same tap.
+pcm.spotify {
+  type glasstap
+  slave.pcm "postglass"
+  ring "glass"
+  fft_size 2048
+}
+
+pcm.airplay {
+  type glasstap
+  slave.pcm "postglass"
+  ring "glass"
+  fft_size 2048
+}
+
+# ---> the side outputs of earlier releases, kept as names so an older
+# player include still loads; they play nowhere and measure nothing.
+pcm.mpd_glass {
+  type null
+}
+
+pcm.spd_glass {
+  type null
 }
 
 # needed for some sound cards otherwiese Spotify stops playing after 10 seconds

@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.9] - 2026-09-26
+
+Meters for every source, bit-perfect. The tap is an ALSA PCM plugin now (`type glasstap`), at the head of the Glass section for every source: the stream passes through it byte for byte in the format the player and the output agreed, so PCM, DoP and native DSD stay bit-perfect, and it is measured on the way, linear audio for peak, RMS and spectrum, one-bit audio by density. The audio thread only copies and hands the samples across a lock-free relay; a thread of the tap's own measures and publishes. FM and DAB, Tidal Connect, Bluetooth and anything else that plays through `volumio` meter as MPD, Spotify and AirPlay did, in both audio selections and on x64 as on the Pi; the MPD side output is off and the loopback card unused. `scripts/tap_exact.sh` plays raw frames of each format through the tap into a file and proves the bytes; CI runs it. Ring files carry a writer number after the process id.
+
 ## [0.5.8] - 2026-09-26
 
 The guard holds. When Glass refuses to start because PeppyMeter Screensaver is enabled, it disables itself, so the two are never both enabled at the next start and the ALSA chain is built without Glass until the switch is made. Glass starts after PeppyMeter Screensaver at boot, so when both are found enabled the transition release steps aside and Glass runs. The guard's messages name PeppyMeter Screensaver where they said Glass, and the German and French files carry their own words where they carried English. PeppyMeter Screensaver 3.5.0, its transition release, mirrors the guard.

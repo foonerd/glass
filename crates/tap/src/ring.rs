@@ -18,7 +18,44 @@ use std::ffi::CString;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+
+/// Writers made by this process so far, for their file names.
+static INSTANCE: AtomicU32 = AtomicU32::new(0);
+
+/// Remove the rings left under `dir` by writers whose process is gone: a
+/// player killed outright never drops its writer. Every new writer sweeps
+/// first. Returns how many went.
+pub fn sweep(dir: &Path) -> usize {
+    let mut gone = 0;
+    let own = std::process::id() as i32;
+    for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let Some(rest) = name.strip_prefix(PREFIX) else {
+            continue;
+        };
+        // `<tag>.<pid>.<n>`, or `<tag>.<pid>` from earlier releases.
+        let fields: Vec<&str> = rest.split('.').collect();
+        let pid = match fields.len() {
+            n if n >= 3 => fields[n - 2].parse::<i32>().ok(),
+            2 => fields[1].parse::<i32>().ok(),
+            _ => None,
+        };
+        let Some(pid) = pid else {
+            continue;
+        };
+        if pid == own {
+            continue;
+        }
+        // A process of another user answers with EPERM: alive.
+        let alive = unsafe { libc::kill(pid, 0) } == 0
+            || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
+        if !alive && fs::remove_file(entry.path()).is_ok() {
+            gone += 1;
+        }
+    }
+    gone
+}
 
 pub const MAGIC: &[u8; 8] = b"GLASSTAP";
 pub const VERSION: u32 = 1;
@@ -186,11 +223,14 @@ impl Writer {
         hop: u32,
         slots: usize,
     ) -> io::Result<Self> {
+        sweep(dir);
         let bins = (fft_size / 2) as usize;
         let slots = slots.max(2);
         let slot_bytes = slot_bytes(bins);
         let len = HEADER_BYTES + slots * slot_bytes;
-        let path = dir.join(format!("{PREFIX}{tag}.{}", std::process::id()));
+        // One file per writer: a process may hold more than one tap.
+        let instance = INSTANCE.fetch_add(1, Ordering::Relaxed);
+        let path = dir.join(format!("{PREFIX}{tag}.{}.{instance}", std::process::id()));
         let cpath = CString::new(path.to_string_lossy().as_bytes())
             .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
         let fd = unsafe {
@@ -440,6 +480,29 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("glasstap-ring-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         dir
+    }
+
+    #[test]
+    fn rings_of_dead_processes_are_swept_and_live_ones_kept() {
+        // A directory of its own: the other tests write rings beside it.
+        let dir = temp_dir().join("sweep");
+        fs::create_dir_all(&dir).unwrap();
+        let dead = dir.join(format!("{PREFIX}test.{}.0", i32::MAX));
+        let old_style_dead = dir.join(format!("{PREFIX}test.{}", i32::MAX - 1));
+        let live = dir.join(format!("{PREFIX}test.{}.7", std::process::id()));
+        let other = dir.join("not-a-ring.txt");
+        for p in [&dead, &old_style_dead, &live, &other] {
+            fs::write(p, b"x").unwrap();
+        }
+        assert_eq!(sweep(&dir), 2);
+        assert!(!dead.exists() && !old_style_dead.exists());
+        assert!(live.exists() && other.exists());
+        // A new writer sweeps on its way in.
+        fs::write(&dead, b"x").unwrap();
+        let writer = Writer::create(&dir, "test", 48_000, 2, 256, 128, 4).unwrap();
+        assert!(!dead.exists());
+        assert!(writer.path().exists());
+        let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]

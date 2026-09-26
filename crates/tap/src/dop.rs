@@ -1,22 +1,18 @@
 //! DSD over PCM. A DoP stream carries DSD bits in the low sixteen bits of
 //! 24-bit frames with a marker byte alternating 0x05 and 0xFA on top; as
-//! 16-bit samples it looks like full-scale noise. The level of such a
-//! stream is the density of ones in the bit stream around one half, which
-//! is what a DSD modulator makes of the signal's amplitude.
+//! 16-bit samples (the top sixteen bits of each frame) it looks like
+//! full-scale noise with the marker in the high byte and eight DSD bits in
+//! the low byte. The level of such a stream is the density of those bits,
+//! measured as for native DSD.
 
 const MARKER_A: i32 = 0x05;
 const MARKER_B: i32 = 0xFA;
 const PROBE: usize = 64;
-const WINDOW: usize = 2;
-const GROUP_HZ: u32 = 8000;
-/// 0 dBFS in DSD is a 50 percent modulation index, so the density of a
-/// full-scale signal swings between a quarter and three quarters.
-const FULL_SCALE: f64 = 2.0;
 
 /// Frames per density group at a sample rate: the group's duration, and so
 /// the measurement bandwidth, stays the same from DSD64 to DSD512.
 pub fn group_frames(rate: u32) -> usize {
-    ((rate / GROUP_HZ) as usize).max(2)
+    ((rate / crate::dsd::GROUP_HZ) as usize).max(2)
 }
 
 /// Whether the first frames carry the alternating DoP markers.
@@ -36,39 +32,10 @@ pub fn is_stream(samples: &[i16]) -> bool {
     true
 }
 
-/// The level of a DoP stream on the 16-bit scale, 0 through 32767.
+/// The level of a DoP stream on the 16-bit scale, 0 through 32767: the
+/// density of the DSD byte each sample carries.
 pub fn level(samples: &[i16], group: usize) -> i32 {
-    let groups = samples.len() / group;
-    if groups == 0 {
-        return 0;
-    }
-    let bits = (group * 8) as f64;
-    let mut ring = [0.0f64; WINDOW];
-    let mut running = 0.0;
-    let mut best = 0.0;
-    for g in 0..groups {
-        let ones: u32 = samples[g * group..(g + 1) * group]
-            .iter()
-            .map(|s| (*s as u8).count_ones())
-            .sum();
-        let d = (ones as f64 - bits / 2.0) / (bits / 2.0);
-        running += d * d - ring[g % WINDOW];
-        ring[g % WINDOW] = d * d;
-        if g + 1 >= WINDOW && running > best {
-            best = running;
-        }
-    }
-    let lev = if groups < WINDOW {
-        (running / groups as f64).sqrt()
-    } else {
-        (best / WINDOW as f64).sqrt()
-    };
-    let lev = lev * FULL_SCALE * 32767.0;
-    if lev > 32767.0 {
-        32767
-    } else {
-        lev as i32
-    }
+    crate::dsd::level(samples.iter().map(|s| *s as u8), group)
 }
 
 #[cfg(test)]
