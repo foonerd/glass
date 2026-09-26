@@ -900,7 +900,12 @@ Glass.prototype.getUIConfig = function () {
             C('managerPort').value = parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT;
             C('managerHost').value = String(self.config.get('managerHost') || '');
             C('managerHost').attributes[0].placeholder = self.managerDefaultHost();
-            C('managerOpen').onClick.url = '/iframe-page/' + managerUrl.replace(/\//g, '~2F');
+            // The UI opens an openUrl button in a new tab, always; the one
+            // button type it navigates in place is the oauth one, which sets
+            // the window's location to its performer URL (with two query
+            // parameters the page ignores). So "open here" goes that way,
+            // to Volumio's own iframe page holding the manager.
+            C('managerOpen').onClick.performerUrl = 'http://' + self.managerHost() + '/iframe-page/' + managerUrl.replace(/\//g, '~2F');
             C('managerOpenTab').onClick.url = managerUrl;
             C('managerOpenTab').doc = self.commandRouter.getI18nString('GLASS.MANAGER_OPEN_TAB_DOC') + ' ' + managerUrl;
 
