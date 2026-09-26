@@ -1,0 +1,34 @@
+{
+  "name": "glass",
+  "version": "0.5.0",
+  "description": "Glass: VU meters, spectrum, turntables and reels on the player's display",
+  "main": "index.js",
+  "author": "foonerd; audio path from PeppyMeter Screensaver by 2aCD (original) and Just a Nerd",
+  "license": "MIT",
+  "repository": "https://github.com/foonerd/glass",
+  "dependencies": {
+    "fs-extra": "^11.2.0",
+    "kew": "^0.7.0",
+    "v-conf": "^1.4.3",
+    "socket.io-client": "^1.7.4",
+    "ini": "^4.1.1",
+    "image-size": "^1.1.1",
+    "line-reader": "^0.4.0"
+  },
+  "volumio_info": {
+    "prettyName": "Glass",
+    "icon": "fa-lightbulb-o",
+    "plugin_type": "user_interface",
+    "boot_priority": 10,
+    "has_alsa_contribution": true,
+    "os": [
+      "bookworm"
+    ],
+    "architectures": [
+      "armhf",
+      "amd64"
+    ],
+    "details": "Glass draws VU meters, spectrum analysers, turntables and tape decks on the player's display from PeppyMeter themes. It is a native display, one small binary, with no Python and no browser in the path. Glass replaces PeppyMeter Screensaver: only one of the two may be enabled.",
+    "changelog": "0.5.0 First release as a plugin: the glass display binary, the audio path and settings carried over from PeppyMeter Screensaver, themes and settings adopted from an installed or preserved PeppyMeter Screensaver, the bundled PeppyMeter and PeppySpectrum default themes."
+  }
+}

@@ -1,0 +1,1411 @@
+{
+  "page": {
+    "label": "TRANSLATE.GLASS.PLUGIN_CONFIGURATION"
+  },
+  "sections": [
+    {
+      "id": "legacy_conf",
+      "element": "section",
+      "label": "TRANSLATE.GLASS.LEGACY_SECTION",
+      "description": "TRANSLATE.GLASS.LEGACY_ENABLED_MSG",
+      "icon": "fa-exclamation-triangle",
+      "hidden": false,
+      "onSave": {
+        "type": "controller",
+        "endpoint": "user_interface/glass",
+        "method": "disableLegacyAndStart"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.GLASS.LEGACY_DISABLE_BTN",
+        "data": []
+      },
+      "content": []
+    },
+    {
+      "id": "audio_source_conf",
+      "element": "section",
+      "label": "TRANSLATE.GLASS.AUDIO_SOURCE_CONF",
+      "description": "TRANSLATE.GLASS.AUDIO_SOURCE_DESC",
+      "icon": "fa-music",
+      "hidden": false,
+      "onSave": {
+        "type": "controller",
+        "endpoint": "user_interface/glass",
+        "method": "saveAudioSourceConf"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.GLASS.APPLY",
+        "data": [
+          "alsaSelection",
+          "useDSP",
+          "useSpotify",
+          "useUSBDAC",
+          "useSoloist",
+          "useAirplay"
+        ]
+      },
+      "content": [
+        {
+          "id": "alsaSelection",
+          "element": "select",
+          "visibleIf": {
+            "field": "useDSP",
+            "value": false
+          },
+          "doc": "TRANSLATE.GLASS.ALSA_SELECTION_DOC",
+          "label": "TRANSLATE.GLASS.ALSA_SELECTION",
+          "value": {
+            "value": 1,
+            "label": "TRANSLATE.GLASS.ALSA_SELECTION_1"
+          },
+          "options": [
+            {
+              "value": 0,
+              "label": "TRANSLATE.GLASS.ALSA_SELECTION_0"
+            },
+            {
+              "value": 1,
+              "label": "TRANSLATE.GLASS.ALSA_SELECTION_1"
+            }
+          ]
+        },
+        {
+          "id": "useDSP",
+          "element": "switch",
+          "doc": "TRANSLATE.GLASS.DSP_DOC",
+          "label": "TRANSLATE.GLASS.DSP",
+          "value": false
+        },
+        {
+          "id": "useSpotify",
+          "element": "switch",
+          "visibleIf": {
+            "field": "useDSP",
+            "value": false
+          },
+          "doc": "TRANSLATE.GLASS.SPOTIFY_DOC",
+          "label": "TRANSLATE.GLASS.SPOTIFY",
+          "value": false
+        },
+        {
+          "id": "useUSBDAC",
+          "element": "switch",
+          "visibleIf": {
+            "field": "useSpotify",
+            "value": true
+          },
+          "doc": "TRANSLATE.GLASS.USBDAC_DOC",
+          "label": "TRANSLATE.GLASS.USBDAC",
+          "value": false
+        },
+        {
+          "id": "useSoloist",
+          "element": "switch",
+          "visibleIf": {
+            "field": "useDSP",
+            "value": false
+          },
+          "doc": "TRANSLATE.GLASS.SOLOIST_DOC",
+          "label": "TRANSLATE.GLASS.SOLOIST",
+          "value": true
+        },
+        {
+          "id": "useAirplay",
+          "element": "switch",
+          "visibleIf": {
+            "field": "useDSP",
+            "value": false
+          },
+          "doc": "TRANSLATE.GLASS.AIRPLAY_DOC",
+          "label": "TRANSLATE.GLASS.AIRPLAY",
+          "value": false
+        }
+      ]
+    },
+    {
+      "id": "display_conf",
+      "element": "section",
+      "label": "TRANSLATE.GLASS.DISPLAY_CONF",
+      "description": "TRANSLATE.GLASS.DISPLAY_DESC",
+      "icon": "fa-desktop",
+      "hidden": false,
+      "onSave": {
+        "type": "controller",
+        "endpoint": "user_interface/glass",
+        "method": "saveDisplayConf"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.GLASS.APPLY",
+        "data": [
+          "timeout",
+          "positionType",
+          "position_x",
+          "position_y",
+          "mouseEnabled",
+          "displayOutput",
+          "formatTypeMode"
+        ]
+      },
+      "content": [
+        {
+          "id": "timeout",
+          "element": "input",
+          "type": "number",
+          "doc": "TRANSLATE.GLASS.TIMEOUT_DOC",
+          "label": "TRANSLATE.GLASS.TIMEOUT",
+          "attributes": [
+            {
+              "placeholder": 15
+            },
+            {
+              "maxlength": 2
+            },
+            {
+              "min": 0
+            },
+            {
+              "max": 3600
+            }
+          ],
+          "value": 15
+        },
+        {
+          "id": "positionType",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.POSITION_TYPE_DOC",
+          "label": "TRANSLATE.GLASS.POSITION_TYPE",
+          "value": {
+            "value": "0",
+            "label": "centered"
+          },
+          "options": [
+            {
+              "value": 0,
+              "label": "centered"
+            },
+            {
+              "value": 1,
+              "label": "manually"
+            }
+          ]
+        },
+        {
+          "id": "position_x",
+          "element": "input",
+          "type": "number",
+          "visibleIf": {
+            "field": "positionType",
+            "value": 1
+          },
+          "doc": "TRANSLATE.GLASS.POS_X_DOC",
+          "label": "TRANSLATE.GLASS.POS_X",
+          "attributes": [
+            {
+              "placeholder": 0
+            },
+            {
+              "maxlength": 4
+            },
+            {
+              "min": 0
+            },
+            {
+              "max": 3840
+            }
+          ],
+          "value": 0
+        },
+        {
+          "id": "position_y",
+          "element": "input",
+          "type": "number",
+          "visibleIf": {
+            "field": "positionType",
+            "value": 1
+          },
+          "doc": "TRANSLATE.GLASS.POS_Y_DOC",
+          "label": "TRANSLATE.GLASS.POS_Y",
+          "attributes": [
+            {
+              "placeholder": 0
+            },
+            {
+              "maxlength": 4
+            },
+            {
+              "min": 0
+            },
+            {
+              "max": 2160
+            }
+          ],
+          "value": 0
+        },
+        {
+          "id": "mouseEnabled",
+          "element": "switch",
+          "doc": "TRANSLATE.GLASS.MOUSE_DOC",
+          "label": "TRANSLATE.GLASS.MOUSE",
+          "value": true
+        },
+        {
+          "id": "displayOutput",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.DISPLAY_OUTPUT_DOC",
+          "label": "TRANSLATE.GLASS.DISPLAY_OUTPUT",
+          "value": {
+            "value": "0",
+            "label": "Display :0"
+          },
+          "options": [
+            {
+              "value": "0",
+              "label": "Display=0"
+            },
+            {
+              "value": "1",
+              "label": "Display=1"
+            }
+          ]
+        },
+        {
+          "id": "formatTypeMode",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.FORMAT_TYPE_MODE_DOC",
+          "label": "TRANSLATE.GLASS.FORMAT_TYPE_MODE",
+          "value": {
+            "value": "icon",
+            "label": "TRANSLATE.GLASS.FORMAT_TYPE_ICON"
+          },
+          "options": [
+            {
+              "value": "icon",
+              "label": "TRANSLATE.GLASS.FORMAT_TYPE_ICON"
+            },
+            {
+              "value": "text",
+              "label": "TRANSLATE.GLASS.FORMAT_TYPE_TEXT"
+            },
+            {
+              "value": "both",
+              "label": "TRANSLATE.GLASS.FORMAT_TYPE_BOTH"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "theme_gallery_conf",
+      "element": "section",
+      "label": "TRANSLATE.GLASS.THEMES_ARTWORK_CONF",
+      "description": "TRANSLATE.GLASS.THEMES_ARTWORK_DESC",
+      "icon": "fa-picture-o",
+      "hidden": false,
+      "onSave": {
+        "type": "controller",
+        "endpoint": "user_interface/glass",
+        "method": "saveThemesArtwork"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.GLASS.APPLY",
+        "data": [
+          "activeFolder",
+          "themeTagRules",
+          "themeToRemove",
+          "doNotDeleteThemes",
+          "fanartEnabled",
+          "fanartKeyMode",
+          "fanart_personal_key",
+          "fanartInterval",
+          "fanartOrder",
+          "fanartTransition",
+          "fanartTransitionMs",
+          "fanartUnlimitedImages"
+        ]
+      },
+      "content": [
+        {
+          "id": "activeFolder",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.ACTIVE_FOLDER_DOC",
+          "label": "TRANSLATE.GLASS.ACTIVE_FOLDER",
+          "value": {
+            "value": "480x320",
+            "label": "BuildIn 480x320"
+          },
+          "options": [
+            {
+              "value": "320x240",
+              "label": "BuildIn 320x240"
+            },
+            {
+              "value": "480x320",
+              "label": "BuildIn 480x320"
+            },
+            {
+              "value": "800x480",
+              "label": "BuildIn 800x480"
+            },
+            {
+              "value": "1280x400",
+              "label": "BuildIn 1280x400"
+            }
+          ]
+        },
+        {
+          "id": "themeTagRules",
+          "element": "input",
+          "doc": "TRANSLATE.GLASS.THEME_TAG_RULES_DOC",
+          "label": "TRANSLATE.GLASS.THEME_TAG_RULES",
+          "value": "",
+          "attributes": [
+            {
+              "placeholder": "Vinyl=1920x1080_name_Vinyl, Tape=1920x1080_name_Tape"
+            },
+            {
+              "maxlength": 800
+            }
+          ]
+        },
+        {
+          "id": "themeToRemove",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.THEME_REMOVE_DOC",
+          "label": "TRANSLATE.GLASS.THEME_REMOVE_LABEL",
+          "value": {
+            "value": "",
+            "label": ""
+          },
+          "options": []
+        },
+        {
+          "id": "doNotDeleteThemes",
+          "element": "switch",
+          "doc": "TRANSLATE.GLASS.DO_NOT_DELETE_THEMES_DOC",
+          "label": "TRANSLATE.GLASS.DO_NOT_DELETE_THEMES",
+          "value": false
+        },
+        {
+          "id": "fanartEnabled",
+          "element": "switch",
+          "doc": "TRANSLATE.GLASS.FANART_ENABLE_DOC",
+          "label": "TRANSLATE.GLASS.FANART_ENABLE_LABEL",
+          "value": false
+        },
+        {
+          "id": "fanartKeyMode",
+          "element": "select",
+          "visibleIf": {
+            "field": "fanartEnabled",
+            "value": true
+          },
+          "doc": "TRANSLATE.GLASS.FANART_KEY_MODE_DOC",
+          "label": "TRANSLATE.GLASS.FANART_KEY_MODE_LABEL",
+          "value": {
+            "value": "personal",
+            "label": "TRANSLATE.GLASS.FANART_KEY_MODE_PERSONAL"
+          },
+          "options": [
+            {
+              "value": "personal",
+              "label": "TRANSLATE.GLASS.FANART_KEY_MODE_PERSONAL"
+            },
+            {
+              "value": "project",
+              "label": "TRANSLATE.GLASS.FANART_KEY_MODE_PROJECT"
+            }
+          ]
+        },
+        {
+          "id": "fanart_personal_key",
+          "element": "input",
+          "type": "text",
+          "visibleIf": {
+            "field": "fanartEnabled",
+            "value": true
+          },
+          "doc": "TRANSLATE.GLASS.FANART_KEY_DOC",
+          "label": "TRANSLATE.GLASS.FANART_KEY_LABEL",
+          "value": ""
+        },
+        {
+          "id": "fanartInterval",
+          "element": "input",
+          "type": "number",
+          "visibleIf": {
+            "field": "fanartEnabled",
+            "value": true
+          },
+          "doc": "TRANSLATE.GLASS.FANART_INTERVAL_DOC",
+          "label": "TRANSLATE.GLASS.FANART_INTERVAL_LABEL",
+          "attributes": [
+            {
+              "placeholder": 0
+            },
+            {
+              "maxlength": 4
+            },
+            {
+              "min": 0
+            },
+            {
+              "max": 3600
+            }
+          ],
+          "value": 0
+        },
+        {
+          "id": "fanartOrder",
+          "element": "select",
+          "visibleIf": {
+            "field": "fanartEnabled",
+            "value": true
+          },
+          "doc": "TRANSLATE.GLASS.FANART_ORDER_DOC",
+          "label": "TRANSLATE.GLASS.FANART_ORDER_LABEL",
+          "value": {
+            "value": "sequential",
+            "label": "TRANSLATE.GLASS.FANART_ORDER_SEQUENTIAL"
+          },
+          "options": [
+            {
+              "value": "sequential",
+              "label": "TRANSLATE.GLASS.FANART_ORDER_SEQUENTIAL"
+            },
+            {
+              "value": "random",
+              "label": "TRANSLATE.GLASS.FANART_ORDER_RANDOM"
+            }
+          ]
+        },
+        {
+          "id": "fanartTransition",
+          "element": "select",
+          "visibleIf": {
+            "field": "fanartEnabled",
+            "value": true
+          },
+          "doc": "TRANSLATE.GLASS.FANART_TRANSITION_DOC",
+          "label": "TRANSLATE.GLASS.FANART_TRANSITION_LABEL",
+          "value": {
+            "value": "none",
+            "label": "TRANSLATE.GLASS.FANART_TRANSITION_NONE"
+          },
+          "options": [
+            {
+              "value": "none",
+              "label": "TRANSLATE.GLASS.FANART_TRANSITION_NONE"
+            },
+            {
+              "value": "fade",
+              "label": "TRANSLATE.GLASS.FANART_TRANSITION_FADE"
+            },
+            {
+              "value": "merge",
+              "label": "TRANSLATE.GLASS.FANART_TRANSITION_MERGE"
+            }
+          ]
+        },
+        {
+          "id": "fanartTransitionMs",
+          "element": "input",
+          "type": "number",
+          "visibleIf": {
+            "field": "fanartEnabled",
+            "value": true
+          },
+          "doc": "TRANSLATE.GLASS.FANART_TRANSITION_MS_DOC",
+          "label": "TRANSLATE.GLASS.FANART_TRANSITION_MS_LABEL",
+          "attributes": [
+            {
+              "placeholder": 600
+            },
+            {
+              "maxlength": 4
+            },
+            {
+              "min": 50
+            },
+            {
+              "max": 3000
+            }
+          ],
+          "value": 600
+        },
+        {
+          "id": "fanartUnlimitedImages",
+          "element": "switch",
+          "visibleIf": {
+            "field": "fanartEnabled",
+            "value": true
+          },
+          "doc": "TRANSLATE.GLASS.FANART_UNLIMITED_DOC",
+          "label": "TRANSLATE.GLASS.FANART_UNLIMITED_LABEL",
+          "value": false
+        },
+        {
+          "id": "clearFanartCache",
+          "element": "button",
+          "visibleIf": {
+            "field": "fanartEnabled",
+            "value": true
+          },
+          "doc": "TRANSLATE.GLASS.CLEAR_FANART_CACHE_DOC",
+          "label": "TRANSLATE.GLASS.CLEAR_FANART_CACHE",
+          "onClick": {
+            "type": "controller",
+            "endpoint": "user_interface/glass",
+            "method": "clearFanartCache"
+          }
+        }
+      ]
+    },
+    {
+      "id": "VUmeter_conf",
+      "element": "section",
+      "label": "TRANSLATE.GLASS.VUMETER_CONF",
+      "description": "TRANSLATE.GLASS.VUMETER_DESC",
+      "icon": "fa-tachometer",
+      "hidden": false,
+      "onSave": {
+        "type": "controller",
+        "endpoint": "user_interface/glass",
+        "method": "saveVUMeterConf"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.GLASS.APPLY",
+        "data": [
+          "meter",
+          "randomSelection",
+          "randomMode",
+          "randomInterval",
+          "smoothBuffer",
+          "meterGain"
+        ]
+      },
+      "content": [
+        {
+          "id": "meter",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.METER_DOC",
+          "label": "TRANSLATE.GLASS.METER",
+          "value": {
+            "value": "random",
+            "label": "Random"
+          },
+          "options": [
+            {
+              "value": "random",
+              "label": "Random"
+            },
+            {
+              "value": "list",
+              "label": "List"
+            }
+          ]
+        },
+        {
+          "id": "randomSelection",
+          "element": "input",
+          "type": "string",
+          "doc": "TRANSLATE.GLASS.RANDOMSELECTION_DOC",
+          "label": "TRANSLATE.GLASS.RANDOMSELECTION",
+          "value": "",
+          "visibleIf": {
+            "field": "meter",
+            "value": "list"
+          }
+        },
+        {
+          "id": "randomMode",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.RANDOMMODE_DOC",
+          "label": "TRANSLATE.GLASS.RANDOMMODE",
+          "hidden": true,
+          "value": {
+            "value": "titlechange",
+            "label": "On Title Change"
+          },
+          "options": [
+            {
+              "value": "titlechange",
+              "label": "On Title Change"
+            },
+            {
+              "value": "interval",
+              "label": "Interval"
+            }
+          ]
+        },
+        {
+          "id": "randomInterval",
+          "element": "input",
+          "type": "number",
+          "visibleIf": {
+            "field": "randomMode",
+            "value": "interval"
+          },
+          "doc": "TRANSLATE.GLASS.RANDOMINTERVAL_DOC",
+          "label": "TRANSLATE.GLASS.RANDOMINTERVAL",
+          "attributes": [
+            {
+              "placeholder": 60
+            },
+            {
+              "maxlength": 4
+            },
+            {
+              "min": 15
+            },
+            {
+              "max": 1000
+            }
+          ],
+          "value": 120
+        },
+        {
+          "id": "smoothBuffer",
+          "element": "input",
+          "type": "number",
+          "doc": "TRANSLATE.GLASS.SMOOTH_BUFFER_DOC",
+          "label": "TRANSLATE.GLASS.SMOOTH_BUFFER",
+          "attributes": [
+            {
+              "placeholder": 8
+            },
+            {
+              "maxlength": 2
+            },
+            {
+              "min": 2
+            },
+            {
+              "max": 15
+            }
+          ],
+          "value": 8
+        },
+        {
+          "id": "meterGain",
+          "element": "input",
+          "type": "number",
+          "doc": "TRANSLATE.GLASS.METER_SENSITIVITY_DOC",
+          "label": "TRANSLATE.GLASS.METER_SENSITIVITY",
+          "attributes": [
+            {
+              "placeholder": 0
+            },
+            {
+              "maxlength": 3
+            },
+            {
+              "min": -12
+            },
+            {
+              "max": 12
+            }
+          ],
+          "value": 0
+        }
+      ]
+    },
+    {
+      "id": "performance_conf",
+      "element": "section",
+      "label": "TRANSLATE.GLASS.PERFORMANCE_CONF",
+      "description": "TRANSLATE.GLASS.PERFORMANCE_DESC",
+      "icon": "fa-dashboard",
+      "hidden": false,
+      "onSave": {
+        "type": "controller",
+        "endpoint": "user_interface/glass",
+        "method": "savePerformanceConf"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.GLASS.APPLY",
+        "data": [
+          "frameRate"
+        ]
+      },
+      "content": [
+        {
+          "id": "frameRate",
+          "element": "input",
+          "type": "number",
+          "doc": "TRANSLATE.GLASS.FRAME_RATE_DOC",
+          "label": "TRANSLATE.GLASS.FRAME_RATE",
+          "attributes": [
+            {
+              "placeholder": 30
+            },
+            {
+              "maxlength": 2
+            },
+            {
+              "min": 10
+            },
+            {
+              "max": 60
+            }
+          ],
+          "value": 30
+        }
+      ]
+    },
+    {
+      "id": "rotation_conf",
+      "element": "section",
+      "label": "TRANSLATE.GLASS.ROTATION_CONF",
+      "description": "TRANSLATE.GLASS.ROTATION_DESC",
+      "icon": "fa-refresh",
+      "hidden": false,
+      "onSave": {
+        "type": "controller",
+        "endpoint": "user_interface/glass",
+        "method": "saveRotationConf"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.GLASS.APPLY",
+        "data": [
+          "rotationQuality",
+          "rotationFPS",
+          "rotationSpeed",
+          "spoolLeftSpeed",
+          "spoolRightSpeed",
+          "spoolAdaptive",
+          "reelDirection"
+        ]
+      },
+      "content": [
+        {
+          "id": "rotationQuality",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.ROTATION_QUALITY_DOC",
+          "label": "TRANSLATE.GLASS.ROTATION_QUALITY",
+          "value": {
+            "value": "medium",
+            "label": "TRANSLATE.GLASS.ROTATION_MEDIUM"
+          },
+          "options": [
+            {
+              "value": "low",
+              "label": "TRANSLATE.GLASS.ROTATION_LOW"
+            },
+            {
+              "value": "medium",
+              "label": "TRANSLATE.GLASS.ROTATION_MEDIUM"
+            },
+            {
+              "value": "high",
+              "label": "TRANSLATE.GLASS.ROTATION_HIGH"
+            },
+            {
+              "value": "custom",
+              "label": "TRANSLATE.GLASS.ROTATION_CUSTOM"
+            }
+          ]
+        },
+        {
+          "id": "rotationFPS",
+          "element": "input",
+          "type": "number",
+          "visibleIf": {
+            "field": "rotationQuality",
+            "value": "custom"
+          },
+          "doc": "TRANSLATE.GLASS.ROTATION_FPS_DOC",
+          "label": "TRANSLATE.GLASS.ROTATION_FPS",
+          "attributes": [
+            {
+              "placeholder": "8"
+            },
+            {
+              "maxlength": 2
+            },
+            {
+              "min": 4
+            },
+            {
+              "max": 30
+            }
+          ],
+          "value": 8
+        },
+        {
+          "id": "rotationSpeed",
+          "element": "input",
+          "type": "number",
+          "visibleIf": {
+            "field": "rotationQuality",
+            "value": "custom"
+          },
+          "doc": "TRANSLATE.GLASS.ROTATION_SPEED_DOC",
+          "label": "TRANSLATE.GLASS.ROTATION_SPEED",
+          "attributes": [
+            {
+              "placeholder": "1.0"
+            },
+            {
+              "maxlength": 4
+            },
+            {
+              "min": 0.1
+            },
+            {
+              "max": 5.0
+            },
+            {
+              "step": 0.1
+            }
+          ],
+          "value": 1.0
+        },
+        {
+          "id": "spoolLeftSpeed",
+          "element": "input",
+          "type": "number",
+          "visibleIf": {
+            "field": "rotationQuality",
+            "value": "custom"
+          },
+          "doc": "TRANSLATE.GLASS.SPOOL_LEFT_SPEED_DOC",
+          "label": "TRANSLATE.GLASS.SPOOL_LEFT_SPEED",
+          "attributes": [
+            {
+              "placeholder": "1.0"
+            },
+            {
+              "maxlength": 4
+            },
+            {
+              "min": 0.1
+            },
+            {
+              "max": 5.0
+            },
+            {
+              "step": 0.1
+            }
+          ],
+          "value": 1.0
+        },
+        {
+          "id": "spoolRightSpeed",
+          "element": "input",
+          "type": "number",
+          "visibleIf": {
+            "field": "rotationQuality",
+            "value": "custom"
+          },
+          "doc": "TRANSLATE.GLASS.SPOOL_RIGHT_SPEED_DOC",
+          "label": "TRANSLATE.GLASS.SPOOL_RIGHT_SPEED",
+          "attributes": [
+            {
+              "placeholder": "1.0"
+            },
+            {
+              "maxlength": 4
+            },
+            {
+              "min": 0.1
+            },
+            {
+              "max": 5.0
+            },
+            {
+              "step": 0.1
+            }
+          ],
+          "value": 1.0
+        },
+        {
+          "id": "spoolAdaptive",
+          "element": "switch",
+          "doc": "TRANSLATE.GLASS.SPOOL_ADAPTIVE_DOC",
+          "label": "TRANSLATE.GLASS.SPOOL_ADAPTIVE",
+          "value": false
+        },
+        {
+          "id": "reelDirection",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.REEL_DIRECTION_DOC",
+          "label": "TRANSLATE.GLASS.REEL_DIRECTION",
+          "value": {
+            "value": "ccw",
+            "label": "TRANSLATE.GLASS.REEL_CCW"
+          },
+          "options": [
+            {
+              "value": "ccw",
+              "label": "TRANSLATE.GLASS.REEL_CCW"
+            },
+            {
+              "value": "cw",
+              "label": "TRANSLATE.GLASS.REEL_CW"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "scrolling_conf",
+      "element": "section",
+      "label": "TRANSLATE.GLASS.SCROLLING_CONF",
+      "description": "TRANSLATE.GLASS.SCROLLING_DESC",
+      "icon": "fa-text-width",
+      "hidden": false,
+      "onSave": {
+        "type": "controller",
+        "endpoint": "user_interface/glass",
+        "method": "saveScrollingConf"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.GLASS.APPLY",
+        "data": [
+          "scrollingMode",
+          "scrollingSpeedArtist",
+          "scrollingSpeedTitle",
+          "scrollingSpeedAlbum"
+        ]
+      },
+      "content": [
+        {
+          "id": "scrollingMode",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.SCROLLING_MODE_DOC",
+          "label": "TRANSLATE.GLASS.SCROLLING_MODE",
+          "value": {
+            "value": "skin",
+            "label": "TRANSLATE.GLASS.SCROLLING_SKIN"
+          },
+          "options": [
+            {
+              "value": "skin",
+              "label": "TRANSLATE.GLASS.SCROLLING_SKIN"
+            },
+            {
+              "value": "default",
+              "label": "TRANSLATE.GLASS.SCROLLING_DEFAULT"
+            },
+            {
+              "value": "custom",
+              "label": "TRANSLATE.GLASS.SCROLLING_CUSTOM"
+            }
+          ]
+        },
+        {
+          "id": "scrollingSpeedArtist",
+          "element": "input",
+          "type": "number",
+          "visibleIf": {
+            "field": "scrollingMode",
+            "value": "custom"
+          },
+          "doc": "TRANSLATE.GLASS.SCROLLING_SPEED_ARTIST_DOC",
+          "label": "TRANSLATE.GLASS.SCROLLING_SPEED_ARTIST",
+          "attributes": [
+            {
+              "placeholder": 40
+            },
+            {
+              "maxlength": 3
+            },
+            {
+              "min": 5
+            },
+            {
+              "max": 200
+            }
+          ],
+          "value": 40
+        },
+        {
+          "id": "scrollingSpeedTitle",
+          "element": "input",
+          "type": "number",
+          "visibleIf": {
+            "field": "scrollingMode",
+            "value": "custom"
+          },
+          "doc": "TRANSLATE.GLASS.SCROLLING_SPEED_TITLE_DOC",
+          "label": "TRANSLATE.GLASS.SCROLLING_SPEED_TITLE",
+          "attributes": [
+            {
+              "placeholder": 40
+            },
+            {
+              "maxlength": 3
+            },
+            {
+              "min": 5
+            },
+            {
+              "max": 200
+            }
+          ],
+          "value": 40
+        },
+        {
+          "id": "scrollingSpeedAlbum",
+          "element": "input",
+          "type": "number",
+          "visibleIf": {
+            "field": "scrollingMode",
+            "value": "custom"
+          },
+          "doc": "TRANSLATE.GLASS.SCROLLING_SPEED_ALBUM_DOC",
+          "label": "TRANSLATE.GLASS.SCROLLING_SPEED_ALBUM",
+          "attributes": [
+            {
+              "placeholder": 40
+            },
+            {
+              "maxlength": 3
+            },
+            {
+              "min": 5
+            },
+            {
+              "max": 200
+            }
+          ],
+          "value": 40
+        }
+      ]
+    },
+    {
+      "id": "animation_conf",
+      "element": "section",
+      "label": "TRANSLATE.GLASS.ANIMATION_CONF",
+      "description": "TRANSLATE.GLASS.ANIMATION_DESC",
+      "icon": "fa-film",
+      "hidden": false,
+      "onSave": {
+        "type": "controller",
+        "endpoint": "user_interface/glass",
+        "method": "saveAnimationConf"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.GLASS.APPLY",
+        "data": [
+          "animation",
+          "transitionType",
+          "transitionDuration",
+          "transitionColor",
+          "transitionOpacity"
+        ]
+      },
+      "content": [
+        {
+          "id": "animation",
+          "element": "switch",
+          "doc": "TRANSLATE.GLASS.ANIMATION_DOC",
+          "label": "TRANSLATE.GLASS.ANIMATION",
+          "value": true
+        },
+        {
+          "id": "transitionType",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.TRANSITION_TYPE_DOC",
+          "label": "TRANSLATE.GLASS.TRANSITION_TYPE",
+          "value": {
+            "value": "fade",
+            "label": "TRANSLATE.GLASS.TRANSITION_FADE"
+          },
+          "options": [
+            {
+              "value": "none",
+              "label": "TRANSLATE.GLASS.TRANSITION_NONE"
+            },
+            {
+              "value": "fade",
+              "label": "TRANSLATE.GLASS.TRANSITION_FADE"
+            }
+          ]
+        },
+        {
+          "id": "transitionDuration",
+          "element": "input",
+          "type": "number",
+          "doc": "TRANSLATE.GLASS.TRANSITION_DURATION_DOC",
+          "label": "TRANSLATE.GLASS.TRANSITION_DURATION",
+          "attributes": [
+            {
+              "placeholder": "0.5"
+            },
+            {
+              "maxlength": 3
+            },
+            {
+              "min": 0.1
+            },
+            {
+              "max": 5.0
+            },
+            {
+              "step": 0.1
+            }
+          ],
+          "value": 0.5
+        },
+        {
+          "id": "transitionColor",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.TRANSITION_COLOR_DOC",
+          "label": "TRANSLATE.GLASS.TRANSITION_COLOR",
+          "value": {
+            "value": "black",
+            "label": "TRANSLATE.GLASS.TRANSITION_BLACK"
+          },
+          "options": [
+            {
+              "value": "black",
+              "label": "TRANSLATE.GLASS.TRANSITION_BLACK"
+            },
+            {
+              "value": "white",
+              "label": "TRANSLATE.GLASS.TRANSITION_WHITE"
+            }
+          ]
+        },
+        {
+          "id": "transitionOpacity",
+          "element": "input",
+          "type": "number",
+          "doc": "TRANSLATE.GLASS.TRANSITION_OPACITY_DOC",
+          "label": "TRANSLATE.GLASS.TRANSITION_OPACITY",
+          "attributes": [
+            {
+              "placeholder": "100"
+            },
+            {
+              "maxlength": 3
+            },
+            {
+              "min": 0
+            },
+            {
+              "max": 100
+            },
+            {
+              "step": 5
+            }
+          ],
+          "value": 100
+        }
+      ]
+    },
+    {
+      "id": "playback_conf",
+      "element": "section",
+      "label": "TRANSLATE.GLASS.PLAYBACK_CONF",
+      "description": "TRANSLATE.GLASS.PLAYBACK_DESC",
+      "icon": "fa-play-circle",
+      "hidden": false,
+      "onSave": {
+        "type": "controller",
+        "endpoint": "user_interface/glass",
+        "method": "savePlaybackConf"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.GLASS.APPLY",
+        "data": [
+          "persist_duration",
+          "persist_display",
+          "queueMode"
+        ]
+      },
+      "content": [
+        {
+          "id": "persist_duration",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.PERSIST_DURATION_DOC",
+          "label": "TRANSLATE.GLASS.PERSIST_DURATION",
+          "value": {
+            "value": "30",
+            "label": "TRANSLATE.GLASS.PERSIST_30"
+          },
+          "options": [
+            {
+              "value": "0",
+              "label": "TRANSLATE.GLASS.PERSIST_DISABLED"
+            },
+            {
+              "value": "5",
+              "label": "TRANSLATE.GLASS.PERSIST_5"
+            },
+            {
+              "value": "15",
+              "label": "TRANSLATE.GLASS.PERSIST_15"
+            },
+            {
+              "value": "30",
+              "label": "TRANSLATE.GLASS.PERSIST_30"
+            },
+            {
+              "value": "60",
+              "label": "TRANSLATE.GLASS.PERSIST_60"
+            },
+            {
+              "value": "120",
+              "label": "TRANSLATE.GLASS.PERSIST_120"
+            },
+            {
+              "value": "300",
+              "label": "TRANSLATE.GLASS.PERSIST_300"
+            }
+          ]
+        },
+        {
+          "id": "persist_display",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.PERSIST_DISPLAY_DOC",
+          "label": "TRANSLATE.GLASS.PERSIST_DISPLAY",
+          "value": {
+            "value": "freeze",
+            "label": "TRANSLATE.GLASS.PERSIST_DISPLAY_FREEZE"
+          },
+          "options": [
+            {
+              "value": "freeze",
+              "label": "TRANSLATE.GLASS.PERSIST_DISPLAY_FREEZE"
+            },
+            {
+              "value": "countdown",
+              "label": "TRANSLATE.GLASS.PERSIST_DISPLAY_COUNTDOWN"
+            }
+          ]
+        },
+        {
+          "id": "queueMode",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.QUEUE_MODE_DOC",
+          "label": "TRANSLATE.GLASS.QUEUE_MODE",
+          "value": {
+            "value": "track",
+            "label": "TRANSLATE.GLASS.QUEUE_MODE_TRACK"
+          },
+          "options": [
+            {
+              "value": "track",
+              "label": "TRANSLATE.GLASS.QUEUE_MODE_TRACK"
+            },
+            {
+              "value": "queue",
+              "label": "TRANSLATE.GLASS.QUEUE_MODE_QUEUE"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "backup_create_conf",
+      "element": "section",
+      "label": "TRANSLATE.GLASS.BACKUP_SECTION_CREATE",
+      "description": "TRANSLATE.GLASS.BACKUP_DESC",
+      "icon": "fa-save",
+      "hidden": false,
+      "onSave": {
+        "type": "controller",
+        "endpoint": "user_interface/glass",
+        "method": "createSettingsBackup"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.GLASS.BACKUP_CREATE",
+        "data": [
+          "backupName"
+        ]
+      },
+      "content": [
+        {
+          "id": "backupInfo",
+          "element": "section",
+          "label": "",
+          "description": "TRANSLATE.GLASS.BACKUP_INFO"
+        },
+        {
+          "id": "backupName",
+          "element": "input",
+          "type": "string",
+          "doc": "TRANSLATE.GLASS.BACKUP_NAME_DOC",
+          "label": "TRANSLATE.GLASS.BACKUP_NAME",
+          "value": ""
+        }
+      ]
+    },
+    {
+      "id": "backup_restore_conf",
+      "element": "section",
+      "label": "TRANSLATE.GLASS.BACKUP_SECTION_RESTORE",
+      "description": "TRANSLATE.GLASS.BACKUP_SECTION_RESTORE_DESC",
+      "icon": "fa-undo",
+      "hidden": false,
+      "onSave": {
+        "type": "controller",
+        "endpoint": "user_interface/glass",
+        "method": "restoreSettingsBackup"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.GLASS.BACKUP_RESTORE",
+        "data": [
+          "selectedBackup"
+        ]
+      },
+      "content": [
+        {
+          "id": "selectedBackup",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.BACKUP_SELECTED_DOC",
+          "label": "TRANSLATE.GLASS.BACKUP_SELECTED",
+          "value": {
+            "value": "",
+            "label": "TRANSLATE.GLASS.BACKUP_NONE_YET"
+          },
+          "options": [
+            {
+              "value": "",
+              "label": "TRANSLATE.GLASS.BACKUP_NONE_YET"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "backup_delete_conf",
+      "element": "section",
+      "label": "TRANSLATE.GLASS.BACKUP_SECTION_DELETE",
+      "description": "TRANSLATE.GLASS.BACKUP_SECTION_DELETE_DESC",
+      "icon": "fa-trash",
+      "hidden": false,
+      "onSave": {
+        "type": "controller",
+        "endpoint": "user_interface/glass",
+        "method": "deleteSettingsBackup"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.GLASS.BACKUP_DELETE",
+        "data": [
+          "selectedBackupDelete"
+        ]
+      },
+      "content": [
+        {
+          "id": "selectedBackupDelete",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.BACKUP_SELECTED_DOC",
+          "label": "TRANSLATE.GLASS.BACKUP_SELECTED",
+          "value": {
+            "value": "",
+            "label": "TRANSLATE.GLASS.BACKUP_NONE_YET"
+          },
+          "options": [
+            {
+              "value": "",
+              "label": "TRANSLATE.GLASS.BACKUP_NONE_YET"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

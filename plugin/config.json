@@ -1,0 +1,98 @@
+{
+  "alsaSelection": {
+    "value": "1",
+    "type": "number"
+  },
+  "useSpotify": {
+    "value": false,
+    "type": "boolean"
+  },
+  "useSoloist": {
+    "value": true,
+    "type": "boolean"
+  },
+  "useUSBDAC": {
+    "value": false,
+    "type": "boolean"
+  },
+  "useAirplay": {
+    "value": false,
+    "type": "boolean"
+  },
+  "useDSP": {
+    "value": false,
+    "type": "boolean"
+  },
+  "timeout": {
+    "value": "60",
+    "type": "number"
+  },
+  "persist_duration": {
+    "value": "30",
+    "type": "number"
+  },
+  "persist_display": {
+    "value": "freeze",
+    "type": "string"
+  },
+  "randomSelection": {
+    "value": "",
+    "type": "string"
+  },
+  "activeFolder": {
+    "type": "string",
+    "value": "800x480"
+  },
+  "activeFolder_title": {
+    "type": "string",
+    "value": "Bundled 800x480"
+  },
+  "themeTagRules": {
+    "value": "",
+    "type": "string"
+  },
+  "displayOutput": {
+    "value": "0",
+    "type": "number"
+  },
+  "doNotDeleteThemes": {
+    "value": false,
+    "type": "boolean"
+  },
+  "fanartEnabled": {
+    "value": false,
+    "type": "boolean"
+  },
+  "fanartKeyMode": {
+    "value": "personal",
+    "type": "string"
+  },
+  "fanart_personal_key": {
+    "value": "",
+    "type": "string"
+  },
+  "fanartInterval": {
+    "value": 0,
+    "type": "number"
+  },
+  "fanartTransition": {
+    "value": "none",
+    "type": "string"
+  },
+  "fanartTransitionMs": {
+    "value": 600,
+    "type": "number"
+  },
+  "fanartOrder": {
+    "value": "sequential",
+    "type": "string"
+  },
+  "fanartUnlimitedImages": {
+    "value": false,
+    "type": "boolean"
+  },
+  "legacyImported": {
+    "type": "boolean",
+    "value": false
+  }
+}

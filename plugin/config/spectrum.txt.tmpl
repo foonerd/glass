@@ -1,0 +1,24 @@
+[current]
+spectrum = s.1
+base.folder = /data/INTERNAL/glass/templates_spectrum
+spectrum.folder = 800x480
+update.period = 10
+max.value = 100
+pipe.name = /tmp/myfifosa
+size = 20
+update.ui.interval = 0.04
+frame.rate = 30
+depth = 32
+exit.on.touch = True
+use.logging = False
+use.test.data = 
+
+[sdl.env]
+framebuffer.device = /dev/fb0
+mouse.device = /dev/input/event0
+mouse.driver = TSLIB
+mouse.enabled = True
+video.driver = dummy
+video.display = :0
+double.buffer = False
+no.frame = True
