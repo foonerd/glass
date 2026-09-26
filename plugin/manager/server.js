@@ -18,6 +18,11 @@ const { Zip, ZipError, unitsOf, extractUnit, safeFolderName } = require('./zip')
 const { Catalog, CatalogError } = require('./catalog');
 const { Previews } = require('./previews');
 const { Updater, UpdateError } = require('./update');
+const { zipDirectory } = require('./zipwrite');
+
+const MAX_BACKUP_UPLOAD_BYTES = 32 * 1024 * 1024;
+const MAX_BACKUP_FILE_BYTES = 4 * 1024 * 1024;
+const BACKUP_FILES = ['manifest.json', 'config.json', 'peppymeter_config.txt', 'spectrum_config.txt'];
 
 const DEFAULT_PORT = 5582;
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
@@ -340,6 +345,38 @@ class Manager {
       res.json({ ok: true, backups: self.plugin.backupList() });
     }));
 
+    // A backup as a zip, to carry to another player.
+    app.get('/api/backups/:name/download', wrap(async function (req, res) {
+      const found = self.plugin.backupDir(req.params.name);
+      if (found.error) return res.status(400).json({ error: found.error });
+      const tmp = path.join(self.catalog.downloadsDir, 'backup-' + Date.now() + '.zip');
+      await zipDirectory(found.dir, tmp);
+      res.download(tmp, 'glass-backup-' + found.name + '.zip', function () {
+        fsp.rm(tmp, { force: true }).catch(function () {});
+      });
+    }));
+
+    // A backup zip from another player, checked before it lands.
+    app.post('/api/backups/upload', wrap(async function (req, res) {
+      const rawName = String(req.query.name || req.headers['x-file-name'] || '');
+      const wanted = path.basename(rawName, path.extname(rawName)).replace(/^glass-backup-/, '');
+      const stamp = Date.now();
+      const file = path.join(self.catalog.downloadsDir, 'backup-upload-' + stamp + '.zip');
+      const staging = path.join(self.catalog.downloadsDir, 'backup-staging-' + stamp);
+      try {
+        await self.receive(req, file, MAX_BACKUP_UPLOAD_BYTES);
+        await self.unpackBackup(file, staging);
+        const result = self.plugin.backupAdopt(staging, wanted);
+        if (result.error) return res.status(400).json(result);
+        res.json({ ok: true, name: result.name, backups: self.plugin.backupList() });
+      } catch (e) {
+        res.status(e.code === 'too-large' ? 413 : 400).json(failure(e));
+      } finally {
+        await fsp.rm(file, { force: true });
+        await fsp.rm(staging, { recursive: true, force: true });
+      }
+    }));
+
     app.post('/api/backups/:name/restore', wrap(async function (req, res) {
       const result = await self.exclusive(function () { return self.plugin.backupRestore(req.params.name); });
       if (result.error) return res.status(400).json(result);
@@ -648,6 +685,26 @@ class Manager {
       self.previews.ensure(f.folder, metersFile, true).catch(function (e) {
         self.logger.warn('glass: manager preview of ' + f.folder + ': ' + e.message);
       });
+    }
+  }
+
+  // The four files of a backup out of a zip into a staging directory. They
+  // may sit at the zip root or under one folder.
+  async unpackBackup(file, staging) {
+    const zip = await Zip.open(file);
+    try {
+      const manifest = zip.entries.find(function (e) { return e.isRegular && path.basename(e.name) === 'manifest.json' && e.name.split('/').length <= 2; });
+      if (!manifest) throw new ZipError('bad-backup', 'no manifest.json in the zip');
+      const prefix = manifest.name.slice(0, manifest.name.length - 'manifest.json'.length);
+      await fsp.mkdir(staging, { recursive: true });
+      for (const name of BACKUP_FILES) {
+        const entry = zip.entries.find(function (e) { return e.isRegular && e.name === prefix + name; });
+        if (!entry) throw new ZipError('bad-backup', name + ' is missing from the zip');
+        if (entry.size > MAX_BACKUP_FILE_BYTES) throw new ZipError('too-large', name + ' is larger than a backup file can be');
+        await fsp.writeFile(path.join(staging, name), await zip.read(entry));
+      }
+    } finally {
+      await zip.close();
     }
   }
 

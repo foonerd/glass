@@ -232,6 +232,8 @@
       <div class="row">
         <input type="text" id="bk-name" maxlength="64" style="flex:1;min-width:200px">
         <button class="primary" id="btn-bk-create"></button>
+        <button id="btn-bk-upload"></button>
+        <input type="file" id="bk-upload-file" accept=".zip,application/zip" class="hidden">
       </div>
     </div>
     <div class="list" id="bk-list"></div>
@@ -366,7 +368,7 @@
       return t(key) + (e.data && e.data.message ? ' ' + e.data.message : '');
     }
     var known = { 'checksum': 'MANAGER_ERR_CHECKSUM', 'size': 'MANAGER_ERR_SIZE', 'units-differ': 'MANAGER_ERR_UNITS', 'bad-theme': 'MANAGER_ERR_BAD_THEME', 'not-a-zip': 'MANAGER_ERR_NOT_ZIP', 'timeout': 'MANAGER_ERR_NETWORK', 'network': 'MANAGER_ERR_NETWORK', 'too-large': 'MANAGER_ERR_TOO_LARGE', 'render-failed': 'MANAGER_ERR_RENDER',
-      'no-release': 'MANAGER_ERR_NO_RELEASE', 'bad-release': 'MANAGER_ERR_NO_RELEASE', 'up-to-date': 'MANAGER_UPD_UPTODATE', 'no-previous': 'MANAGER_UPD_NONE', 'no-digest': 'MANAGER_ERR_NO_DIGEST', 'apply': 'MANAGER_ERR_APPLY', 'busy': 'MANAGER_ERR_BUSY' };
+      'no-release': 'MANAGER_ERR_NO_RELEASE', 'bad-release': 'MANAGER_ERR_NO_RELEASE', 'up-to-date': 'MANAGER_UPD_UPTODATE', 'no-previous': 'MANAGER_UPD_NONE', 'no-digest': 'MANAGER_ERR_NO_DIGEST', 'apply': 'MANAGER_ERR_APPLY', 'busy': 'MANAGER_ERR_BUSY', 'bad-backup': 'MANAGER_ERR_BAD_BACKUP' };
     if (known[code]) return t(known[code]) + (e.message && e.message !== code ? ' (' + e.message + ')' : '');
     return e.message || t('MANAGER_ERROR');
   }
@@ -436,6 +438,7 @@
     $('bk-help').textContent = t('BACKUP_INFO');
     $('bk-name').placeholder = t('BACKUP_NAME');
     $('btn-bk-create').textContent = t('BACKUP_CREATE');
+    $('btn-bk-upload').textContent = t('MANAGER_BK_UPLOAD');
     $('st-title').textContent = t('MANAGER_TAB_STATUS');
     $('btn-status-refresh').textContent = t('MANAGER_REFRESH');
     $('upd-title').textContent = t('MANAGER_UPD_TITLE');
@@ -907,7 +910,9 @@
       var el = document.createElement('div');
       el.className = 'item';
       el.innerHTML = '<div class="grow"><div class="name">' + esc(b.name) + '</div><div class="muted" style="font-size:13px">' + esc(fmtDate(b.created)) + ' · v' + esc(b.pluginVersion) + '</div></div>' +
-        '<button class="small" data-act="restore">' + esc(t('MANAGER_RESTORE')) + '</button><button class="small danger" data-act="delete">' + esc(t('MANAGER_DELETE')) + '</button>';
+        '<button class="small" data-act="restore">' + esc(t('MANAGER_RESTORE')) + '</button>' +
+        '<a class="small" href="/api/backups/' + encodeURIComponent(b.name) + '/download" download style="text-decoration:none"><button class="small">' + esc(t('MANAGER_BK_DOWNLOAD')) + '</button></a>' +
+        '<button class="small danger" data-act="delete">' + esc(t('MANAGER_DELETE')) + '</button>';
       el.querySelector('[data-act=restore]').onclick = function () {
         confirmDialog(t('BACKUP_SECTION_RESTORE'), t('BACKUP_SECTION_RESTORE_DESC') + ' (' + b.name + ')', t('MANAGER_RESTORE')).then(function (ok) {
           if (!ok) return;
@@ -923,6 +928,16 @@
       box.appendChild(el);
     });
   }
+  $('btn-bk-upload').onclick = function () { $('bk-upload-file').click(); };
+  $('bk-upload-file').onchange = function () {
+    var file = $('bk-upload-file').files[0];
+    if (!file) return;
+    $('bk-upload-file').value = '';
+    api('POST', '/api/backups/upload?name=' + encodeURIComponent(file.name), file, true).then(function (data) {
+      toast(t('MANAGER_BK_UPLOADED') + ' ' + data.name);
+      renderBackups(data.backups);
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
   $('btn-bk-create').onclick = function () {
     api('POST', '/api/backups', { name: $('bk-name').value }).then(function (data) {
       $('bk-name').value = '';

@@ -468,6 +468,10 @@
     "MANAGER_ERR_NO_DIGEST": "The release carries no checksum for its zip.",
     "MANAGER_ERR_APPLY": "The player’s plugin manager could not replace the plugin.",
     "MANAGER_ERR_BUSY": "An upgrade is already running.",
-    "MANAGER_UPD_BADGE": "Glass update:"
+    "MANAGER_UPD_BADGE": "Glass update:",
+    "MANAGER_BK_DOWNLOAD": "Download",
+    "MANAGER_BK_UPLOAD": "Upload a backup zip",
+    "MANAGER_BK_UPLOADED": "Backup added:",
+    "MANAGER_ERR_BAD_BACKUP": "The zip is not a Glass settings backup."
   }
 }

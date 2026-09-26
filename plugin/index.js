@@ -2806,6 +2806,52 @@ Glass.prototype.backupRestore = function (name) {
     }
 };
 
+// Take a backup unpacked by the manager into the backups: its manifest
+// and files are checked the way a restore checks them, and it lands
+// under its own name, or the name asked for, with a number when taken.
+Glass.prototype.backupAdopt = function (stagingDir, wantedName) {
+    var self = this;
+    try {
+        var manifestPath = stagingDir + '/' + BackupManifestName;
+        if (!fs.existsSync(manifestPath)) { return { error: 'GLASS.BACKUP_MANIFEST_INVALID' }; }
+        var manifest;
+        try {
+            manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+        } catch (e) {
+            return { error: 'GLASS.BACKUP_MANIFEST_INVALID' };
+        }
+        if (!manifest || typeof manifest !== 'object' || manifest.schema_version === undefined) {
+            return { error: 'GLASS.BACKUP_MANIFEST_INVALID' };
+        }
+        if (manifest.schema_version > BackupSchemaVersion) { return { error: 'GLASS.BACKUP_SCHEMA_UNSUPPORTED' }; }
+        var files = ['config.json', PeppyConfBackupName, SpectrumConfBackupName];
+        for (var i = 0; i < files.length; i++) {
+            if (!fs.existsSync(stagingDir + '/' + files[i])) { return { error: 'GLASS.BACKUP_FILES_MISSING' }; }
+        }
+        try { JSON.parse(fs.readFileSync(stagingDir + '/config.json', 'utf8')); } catch (e) { return { error: 'GLASS.BACKUP_CONFIG_CORRUPT' }; }
+        try { ini.parse(fs.readFileSync(stagingDir + '/' + PeppyConfBackupName, 'utf8')); } catch (e) { return { error: 'GLASS.BACKUP_PEPPYCONF_CORRUPT' }; }
+        try { ini.parse(fs.readFileSync(stagingDir + '/' + SpectrumConfBackupName, 'utf8')); } catch (e) { return { error: 'GLASS.BACKUP_SPECTRUMCONF_CORRUPT' }; }
+
+        var base = String(wantedName || manifest.name || 'imported').trim().replace(/[^A-Za-z0-9 _.\-]/g, '-').replace(/^[.\-]+/, '').slice(0, 56).trim() || 'imported';
+        if (!BackupNameRegex.test(base) || base.indexOf('..') !== -1) { base = 'imported'; }
+        if (!fs.existsSync(BackupsPath)) { fs.mkdirSync(BackupsPath, { recursive: true }); }
+        var name = base;
+        var n = 1;
+        while (fs.existsSync(BackupsPath + '/' + name)) { name = base + '-' + (++n); }
+        var target = BackupsPath + '/' + name;
+        fs.mkdirSync(target);
+        files.forEach(function (f) { fs.copySync(stagingDir + '/' + f, target + '/' + f); });
+        manifest.name = name;
+        manifest.imported = new Date().toISOString();
+        fs.writeFileSync(target + '/' + BackupManifestName, JSON.stringify(manifest, null, 2));
+        self.logger.info(id + 'backupAdopt: backup "' + name + '" taken in');
+        return { ok: true, name: name };
+    } catch (e) {
+        self.logger.error(id + 'backupAdopt: ' + e.message);
+        return { error: 'GLASS.BACKUP_CREATE_FAILED', message: e.message };
+    }
+};
+
 // Delete a backup by name; only a directory under the backups root goes.
 Glass.prototype.backupDelete = function (name) {
     var self = this;
