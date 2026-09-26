@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.3] - 2026-09-26
+
+The cross builds in CI get the C library headers of each target, which the TLS dependency's C sources need.
+
 ## [0.5.2] - 2026-09-26
 
 The workshop. The toolchain is pinned in `rust-toolchain.toml`, the workspace shares one set of lints, the code is formatted by rustfmt and clean under clippy with warnings denied, and `scripts/check.sh` runs formatting, lints, tests and documentation the way CI does. GitHub Actions runs that check and the cross builds on every push, and publishes the plugin zip and per-architecture archives of the display and the tap on every version tag, with the changelog section as the notes. `scripts/package.sh` uses npm when the machine has it and a container otherwise.
