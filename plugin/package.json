@@ -30,6 +30,6 @@
       "amd64"
     ],
     "details": "Glass draws VU meters, spectrum analysers, turntables and tape decks on the player's display from PeppyMeter themes. It is a native display, one small binary, with no Python and no browser in the path. Glass replaces PeppyMeter Screensaver: only one of the two may be enabled.",
-    "changelog": "0.6.0 The Glass Manager: a web application the plugin serves on its own port for everything that manages the display. Installed themes with previews the display draws itself, the theme catalog with checksum-verified installs and updates, theme uploads, the meter rotation, the artist fanart settings, settings backups and a status page. The settings page keeps what operates the display and opens the manager."
+    "changelog": "0.6.1 Glass upgrades itself from the manager: the latest release is checked on GitHub, its zip downloaded and verified against the release digest, the settings backed up and the installed plugin kept for going back, then the player's plugin manager replaces the plugin and the backend restarts. 0.6.0 The Glass Manager: a web application the plugin serves on its own port for everything that manages the display. Installed themes with previews the display draws itself, the theme catalog with checksum-verified installs and updates, theme uploads, the meter rotation, the artist fanart settings, settings backups and a status page. The settings page keeps what operates the display and opens the manager."
   }
 }
