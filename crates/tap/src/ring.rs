@@ -484,8 +484,10 @@ mod tests {
 
     #[test]
     fn rings_of_dead_processes_are_swept_and_live_ones_kept() {
-        // A directory of its own: the other tests write rings beside it.
-        let dir = temp_dir().join("sweep");
+        // A directory of its own: the other tests write rings in theirs and
+        // remove it when they are done.
+        let dir = std::env::temp_dir().join(format!("glasstap-sweep-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let dead = dir.join(format!("{PREFIX}test.{}.0", i32::MAX));
         let old_style_dead = dir.join(format!("{PREFIX}test.{}", i32::MAX - 1));

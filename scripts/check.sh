@@ -17,4 +17,7 @@ cargo test --workspace --locked
 echo "check: documentation"
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 
+echo "check: ALSA templates"
+scripts/asound_check.sh
+
 echo "check: clean"

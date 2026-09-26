@@ -223,7 +223,6 @@ const FANART_IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp'];
 const FANART_MAX_IMAGES = 30;
 
 var minmax = new Array(16);
-var last_outputdevice, last_softmixer;
 var meterConfig, base_folder_P;
 var spectrum_config, base_folder_S;
 var availMeters = '';
@@ -235,15 +234,12 @@ var use_SDL2 = true;
 const PluginConfiguration = '/data/configuration/plugins.json';
 const MPDtmpl = '/volumio/app/plugins/music_service/mpd/mpd.conf.tmpl';
 const MPD = '/tmp/mpd.conf.tmpl';
-const MPD_include_tmpl = PluginPath + '/mpd_custom.conf';
 const MPD_include = '/data/configuration/music_service/mpd/mpd_custom.conf';
 const AIRtmpl = '/volumio/app/plugins/music_service/airplay_emulation/shairport-sync.conf.tmpl';
 const AIR = '/tmp/shairport-sync.conf.tmpl';
 const asound = '/Glass.postGlass.5.conf';
 
 const spotify_config = '/data/plugins/music_service/spop/config.yml.tmpl';
-const soloist_index = '/data/plugins/music_service/soloist_connect/index.js';
-const dsp_config = '/data/plugins/audio_interface/fusiondsp/camilladsp.conf.yml';
 
 // Logging gated by the configuration's debug.level: basic, verbose, trace.
 function levelAllows(level) {
@@ -281,7 +277,6 @@ Glass.prototype.onVolumioStart = function () {
     self.config = new (require('v-conf'))();
     self.config.loadFile(configFile);
     var defaults = {
-        useSoloist: ['boolean', true],
         themeTagRules: ['string', ''],
         legacyImported: ['boolean', false],
         displayOutput: ['string', '0']
@@ -377,9 +372,6 @@ Glass.prototype.onStart = function () {
         return libQ.reject(new Error('PeppyMeter Screensaver is enabled'));
     }
 
-    // The dummy card the side outputs play to.
-    self.install_dummy();
-
     if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
     try { if (fs.existsSync(dismissFile)) fs.removeSync(dismissFile); } catch (e) {}
     try { if (fs.existsSync(persistFile)) fs.removeSync(persistFile); } catch (e) {}
@@ -403,67 +395,14 @@ Glass.prototype.onStart = function () {
         self.logger.warn(id + 'settings import: ' + (e && e.message ? e.message : e));
     }
 
-    // The tap sits on every path, so the MPD side output of earlier
-    // releases stays disabled; the include is kept so an existing player
-    // configuration still loads, and one from an earlier release is replaced.
-    var includeIsOurs = false;
-    try { includeIsOurs = fs.existsSync(MPD_include) && fs.readFileSync(MPD_include, 'utf8').indexOf('output glass') !== -1; } catch (e) {}
-    if (!includeIsOurs) { self.copy_MPD_include(MPD_include_tmpl, MPD_include); }
-    var enableMPDOutput = false;
-    self.MPD_setOutput(MPD_include, enableMPDOutput);
-    var mpcCmd = enableMPDOutput ? 'mpc enable 1' : 'mpc disable 1';
-    setTimeout(function () {
-        exec(mpcCmd, { uid: 1000, gid: 1000 }, function (error) {
-            if (error) {
-                self.logger.warn(id + 'MPD output 1: ' + error);
-            } else {
-                self.logger.info(id + 'MPD output 1 ' + (enableMPDOutput ? 'enabled' : 'disabled'));
-            }
+    // The audio path: the tap heads the ALSA contribution and meters every
+    // source. What earlier releases added beside it is taken back once.
+    self.retireSideOutputs(false)
+        .then(self.writeAsoundConfigModular.bind(self))
+        .then(self.updateALSAConfigFile.bind(self))
+        .fail(function (e) {
+            self.logger.error(id + 'audio path: ' + (e && e.message ? e.message : e));
         });
-    }, 3000);
-
-    // The include line in mpd.conf that pulls the side output in; the
-    // template is mounted over the original and unmounted on stop.
-    try {
-        var MPDdata = fs.readFileSync(MPDtmpl, 'utf8');
-        if (!MPDdata.includes('include_optional')) {
-            fs.copySync(MPDtmpl, MPD);
-            self.add_mpd_include(MPD)
-                .then(self.mount_tmpl.bind(self, MPD, MPDtmpl))
-                .then(self.recreate_mpdconf.bind(self))
-                .then(self.restartMpd.bind(self));
-        }
-    } catch (err) {
-        self.logger.error(id + MPDtmpl + ' not found');
-    }
-
-    last_outputdevice = self.getAlsaConfigParam('outputdevice');
-    last_softmixer = self.getAlsaConfigParam('softvolume');
-
-    var alsaconf = parseInt(self.config.get('alsaSelection'), 10);
-    self.switch_alsaConfig(alsaconf);
-    if (self.connectProvider() === 'conflict') {
-        self.commandRouter.pushToastMessage('warning',
-            self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-            self.commandRouter.getI18nString('GLASS.CONNECT_CONFLICT_DESC'));
-    }
-    self.commandRouter.sharedVars.registerCallback('alsa.outputdevice', self.switch_alsaModular.bind(self));
-
-    // Keep the Spotify and AirPlay outputs in step with the settings.
-    if (self.connectProvider() === 'spop') {
-        var spotifydata = fs.readFileSync(spotify_config, 'utf8');
-        var useDSP = fs.existsSync(dsp_config) && self.config.get('useDSP');
-        if ((!useDSP && spotifydata.includes('volumio')) || (useDSP && spotifydata.includes('spotify'))) {
-            self.switch_Spotify(!useDSP);
-        }
-    }
-    if (fs.existsSync(AIRtmpl) && self.getPluginStatus('music_service', 'airplay_emulation') === 'STARTED') {
-        var airplaydata = fs.readFileSync(AIRtmpl, 'utf8');
-        var useAir = self.config.get('useAirplay');
-        if ((useAir && airplaydata.includes('${device}')) || (!useAir && airplaydata.includes('airplay'))) {
-            self.switch_Airplay(useAir);
-        }
-    }
 
     // The player state drives the display: it opens after the timeout while
     // music plays, stays through a pause for the persist time, and leaves
@@ -497,10 +436,6 @@ Glass.prototype.onStart = function () {
             self.channel.push({ kind: 'state', state: state });
         }
         self.logger.info(id + 'pushState: status=' + status + ' service=' + state.service + ' volatile=' + state.volatile);
-        var DSP_ON = fs.existsSync(dsp_config) && self.config.get('useDSP');
-        var Spotify_ON = fs.existsSync(spotify_config) && self.getPluginStatus('music_service', 'spop') === 'STARTED' && self.config.get('useSpotify') && state.service === 'spop';
-        var Airplay_ON = fs.existsSync(AIRtmpl) && self.getPluginStatus('music_service', 'airplay_emulation') === 'STARTED' && self.config.get('useAirplay') && state.service === 'airplay_emulation';
-        var Other_ON = state.service !== 'spop' && state.service !== 'airplay_emulation';
 
         var persistDuration = parseInt(self.config.get('persist_duration'), 10) || 0;
         var persistDisplay = self.config.get('persist_display') || 'freeze';
@@ -525,51 +460,49 @@ Glass.prototype.onStart = function () {
                 self.logger.warn(id + 'theme tag: ' + (eTag && eTag.message ? eTag.message : eTag));
             }
 
-            if (DSP_ON || Spotify_ON || Airplay_ON || Other_ON) {
-                if (!self.Timeout) {
-                    lastStateIsPlaying = true;
-                    var ScreenTimeout = (parseInt(self.config.get('timeout'), 10)) * 1000;
+            if (!self.Timeout) {
+                lastStateIsPlaying = true;
+                var ScreenTimeout = (parseInt(self.config.get('timeout'), 10)) * 1000;
 
-                    if (ScreenTimeout > 0) {
-                        var startDisplayOnce = function () {
-                            if (self.meterChild && self.meterChild.exitCode === null) {
-                                return;
+                if (ScreenTimeout > 0) {
+                    var startDisplayOnce = function () {
+                        if (self.meterChild && self.meterChild.exitCode === null) {
+                            return;
+                        }
+                        var child = exec(LaunchScript, { uid: 1000, gid: 1000, env: self.launchEnv() }, function (error, stdout, stderr) {
+                            if (error !== null) {
+                                self.logger.error(id + 'the display did not run: ' + error + (stderr ? ' ' + String(stderr).trim() : ''));
+                            } else {
+                                self.logger.info(id + 'the display ran and left');
                             }
-                            var child = exec(LaunchScript, { uid: 1000, gid: 1000, env: self.launchEnv() }, function (error, stdout, stderr) {
-                                if (error !== null) {
-                                    self.logger.error(id + 'the display did not run: ' + error + (stderr ? ' ' + String(stderr).trim() : ''));
-                                } else {
-                                    self.logger.info(id + 'the display ran and left');
-                                }
-                                var dismissMarkerPresent = false;
-                                try { dismissMarkerPresent = fs.existsSync(dismissFile); } catch (e) {}
-                                var action = meterExitAction(error === null, !!self.Timeout, dismissMarkerPresent);
-                                try { if (dismissMarkerPresent) fs.removeSync(dismissFile); } catch (e) {}
-                                if (self.meterChild === child) {
-                                    self.meterChild = null;
-                                    if (action === 'rearm') {
-                                        clearInterval(self.Timeout);
-                                        self.Timeout = setInterval(function () {
-                                            startDisplayOnce();
-                                        }, ScreenTimeout);
-                                        self.logger.info(id + 'dismissed by touch, re-armed for ' + (ScreenTimeout / 1000) + ' s');
-                                    } else if (action === 'restart') {
-                                        var ranMs = Date.now() - (child.startedAt || 0);
-                                        if (meterRestartNow(error === null, ranMs)) {
-                                            startDisplayOnce();
-                                        } else {
-                                            self.logger.warn(id + 'the display died ' + Math.round(ranMs / 1000) + ' s after launch; next attempt in ' + (ScreenTimeout / 1000) + ' s');
-                                        }
+                            var dismissMarkerPresent = false;
+                            try { dismissMarkerPresent = fs.existsSync(dismissFile); } catch (e) {}
+                            var action = meterExitAction(error === null, !!self.Timeout, dismissMarkerPresent);
+                            try { if (dismissMarkerPresent) fs.removeSync(dismissFile); } catch (e) {}
+                            if (self.meterChild === child) {
+                                self.meterChild = null;
+                                if (action === 'rearm') {
+                                    clearInterval(self.Timeout);
+                                    self.Timeout = setInterval(function () {
+                                        startDisplayOnce();
+                                    }, ScreenTimeout);
+                                    self.logger.info(id + 'dismissed by touch, re-armed for ' + (ScreenTimeout / 1000) + ' s');
+                                } else if (action === 'restart') {
+                                    var ranMs = Date.now() - (child.startedAt || 0);
+                                    if (meterRestartNow(error === null, ranMs)) {
+                                        startDisplayOnce();
+                                    } else {
+                                        self.logger.warn(id + 'the display died ' + Math.round(ranMs / 1000) + ' s after launch; next attempt in ' + (ScreenTimeout / 1000) + ' s');
                                     }
                                 }
-                            });
-                            child.startedAt = Date.now();
-                            self.meterChild = child;
-                        };
-                        self.Timeout = setInterval(function () {
-                            startDisplayOnce();
-                        }, ScreenTimeout);
-                    }
+                            }
+                        });
+                        child.startedAt = Date.now();
+                        self.meterChild = child;
+                    };
+                    self.Timeout = setInterval(function () {
+                        startDisplayOnce();
+                    }, ScreenTimeout);
                 }
             }
         } else if (lastStateIsPlaying) {
@@ -687,14 +620,6 @@ Glass.prototype.onStop = function () {
     var self = this;
 
     self.commandRouter.stateMachine.stop().then(function () {
-        if (fs.existsSync(MPD)) {
-            self.unmount_tmpl(MPDtmpl).then(function () { fs.removeSync(MPD); });
-        } else {
-            self.logger.info(id + 'mpd template already unmounted');
-        }
-        if (fs.existsSync(AIR)) { self.unmount_tmpl(AIRtmpl); }
-        if (fs.existsSync(spotify_config)) { self.switch_Spotify(false); }
-
         if (self.Timeout) {
             clearInterval(self.Timeout);
             self.Timeout = null;
@@ -733,9 +658,8 @@ Glass.prototype.onInstall = function () {
 
 Glass.prototype.onUninstall = function () {
     var self = this;
-    if (fs.existsSync(MPD_include)) { fs.removeSync(MPD_include); }
-    if (fs.existsSync(spotify_config)) { self.switch_Spotify(false); }
-    if (fs.existsSync(AIR)) { self.unmount_tmpl(AIRtmpl); }
+    // Whatever an earlier release put beside the tap goes with it.
+    self.retireSideOutputs(true);
 };
 
 // Whether PeppyMeter Screensaver is enabled, in which case Glass stays out
@@ -820,7 +744,7 @@ Glass.prototype.importLegacySettings = function () {
     if (fs.existsSync(LEGACY_CONFIG)) {
         var legacy = new (require('v-conf'))();
         legacy.loadFile(LEGACY_CONFIG);
-        ['alsaSelection', 'useSpotify', 'useSoloist', 'useUSBDAC', 'useAirplay', 'useDSP', 'timeout', 'persist_duration', 'persist_display', 'randomSelection', 'themeTagRules', 'displayOutput', 'doNotDeleteThemes', 'fanartEnabled', 'fanartKeyMode', 'fanart_personal_key', 'fanartInterval', 'fanartTransition', 'fanartTransitionMs', 'fanartOrder', 'fanartUnlimitedImages'].forEach(function (key) {
+        ['timeout', 'persist_duration', 'persist_display', 'randomSelection', 'themeTagRules', 'displayOutput', 'doNotDeleteThemes', 'fanartEnabled', 'fanartKeyMode', 'fanart_personal_key', 'fanartInterval', 'fanartTransition', 'fanartTransitionMs', 'fanartOrder', 'fanartUnlimitedImages'].forEach(function (key) {
             var value = legacy.get(key);
             if (value !== undefined) {
                 self.config.set(key, value);
@@ -931,65 +855,6 @@ Glass.prototype.getUIConfig = function () {
             }
             var meters_file = base_folder_P + meterConfig.current[meterFolderStr] + '/meters.txt';
             var upperc = /\b([^-])/g;
-
-            // Audio source.
-            var alsaconf = parseInt(self.config.get('alsaSelection'), 10);
-            if (self.config.get('useDSP')) {
-                C('alsaSelection').value.value = 0;
-                C('alsaSelection').value.label = self.commandRouter.getI18nString('GLASS.ALSA_SELECTION_0');
-            } else {
-                C('alsaSelection').value.value = alsaconf;
-                C('alsaSelection').value.label = self.commandRouter.getI18nString('GLASS.ALSA_SELECTION_' + self.config.get('alsaSelection'));
-            }
-            if (fs.existsSync(dsp_config)) {
-                var useDSP = self.config.get('useDSP');
-                C('useDSP').value = useDSP;
-                self.checkDSPactive(!useDSP);
-            } else {
-                self.config.set('useDSP', false);
-                C('useDSP').hidden = true;
-            }
-            var connectProvider = self.connectProvider();
-            C('useSoloist').hidden = true;
-            if (connectProvider === 'conflict') {
-                C('useSpotify').hidden = true;
-                C('useUSBDAC').hidden = true;
-                for (var as = 0; as < uiconf.sections.length; as++) {
-                    if (uiconf.sections[as].id === 'audio_source_conf') {
-                        uiconf.sections[as].description = self.commandRouter.getI18nString('GLASS.CONNECT_CONFLICT_DESC');
-                        break;
-                    }
-                }
-            } else if (connectProvider === 'soloist') {
-                C('useSpotify').hidden = true;
-                C('useUSBDAC').hidden = true;
-                if (self.config.get('useDSP')) {
-                    self.config.set('useSoloist', false);
-                } else {
-                    C('useSoloist').hidden = false;
-                    C('useSoloist').value = self.config.get('useSoloist') === true;
-                }
-            } else if (connectProvider === 'spop') {
-                if (self.config.get('useDSP')) {
-                    self.config.set('useSpotify', false);
-                } else {
-                    C('useSpotify').value = self.config.get('useSpotify');
-                    C('useUSBDAC').value = self.config.get('useUSBDAC');
-                }
-            } else {
-                self.config.set('useSpotify', false);
-                C('useSpotify').hidden = true;
-                C('useUSBDAC').hidden = true;
-            }
-            if (self.getPluginStatus('music_service', 'airplay_emulation') === 'STARTED') {
-                if (self.config.get('useDSP')) {
-                    self.config.set('useAirplay', false);
-                } else {
-                    C('useAirplay').value = self.config.get('useAirplay');
-                }
-            } else {
-                C('useAirplay').hidden = true;
-            }
 
             // Display and activation.
             C('timeout').value = self.config.get('timeout');
@@ -1198,88 +1063,6 @@ Glass.prototype.getConfigurationFiles = function() {
 // meter so it captures from the new source.
 //-------------------------------------------------------
 
-Glass.prototype.saveAudioSourceConf = function (confData) {
-  const self = this;
-  let noChanges = true;
-  let uiNeedsReboot = false;
-
-  // write DSP
-  if (self.config.get('useDSP') != confData.useDSP) {
-      alsaLog(self.logger, 'basic', 'saveAudioSourceConf: useDSP toggled ' + self.config.get('useDSP') + ' -> ' + confData.useDSP);
-      self.config.set('useDSP', confData.useDSP);
-      self.checkDSPactive(!confData.useDSP);
-      if (self.connectProvider() === 'spop') {
-          self.switch_Spotify(!confData.useDSP);
-      }
-      noChanges = false;
-      uiNeedsReboot = true;
-  }
-
-  // write alsa selection
-  if (confData.useDSP) {
-      self.config.set('alsaSelection', 0);
-  } else if (self.config.get('alsaSelection') != confData.alsaSelection.value) {
-      self.config.set('alsaSelection', confData.alsaSelection.value);
-      noChanges = false;
-      uiNeedsReboot = true;
-  }
-
-  // write spotify / USB-DAC (spop only) or Soloist metering (soloist only)
-  var connectProvider = self.connectProvider();
-  if (connectProvider === 'spop') {
-      if (confData.useDSP) {
-          self.config.set('useSpotify', false);
-      } else {
-          if (self.config.get('useSpotify') != confData.useSpotify) {
-              self.config.set('useSpotify', confData.useSpotify);
-              noChanges = false;
-              uiNeedsReboot = true;
-          }
-          if (self.config.get('useUSBDAC') != confData.useUSBDAC) {
-              self.config.set('useUSBDAC', confData.useUSBDAC);
-              noChanges = false;
-              uiNeedsReboot = true;
-          }
-      }
-  } else if (connectProvider === 'soloist') {
-      if (confData.useDSP) {
-          self.config.set('useSoloist', false);
-      } else if (self.config.get('useSoloist') != confData.useSoloist) {
-          self.config.set('useSoloist', !!confData.useSoloist);
-          noChanges = false;
-          uiNeedsReboot = true;
-      }
-  }
-
-  // write airplay
-  if (self.getPluginStatus ('music_service', 'airplay_emulation') === 'STARTED'){
-      if (confData.useDSP) {
-          self.config.set('useAirplay', false);
-          self.switch_Airplay(false);
-      } else if (self.config.get('useAirplay') != confData.useAirplay) {
-          self.config.set('useAirplay', confData.useAirplay);
-          self.switch_Airplay(confData.useAirplay);
-          noChanges = false;
-      }
-  }
-
-  if (!noChanges) {
-      // Reload the meter so it captures from the newly selected source
-      if (fs.existsSync(runFlag)){fs.removeSync(runFlag);}
-  }
-  if (uiNeedsReboot) {
-      alsaLog(self.logger, 'basic', 'saveAudioSourceConf: triggering ALSA rebuild (alsaSelection=' + self.config.get('alsaSelection') + ')');
-      self.switch_alsaConfig(parseInt(self.config.get('alsaSelection'),10));
-  }
-
-  setTimeout(function () {
-    if (noChanges) {
-        self.commandRouter.pushToastMessage('info', self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'), self.commandRouter.getI18nString('GLASS.NO_CHANGES'));
-    } else {
-        self.commandRouter.pushToastMessage('success', self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'), self.commandRouter.getI18nString('COMMON.SETTINGS_SAVED_SUCCESSFULLY'));
-    }
-  }, 500);
-}; // end saveAudioSourceConf ----------------------------
 
 // Display & Activation save handler (split out of the old global section). Covers the
 // screensaver activation timeout (config.json), on-screen position + mouse pointer
@@ -2402,7 +2185,6 @@ function escapeThemeGalleryHtml(text) {
 }
 
 
-
 function escapeThemeGalleryJsString(text) {
   return JSON.stringify(String(text));
 }
@@ -2740,30 +2522,6 @@ Glass.prototype.updateUIConfig = function () {
 // When enabled: dirs 777, files 666 (writable by SMB nobody:nogroup)
 // When disabled: dirs 755, files 644 (standard permissions)
 
-Glass.prototype.checkDSPactive = function (DSD){
-  const self = this;
-  const defer = libQ.defer();
-  let DSPMessage = "";
-  let DSPMessageTitle = "";
-  let DSPactive = self.getPluginStatus ('audio_interface', 'fusiondsp') === 'STARTED';
-	    
-    if(DSD && DSPactive){	
-        DSPMessageTitle = self.commandRouter.getI18nString('GLASS.DSPWARNING_TITLE');
-        DSPMessage = self.commandRouter.getI18nString('GLASS.DSPWARNING');
-    }
-    if(!DSD && !DSPactive){
-        DSPMessageTitle = self.commandRouter.getI18nString('GLASS.NODSPWARNING_TITLE');
-        DSPMessage = self.commandRouter.getI18nString('GLASS.NODSPWARNING');
-    }
-    if (DSPMessage != ""){
-        setTimeout(function () {
-            self.commandRouter.pushToastMessage('warning', DSPMessageTitle, DSPMessage);
-        }, 1500);
-    }
-
-  return defer.promise;
-};
-
 
 Glass.prototype.checkMetersFile = function (){
     const self = this;
@@ -2833,303 +2591,95 @@ Glass.prototype.checkListMode = function (listStr){
 
 
 
-Glass.prototype.install_dummy = function () {
-  const self = this;
-  let defer = libQ.defer();
-  
-  // Detect architecture
-  var arch = '';
-  try { arch = execSync('cat /etc/os-release | grep ^VOLUMIO_ARCH | tr -d \'VOLUMIO_ARCH="\'').toString().trim(); } catch(e) {}
-  var isX64 = (arch === 'x64');
-  
-  try {
-    execSync("/usr/bin/sudo /sbin/modprobe snd-dummy index=7 pcm_substreams=1 fake_buffer=0", { uid: 1000, gid: 1000 });
-    self.commandRouter.pushConsoleMessage('snd-dummy loaded');
-    
-    // x64: also load snd-aloop for Spotify meter path (Loopback has flexible buffer params)
-    if (isX64) {
-      try {
-        execSync("/usr/bin/sudo /sbin/modprobe snd-aloop index=6 pcm_substreams=2", { uid: 1000, gid: 1000 });
-        self.commandRouter.pushConsoleMessage('snd-aloop loaded for x64 Spotify');
-      } catch (err) {
-        self.logger.info('failed to load snd-aloop: ' + err);
-      }
-    }
-    
-    defer.resolve();
-  } catch (err) {
-    self.logger.info('failed to load snd-dummy' + err);
-  }
-};
-
-
-Glass.prototype.switch_alsaConfig = function (alsaConf) {
-    const self = this;
-    var defer = libQ.defer();
-    // x64: ALWAYS enable MPD output - it's the only source for meter data
-    var arch_cmd = 'cat /etc/os-release | grep ^VOLUMIO_ARCH | tr -d \'VOLUMIO_ARCH="\'';
-    var arch = '';
-    try { arch = execSync(arch_cmd).toString().trim(); } catch(e) {}
-    var isX64 = (arch === 'x64');
-    // The tap sits on every path, so the MPD side output stays off in
-    // both selections and on every architecture.
-    var enableMPDOutput = false;
-    alsaLog(self.logger, 'basic', 'switch_alsaConfig: alsaConf=' + alsaConf + ' isX64=' + isX64 + ' enableMPDOutput=' + enableMPDOutput);
-    
-    self.MPD_setOutput(MPD_include, enableMPDOutput)
-//        .then(self.MPD_allowedFormats.bind(self, MPD, enableDSD)) // not more needed
-        .then(self.writeAsoundConfigModular.bind(self, alsaConf))
-        .then(self.updateALSAConfigFile.bind(self))
-//        .then(self.updateMountpoint.bind(self, MPD, MPDtmpl))     // not more needed with MPD_include
-//        .then(self.recreate_mpdconf.bind(self))                   // not more needed with MPD_include
-        .then(self.restartMpd.bind(self))
-        .then(function() {
-            // Set MPD output state via mpc after restart (config file alone doesn't control live state)
-            var mpcCmd = enableMPDOutput ? 'mpc enable 1' : 'mpc disable 1';
-            setTimeout(function() {
-                exec(mpcCmd, { uid: 1000, gid: 1000 }, function(error, stdout, stderr) {
-                    if (error) {
-                        self.logger.warn('glass: Failed to set MPD output: ' + error);
-                    } else {
-                        self.logger.info('glass: MPD output 1 ' + (enableMPDOutput ? 'enabled' : 'disabled'));
-                    }
-                });
-            }, 1000); // Wait for MPD to fully restart
-        });
-    defer.resolve();
-    return defer.promise;    
-};
-
-// switch display port
-
-Glass.prototype.switch_Spotify = function (useSpotify) {
-    const self = this;
-    var defer = libQ.defer();
-    //var useDSP = fs.existsSync(dsp_config) && self.config.get('useDSP');
-
-    // only if spotify installed
-    if (fs.existsSync(spotify_config)){
-        var spotifydata = fs.readFileSync(spotify_config, 'utf8'); 
-        if (useSpotify) {
-            spotifydata = spotifydata.replace('volumio', 'spotify');
-        } else {
-            spotifydata = spotifydata.replace('spotify', 'volumio');
-        }
-
-        fs.writeFile(spotify_config, spotifydata, 'utf8', function (err) {
-            if (err) {
-                self.logger.info('Cannot write ' + spotify_config + err);
-                defer.resolve(); // resolve anyway to not block chain
-            } else {              
-                var cmdret = self.commandRouter.executeOnPlugin('music_service', 'spop', 'initializeLibrespotDaemon', '');
-                defer.resolve();
-            }
-        });
-    } else {
-        defer.resolve();
-    }
-
-    return defer.promise;    
-};
-
-// switch airplay
-Glass.prototype.switch_Airplay = function (useAirplay) {
-    const self = this;
-    var defer = libQ.defer();
-
-    if (fs.existsSync(AIRtmpl)){
-        if (useAirplay) {
-			if (!fs.existsSync(AIR)){
-				fs.copySync(AIRtmpl, AIR); // copy orignal file
-				var airplaydata = fs.readFileSync(AIR, 'utf8'); 
-				airplaydata = airplaydata.replace('${device}', 'airplay');
-				fs.writeFileSync(AIR, airplaydata);
-			}
-			// mount template
-			self.mount_tmpl(AIR, AIRtmpl);
-			
-        } else {
-			if (fs.existsSync(AIR)){
-				//unmount air_tmpl file, if mounted
-				self.unmount_tmpl(AIRtmpl)
-					.then(function() {fs.removeSync(AIR);});
-			}
-        }
-        
-        // restart airplay, if running
-        if (self.getPluginStatus ('music_service', 'airplay_emulation') === 'STARTED'){
-            var cmdret = self.commandRouter.executeOnPlugin('music_service', 'airplay_emulation', 'startShairportSync', '');
-        }
-		defer.resolve();
-    } else {
-        defer.resolve();
-    }
-
-    return defer.promise;
-};
-    
-// callback if mixer or outputdevice changed
-// update of asound template
-Glass.prototype.switch_alsaModular = function () {
-    const self = this;
-
-    setTimeout(function () {
-        var outputdevice = self.getAlsaConfigParam('outputdevice');
-        var softmixer = self.getAlsaConfigParam('softvolume');
-        // only if outputdevice or mixer changed
-        if (last_outputdevice !== outputdevice || last_softmixer !== softmixer) {
-            alsaLog(self.logger, 'basic', 'switch_alsaModular: outputdevice changed ' + last_outputdevice + ' -> ' + outputdevice + ' or softmixer changed ' + last_softmixer + ' -> ' + softmixer);
-            var alsaConf = parseInt(self.config.get('alsaSelection'),10);
-            if (alsaConf == 0) { // and only for modular alsa      
-                self.writeAsoundConfigModular(alsaConf).then(self.updateALSAConfigFile.bind(self));
-            }                
-        }
-        last_outputdevice = outputdevice;
-        last_softmixer = softmixer;
-    }, 500 );
-};
-
-// check, if Pygame 2 with SDL2 installed)
-Glass.prototype.get_SDL2_enabled = function (data) {
-    const self = this;
-    var defer = libQ.defer();
-  
-    // Get architecture and set PYTHONPATH for plugin-local packages
-    var arch_cmd = 'cat /etc/os-release | grep ^VOLUMIO_ARCH | tr -d \'VOLUMIO_ARCH="\'';
-    var arch = execSync(arch_cmd).toString().trim();
-    var pythonpath = '/data/plugins/user_interface/glass/lib/' + arch + '/python';
-    var python_str = 'PYTHONPATH=' + pythonpath + ' python3 -c "import pygame; print(pygame.version.ver)"';
-
-    exec(python_str, { uid: 1000, gid: 1000 }, function (error, stdout, stderr) {
-    if (error) {
-        self.logger.warn(id + 'An error occurred on pygame check', error);
-        defer.resolve(false);
-    } else {
-        // Check for pygame 2.x anywhere in output (welcome message precedes version)
-        if (stdout.includes('pygame 2.') || stdout.match(/^2\./m)) {
-            defer.resolve(true);
-        } else {
-            defer.resolve(false);
-        }            
-    }
-  });
-    return defer.promise;
-};
-
-// check if installed memory smaller then 4GB)
-Glass.prototype.get_lt_4gb = function (data) {
-    const self = this;
-    var defer = libQ.defer();
-  
-    var get_str = "free -m | grep Mem: | awk '{print $2}'"   
-
-    exec(get_str, { uid: 1000, gid: 1000 }, function (error, stdout, stderr) {
-    if (error) {
-        self.logger.warn(id + 'An error occurred on get memory', error);
-    } else {
-        if (parseInt(stdout, 10) < 3000) {
-            defer.resolve(true);
-            return true;
-        } else {
-            defer.resolve(false);
-            return false;
-        }            
-    }
-  });
-    return defer.promise;
-};
-                         
 // check, if MPD output enabled
 
-Glass.prototype.get_output_enabled = function (data) {
-    const self = this;
-    var defer = libQ.defer();
-    var found = false;
-    var count = 0;
-       
-    lineReader.eachLine(data, function(line) {
-  
-        if (line.includes('---> output glass')) {
-            found = true;
-        }
-        if (found) {count += 1;}
 
-        if (count === 3) {
-            if (line.includes('no')) {
-                defer.resolve (false);
-                return false
-            } else {
-                defer.resolve (true);
-                return true
-            }
-        }           
-    })
+// The ALSA contribution: the template of the architecture, written where
+// Volumio collects it. The tap heads it on every path.
+Glass.prototype.writeAsoundConfigModular = function () {
+    var self = this;
+    var defer = libQ.defer();
+    var isX64 = self.volumioArch() === 'x64';
+    var asoundTmpl = __dirname + (isX64 ? '/Glass.postGlass.5.x64.conf' : asound) + '.tmpl';
+    var asoundConf = __dirname + '/asound' + asound;
+    if (!fs.existsSync(asoundTmpl)) {
+        self.logger.error(id + 'ALSA template missing: ' + asoundTmpl);
+        defer.resolve();
+        return defer.promise;
+    }
+    fs.writeFile(asoundConf, fs.readFileSync(asoundTmpl, 'utf8'), 'utf8', function (err) {
+        if (err) {
+            self.logger.error(id + 'cannot write ' + asoundConf + ': ' + err);
+        } else {
+            alsaLog(self.logger, 'basic', 'config written: ' + asoundConf);
+        }
+        defer.resolve();
+    });
     return defer.promise;
 };
 
-// enable the MPD output for peppymeter 
-Glass.prototype.MPD_setOutput = function (data, enableDSD) {
-  const self = this;
-  let defer = libQ.defer();
-  var sedStr = enableDSD ? "sed -i '/---> output glass/,+2{/---> output glass/,+1{b};s/no/yes/}' " : "sed -i '/---> output glass/,+2{/---> output glass/,+1{b};s/yes/no/}' ";
-
-  exec(sedStr +  data, { uid: 1000, gid: 1000 }, function (error, stdout, stderr) {
-    if (error) {
-        self.logger.warn(id + 'An error occurred when change MPD output', error);
-    } else {
-        setTimeout(function () {defer.resolve();}, 100);
+// What earlier releases put beside the tap, taken back once: the MPD side
+// output and its include, the copies mounted over MPD's and AirPlay's
+// configuration templates, Spotify's own PCM, and Soloist's metering
+// device. The tap meters every source on the main path, so all of them
+// play to `volumio` again. `force` does it again, for the uninstall.
+Glass.prototype.retireSideOutputs = function (force) {
+    var self = this;
+    if (!force && self.config.get('sideOutputsRetired') === true) {
+        return libQ.resolve();
     }
-  });
-
-  return defer.promise;
-};
-
-
-// inject additional include file to mpd.conf.tmpl
-Glass.prototype.add_mpd_include = function (data) {
-  const self = this;
-  let defer = libQ.defer();
-
-    var MPDdata = fs.readFileSync(data, 'utf8'); 
-    if (!MPDdata.includes('include_optional')){
-            
-        exec("sed -i '/# Files and directories/a include_optional    \x22\/data\/configuration\/music_service\/mpd\/mpd_custom.conf\x22' " + data, { uid: 1000, gid: 1000 }, function (error, stdout, stderr    ) {
-            if (error) {
-                self.logger.warn(id + 'An error occurred when add MPD include entry', error);
-            } else {
-                setTimeout(function () {defer.resolve();}, 100);
-            }       
-        });
-    } else {
-        defer.resolve();
+    var chain = libQ.resolve();
+    var mpdChanged = false;
+    if (fs.existsSync(MPD_include)) {
+        try { fs.removeSync(MPD_include); mpdChanged = true; } catch (e) {}
     }
-                
-  return defer.promise;
-};
-
-Glass.prototype.rebootMessage = function () {
-  var self = this;
-  var responseData = {
-    title: self.commandRouter.getI18nString('GLASS.MPD_CHANGED'),
-    message: self.commandRouter.getI18nString('GLASS.MPD_CHANGED_REBOOT'),
-    size: 'lg',
-    buttons: [
-        {
-          name: self.commandRouter.getI18nString('COMMON.RESTART'),
-          class: 'btn btn-info',
-          emit: 'reboot',
-          payload: ''
-        },
-      {
-        name: self.commandRouter.getI18nString('COMMON.CONTINUE'),
-        class: 'btn btn-info',
-        emit: 'closeModals',
-        payload: ''
-      }
-    ]
-  };
-
-  self.commandRouter.broadcastMessage('openModal', responseData);
+    if (fs.existsSync(MPD)) {
+        chain = chain
+            .then(function () { return self.unmount_tmpl(MPDtmpl); })
+            .then(function () {
+                try { fs.removeSync(MPD); } catch (e) {}
+                mpdChanged = true;
+            });
+    }
+    chain = chain.then(function () {
+        if (mpdChanged) {
+            self.logger.info(id + 'the MPD side output of an earlier release is retired');
+            return self.recreate_mpdconf().then(self.restartMpd.bind(self));
+        }
+    });
+    if (fs.existsSync(spotify_config)) {
+        try {
+            var spotifydata = fs.readFileSync(spotify_config, 'utf8');
+            if (spotifydata.indexOf('spotify') !== -1) {
+                fs.writeFileSync(spotify_config, spotifydata.replace('spotify', 'volumio'), 'utf8');
+                if (self.getPluginStatus('music_service', 'spop') === 'STARTED') {
+                    self.commandRouter.executeOnPlugin('music_service', 'spop', 'initializeLibrespotDaemon', '');
+                }
+                self.logger.info(id + 'Spotify plays to volumio again');
+            }
+        } catch (e) {
+            self.logger.warn(id + 'spotify: ' + (e && e.message ? e.message : e));
+        }
+    }
+    if (fs.existsSync(AIR)) {
+        chain = chain
+            .then(function () { return self.unmount_tmpl(AIRtmpl); })
+            .then(function () {
+                try { fs.removeSync(AIR); } catch (e) {}
+                if (self.getPluginStatus('music_service', 'airplay_emulation') === 'STARTED') {
+                    self.commandRouter.executeOnPlugin('music_service', 'airplay_emulation', 'startShairportSync', '');
+                }
+                self.logger.info(id + 'AirPlay plays to volumio again');
+            });
+    }
+    if (self.getPluginStatus('music_service', 'soloist_connect') === 'STARTED') {
+        try {
+            self.commandRouter.executeOnPlugin('music_service', 'soloist_connect', 'setPeppyMetering', false);
+        } catch (e) {}
+    }
+    return chain.then(function () {
+        self.config.set('sideOutputsRetired', true);
+    });
 };
 
 //mount a copy of changed file over 
@@ -3153,14 +2703,13 @@ Glass.prototype.unmount_tmpl = function (data_dest) {
   var self = this;
   var defer = libQ.defer();
 
-  exec('/bin/df ' + data_dest + ' | /bin/grep ' + data_dest + ' && /bin/echo volumio | /usr/bin/sudo -S /bin/umount ' + data_dest, { uid: 1000, gid: 1000 }, function (error, stdout, stderr) {        
+  // Nothing mounted there is not an error.
+  exec('/bin/mountpoint -q ' + data_dest + ' && /bin/echo volumio | /usr/bin/sudo -S /bin/umount ' + data_dest + ' || /bin/true', { uid: 1000, gid: 1000 }, function (error, stdout, stderr) {
     if (error) {
         self.logger.error(id + 'Error unmount ' + data_dest + ' ' + error);
-        defer.resolve(); // resolve anyway to not block chain
-    } else {
-        defer.resolve();
-    }    
-  });        
+    }
+    defer.resolve(); // resolve anyway to not block chain
+  });
   
   return defer.promise;
 };
@@ -3178,29 +2727,6 @@ Glass.prototype.restartMpd = function () {
   return defer.promise;
 };
 
-// copy MPD_include file
-Glass.prototype.copy_MPD_include = function (data, data_dest) {
-  var self = this;
-  var defer = libQ.defer();
-  
-  try {
-
-    fs.copySync(data, data_dest);
-  
-    exec('/bin/chmod 777 ' + data_dest, function (error, stdout, stderr) {        
-        if (error) {
-            self.logger.error(id + 'Error chmod ' + data_dest + ' ' + error);
-        } else {
-            defer.resolve();
-        }    
-    });        
-
-  } catch (err) {
-    defer.resolve();
-  }
-  
-  return defer.promise;
-};
 
 // recreate active /etc/mpd.conf
 Glass.prototype.recreate_mpdconf = function () {
@@ -3217,105 +2743,6 @@ Glass.prototype.recreate_mpdconf = function () {
   return defer.promise;
 };
 
-// write asound.conf from template and remove variables
-Glass.prototype.writeAsoundConfigModular = function (alsaConf) {
-  var self = this;
-  
-  // Detect architecture and select appropriate template
-  var arch_cmd = 'cat /etc/os-release | grep ^VOLUMIO_ARCH | tr -d \'VOLUMIO_ARCH="\'';
-  var arch = '';
-  try { arch = execSync(arch_cmd).toString().trim(); } catch(e) {}
-  var isX64 = (arch === 'x64');
-  
-  // Use x64-specific template on x64 systems, but keep output filename same
-  var tmplFile = isX64 ? '/Glass.postGlass.5.x64.conf' : asound;
-  var asoundTmpl = __dirname + tmplFile + '.tmpl';
-  var asoundConf = __dirname + '/asound' + asound;  // Output always uses standard name
-  self.logger.info(id + 'ALSA template: ' + asoundTmpl + ' (isX64=' + isX64 + ')');
-  var conf;
-  var defer = libQ.defer();
-  var useDSP = fs.existsSync(dsp_config) && self.config.get('useDSP');
-  var plugType = self.config.get('useUSBDAC') ? 'copy' : 'empty';
-  var useSpot = self.config.get('useSpotify');
-  alsaLog(self.logger, 'verbose', 'writeAsoundConfigModular: alsaConf=' + alsaConf + ' useDSP=' + useDSP + ' isX64=' + isX64 + ' plugType=' + plugType + ' useSpot=' + useSpot);
-  alsaLog(self.logger, 'verbose', 'writeAsoundConfigModular: template=' + asoundTmpl + ' output=' + asoundConf);
-
-  if (fs.existsSync(asoundTmpl)) {
-    var asounddata = fs.readFileSync(asoundTmpl, 'utf8');
-    // The tap heads the section on every path in both selections; the
-    // selection still decides the MPD include and the Soloist naming.
-    conf = asounddata;
-    alsaLog(self.logger, 'basic', 'tap mode: the tap on every path (alsaConf=' + alsaConf + ', bridge=' + useDSP + ')');
-    conf = conf.replace('${type}', plugType);
-
-    //for spotify / Soloist — exclusive. Conflict leaves pcm.spotify empty.
-    // Name pcm.spotify from the Soloist install marker, not STARTED. Motivo
-    // writes this file before plugins.json says STARTED; hanger does not.
-    var connectProvider = self.connectProvider();
-    if (!useDSP) {
-        if (connectProvider === 'spop' && useSpot){
-            conf = conf.replace('${spotMeter}', 'spotify');
-        } else if (fs.existsSync(soloist_index) && connectProvider !== 'spop' && connectProvider !== 'conflict' && self.config.get('useSoloist') === true && alsaConf == 1) {
-            conf = conf.replace('${spotMeter}', 'spotify');
-        } else {
-            conf = conf.replace('${spotDirect}', 'spotify');
-        }
-    }
-    conf = conf.replace('${spotMeter}', 'spotify2_off');
-    conf = conf.replace('${spotDirect}', 'spotify1_off');
-        
-    // change alsa config depend on outputdevice and mixer
-    // no reformat possible for softmixer
-    // for internal cards (hdmi, headphone) 44100 kHz
-    // for external sound cards 16000 kHz (the only rate without error)
-    // removed since 3.569
-    //var outputdevice = self.getAlsaConfigParam('outputdevice');
-    //var softmixer = self.getAlsaConfigParam('softvolume');
-        
-    //if (outputdevice == 'softvolume') {
-    //    outputdevice = self.getAlsaConfigParam ('softvolumenumber');
-    //}
-
-//    var slave_b = softmixer ? 'mpd_glass' : 'reformat'; 
-//    conf = conf.replace('${slave_b}', slave_b);            
-//    var rate = parseInt(outputdevice,10) > 1 ? 16000 : 44100;
-//    conf = conf.replace('${rate}', rate);    
-        
-    alsaLog(self.logger, 'trace', 'writeAsoundConfigModular: generated config:\n' + conf);
-    fs.writeFile(asoundConf, conf, 'utf8', function (err) {
-        if (err) {
-            self.logger.info('Cannot write ' + asoundConf + ': ' + err);
-            defer.resolve(); // resolve anyway to not block chain
-        } else {
-            alsaLog(self.logger, 'basic', 'config written: ' + asoundConf);
-            if (self.connectProvider() === 'spop'){
-                var cmdret = self.commandRouter.executeOnPlugin('music_service', 'spop', 'initializeLibrespotDaemon', '');            
-            }
-            defer.resolve();
-        }
-    });
-  }
-
-return defer.promise;  
-};
-
-
-
-
-Glass.prototype.getAlsaConfigParam = function (data) {
-	var self = this;
-	return self.commandRouter.executeOnPlugin('audio_interface', 'alsa_controller', 'getConfigParam', data);
-};
-
-Glass.prototype.disableSoftMixer = function (data) {
-	var self = this;
-	return self.commandRouter.executeOnPlugin('audio_interface', 'alsa_controller', 'disableSoftMixer', data);
-};
-
-Glass.prototype.writeSoftMixerFile = function (data) {
-	var self = this;
-	return self.commandRouter.executeOnPlugin('audio_interface', 'alsa_controller', 'writeSoftMixerFile', data);
-};
 
 Glass.prototype.updateALSAConfigFile = function () {
 	var self = this;
@@ -3324,7 +2751,6 @@ Glass.prototype.updateALSAConfigFile = function () {
     var finish = function () {
         if (done) return;
         done = true;
-        self.notifySoloistMetering();
         defer.resolve();
     };
     var ret;
@@ -3378,31 +2804,7 @@ Glass.prototype.getPluginStatus = function (category, name) {
   return retStr;  
 };
 
-// Operator enables Soloist or stock Spotify Connect, not both.
-Glass.prototype.connectProvider = function () {
-  var soloist = fs.existsSync(soloist_index) && this.getPluginStatus('music_service', 'soloist_connect') === 'STARTED';
-  var spop = fs.existsSync(spotify_config) && this.getPluginStatus('music_service', 'spop') === 'STARTED';
-  if (soloist && spop) return 'conflict';
-  if (soloist) return 'soloist';
-  if (spop) return 'spop';
-  return 'none';
-};
 
-Glass.prototype.soloistMeteringWanted = function () {
-  var useDSP = fs.existsSync(dsp_config) && this.config.get('useDSP');
-  var dsd = parseInt(this.config.get('alsaSelection'), 10) === 1;
-  return this.connectProvider() === 'soloist' && !useDSP && dsd && this.config.get('useSoloist') === true;
-};
-
-Glass.prototype.notifySoloistMetering = function () {
-  if (this.getPluginStatus('music_service', 'soloist_connect') !== 'STARTED') return;
-  this.commandRouter.executeOnPlugin(
-    'music_service',
-    'soloist_connect',
-    'setPeppyMetering',
-    this.soloistMeteringWanted()
-  );
-};
 //-------------------------------------------------------------
 
 // Continuity Engine - backup and restore helper methods
@@ -3714,24 +3116,12 @@ Glass.prototype.restoreSettingsBackup = function (data) {
         base_folder_S = spectrum_config.current['base.folder'] + '/';
         if (base_folder_S == '/') { base_folder_S = DATA_DIR + '/templates_spectrum/'; }
         
-        // Re-apply derived state from the restored config.json. Order matters:
-        // alsa config first (rebuilds asound.conf), then display port (edits
-        // run_peppymeter.sh), then spotify/airplay/SMB permissions.
-        var alsaconf = parseInt(self.config.get('alsaSelection'), 10);
-        self.switch_alsaConfig(alsaconf);
-        
+        // Re-apply what the restored config.json decides: the display port
+        // (in the launcher) and the share permissions. The audio path is the
+        // tap on every source and needs nothing from the settings.
         var dispOut = parseInt(self.config.get('displayOutput'), 10);
         self.switch_DisplayPort(dispOut);
-        
-        if (self.connectProvider() === 'spop') {
-            var useSpot = self.config.get('useSpotify');
-            self.switch_Spotify(useSpot);
-        }
-        if (fs.existsSync(AIRtmpl) && self.getPluginStatus('music_service', 'airplay_emulation') === 'STARTED') {
-            var useAir = self.config.get('useAirplay');
-            self.switch_Airplay(useAir);
-        }
-        
+
         var smbEnabled = self.config.get('smbShareAccess') === true;
         self.normalizeTemplatePermissions(smbEnabled);
         

@@ -40,12 +40,6 @@ pcm.spd_glass {
   type null
 }
 
-# needed for some sound cards otherwiese Spotify stops playing after 10 seconds
-pcm.copy_output {
-  type ${type}
-  slave.pcm "postglass"
-}
-
 pcm.postglass {
   type empty
   slave.pcm "postGlass"
