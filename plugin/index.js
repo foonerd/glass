@@ -755,10 +755,17 @@ Glass.prototype.legacyEnabled = function () {
     }
 };
 
-// Say why Glass did not start, with a way to fix it in one press.
+// Say why Glass did not start, with a way to fix it in one press. Glass
+// disables itself, so the two are never both enabled at the next start and
+// the ALSA chain is built without it.
 Glass.prototype.refuseForLegacy = function () {
     var self = this;
     var name = self.commandRouter.getI18nString('GLASS.PLUGIN_NAME');
+    try {
+        self.commandRouter.pluginManager.disablePlugin('user_interface', 'glass');
+    } catch (e) {
+        self.logger.warn(id + 'could not disable itself: ' + (e && e.message ? e.message : e));
+    }
     self.commandRouter.pushToastMessage('error', name, self.commandRouter.getI18nString('GLASS.LEGACY_ENABLED_MSG'));
     self.commandRouter.broadcastMessage('openModal', {
         title: self.commandRouter.getI18nString('GLASS.LEGACY_ENABLED_TITLE'),

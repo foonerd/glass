@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.8] - 2026-09-26
+
+The guard holds. When Glass refuses to start because PeppyMeter Screensaver is enabled, it disables itself, so the two are never both enabled at the next start and the ALSA chain is built without Glass until the switch is made. Glass starts after PeppyMeter Screensaver at boot, so when both are found enabled the transition release steps aside and Glass runs. The guard's messages name PeppyMeter Screensaver where they said Glass, and the German and French files carry their own words where they carried English. PeppyMeter Screensaver 3.5.0, its transition release, mirrors the guard.
+
 ## [0.5.7] - 2026-09-26
 
 The channel. The plugin serves a local socket with the player's state and the infinity playback flag, pushed as they change, and takes commands for the player back. The display reads its state from the channel when the plugin runs it, so a track change shows at once and the player is no longer asked once a second; without a channel it asks the player as before. Infinity playback shows on the repeat indicator's fourth state, or on the shuffle indicator's third. The wiki's Contracts page has the lines.

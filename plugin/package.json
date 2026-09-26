@@ -19,7 +19,7 @@
     "prettyName": "Glass",
     "icon": "fa-lightbulb-o",
     "plugin_type": "user_interface",
-    "boot_priority": 10,
+    "boot_priority": 11,
     "has_alsa_contribution": true,
     "os": [
       "bookworm"
