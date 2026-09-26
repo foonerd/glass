@@ -1,10 +1,5 @@
-//! FIFO bytes become these types. This station does not open devices or draw.
-
-/// Installed meter pipe. The ALSA scope writes it.
-pub const METER_FIFO: &str = "/tmp/myfifo";
-
-/// Installed spectrum pipe. The ALSA scope writes it.
-pub const SPECTRUM_FIFO: &str = "/tmp/myfifosa";
+//! The tap's measurements and the player's words become these types. This
+//! station does not open devices or draw.
 
 /// Bin count in the Volumio ALSA template.
 pub const DEFAULT_SPECTRUM_BINS: usize = 20;

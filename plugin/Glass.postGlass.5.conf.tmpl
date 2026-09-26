@@ -11,7 +11,7 @@ pcm.${alsaDirect} {
 pcm.${alsaInlineMeter} {
   type meter
   slave.pcm "postglass"
-  scopes.0 peppyalsa
+  scopes.0 glasstap
 }
 
 # ---> input from modular alsa 
@@ -25,7 +25,7 @@ pcm.${alsaMeter} {
 
     slaves.a.pcm "postglass"
     slaves.a.channels 2
-    slaves.b.pcm "mpd_peppyalsa"
+    slaves.b.pcm "mpd_glass"
     slaves.b.channels 2
 
     bindings.0 { slave a; channel 0; }
@@ -35,19 +35,19 @@ pcm.${alsaMeter} {
   }
 }
 
-# ---> input from exclusive MPD output for peppyalsa
+# ---> input from the MPD side output
 # without audio output (dummy)
-pcm.mpd_peppyalsa{
+pcm.mpd_glass{
 	type meter
 	slave.pcm "dummy"
-	scopes.0 peppyalsa
+	scopes.0 glasstap
 }
 
 # ---> separate airplay input
 pcm.airplay {
 	type meter
 	slave.pcm "postglass"
-	scopes.0 peppyalsa
+	scopes.0 glasstap
 }
 
 # ---> separate spotify input
@@ -68,7 +68,7 @@ pcm.${spotMeter} {
 
     slaves.a.pcm "postglass"
     slaves.a.channels 2
-    slaves.b.pcm "spd_peppyalsa"
+    slaves.b.pcm "spd_glass"
     slaves.b.channels 2
 
     bindings.0 { slave a; channel 0; }
@@ -79,51 +79,24 @@ pcm.${spotMeter} {
 }
 
 # spotify meter to dummy - side path for meter data only
-pcm.spd_peppyalsa {
+pcm.spd_glass {
   type meter
   slave.pcm "dummy"
-  scopes.0 peppyalsa
+  scopes.0 glasstap
 }
 
-# standard scope
-pcm_scope.peppyalsa {
-  type peppyalsa
-  decay_ms 500
-  meter "/tmp/myfifo"
-  meter_max 100
-  meter_show 0
-  spectrum "/tmp/myfifosa"
-  spectrum_max 100
-  spectrum_size 20
-  logarithmic_frequency 1
-  logarithmic_amplitude 1
-  smoothing_factor 60
-}
-
-pcm_scope_type.peppyalsa {
-    lib /data/plugins/user_interface/glass/lib/libpeppyalsa.so
-}
-
-# null output
-# glasstap: the tap of this plugin, with the same records the scope above writes
+# the tap: peak, RMS and the spectrum of what plays, into a ring under /dev/shm
 pcm_scope.glasstap {
   type glasstap
-  decay_ms 500
-  meter "/tmp/myfifo"
-  meter_max 100
-  spectrum "/tmp/myfifosa"
-  spectrum_max 100
-  spectrum_size 20
-  logarithmic_frequency 1
-  logarithmic_amplitude 1
-  smoothing_factor 60
   fft_size 2048
+  ring "glass"
 }
 
 pcm_scope_type.glasstap {
     lib /data/plugins/user_interface/glass/lib/libglasstap.so
 }
 
+# null output
 pcm.dummy {
   type hw
 	card Dummy

@@ -14,7 +14,7 @@ use expose::{
     apply_circle, compose_base, fit_art, flip_x, raster_over, read_art, read_icon, read_png,
     write_png, FolderPicture, Fonts, IndicatorAssets, Motion, Spans, SpectrumAssets, Stack,
 };
-use intake::{Overrides, PipeSource, Selector, Source};
+use intake::{Overrides, Selector, Source, TapSource};
 use lead::{
     frame_period, should_mark_dismiss, FolderLayerSpec, Input, MeterKind, SkinDesc, TypeMode,
     DISMISS_FILE_VAR, RUN_FLAG,
@@ -353,7 +353,7 @@ fn main() -> ExitCode {
                     "glass [--once] [--headless] [--print] [--output frame.png|frame.ppm] [--record step.json]\n      \
                      [--theme FOLDER] [--meter NAME|random|a,b,c] [--interval SECONDS] [--fps N] [--threads N]\n      \
                      [--list] [--snapshot DIR [--settle SECONDS]]\n\
-                     Reads {meter} and {spectrum}.\n\
+                     Reads the tap's ring under /dev/shm and the player's state.\n\
                      A window opens when DISPLAY is set. --headless skips it.\n\
                      --output writes every frame as a PNG or PPM and still rasters.\n\
                      --record writes the skin, input and scene of each step as JSON.\n\
@@ -361,9 +361,7 @@ fn main() -> ExitCode {
                      --threads N paints every frame on N threads; by default a frame takes from one thread up to one a core as it needs.\n\
                      --list prints the installed themes and their meters.\n\
                      --snapshot shows each meter of the theme (or of the --meter list) for --settle seconds\n\
-                     and writes DIR/<theme>/<meter>.png, then leaves.",
-                    meter = lead::METER_FIFO,
-                    spectrum = lead::SPECTRUM_FIFO
+                     and writes DIR/<theme>/<meter>.png, then leaves."
                 );
                 return ExitCode::SUCCESS;
             }
@@ -425,7 +423,7 @@ fn main() -> ExitCode {
         Some(name) => intake::installed_skin_named(Some(&name)),
         None => intake::installed_skin(),
     };
-    let mut source = PipeSource::installed().with_skin(&skin);
+    let mut source = TapSource::installed().with_skin(&skin);
     let frame_rate = intake::installed_frame_rate();
     let started = Instant::now();
     // GLASS_PROFILE prints where each frame's time goes, averaged over 60 frames, and what is kept in memory.
