@@ -26,7 +26,46 @@ use lead::{
 };
 
 mod channel;
-pub use channel::{Channel, Command, Event};
+pub mod remote;
+pub use channel::{Channel, Command, Event, RemoteHello};
+
+use std::net::ToSocketAddrs;
+use std::sync::RwLock;
+
+/// The player's HTTP address: the player itself on the player, the
+/// player's host for a remote display.
+static PLAYER: RwLock<Option<(String, u16)>> = RwLock::new(None);
+
+/// Name the player a remote display talks to. Without this, the player is
+/// this machine.
+pub fn set_player(host: &str, port: u16) {
+    if let Ok(mut player) = PLAYER.write() {
+        *player = Some((host.to_string(), port));
+    }
+}
+
+fn player() -> (String, u16) {
+    PLAYER
+        .read()
+        .ok()
+        .and_then(|p| p.clone())
+        .unwrap_or_else(|| ("127.0.0.1".to_string(), 3000))
+}
+
+/// `http://host:port` of the player.
+pub fn player_http() -> String {
+    let (host, port) = player();
+    format!("http://{host}:{port}")
+}
+
+/// A TCP connection to the player's web port, or none within `timeout`.
+fn player_connect(timeout: Duration) -> Option<TcpStream> {
+    let (host, port) = player();
+    let addrs = (host.as_str(), port).to_socket_addrs().ok()?;
+    addrs
+        .into_iter()
+        .find_map(|addr| TcpStream::connect_timeout(&addr, timeout).ok())
+}
 
 /// The theme's meter rotation as the player configures it: which names, in
 /// what order, and what moves it on. No names means one fixed meter.
@@ -347,7 +386,7 @@ fn fanart_list(artist: &str, uri: &str) -> FanartAnswer {
         "data": { "artist": artist, "uri": uri },
     });
     let Ok(mut response) = agent
-        .post("http://localhost:3000/api/v1/pluginEndpoint")
+        .post(format!("{}/api/v1/pluginEndpoint", player_http()))
         .header("Content-Type", "application/json")
         .send(body.to_string().as_bytes())
     else {
@@ -379,7 +418,8 @@ fn fanart_file(reference: &str) -> String {
         return local.to_string_lossy().into_owned();
     }
     fetch_art(&format!(
-        "http://localhost:3000/albumart?sectionimage={reference}"
+        "{}/albumart?sectionimage={reference}",
+        player_http()
     ))
     .map(|p| p.to_string_lossy().into_owned())
     .unwrap_or_default()
@@ -769,15 +809,14 @@ pub fn resolve_time_font(spec: &mut TextSpec, theme_dir: &str, font_path: &str) 
         .unwrap_or_default();
 }
 
-/// One HTTP GET against the player on localhost. `None` when it does not answer.
+/// One HTTP GET against the player. `None` when it does not answer.
 fn player_get(path: &str) -> Option<String> {
-    let address = std::net::SocketAddr::from(([127, 0, 0, 1], 3000));
-    let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(200)).ok()?;
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
+    let (host, _) = player();
+    let mut stream = player_connect(Duration::from_millis(500))?;
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(1500)));
     stream
         .write_all(
-            format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
-                .as_bytes(),
+            format!("GET {path} HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\n\r\n").as_bytes(),
         )
         .ok()?;
     let mut buf = String::new();
@@ -900,7 +939,7 @@ pub fn resolve_icon(key: &str, skin_icons: &str, plugin_icons: &str) -> String {
 /// slash is a path served by the player itself; anything else is used as is.
 pub fn art_url(reported: &str) -> String {
     if reported.starts_with('/') {
-        format!("http://127.0.0.1:3000{reported}")
+        format!("{}{reported}", player_http())
     } else {
         reported.to_string()
     }
@@ -1011,13 +1050,94 @@ impl Source for IdleSource {
     }
 }
 
-/// The tap's ring and the player's state: what the display shows.
-pub struct TapSource {
-    /// The live ring, found under `/dev/shm` and looked for again when it goes.
+/// What a look at the hops gives: the hops since the last look merged as
+/// one, with the stream's rate and the frames elapsed, and whether the
+/// stream is quiet.
+pub struct Taken {
+    pub hop: Option<(tap::Frame, u32, u64)>,
+    pub quiet: bool,
+}
+
+/// Where the hops come from: the tap's ring on the player, the wire on a
+/// remote display.
+pub trait Hops {
+    fn take(&mut self) -> Taken;
+}
+
+/// The tap's ring under `/dev/shm`, looked for again when it goes.
+#[cfg(unix)]
+#[derive(Default)]
+pub struct RingHops {
     ring: Option<tap::Reader>,
     ring_looked_at: Option<Instant>,
     last_seq: u64,
     last_frames: u64,
+}
+
+#[cfg(unix)]
+impl RingHops {
+    /// The live ring, looked for at most once a second while there is none.
+    fn ring(&mut self) -> Option<&tap::Reader> {
+        if self.ring.as_ref().is_some_and(|r| r.is_live()) {
+            return self.ring.as_ref();
+        }
+        let due = self
+            .ring_looked_at
+            .is_none_or(|at| at.elapsed() >= Duration::from_secs(1));
+        if due {
+            self.ring_looked_at = Some(Instant::now());
+            self.ring = tap::Reader::open_live(Path::new(tap::ring::DIR));
+            self.last_seq = 0;
+            self.last_frames = 0;
+        }
+        self.ring.as_ref().filter(|r| r.is_live())
+    }
+}
+
+#[cfg(unix)]
+impl Hops for RingHops {
+    fn take(&mut self) -> Taken {
+        let mut hop: Option<(tap::Frame, u32, u64)> = None;
+        let mut quiet = true;
+        let last_seq = self.last_seq;
+        let last_frames = self.last_frames;
+        if let Some(reader) = self.ring() {
+            let info = reader.info();
+            let stale = tap::ring::now_ns().saturating_sub(info.written_ns) > RING_QUIET_NS;
+            if !stale {
+                quiet = false;
+                if info.seq != last_seq {
+                    // Every hop since the last look, so no peak between two
+                    // frames of the display is missed.
+                    let first = if last_seq == 0
+                        || info.seq.saturating_sub(last_seq) >= info.slots as u64
+                    {
+                        info.seq
+                    } else {
+                        last_seq + 1
+                    };
+                    let merged = merge_hops((first..=info.seq).filter_map(|seq| reader.slot(seq)));
+                    if let Some(frame) = merged {
+                        let elapsed = frame.frames.saturating_sub(last_frames).max(1);
+                        hop = Some((frame, info.rate.max(1), elapsed));
+                    }
+                }
+            }
+        }
+        if let Some((frame, _, _)) = hop.as_ref() {
+            self.last_seq = frame.seq;
+            self.last_frames = frame.frames;
+        }
+        Taken { hop, quiet }
+    }
+}
+
+/// The tap's hops and the player's state: what the display shows.
+pub struct TapSource {
+    /// The hops: the ring on the player, the wire on a remote.
+    hops: Box<dyn Hops>,
+    /// The configuration change the channel last announced, until taken.
+    config_seen: Option<(String, String, String)>,
     /// The meter's fall, as the old scope shaped it, on the pipe scale.
     decay: tap::legacy::Meter,
     /// The theme's bins from the raw spectrum, on the old logarithmic mapping.
@@ -1072,30 +1192,7 @@ pub struct TapSource {
     rederive: bool,
 }
 
-/// The hops that arrived between two looks at the ring, as one: the peaks,
-/// RMS and bins take the highest of them, the count and sequence the
-/// latest, so a transient inside one frame of the display still shows.
-fn merge_hops(hops: impl Iterator<Item = tap::Frame>) -> Option<tap::Frame> {
-    let mut merged: Option<tap::Frame> = None;
-    for frame in hops {
-        match merged.as_mut() {
-            None => merged = Some(frame),
-            Some(m) => {
-                for ch in 0..tap::MAX_CHANNELS {
-                    m.peak[ch] = m.peak[ch].max(frame.peak[ch]);
-                    m.rms[ch] = m.rms[ch].max(frame.rms[ch]);
-                    for (a, b) in m.spectrum[ch].iter_mut().zip(frame.spectrum[ch].iter()) {
-                        *a = a.max(*b);
-                    }
-                }
-                m.frames = frame.frames;
-                m.seq = frame.seq;
-                m.time_ns = frame.time_ns;
-            }
-        }
-    }
-    merged
-}
+use tap::ring::merge_hops;
 
 /// The meter falls no faster than this from full scale, as the old scope had it.
 const METER_DECAY_MS: u32 = 500;
@@ -1109,7 +1206,37 @@ impl TapSource {
     /// the ring is looked for again once a second. Now-playing text is
     /// asked of the player once a second, not once a frame.
     pub fn installed() -> Self {
-        Self::new(DEFAULT_SPECTRUM_BINS, DEFAULT_METER_MAX)
+        let source = Self::new(DEFAULT_SPECTRUM_BINS, DEFAULT_METER_MAX);
+        #[cfg(unix)]
+        let source = source.with_hops(Box::new(RingHops::default()));
+        source
+    }
+
+    /// Take the hops from elsewhere: a remote display's wire.
+    pub fn with_hops(mut self, hops: Box<dyn Hops>) -> Self {
+        self.hops = hops;
+        self
+    }
+
+    /// Hear the player through this channel instead: a remote display's TCP one.
+    pub fn with_channel(mut self, mut channel: Channel) -> Self {
+        if channel.connected() {
+            channel.await_state(Duration::from_millis(300));
+        }
+        self.channel = Some(channel);
+        self.channel_was_live = false;
+        self
+    }
+
+    /// Send the player a command through the channel. False without one.
+    pub fn command(&mut self, command: &Command) -> bool {
+        self.channel.as_mut().is_some_and(|c| c.send(command))
+    }
+
+    /// The configuration change the channel announced since the last call:
+    /// its version, the theme on show and the meter.
+    pub fn take_config(&mut self) -> Option<(String, String, String)> {
+        self.config_seen.take()
     }
     pub fn new(spectrum_bins: usize, meter_max: f32) -> Self {
         let bins = spectrum_bins.max(1);
@@ -1120,10 +1247,8 @@ impl TapSource {
             channel.await_state(Duration::from_millis(300));
         }
         Self {
-            ring: None,
-            ring_looked_at: None,
-            last_seq: 0,
-            last_frames: 0,
+            hops: Box::new(IdleHops),
+            config_seen: None,
             decay: tap::legacy::Meter::new(METER_DECAY_MS, meter_max.max(1.0) as u32),
             bins_mapper: tap::legacy::Spectrum::new(
                 bins,
@@ -1333,57 +1458,25 @@ impl TapSource {
             }
         }
     }
+}
 
-    /// The live ring, looked for at most once a second while there is none.
-    fn ring(&mut self) -> Option<&tap::Reader> {
-        if self.ring.as_ref().is_some_and(|r| r.is_live()) {
-            return self.ring.as_ref();
+/// No hops at all: silence, for a source without a ring or a wire.
+struct IdleHops;
+
+impl Hops for IdleHops {
+    fn take(&mut self) -> Taken {
+        Taken {
+            hop: None,
+            quiet: true,
         }
-        let due = self
-            .ring_looked_at
-            .is_none_or(|at| at.elapsed() >= Duration::from_secs(1));
-        if due {
-            self.ring_looked_at = Some(Instant::now());
-            self.ring = tap::Reader::open_live(Path::new(tap::ring::DIR));
-            self.last_seq = 0;
-            self.last_frames = 0;
-        }
-        self.ring.as_ref().filter(|r| r.is_live())
     }
 }
 
 impl Source for TapSource {
     fn poll(&mut self) -> Input {
-        // The latest hop, or silence when the ring is gone or has gone quiet.
-        let mut hop: Option<(tap::Frame, u32, u64)> = None;
-        let mut quiet = true;
-        let last_seq = self.last_seq;
-        if let Some(reader) = self.ring() {
-            let info = reader.info();
-            let stale = tap::ring::now_ns().saturating_sub(info.written_ns) > RING_QUIET_NS;
-            if !stale {
-                quiet = false;
-                if info.seq != last_seq {
-                    // Every hop since the last look, so no peak between two
-                    // frames of the display is missed.
-                    let first = if last_seq == 0
-                        || info.seq.saturating_sub(last_seq) >= info.slots as u64
-                    {
-                        info.seq
-                    } else {
-                        last_seq + 1
-                    };
-                    let merged = merge_hops((first..=info.seq).filter_map(|seq| reader.slot(seq)));
-                    if let Some(frame) = merged {
-                        let elapsed = frame.frames.saturating_sub(self.last_frames).max(1);
-                        hop = Some((frame, info.rate.max(1), elapsed));
-                    }
-                }
-            }
-        }
+        // The latest hop, or silence when the stream is gone or has gone quiet.
+        let Taken { hop, quiet } = self.hops.take();
         if let Some((frame, rate, elapsed)) = hop {
-            self.last_seq = frame.seq;
-            self.last_frames = frame.frames;
             let raw = [
                 (frame.peak[0] * 32767.0) as i32,
                 (frame.peak[1] * 32767.0) as i32,
@@ -1424,6 +1517,11 @@ impl Source for TapSource {
                 match event {
                     Event::State(state) => arrived = Some(NowPlaying::from_value(&state)),
                     Event::Infinity(on) => self.infinity_held = on,
+                    Event::Config {
+                        version,
+                        theme,
+                        meter,
+                    } => self.config_seen = Some((version, theme, meter)),
                     Event::Hello { .. } => {}
                 }
             }
@@ -1431,7 +1529,7 @@ impl Source for TapSource {
             if live != self.channel_was_live {
                 self.channel_was_live = live;
                 if live {
-                    println!("glass: channel {}", channel.path().display());
+                    println!("glass: channel {}", channel.name());
                 } else {
                     println!("glass: channel gone, asking the player");
                 }
@@ -1769,13 +1867,14 @@ impl NowPlaying {
 /// plugin's channel is not there.
 pub fn now_playing() -> NowPlaying {
     let mut playing = NowPlaying::default();
-    let address = std::net::SocketAddr::from(([127, 0, 0, 1], 3000));
-    let Ok(mut stream) = TcpStream::connect_timeout(&address, Duration::from_millis(200)) else {
+    let (host, _) = player();
+    let Some(mut stream) = player_connect(Duration::from_millis(500)) else {
         return playing;
     };
-    let _ = stream.set_read_timeout(Some(Duration::from_millis(200)));
+    let _ = stream.set_read_timeout(Some(Duration::from_millis(1500)));
     let _ = stream.write_all(
-        b"GET /api/v1/getState HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+        format!("GET /api/v1/getState HTTP/1.0\r\nHost: {host}\r\nConnection: close\r\n\r\n")
+            .as_bytes(),
     );
     let mut buf = String::new();
     if stream.read_to_string(&mut buf).is_err() {

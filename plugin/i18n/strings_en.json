@@ -484,6 +484,23 @@
     "MANAGER_ST_MEASURED": "measured",
     "MANAGER_ST_NOT_MEASURED": "not measured: the source plays below the tap",
     "MANAGER_ST_RING_LIVE": "live",
-    "MANAGER_ST_RING_QUIET": "quiet for"
+    "MANAGER_ST_RING_QUIET": "quiet for",
+    "MANAGER_TAB_REMOTES": "Remotes",
+    "MANAGER_RM_TITLE": "Remote displays",
+    "MANAGER_RM_HELP": "A remote display is Glass on another machine, showing this player's meters with this player's theme. It finds the player by its beacon or by name, takes the frames over the network, and follows the theme on show. Run it with: glass --remote <player>",
+    "MANAGER_RM_OFF": "Remote displays are off on this player.",
+    "MANAGER_RM_PORTS": "Ports",
+    "MANAGER_RM_FRAMES": "frames",
+    "MANAGER_RM_CHANNEL": "channel",
+    "MANAGER_RM_BEACON": "beacon",
+    "MANAGER_RM_SERVING": "Frames daemon",
+    "MANAGER_RM_SERVING_UP": "running",
+    "MANAGER_RM_SERVING_DOWN": "not running",
+    "MANAGER_RM_SENT": "frames sent",
+    "MANAGER_RM_NONE": "No remote display is connected.",
+    "MANAGER_RM_SINCE": "since",
+    "MANAGER_RM_SUBSCRIBED": "receiving frames",
+    "MANAGER_RM_NOT_SUBSCRIBED": "connected, no frames yet",
+    "MANAGER_RM_SCREEN": "screen"
   }
 }

@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-09-26
+
+Remote displays: Glass on another machine shows a player's meters with the player's theme, fonts and icons, drawn by the same pipeline. `glass --remote <player>` (or `discover`) brings the player's configuration, the theme on show, the fonts and the format icons into a home of its own from the manager, each file kept by checksum; subscribes to the player's frames, which `glass-serve` on the player sends over UDP from the tap's ring, one datagram per hop with the peaks and RMS exact and the spectrum in quarter-decibel steps; hears the player over the channel on TCP and says who it is; starts itself again when the player's theme changes; and plays or pauses the player on a touch. The plugin starts the frames daemon, serves the channel over TCP, announces the player with a beacon, and shows the remotes on the manager's Remotes tab. The wire is documented on the wiki's Remotes page. The old peppy_remote is not fed: it ran the Python engine on the remote, and this is its replacement.
+
 ## [0.6.11] - 2026-09-26
 
 The measured line reads a ring stamped a hair ahead of the manager's own clock reading as live, the display's own rule; 0.6.10 could call a playing source unmeasured for that.

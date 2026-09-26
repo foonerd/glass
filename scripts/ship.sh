@@ -54,18 +54,20 @@ ship() {
   local arch=$2
   local stripper=$3
   echo "ship: $arch ($triple)"
-  cargo build --release --locked --target "$triple" --bin glass --bin tapdump -p glass -p tap
+  cargo build --release --locked --target "$triple" --bin glass --bin tapdump --bin glass-serve -p glass -p tap -p glass-serve
   cargo build --release --locked --target "$triple" -p glasstap
   install -D -m 755 "target/$triple/release/glass" "bin/$arch/glass"
   install -D -m 755 "target/$triple/release/tapdump" "bin/$arch/tapdump"
+  install -D -m 755 "target/$triple/release/glass-serve" "bin/$arch/glass-serve"
   install -D -m 644 "target/$triple/release/libglasstap.so" "lib/$arch/libglasstap.so"
-  "$stripper" "bin/$arch/glass" "bin/$arch/tapdump" "lib/$arch/libglasstap.so"
+  "$stripper" "bin/$arch/glass" "bin/$arch/tapdump" "bin/$arch/glass-serve" "lib/$arch/libglasstap.so"
 }
 
 ship x86_64-unknown-linux-gnu x64 strip
 ship armv7-unknown-linux-gnueabihf armv7 arm-linux-gnueabihf-strip
 install -D -m 755 bin/armv7/glass bin/arm/glass
 install -D -m 755 bin/armv7/tapdump bin/arm/tapdump
+install -D -m 755 bin/armv7/glass-serve bin/arm/glass-serve
 install -D -m 644 lib/armv7/libglasstap.so lib/arm/libglasstap.so
 ship aarch64-unknown-linux-gnu armv8 aarch64-linux-gnu-strip
 

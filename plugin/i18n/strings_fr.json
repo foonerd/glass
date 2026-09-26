@@ -484,6 +484,23 @@
     "MANAGER_ST_MEASURED": "mesuré",
     "MANAGER_ST_NOT_MEASURED": "non mesuré : la source joue en aval de la prise",
     "MANAGER_ST_RING_LIVE": "actif",
-    "MANAGER_ST_RING_QUIET": "silencieux depuis"
+    "MANAGER_ST_RING_QUIET": "silencieux depuis",
+    "MANAGER_TAB_REMOTES": "Écrans distants",
+    "MANAGER_RM_TITLE": "Écrans distants",
+    "MANAGER_RM_HELP": "Un écran distant est Glass sur une autre machine, montrant les vumètres de ce lecteur avec son thème. Il trouve le lecteur par sa balise ou par son nom, reçoit les trames par le réseau et suit le thème affiché. Lancement : glass --remote <lecteur>",
+    "MANAGER_RM_OFF": "Les écrans distants sont désactivés sur ce lecteur.",
+    "MANAGER_RM_PORTS": "Ports",
+    "MANAGER_RM_FRAMES": "trames",
+    "MANAGER_RM_CHANNEL": "canal",
+    "MANAGER_RM_BEACON": "balise",
+    "MANAGER_RM_SERVING": "Service de trames",
+    "MANAGER_RM_SERVING_UP": "en marche",
+    "MANAGER_RM_SERVING_DOWN": "arrêté",
+    "MANAGER_RM_SENT": "trames envoyées",
+    "MANAGER_RM_NONE": "Aucun écran distant n'est connecté.",
+    "MANAGER_RM_SINCE": "depuis",
+    "MANAGER_RM_SUBSCRIBED": "reçoit les trames",
+    "MANAGER_RM_NOT_SUBSCRIBED": "connecté, pas encore de trames",
+    "MANAGER_RM_SCREEN": "écran"
   }
 }

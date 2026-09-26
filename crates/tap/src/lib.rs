@@ -23,6 +23,7 @@ pub mod measure;
 pub mod relay;
 pub mod ring;
 pub mod sample;
+pub mod wire;
 
 pub use analysis::Analyser;
 pub use ring::{Frame, Reader, Writer, MAX_CHANNELS};

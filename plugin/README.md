@@ -14,6 +14,6 @@ What is here:
 - `install.sh` and `uninstall.sh`: the install steps Volumio runs as root.
 - `UIConfig.json`, `i18n`, `config.json`: the settings page, its strings (which the manager's page reads too), and the defaults. The settings page keeps what operates the display: the guard, the manager's buttons, the display and activation, the theme on show with its tag rules, the meter and its response, the frame rate, rotation, scrolling, animation and playback.
 
-The packaging step adds `bin/<arch>/glass`, `bin/<arch>/tapdump` and `lib/<arch>/libglasstap.so` from the ship script's output, and `node_modules`.
+The packaging step adds `bin/<arch>/glass`, `bin/<arch>/tapdump`, `bin/<arch>/glass-serve` (the frames daemon for remote displays, see the wiki's Remotes page) and `lib/<arch>/libglasstap.so` from the ship script's output, and `node_modules`.
 
 Glass replaces PeppyMeter Screensaver. The installer refuses to run while that plugin is enabled; the plugin refuses to start while it is enabled, disables itself so the two are never both enabled, and offers to disable that plugin and start instead; at boot Glass starts after it, so when both are found enabled PeppyMeter Screensaver's transition release steps aside and Glass runs. Themes and settings are taken over: copied from an installed PeppyMeter Screensaver, or adopted in place when it was uninstalled with its themes preserved.

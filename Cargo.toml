@@ -10,10 +10,11 @@ members = [
     "bins/glass",
     "bins/glasstap",
     "bins/glass-remote",
+    "bins/glass-serve",
 ]
 
 [workspace.package]
-version = "0.6.11"
+version = "0.7.0"
 edition = "2021"
 license = "MIT"
 publish = false

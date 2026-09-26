@@ -484,6 +484,23 @@
     "MANAGER_ST_MEASURED": "gemessen",
     "MANAGER_ST_NOT_MEASURED": "nicht gemessen: die Quelle spielt unterhalb des Abgriffs",
     "MANAGER_ST_RING_LIVE": "aktiv",
-    "MANAGER_ST_RING_QUIET": "still seit"
+    "MANAGER_ST_RING_QUIET": "still seit",
+    "MANAGER_TAB_REMOTES": "Fernanzeigen",
+    "MANAGER_RM_TITLE": "Fernanzeigen",
+    "MANAGER_RM_HELP": "Eine Fernanzeige ist Glass auf einem anderen Rechner und zeigt die Meter dieses Players mit dessen Theme. Sie findet den Player über sein Signal oder seinen Namen, holt die Frames über das Netz und folgt dem angezeigten Theme. Start: glass --remote <player>",
+    "MANAGER_RM_OFF": "Fernanzeigen sind auf diesem Player ausgeschaltet.",
+    "MANAGER_RM_PORTS": "Ports",
+    "MANAGER_RM_FRAMES": "Frames",
+    "MANAGER_RM_CHANNEL": "Kanal",
+    "MANAGER_RM_BEACON": "Signal",
+    "MANAGER_RM_SERVING": "Frame-Dienst",
+    "MANAGER_RM_SERVING_UP": "läuft",
+    "MANAGER_RM_SERVING_DOWN": "läuft nicht",
+    "MANAGER_RM_SENT": "Frames gesendet",
+    "MANAGER_RM_NONE": "Keine Fernanzeige verbunden.",
+    "MANAGER_RM_SINCE": "seit",
+    "MANAGER_RM_SUBSCRIBED": "empfängt Frames",
+    "MANAGER_RM_NOT_SUBSCRIBED": "verbunden, noch keine Frames",
+    "MANAGER_RM_SCREEN": "Bildschirm"
   }
 }

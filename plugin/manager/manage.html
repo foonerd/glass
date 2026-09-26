@@ -122,6 +122,7 @@
     <button class="tab" data-view="catalog"></button>
     <button class="tab" data-view="artwork"></button>
     <button class="tab" data-view="backups"></button>
+    <button class="tab" data-view="remotes"></button>
     <button class="tab" data-view="status"></button>
   </div>
 
@@ -237,6 +238,19 @@
       </div>
     </div>
     <div class="list" id="bk-list"></div>
+  </section>
+
+  <!-- Remotes -->
+  <section class="view" id="view-remotes">
+    <div class="panel">
+      <div class="row" style="justify-content:space-between">
+        <h2 id="rm-title" style="margin:0"></h2>
+        <button class="small" id="btn-rm-refresh"></button>
+      </div>
+      <div class="help" id="rm-help" style="margin:10px 0"></div>
+      <table class="kv" id="rm-table"></table>
+    </div>
+    <div class="list" id="rm-list"></div>
   </section>
 
   <!-- Status -->
@@ -399,7 +413,10 @@
     document.title = t('MANAGER_TITLE');
     $('title').textContent = t('MANAGER_TITLE');
     $('btn-close').textContent = t('MANAGER_CLOSE');
-    var tabs = { themes: 'MANAGER_TAB_THEMES', catalog: 'MANAGER_TAB_CATALOG', artwork: 'MANAGER_TAB_ARTWORK', backups: 'MANAGER_TAB_BACKUPS', status: 'MANAGER_TAB_STATUS' };
+    var tabs = { themes: 'MANAGER_TAB_THEMES', catalog: 'MANAGER_TAB_CATALOG', artwork: 'MANAGER_TAB_ARTWORK', backups: 'MANAGER_TAB_BACKUPS', remotes: 'MANAGER_TAB_REMOTES', status: 'MANAGER_TAB_STATUS' };
+    $('rm-title').textContent = t('MANAGER_RM_TITLE');
+    $('rm-help').textContent = t('MANAGER_RM_HELP');
+    $('btn-rm-refresh').textContent = t('MANAGER_REFRESH');
     document.querySelectorAll('.tab').forEach(function (b) { b.textContent = t(tabs[b.dataset.view]); });
     $('themes-search').placeholder = t('MANAGER_SEARCH');
     $('btn-upload').textContent = t('MANAGER_UPLOAD');
@@ -479,7 +496,47 @@
     if (name === 'artwork') loadArtwork();
     if (name === 'backups') loadBackups();
     if (name === 'status') { loadStatus(); loadUpdate(false); }
+    if (name === 'remotes') loadRemotes();
   }
+
+  // ---- remote displays -----------------------------------------------
+  function loadRemotes() {
+    api('GET', '/api/remote/status').then(function (r) {
+      var rows = [];
+      if (!r.ports.enabled) {
+        $('rm-table').innerHTML = '<tr><td colspan="2">' + esc(t('MANAGER_RM_OFF')) + '</td></tr>';
+        $('rm-list').innerHTML = '';
+        return;
+      }
+      rows.push(['MANAGER_RM_PORTS', t('MANAGER_RM_FRAMES') + ' ' + r.ports.frames + ' · ' + t('MANAGER_RM_CHANNEL') + ' ' + r.ports.channel + ' · ' + t('MANAGER_RM_BEACON') + ' ' + r.ports.beacon]);
+      rows.push(['MANAGER_RM_SERVING', (r.serving ? t('MANAGER_RM_SERVING_UP') : t('MANAGER_RM_SERVING_DOWN')) + (r.serve ? ' · ' + r.serve.sent + ' ' + t('MANAGER_RM_SENT') : '')]);
+      $('rm-table').innerHTML = rows.map(function (x) { return '<tr><td>' + esc(t(x[0])) + '</td><td>' + esc(x[1]) + '</td></tr>'; }).join('');
+      var subs = {};
+      ((r.serve && r.serve.subscribers) || []).forEach(function (s) { subs[s.address.split(':')[0]] = s; });
+      var box = $('rm-list');
+      box.innerHTML = '';
+      var seen = {};
+      var items = (r.remotes || []).map(function (m) {
+        seen[m.address] = true;
+        var s = subs[m.address];
+        return { name: m.name || m.id, address: m.address, release: m.release, screen: m.screen, since: m.since, frames: !!s, sent: s ? s.sent : 0 };
+      });
+      Object.keys(subs).forEach(function (ip) {
+        if (!seen[ip]) items.push({ name: subs[ip].name || subs[ip].id, address: ip, release: subs[ip].release, screen: null, since: null, frames: true, sent: subs[ip].sent });
+      });
+      if (!items.length) { box.innerHTML = '<div class="empty">' + esc(t('MANAGER_RM_NONE')) + '</div>'; return; }
+      items.forEach(function (m) {
+        var el = document.createElement('div');
+        el.className = 'item';
+        el.innerHTML = '<div class="grow"><div class="name">' + esc(m.name) + ' <span class="muted" style="font-weight:normal">' + esc(m.address) + (m.release ? ' · ' + esc(m.release) : '') + '</span></div>' +
+          '<div class="muted" style="font-size:13px">' + (m.screen && m.screen[0] ? esc(t('MANAGER_RM_SCREEN')) + ' ' + m.screen[0] + '×' + m.screen[1] + ' · ' : '') +
+          esc(m.frames ? t('MANAGER_RM_SUBSCRIBED') + ' (' + m.sent + ')' : t('MANAGER_RM_NOT_SUBSCRIBED')) + (m.since ? ' · ' + esc(t('MANAGER_RM_SINCE')) + ' ' + esc(fmtDate(m.since)) : '') + '</div></div>' +
+          '<span class="badge ' + (m.frames ? 'green' : 'gray') + '">' + esc(m.frames ? 'LIVE' : 'IDLE') + '</span>';
+        box.appendChild(el);
+      });
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  $('btn-rm-refresh').onclick = loadRemotes;
 
   // ---- themes -----------------------------------------------------------
   function loadThemes() {

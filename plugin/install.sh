@@ -42,7 +42,7 @@ fi
 # =============================================================================
 # CHECK: the display binary for this machine. The unzip does not keep modes.
 # =============================================================================
-chmod +x "$PLUGIN_DIR"/bin/*/glass "$PLUGIN_DIR"/bin/*/tapdump "$PLUGIN_DIR/run_glass.sh" 2>/dev/null || true
+chmod +x "$PLUGIN_DIR"/bin/*/glass "$PLUGIN_DIR"/bin/*/tapdump "$PLUGIN_DIR"/bin/*/glass-serve "$PLUGIN_DIR/run_glass.sh" 2>/dev/null || true
 if [ ! -x "$PLUGIN_DIR/bin/$ARCH/glass" ]; then
   refuse "ERROR: no display binary for architecture $ARCH (available: $(ls "$PLUGIN_DIR/bin" 2>/dev/null | tr '\n' ' '))"
 fi
