@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.9] - 2026-09-26
+
+Soloist Connect plays again with Glass running. 0.6.8 sent Soloist to `plug:spotify`, a `plug` put straight on the tap, and libasound's parameter negotiation there ends with an empty interval and aborts Soloist's daemon the moment it plays. Soloist stays on the player's own device, `plug:volumio`, where the tap sits and measures it. What 0.6.8 set out to fix stays fixed another way: Glass nudges Soloist after its own rewrite of the ALSA file and after every later rewrite the player makes as plugins start, and Soloist restarts its daemon only when the device it runs with differs from what the file now says, so a device sampled while the file was half written is corrected within seconds.
+
 ## [0.6.8] - 2026-09-26
 
 Soloist Connect meters again after a backend start. Soloist chooses its ALSA device when its daemon starts, from the ALSA file as it stands; at a backend start that file is written in stages, and a device read too early (`softvolume`) sits below the tap, so Soloist's stream was heard but never measured until its plugin was restarted. With its metering flag on and a `pcm.spotify` in the file, Soloist opens `plug:spotify`, which is the tap. Glass now says metering is on after every rewrite of the ALSA file, and off when it is uninstalled; 0.5.10 had said off when it retired the old side outputs, which the tap made wrong. Soloist restarts its daemon only when the device it runs with differs.
