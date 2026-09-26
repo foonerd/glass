@@ -21,6 +21,7 @@ for arch in arm armv7 armv8 x64; do
     mkdir -p "$STAGE/bin/$arch" "$STAGE/lib/$arch"
     cp "$ROOT/bin/$arch/glass" "$STAGE/bin/$arch/glass"
     [ -x "$ROOT/bin/$arch/tapdump" ] && cp "$ROOT/bin/$arch/tapdump" "$STAGE/bin/$arch/tapdump"
+    [ -x "$ROOT/bin/$arch/glass-serve" ] && cp "$ROOT/bin/$arch/glass-serve" "$STAGE/bin/$arch/glass-serve"
     [ -f "$ROOT/lib/$arch/libglasstap.so" ] && cp "$ROOT/lib/$arch/libglasstap.so" "$STAGE/lib/$arch/libglasstap.so"
   fi
 done

@@ -78,5 +78,21 @@
   "managerHost": {
     "type": "string",
     "value": ""
+  },
+  "remotesEnabled": {
+    "type": "boolean",
+    "value": true
+  },
+  "remoteFramesPort": {
+    "type": "number",
+    "value": 5580
+  },
+  "remoteChannelPort": {
+    "type": "number",
+    "value": 5581
+  },
+  "remoteBeaconPort": {
+    "type": "number",
+    "value": 5579
   }
 }

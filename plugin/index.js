@@ -101,6 +101,18 @@ Channel.prototype.attach = function (conn) {
             try { message = JSON.parse(line); } catch (e) {}
             if (message && message.kind === 'command') {
                 self.onCommand(message);
+            } else if (message && message.kind === 'hello' && message.remote && typeof message.remote === 'object') {
+                // A remote display says who it is.
+                var r = message.remote;
+                conn.remote = {
+                    id: String(r.id || '').slice(0, 64),
+                    name: String(r.name || '').slice(0, 64),
+                    release: String(r.release || '').slice(0, 32),
+                    screen: Array.isArray(r.screen) ? r.screen.slice(0, 2).map(function (n) { return parseInt(n, 10) || 0; }) : [0, 0],
+                    address: String(conn.remoteAddress || '').replace(/^::ffff:/, ''),
+                    since: new Date().toISOString()
+                };
+                self.logger.info(id + 'channel: remote ' + conn.remote.name + ' (' + conn.remote.address + ', ' + conn.remote.release + ')');
             } else {
                 self.logger.warn(id + 'channel: not a command: ' + line.slice(0, 80));
             }
@@ -116,6 +128,27 @@ Channel.prototype.attach = function (conn) {
     conn.on('error', detach);
     conn.on('close', detach);
     self.onAttach();
+};
+
+// The same channel over TCP, for remote displays on the network.
+Channel.prototype.listenTcp = function (port) {
+    var self = this;
+    self.tcpServer = net.createServer(function (conn) {
+        conn.setNoDelay(true);
+        self.attach(conn);
+    });
+    self.tcpServer.on('error', function (err) {
+        self.logger.error(id + 'channel: tcp ' + port + ': ' + (err && err.message ? err.message : err));
+        self.tcpServer = null;
+    });
+    self.tcpServer.listen(port, function () {
+        self.logger.info(id + 'channel: serving tcp ' + port);
+    });
+};
+
+// The remote displays connected, as they introduced themselves.
+Channel.prototype.remotes = function () {
+    return this.clients.filter(function (c) { return c.remote; }).map(function (c) { return c.remote; });
 };
 
 Channel.prototype.tell = function (conn, message) {
@@ -135,6 +168,10 @@ Channel.prototype.close = function () {
     if (self.server) {
         try { self.server.close(); } catch (e) {}
         self.server = null;
+    }
+    if (self.tcpServer) {
+        try { self.tcpServer.close(); } catch (e) {}
+        self.tcpServer = null;
     }
     try { if (self.path && fs.existsSync(self.path)) fs.unlinkSync(self.path); } catch (e) {}
 };
@@ -285,7 +322,11 @@ Glass.prototype.onVolumioStart = function () {
         legacyImported: ['boolean', false],
         displayOutput: ['string', '0'],
         managerPort: ['number', MANAGER_DEFAULT_PORT],
-        managerHost: ['string', '']
+        managerHost: ['string', ''],
+        remotesEnabled: ['boolean', true],
+        remoteFramesPort: ['number', 5580],
+        remoteChannelPort: ['number', 5581],
+        remoteBeaconPort: ['number', 5579]
     };
     Object.keys(defaults).forEach(function (key) {
         if (self.config.get(key) === undefined) {
@@ -411,6 +452,11 @@ Glass.prototype.onStart = function () {
         .fail(function (e) {
             self.logger.error(id + 'audio path: ' + (e && e.message ? e.message : e));
         });
+
+    // Remote displays: the frames daemon, the channel over TCP, the beacon.
+    try { self.startRemotes(); } catch (e) {
+        self.logger.error(id + 'remotes: ' + (e && e.message ? e.message : e));
+    }
 
     // The manager: the web application on its own port.
     self.startManager().catch(function () {
@@ -660,6 +706,7 @@ Glass.prototype.onStop = function () {
             self.channel = null;
         }
         self.unwatchAlsaFile();
+        self.stopRemotes();
         self.stopManager();
     });
 
@@ -1677,6 +1724,11 @@ Glass.prototype.updateConfigVersion = function () {
       if (newHash !== remoteConfigVersion) {
         remoteConfigVersion = newHash;
         self.logger.info(id + 'Config version updated: ' + remoteConfigVersion);
+        // The remotes hear of it at once, and the beacon carries it from now.
+        if (self.channel) {
+          self.channel.push({ kind: 'config', version: newHash, theme: self.activeTheme(), meter: String((meterConfig && meterConfig.current && meterConfig.current.meter) || '') });
+        }
+        self.sendBeacon();
       }
     }
   } catch (err) {
@@ -2972,6 +3024,278 @@ Glass.prototype.backupDelete = function (name) {
         self.logger.error(id + 'backupDelete: ' + e.message);
         return { error: 'GLASS.BACKUP_DELETE_FAILED', message: e.message };
     }
+};
+
+// ---- Remote displays -----------------------------------------------------
+// A remote display is Glass on another machine. The player gives it the
+// tap's frames over UDP (glass-serve, started here), the channel over TCP,
+// a beacon on the network so it is found, and its configuration, theme,
+// fonts and icons over the manager. See the wiki's Remotes page.
+
+const REMOTE_DEFAULTS = { remotesEnabled: true, remoteFramesPort: 5580, remoteChannelPort: 5581, remoteBeaconPort: 5579 };
+const REMOTE_BEACON_EVERY_MS = 5000;
+const REMOTE_SERVE_STATUS = '/tmp/glass_serve.json';
+const REMOTE_PROTOCOL = 1;
+
+Glass.prototype.remotePorts = function () {
+    var self = this;
+    var port = function (key) {
+        var v = parseInt(self.config.get(key), 10);
+        return (v >= 1024 && v <= 65535) ? v : REMOTE_DEFAULTS[key];
+    };
+    return {
+        enabled: self.config.get('remotesEnabled') !== false,
+        frames: port('remoteFramesPort'),
+        channel: port('remoteChannelPort'),
+        beacon: port('remoteBeaconPort'),
+        manager: parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT
+    };
+};
+
+Glass.prototype.startRemotes = function () {
+    var self = this;
+    var ports = self.remotePorts();
+    if (!ports.enabled) { return; }
+    self.remotesStopping = false;
+    if (self.channel) { self.channel.listenTcp(ports.channel); }
+    self.startServe();
+    self.beaconSocket = null;
+    try {
+        var dgram = require('dgram');
+        self.beaconSocket = dgram.createSocket({ type: 'udp4', reuseAddr: true });
+        self.beaconSocket.on('error', function (err) {
+            self.logger.warn(id + 'beacon: ' + (err && err.message ? err.message : err));
+        });
+        self.beaconSocket.bind(0, function () {
+            try { self.beaconSocket.setBroadcast(true); } catch (e) {}
+            self.sendBeacon();
+        });
+    } catch (e) {
+        self.logger.warn(id + 'beacon: ' + (e && e.message ? e.message : e));
+    }
+    if (self.beaconTimer) { clearInterval(self.beaconTimer); }
+    self.beaconTimer = setInterval(function () { self.sendBeacon(); }, REMOTE_BEACON_EVERY_MS);
+    self.logger.info(id + 'remotes: frames ' + ports.frames + ', channel ' + ports.channel + ', beacon ' + ports.beacon);
+};
+
+Glass.prototype.stopRemotes = function () {
+    var self = this;
+    self.remotesStopping = true;
+    if (self.beaconTimer) { clearInterval(self.beaconTimer); self.beaconTimer = null; }
+    if (self.beaconSocket) { try { self.beaconSocket.close(); } catch (e) {} self.beaconSocket = null; }
+    if (self.serveChild) {
+        try { self.serveChild.kill('SIGTERM'); } catch (e) {}
+        self.serveChild = null;
+    }
+    if (self.serveRestart) { clearTimeout(self.serveRestart); self.serveRestart = null; }
+};
+
+// The frames daemon, restarted a few seconds after it leaves.
+Glass.prototype.startServe = function () {
+    var self = this;
+    var ports = self.remotePorts();
+    var arch = self.volumioArch();
+    var bin = PluginPath + '/bin/' + arch + '/glass-serve';
+    if (!fs.existsSync(bin)) {
+        self.logger.error(id + 'remotes: no glass-serve for ' + arch);
+        return;
+    }
+    var spawn = require('child_process').spawn;
+    var child;
+    try {
+        child = spawn(bin, ['--port', String(ports.frames), '--rate', '60', '--status', REMOTE_SERVE_STATUS], { uid: 1000, gid: 1000, stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e) {
+        self.logger.error(id + 'remotes: glass-serve: ' + (e && e.message ? e.message : e));
+        return;
+    }
+    self.serveChild = child;
+    var say = function (chunk) {
+        String(chunk).split('\n').forEach(function (line) { if (line.trim()) { self.logger.info(id + line.trim()); } });
+    };
+    child.stdout.on('data', say);
+    child.stderr.on('data', say);
+    child.on('exit', function (code, signal) {
+        if (self.serveChild === child) { self.serveChild = null; }
+        if (self.remotesStopping) { return; }
+        self.logger.warn(id + 'remotes: glass-serve left (' + (signal || code) + '), starting it again in 5 s');
+        self.serveRestart = setTimeout(function () { self.serveRestart = null; if (!self.remotesStopping) { self.startServe(); } }, 5000);
+    });
+};
+
+// What the beacon says about this player.
+Glass.prototype.beacon = function () {
+    var self = this;
+    var ports = self.remotePorts();
+    var name = '';
+    try { name = String(self.commandRouter.sharedVars.get('system.name') || ''); } catch (e) {}
+    return {
+        glass: 'player',
+        protocol: REMOTE_PROTOCOL,
+        name: name || os.hostname(),
+        host: self.managerHost(),
+        frames_port: ports.frames,
+        channel_port: ports.channel,
+        manager_port: ports.manager,
+        player_port: 3000,
+        release: pluginVersion,
+        config: remoteConfigVersion,
+        theme: self.activeTheme(),
+        meter: String((meterConfig && meterConfig.current && meterConfig.current.meter) || '')
+    };
+};
+
+// Every interface's broadcast address, and the whole-network one.
+function broadcastAddresses() {
+    var out = ['255.255.255.255'];
+    var ifaces = os.networkInterfaces();
+    Object.keys(ifaces).forEach(function (name) {
+        (ifaces[name] || []).forEach(function (a) {
+            if (a.family !== 'IPv4' || a.internal || !a.netmask) { return; }
+            var ip = a.address.split('.').map(Number);
+            var mask = a.netmask.split('.').map(Number);
+            if (ip.length !== 4 || mask.length !== 4) { return; }
+            var b = ip.map(function (o, i) { return (o | (~mask[i] & 255)) & 255; }).join('.');
+            if (out.indexOf(b) === -1) { out.push(b); }
+        });
+    });
+    return out;
+}
+
+Glass.prototype.sendBeacon = function () {
+    var self = this;
+    if (!self.beaconSocket) { return; }
+    var ports = self.remotePorts();
+    var message = Buffer.from(JSON.stringify(self.beacon()));
+    broadcastAddresses().forEach(function (address) {
+        try { self.beaconSocket.send(message, 0, message.length, ports.beacon, address); } catch (e) {}
+    });
+};
+
+// What the manager shows about the remotes: the daemon's subscribers and
+// the channel's remote connections.
+Glass.prototype.remoteInfo = function () {
+    var self = this;
+    var serve = null;
+    try { serve = JSON.parse(fs.readFileSync(REMOTE_SERVE_STATUS, 'utf8')); } catch (e) {}
+    return {
+        ports: self.remotePorts(),
+        beacon: self.beacon(),
+        serve: serve,
+        serving: !!self.serveChild,
+        remotes: self.channel ? self.channel.remotes() : []
+    };
+};
+
+// A file's SHA-256, remembered by its size and time so the fonts are not read again.
+var hashCache = {};
+function fileDigest(file) {
+    try {
+        var stat = fs.statSync(file);
+        var key = file + ':' + stat.size + ':' + stat.mtimeMs;
+        if (hashCache[file] && hashCache[file].key === key) { return { sha256: hashCache[file].sha256, bytes: stat.size }; }
+        var sha256 = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
+        hashCache[file] = { key: key, sha256: sha256 };
+        return { sha256: sha256, bytes: stat.size };
+    } catch (e) {
+        return null;
+    }
+}
+
+function filesOf(dir, filter) {
+    var out = [];
+    try {
+        fs.readdirSync(dir).sort().forEach(function (name) {
+            if (name.indexOf('.') === 0 || (filter && !filter(name))) { return; }
+            var d = fileDigest(dir + '/' + name);
+            if (d) { out.push({ name: name, sha256: d.sha256, bytes: d.bytes }); }
+        });
+    } catch (e) {}
+    return out;
+}
+
+// The configuration and assets a remote brings into its own home.
+Glass.prototype.remoteConfig = function () {
+    var self = this;
+    self.loadConfigs();
+    var meterText = '';
+    var spectrumText = '';
+    try { meterText = fs.readFileSync(MeterConfigFile, 'utf8'); } catch (e) {}
+    try { spectrumText = fs.readFileSync(SpectrumConfigFile, 'utf8'); } catch (e) {}
+    var webfonts = [];
+    ['font.light', 'font.regular', 'font.bold'].forEach(function (key) {
+        var v = meterConfig && meterConfig.current ? String(meterConfig.current[key] || '') : '';
+        v = v.replace(/^\/+/, '');
+        if (v && v.indexOf('/') === -1 && webfonts.indexOf(v) === -1) { webfonts.push(v); }
+    });
+    return {
+        version: remoteConfigVersion,
+        release: pluginVersion,
+        theme: self.activeTheme(),
+        meter: String((meterConfig && meterConfig.current && meterConfig.current.meter) || ''),
+        files: { meter: meterText, spectrum: spectrumText },
+        assets: {
+            fonts: filesOf(PluginPath + '/fonts', function (n) { return /\.(ttf|otf)$/i.test(n); }),
+            icons: filesOf(PluginPath + '/format-icons', function (n) { return /\.(svg|png)$/i.test(n); })
+        },
+        webfonts: webfonts
+    };
+};
+
+// A theme's files with their checksums, the spectrum twin included.
+Glass.prototype.themeFiles = function (folder) {
+    var self = this;
+    self.loadConfigs();
+    if (!safeFolderName(folder)) { return null; }
+    var walk = function (root) {
+        var files = [];
+        var visit = function (dir, prefix) {
+            var names = [];
+            try { names = fs.readdirSync(dir).sort(); } catch (e) { return; }
+            names.forEach(function (name) {
+                if (name.indexOf('.') === 0) { return; }
+                var full = dir + '/' + name;
+                var stat;
+                try { stat = fs.lstatSync(full); } catch (e) { return; }
+                if (stat.isDirectory()) { visit(full, prefix + name + '/'); }
+                else if (stat.isFile()) {
+                    var d = fileDigest(full);
+                    if (d) { files.push({ path: prefix + name, sha256: d.sha256, bytes: d.bytes }); }
+                }
+            });
+        };
+        visit(root, '');
+        return files;
+    };
+    var meterDir = base_folder_P + folder;
+    if (!fs.existsSync(meterDir + '/meters.txt')) { return null; }
+    var out = { folder: folder, files: walk(meterDir), spectrum: null };
+    var spectrumDir = (base_folder_S || '') + folder;
+    if (base_folder_S && fs.existsSync(spectrumDir + '/spectrum.txt')) {
+        out.spectrum = { folder: folder, files: walk(spectrumDir) };
+    }
+    return out;
+};
+
+// One file of a theme, from either tree, only from inside it.
+Glass.prototype.themeFilePath = function (folder, tree, relative) {
+    var self = this;
+    self.loadConfigs();
+    if (!safeFolderName(folder)) { return null; }
+    var base = tree === 'templates_spectrum' ? base_folder_S : (tree === 'templates' ? base_folder_P : null);
+    if (!base) { return null; }
+    var root = path.resolve(base + folder);
+    var target = path.resolve(root, String(relative || ''));
+    if (target.indexOf(root + path.sep) !== 0) { return null; }
+    try { if (!fs.statSync(target).isFile()) { return null; } } catch (e) { return null; }
+    return target;
+};
+
+Glass.prototype.assetPath = function (kind, name) {
+    var dir = kind === 'font' ? PluginPath + '/fonts' : (kind === 'icon' ? PluginPath + '/format-icons' : null);
+    if (!dir || typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,127}$/.test(name)) { return null; }
+    var file = dir + '/' + name;
+    try { if (!fs.statSync(file).isFile()) { return null; } } catch (e) { return null; }
+    return file;
 };
 
 // ---- The manager's view of the plugin --------------------------------

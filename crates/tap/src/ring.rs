@@ -79,6 +79,31 @@ pub struct Frame {
     pub spectrum: [Vec<f32>; MAX_CHANNELS],
 }
 
+/// The hops that arrived between two looks at the ring, as one: the peaks,
+/// RMS and bins take the highest of them, the count and sequence the
+/// latest, so a transient inside one frame of a display still shows.
+pub fn merge_hops(hops: impl Iterator<Item = Frame>) -> Option<Frame> {
+    let mut merged: Option<Frame> = None;
+    for frame in hops {
+        match merged.as_mut() {
+            None => merged = Some(frame),
+            Some(m) => {
+                for ch in 0..MAX_CHANNELS {
+                    m.peak[ch] = m.peak[ch].max(frame.peak[ch]);
+                    m.rms[ch] = m.rms[ch].max(frame.rms[ch]);
+                    for (a, b) in m.spectrum[ch].iter_mut().zip(frame.spectrum[ch].iter()) {
+                        *a = a.max(*b);
+                    }
+                }
+                m.frames = frame.frames;
+                m.seq = frame.seq;
+                m.time_ns = frame.time_ns;
+            }
+        }
+    }
+    merged
+}
+
 /// What the header says about the stream and the ring.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Info {

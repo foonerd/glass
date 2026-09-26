@@ -1,13 +1,16 @@
 //! The plugin's channel: a local socket the plugin serves, one JSON object
-//! per line. A display that connects gets a greeting, then the player's
-//! state and the infinity flag as the plugin last saw them, then every
-//! change as it comes; it sends commands for the player back. Nothing here
-//! blocks the frame loop: the socket is non-blocking and a poll reads what
-//! has arrived.
+//! per line, or the same over TCP for a remote display. A display that
+//! connects gets a greeting, then the player's state and the infinity flag
+//! as the plugin last saw them, then every change as it comes, and word
+//! when the configuration changes; it sends commands for the player back,
+//! and a remote says who it is. Nothing here blocks the frame loop: the
+//! socket is non-blocking and a poll reads what has arrived.
 
 use std::io::{ErrorKind, Read, Write};
+use std::net::{TcpStream, ToSocketAddrs};
+#[cfg(unix)]
 use std::os::unix::net::UnixStream;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use serde::Serialize;
@@ -22,6 +25,12 @@ pub enum Event {
     State(Value),
     /// Whether infinity playback is on.
     Infinity(bool),
+    /// The configuration changed: its version, the theme on show and the meter.
+    Config {
+        version: String,
+        theme: String,
+        meter: String,
+    },
 }
 
 /// A command for the player, sent to the plugin.
@@ -67,37 +76,124 @@ impl Command {
     }
 }
 
+/// Who a remote display is, said once after connecting.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct RemoteHello {
+    pub id: String,
+    pub name: String,
+    pub release: String,
+    pub screen: [u32; 2],
+}
+
+impl RemoteHello {
+    /// The line the plugin reads, newline included.
+    pub fn line(&self) -> String {
+        let mut line = serde_json::json!({ "kind": "hello", "remote": self }).to_string();
+        line.push('\n');
+        line
+    }
+}
+
 /// How long a gone socket rests before it is tried again.
 const RETRY: Duration = Duration::from_secs(2);
 /// A line longer than this is not the plugin's; what was buffered is dropped.
 const LINE_MAX: usize = 1 << 20;
+/// How long a TCP connect may take.
+const TCP_CONNECT: Duration = Duration::from_secs(2);
 
-/// A connection to the plugin's socket, made again when it goes.
+enum Target {
+    #[cfg(unix)]
+    Path(PathBuf),
+    Tcp(String),
+}
+
+enum Link {
+    #[cfg(unix)]
+    Unix(UnixStream),
+    Tcp(TcpStream),
+}
+
+impl Read for Link {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        match self {
+            #[cfg(unix)]
+            Link::Unix(s) => s.read(buf),
+            Link::Tcp(s) => s.read(buf),
+        }
+    }
+}
+
+impl Write for Link {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self {
+            #[cfg(unix)]
+            Link::Unix(s) => s.write(buf),
+            Link::Tcp(s) => s.write(buf),
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self {
+            #[cfg(unix)]
+            Link::Unix(s) => s.flush(),
+            Link::Tcp(s) => s.flush(),
+        }
+    }
+}
+
+/// A connection to the plugin's channel, made again when it goes.
 pub struct Channel {
-    path: PathBuf,
-    stream: Option<UnixStream>,
+    target: Target,
+    stream: Option<Link>,
     pending: Vec<u8>,
     queued: Vec<Event>,
     tried_at: Option<Instant>,
+    /// Said again after every connect, so the plugin knows the remote across reconnects.
+    hello: Option<RemoteHello>,
 }
 
 impl Channel {
     /// Connects now when the socket is there; otherwise the first poll
     /// after two seconds tries again.
+    #[cfg(unix)]
     pub fn at(path: impl Into<PathBuf>) -> Self {
+        Self::to(Target::Path(path.into()))
+    }
+
+    /// The same over TCP, `host:port`, for a remote display.
+    pub fn tcp(address: impl Into<String>) -> Self {
+        Self::to(Target::Tcp(address.into()))
+    }
+
+    fn to(target: Target) -> Self {
         let mut channel = Self {
-            path: path.into(),
+            target,
             stream: None,
             pending: Vec::new(),
             queued: Vec::new(),
             tried_at: None,
+            hello: None,
         };
         channel.connect();
         channel
     }
 
-    pub fn path(&self) -> &Path {
-        &self.path
+    /// Where the channel connects, for a log line.
+    pub fn name(&self) -> String {
+        match &self.target {
+            #[cfg(unix)]
+            Target::Path(path) => path.display().to_string(),
+            Target::Tcp(address) => address.clone(),
+        }
+    }
+
+    /// Say who this remote is on every connect, starting with the one made
+    /// already when there was one.
+    pub fn with_hello(mut self, hello: RemoteHello) -> Self {
+        self.hello = Some(hello);
+        if self.stream.is_some() {
+            self.say_hello();
+        }
+        self
     }
 
     pub fn connected(&self) -> bool {
@@ -106,15 +202,42 @@ impl Channel {
 
     fn connect(&mut self) -> bool {
         self.tried_at = Some(Instant::now());
-        let Ok(stream) = UnixStream::connect(&self.path) else {
-            return false;
+        let link = match &self.target {
+            #[cfg(unix)]
+            Target::Path(path) => match UnixStream::connect(path) {
+                Ok(stream) if stream.set_nonblocking(true).is_ok() => Link::Unix(stream),
+                _ => return false,
+            },
+            Target::Tcp(address) => {
+                let Ok(addrs) = address.to_socket_addrs() else {
+                    return false;
+                };
+                let mut found = None;
+                for addr in addrs {
+                    if let Ok(stream) = TcpStream::connect_timeout(&addr, TCP_CONNECT) {
+                        found = Some(stream);
+                        break;
+                    }
+                }
+                match found {
+                    Some(stream) if stream.set_nonblocking(true).is_ok() => {
+                        let _ = stream.set_nodelay(true);
+                        Link::Tcp(stream)
+                    }
+                    _ => return false,
+                }
+            }
         };
-        if stream.set_nonblocking(true).is_err() {
-            return false;
-        }
-        self.stream = Some(stream);
+        self.stream = Some(link);
         self.pending.clear();
+        self.say_hello();
         true
+    }
+
+    fn say_hello(&mut self) {
+        if let Some(hello) = self.hello.clone() {
+            self.send_line(&hello.line());
+        }
     }
 
     fn drop_stream(&mut self) {
@@ -181,10 +304,14 @@ impl Channel {
     /// Sends a command. False when there is no connection or the write
     /// could not be made.
     pub fn send(&mut self, command: &Command) -> bool {
+        self.send_line(&command.line())
+    }
+
+    fn send_line(&mut self, line: &str) -> bool {
         let Some(stream) = self.stream.as_mut() else {
             return false;
         };
-        match stream.write_all(command.line().as_bytes()) {
+        match stream.write_all(line.as_bytes()) {
             Ok(()) => true,
             Err(err) if err.kind() == ErrorKind::WouldBlock => false,
             Err(_) => {
@@ -199,14 +326,17 @@ impl Channel {
 /// `kind` are ignored, so a newer plugin may say more than this reads.
 fn decode(line: &[u8]) -> Option<Event> {
     let value: Value = serde_json::from_slice(line).ok()?;
+    let text = |key: &str| {
+        value
+            .get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string()
+    };
     match value.get("kind")?.as_str()? {
         "hello" => Some(Event::Hello {
             protocol: value.get("protocol").and_then(Value::as_u64).unwrap_or(0) as u32,
-            plugin: value
-                .get("plugin")
-                .and_then(Value::as_str)
-                .unwrap_or("")
-                .to_string(),
+            plugin: text("plugin"),
         }),
         "state" => value
             .get("state")
@@ -216,6 +346,11 @@ fn decode(line: &[u8]) -> Option<Event> {
         "infinity" => Some(Event::Infinity(
             value.get("on").and_then(Value::as_bool).unwrap_or(false),
         )),
+        "config" => Some(Event::Config {
+            version: text("version"),
+            theme: text("theme"),
+            meter: text("meter"),
+        }),
         _ => None,
     }
 }
@@ -224,9 +359,12 @@ fn decode(line: &[u8]) -> Option<Event> {
 mod tests {
     use super::*;
     use std::io::{BufRead, BufReader};
+    use std::net::TcpListener;
+    #[cfg(unix)]
     use std::os::unix::net::UnixListener;
     use std::thread;
 
+    #[cfg(unix)]
     fn socket_path(tag: &str) -> PathBuf {
         let path = std::env::temp_dir().join(format!("glass-channel-{}-{tag}", std::process::id()));
         let _ = std::fs::remove_file(&path);
@@ -243,6 +381,7 @@ mod tests {
         events
     }
 
+    #[cfg(unix)]
     #[test]
     fn lines_arrive_whole_or_in_pieces_and_a_command_goes_back() {
         let path = socket_path("lines");
@@ -294,6 +433,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(unix)]
     #[test]
     fn a_missing_socket_is_tried_again_after_the_rest() {
         let path = socket_path("missing");
@@ -310,6 +450,7 @@ mod tests {
         let _ = std::fs::remove_file(&path);
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_peer_leaving_ends_the_connection() {
         let path = socket_path("leaving");
@@ -329,5 +470,56 @@ mod tests {
         assert!(!channel.connected());
         assert!(!channel.send(&Command::new("toggle")));
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn over_tcp_a_remote_says_hello_first_and_hears_of_the_configuration() {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let (mut conn, _) = listener.accept().unwrap();
+            let mut reader = BufReader::new(conn.try_clone().unwrap());
+            let mut hello = String::new();
+            reader.read_line(&mut hello).unwrap();
+            conn.write_all(
+                b"{\"kind\":\"hello\",\"protocol\":1,\"plugin\":\"0.7.0\"}\n{\"kind\":\"config\",\"version\":\"abcd1234\",\"theme\":\"1280x720_x\",\"meter\":\"gold\"}\n",
+            )
+            .unwrap();
+            let mut command = String::new();
+            reader.read_line(&mut command).unwrap();
+            (hello, command)
+        });
+        let mut channel = Channel::tcp(address.to_string()).with_hello(RemoteHello {
+            id: "kitchen".into(),
+            name: "Kitchen".into(),
+            release: "0.7.0".into(),
+            screen: [1280, 720],
+        });
+        assert!(channel.connected());
+        assert_eq!(channel.name(), address.to_string());
+        let events = pump_until(&mut channel, 2);
+        assert_eq!(
+            events[1],
+            Event::Config {
+                version: "abcd1234".into(),
+                theme: "1280x720_x".into(),
+                meter: "gold".into()
+            }
+        );
+        assert!(channel.send(&Command::new("toggle")));
+        let (hello, command) = server.join().unwrap();
+        assert_eq!(
+            hello,
+            "{\"kind\":\"hello\",\"remote\":{\"id\":\"kitchen\",\"name\":\"Kitchen\",\"release\":\"0.7.0\",\"screen\":[1280,720]}}\n"
+        );
+        assert_eq!(command, "{\"kind\":\"command\",\"name\":\"toggle\"}\n");
+    }
+
+    #[test]
+    fn a_player_that_is_not_there_is_tried_again_later() {
+        let mut channel = Channel::tcp("127.0.0.1:1");
+        assert!(!channel.connected());
+        assert!(channel.pump().is_empty());
+        assert!(!channel.send(&Command::new("toggle")));
     }
 }

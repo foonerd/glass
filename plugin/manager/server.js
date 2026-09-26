@@ -389,6 +389,35 @@ class Manager {
       res.json({ ok: true, backups: self.plugin.backupList() });
     }));
 
+    // Remote displays: what they bring into their own home, and who is connected.
+    app.get('/api/remote/status', function (req, res) {
+      res.json(self.plugin.remoteInfo());
+    });
+
+    app.get('/api/remote/config', function (req, res) {
+      res.json(self.plugin.remoteConfig());
+    });
+
+    app.get('/api/remote/asset/:kind/:name', function (req, res) {
+      const file = self.plugin.assetPath(String(req.params.kind), String(req.params.name));
+      if (!file) return res.status(404).json({ error: 'not-found' });
+      res.sendFile(file, { maxAge: 0 });
+    });
+
+    app.get('/api/themes/:folder/files', function (req, res) {
+      const folder = self.folderParam(req);
+      const files = self.plugin.themeFiles(folder);
+      if (!files) return res.status(404).json({ error: 'not-found' });
+      res.json(files);
+    });
+
+    app.get('/api/themes/:folder/file', function (req, res) {
+      const folder = self.folderParam(req);
+      const file = self.plugin.themeFilePath(folder, String(req.query.tree || 'templates'), String(req.query.path || ''));
+      if (!file) return res.status(404).json({ error: 'not-found' });
+      res.sendFile(file, { maxAge: 0 });
+    });
+
     // Upgrading Glass itself.
     app.get('/api/update', wrap(async function (req, res) {
       try {
