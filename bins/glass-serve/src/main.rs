@@ -205,6 +205,10 @@ fn main() -> ExitCode {
     // The ring counts frames from the start of the stream; the wire carries
     // the frames in the hop, so the count last sent is kept to subtract.
     let mut last_sent_frames: u64 = 0;
+    // The datagrams are numbered by this daemon, not by the ring: a ring
+    // starts its count again with every stream, and a remote must see the
+    // new stream's packets as newer than the old one's.
+    let mut wire_seq: u32 = 0;
     let mut silence_sent = false;
     let mut sent: u64 = 0;
     let mut status_at = Instant::now() - STATUS_EVERY;
@@ -303,11 +307,14 @@ fn main() -> ExitCode {
             let mut on_wire = frame.clone();
             on_wire.frames = frame.frames.saturating_sub(last_sent_frames).max(1);
             last_sent_frames = frame.frames;
+            wire_seq = wire_seq.wrapping_add(1).max(1);
+            on_wire.seq = u64::from(wire_seq);
             to_send = Some(wire::encode(&on_wire, info.rate, info.channels, 0));
         } else if quiet && !silence_sent && ring.is_some() {
             let info = ring.as_ref().map(|r| r.info()).unwrap_or_default();
+            wire_seq = wire_seq.wrapping_add(1).max(1);
             let silence = Frame {
-                seq: last_seq.wrapping_add(1),
+                seq: u64::from(wire_seq),
                 time_ns: now_ns(),
                 spectrum: [vec![0.0; info.bins as usize], vec![0.0; info.bins as usize]],
                 ..Default::default()
