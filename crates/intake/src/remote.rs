@@ -126,9 +126,19 @@ impl Hops for NetHops {
                     self.received += 1;
                     match wire::decode(&self.buffer[..n]) {
                         Ok(packet) => {
-                            let new = self
+                            // Newer by the player's stamp, the count breaking a tie: a
+                            // daemon of an earlier release numbered its datagrams by the
+                            // ring, whose count starts again with every stream, while the
+                            // stamps go on.
+                            let by_seq = self
                                 .last_seq
                                 .is_none_or(|last| wire::Packet::is_after(packet.seq, last));
+                            let new = match self.last_time_ns {
+                                None => by_seq,
+                                Some(last) => {
+                                    packet.time_ns > last || (packet.time_ns == last && by_seq)
+                                }
+                            };
                             if !new {
                                 continue;
                             }
@@ -939,6 +949,50 @@ mod tests {
         assert_eq!(hops.received, 4);
         thread::sleep(Duration::from_millis(600));
         assert!(hops.take().quiet, "no frame for half a second is silence");
+    }
+
+    #[test]
+    fn a_new_stream_with_a_lower_count_but_a_later_stamp_is_taken() {
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let server_addr = server.local_addr().unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut hops = NetHops::new(server_addr, "t", "Test", "0.7.6").unwrap();
+        let _ = hops.take();
+        let mut buf = [0u8; 2048];
+        let (_, client) = server.recv_from(&mut buf).unwrap();
+        let mut one = Frame {
+            seq: 5000,
+            time_ns: 10_000_000_000,
+            frames: 480,
+            peak: [0.5, 0.5],
+            rms: [0.3, 0.3],
+            spectrum: [vec![0.5; 4], vec![0.5; 4]],
+        };
+        server
+            .send_to(&wire::encode(&one, 48000, 2, 0), client)
+            .unwrap();
+        thread::sleep(Duration::from_millis(30));
+        assert!(hops.take().hop.is_some());
+        // The next stream's ring counts from one again; its stamps go on.
+        one.seq = 1;
+        one.time_ns += 20_000_000;
+        one.peak = [0.9, 0.9];
+        server
+            .send_to(&wire::encode(&one, 48000, 2, 0), client)
+            .unwrap();
+        thread::sleep(Duration::from_millis(30));
+        let (frame, _, _) = hops.take().hop.expect("the new stream's packet");
+        assert_eq!(frame.peak, [0.9, 0.9]);
+        // A packet from before, arriving late, is still refused.
+        one.seq = 4999;
+        one.time_ns -= 40_000_000;
+        server
+            .send_to(&wire::encode(&one, 48000, 2, 0), client)
+            .unwrap();
+        thread::sleep(Duration::from_millis(30));
+        assert!(hops.take().hop.is_none(), "an old packet is not taken");
     }
 
     #[test]

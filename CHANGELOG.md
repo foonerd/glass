@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.6] - 2026-09-26
+
+A remote keeps moving across a track change. The frames daemon numbered its datagrams with the ring's own hop count, which starts again with every stream, so after a track change that opened a new stream the remote took the new packets for old ones and dropped them until the count passed the old stream's; the player's own display, reading the ring directly, never saw it. The daemon numbers its datagrams itself now, and the remote also takes a packet whose stamp from the player is later than the last, whatever its number, so it moves with a daemon of an earlier release too.
+
 ## [0.7.5] - 2026-09-26
 
 A remote that follows the player follows its whole configuration: a change of the meter selection, the rotation or any other value of the player's meter configuration starts the remote's session again with it, not only a change of theme; and the player sends its configuration to every display that connects to the channel, so a change made while a remote was away is taken up when it returns. The wiki is rewritten around a Quick Start, with Settings, Themes, Meters Reference, Spectrum, Catalog, Backups, Artwork, Troubleshooting and Logging pages, screenshots and diagrams. Names of the development machines, private addresses, dashes and other glyphs are gone from the code's fixtures, the plugin's strings and the pages.
