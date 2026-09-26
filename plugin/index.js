@@ -241,6 +241,7 @@ const MPD_include = '/data/configuration/music_service/mpd/mpd_custom.conf';
 const AIRtmpl = '/volumio/app/plugins/music_service/airplay_emulation/shairport-sync.conf.tmpl';
 const AIR = '/tmp/shairport-sync.conf.tmpl';
 const asound = '/Glass.postGlass.5.conf';
+const ALSA_FILE = '/etc/asound.conf';
 
 const spotify_config = '/data/plugins/music_service/spop/config.yml.tmpl';
 
@@ -405,7 +406,8 @@ Glass.prototype.onStart = function () {
     self.retireSideOutputs(false)
         .then(self.writeAsoundConfigModular.bind(self))
         .then(self.updateALSAConfigFile.bind(self))
-        .then(function () { return self.tellSoloist(true); })
+        .then(function () { return self.nudgeSoloist(); })
+        .then(function () { self.watchAlsaFile(); })
         .fail(function (e) {
             self.logger.error(id + 'audio path: ' + (e && e.message ? e.message : e));
         });
@@ -657,6 +659,7 @@ Glass.prototype.onStop = function () {
             self.channel.close();
             self.channel = null;
         }
+        self.unwatchAlsaFile();
         self.stopManager();
     });
 
@@ -671,10 +674,9 @@ Glass.prototype.onInstall = function () {
 
 Glass.prototype.onUninstall = function () {
     var self = this;
-    // Whatever an earlier release put beside the tap goes with it, and
-    // Soloist goes back to the player's own device.
+    // Whatever an earlier release put beside the tap goes with it.
     self.retireSideOutputs(true);
-    self.tellSoloist(false);
+    self.nudgeSoloist();
 };
 
 // Whether PeppyMeter Screensaver is enabled, in which case Glass stays out
@@ -2505,26 +2507,28 @@ Glass.prototype.retireSideOutputs = function (force) {
     });
 };
 
-// Soloist chooses its ALSA device when its daemon starts: with metering on
-// and a `pcm.spotify` in the ALSA file it opens `plug:spotify`, which is
-// the tap; otherwise a device read from the file as it stands, which at a
-// backend start can be one below the tap (`softvolume`), and then its
-// stream is heard but never measured. So Glass says metering is on after
-// every rewrite of the ALSA file, and off when it leaves. Soloist restarts
-// its daemon only when the device it runs with differs.
-// What Soloist may ask at its own start, the way it asks PeppyMeter
-// Screensaver: with Glass running, its stream is to be measured.
+// Soloist chooses its ALSA device when its daemon starts, from the ALSA
+// file as it stands. Its stream is measured on the player's own path,
+// `plug:volumio`, where the tap sits; a `plug` put straight on the tap
+// (`plug:spotify`, Soloist's metering device of the PeppyMeter days)
+// leaves libasound's parameter negotiation with an empty interval and
+// aborts the daemon on play, so Glass never asks for that. What can go
+// wrong is the moment of the choice: at a backend start the file is
+// written in stages, and a device read too early (`softvolume`) sits below
+// the tap, so the stream is heard but never measured. Hence the nudge:
+// Soloist compares the device it runs with against the file as it is now,
+// and restarts its daemon only when they differ.
 Glass.prototype.soloistMeteringWanted = function () {
-    return true;
+    return false;
 };
 
-Glass.prototype.tellSoloist = function (metering) {
+Glass.prototype.nudgeSoloist = function () {
     var self = this;
     if (self.getPluginStatus('music_service', 'soloist_connect') !== 'STARTED') { return libQ.resolve(); }
     var defer = libQ.defer();
     try {
-        var ret = self.commandRouter.executeOnPlugin('music_service', 'soloist_connect', 'setPeppyMetering', metering);
-        self.logger.info(id + 'Soloist told: metering ' + (metering ? 'on' : 'off'));
+        var ret = self.commandRouter.executeOnPlugin('music_service', 'soloist_connect', 'setPeppyMetering', false);
+        self.logger.info(id + 'Soloist nudged: the player\'s device, measured on the way');
         if (ret && typeof ret.then === 'function') {
             ret.then(function () { defer.resolve(); }, function () { defer.resolve(); });
         } else {
@@ -2535,6 +2539,34 @@ Glass.prototype.tellSoloist = function (metering) {
         defer.resolve();
     }
     return defer.promise;
+};
+
+// The player rewrites the ALSA file as plugins start; each rewrite after
+// Glass's own gets Soloist nudged again, a few seconds after the last.
+Glass.prototype.watchAlsaFile = function () {
+    var self = this;
+    self.unwatchAlsaFile();
+    var timer = null;
+    self.alsaWatcher = function (curr, prev) {
+        if (!curr || !prev || curr.mtimeMs === prev.mtimeMs) { return; }
+        if (timer) { clearTimeout(timer); }
+        timer = setTimeout(function () {
+            timer = null;
+            self.nudgeSoloist();
+        }, 5000);
+    };
+    try {
+        fs.watchFile(ALSA_FILE, { interval: 2000, persistent: false }, self.alsaWatcher);
+    } catch (e) {
+        self.logger.warn(id + 'ALSA file watch: ' + (e && e.message ? e.message : e));
+    }
+};
+
+Glass.prototype.unwatchAlsaFile = function () {
+    if (this.alsaWatcher) {
+        try { fs.unwatchFile(ALSA_FILE, this.alsaWatcher); } catch (e) {}
+        this.alsaWatcher = null;
+    }
 };
 
 //mount a copy of changed file over 
