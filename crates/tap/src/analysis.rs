@@ -96,8 +96,9 @@ impl Analyser {
 
     /// Feed `n` frames, `chans[ch][i]` being frame `i` of channel `ch`; a
     /// mono stream gives one channel and is measured as both. `sink` is
-    /// called once per completed hop.
-    pub fn feed(&mut self, chans: &[&[i16]], n: usize, sink: &mut dyn FnMut(&Frame)) {
+    /// called once per completed hop with the frame and how many of the
+    /// `n` frames had been taken in when the hop completed.
+    pub fn feed(&mut self, chans: &[&[i16]], n: usize, sink: &mut dyn FnMut(&Frame, usize)) {
         let used = chans.len().min(self.channels).max(1);
         for i in 0..n {
             for ch in 0..MAX_CHANNELS {
@@ -120,7 +121,7 @@ impl Analyser {
             self.frames += 1;
             if self.hop_fill >= self.hop {
                 self.measure();
-                sink(&self.out);
+                sink(&self.out, i + 1);
                 self.hop_fill = 0;
                 self.peak = [0.0; MAX_CHANNELS];
                 self.square_sum = [0.0; MAX_CHANNELS];
@@ -176,8 +177,13 @@ mod tests {
         let right = sine(rate, hz, 0.5, 4096);
         let mut analyser = Analyser::new(rate, 2, fft, 512);
         let mut frames = Vec::new();
-        analyser.feed(&[&left, &right], 4096, &mut |f| frames.push(f.clone()));
+        let mut taken = Vec::new();
+        analyser.feed(&[&left, &right], 4096, &mut |f, n| {
+            frames.push(f.clone());
+            taken.push(n);
+        });
         assert_eq!(frames.len(), 8, "one hop every 512 frames");
+        assert_eq!(taken, [512, 1024, 1536, 2048, 2560, 3072, 3584, 4096]);
         let last = frames.last().unwrap();
         assert!(
             last.peak[0] > 0.99 && last.peak[0] <= 1.0,
@@ -213,7 +219,7 @@ mod tests {
         // Mono is measured as both channels.
         let mut mono = Analyser::new(rate, 1, fft, 512);
         let mut got = Vec::new();
-        mono.feed(&[&left], 1024, &mut |f| got.push(f.clone()));
+        mono.feed(&[&left], 1024, &mut |f, _| got.push(f.clone()));
         assert_eq!(got.last().unwrap().peak[0], got.last().unwrap().peak[1]);
     }
 
@@ -222,10 +228,10 @@ mod tests {
         let mut analyser = Analyser::new(44_100, 2, 256, 128);
         let loud = sine(44_100, 1000.0, 1.0, 256);
         let mut frames = Vec::new();
-        analyser.feed(&[&loud, &loud], 256, &mut |f| frames.push(f.clone()));
+        analyser.feed(&[&loud, &loud], 256, &mut |f, _| frames.push(f.clone()));
         analyser.reset();
         let quiet = vec![0i16; 256];
-        analyser.feed(&[&quiet, &quiet], 256, &mut |f| frames.push(f.clone()));
+        analyser.feed(&[&quiet, &quiet], 256, &mut |f, _| frames.push(f.clone()));
         let last = frames.last().unwrap();
         assert_eq!(last.peak, [0.0, 0.0]);
         assert_eq!(last.rms, [0.0, 0.0]);

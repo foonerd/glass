@@ -133,9 +133,16 @@ impl Measure {
         }
     }
 
-    /// Measure `samples`, interleaved as the stream's shape says, and
-    /// publish every hop they complete.
-    pub fn take(&mut self, samples: &[i16]) {
+    /// Frames between measurements for the stream on hand.
+    pub fn hop(&self) -> usize {
+        self.analyser.as_ref().map(|a| a.hop()).unwrap_or(1024)
+    }
+
+    /// Measure `samples`, interleaved as the stream's shape says, and hand
+    /// `sink` every hop they complete, with how many of these samples'
+    /// frames had gone in when the hop completed, so the caller can place
+    /// the hop in time. Frames are words for one-bit audio.
+    pub fn take(&mut self, samples: &[i16], sink: &mut dyn FnMut(&Frame, usize)) {
         let (Some(shape), Some(analyser)) = (self.shape, self.analyser.as_mut()) else {
             return;
         };
@@ -151,36 +158,44 @@ impl Measure {
         }
         let by_density = shape.layout.is_dsd() || dop::is_stream(&self.chans[0]);
         if by_density {
-            // One-bit audio has no spectrum to show; the level stands in.
+            // One-bit audio has no spectrum to show; the level stands in,
+            // one per hop's worth of words so it moves as the audio does.
+            let per_frame = if shape.layout.is_dsd() {
+                shape.layout.bytes().max(1)
+            } else {
+                1
+            };
+            let block = (analyser.hop() * per_frame).max(1);
             let group = self.group;
             let level = |s: &[i16]| dsd::level(s.iter().map(|v| *v as u8), group) as f32 / 32767.0;
-            let left = level(&self.chans[0]);
-            let right = if used > 1 {
-                level(&self.chans[1])
-            } else {
-                left
-            };
-            self.frames += if shape.layout.is_dsd() {
-                (n / shape.layout.bytes().max(1)) as u64
-            } else {
-                n as u64
-            };
-            self.quiet.frames = self.frames;
-            self.quiet.peak = [left, right];
-            self.quiet.rms = [left, right];
-            if let Some(w) = self.writer.as_mut() {
-                w.publish(&self.quiet);
+            let mut start = 0;
+            while start < n {
+                let end = (start + block).min(n);
+                let left = level(&self.chans[0][start..end]);
+                let right = if used > 1 {
+                    level(&self.chans[1][start..end])
+                } else {
+                    left
+                };
+                self.frames += ((end - start) / per_frame) as u64;
+                self.quiet.frames = self.frames;
+                self.quiet.peak = [left, right];
+                self.quiet.rms = [left, right];
+                sink(&self.quiet, end / per_frame);
+                start = end;
             }
             return;
         }
         let slices: [&[i16]; MAX_CHANNELS] = [&self.chans[0], &self.chans[1]];
-        let mut writer = self.writer.as_mut();
-        analyser.feed(&slices[..used], n, &mut |frame| {
-            if let Some(w) = writer.as_mut() {
-                w.publish(frame);
-            }
-        });
+        analyser.feed(&slices[..used], n, sink);
         self.frames += n as u64;
+    }
+
+    /// Put a frame into the stream's ring, if it has one.
+    pub fn publish(&mut self, frame: &Frame) {
+        if let Some(w) = self.writer.as_mut() {
+            w.publish(frame);
+        }
     }
 }
 
@@ -228,8 +243,17 @@ mod tests {
             samples.push(s);
             samples.push(0);
         }
-        m.take(&samples);
+        let mut got: Vec<(Frame, usize)> = Vec::new();
+        m.take(&samples, &mut |f, n| got.push((f.clone(), n)));
+        for (f, _) in &got {
+            m.publish(f);
+        }
         let reader = Reader::open(&path).unwrap();
+        assert_eq!(
+            got.iter().map(|g| g.1).collect::<Vec<_>>(),
+            (1..=8).map(|k| k * 128).collect::<Vec<_>>(),
+            "each hop says how many frames had gone in"
+        );
         let frame = reader.latest().expect("a frame after eight hops");
         assert!(
             (frame.peak[0] - 0.5).abs() < 0.02,
@@ -270,7 +294,11 @@ mod tests {
             samples.push(0x55i16);
             samples.push(0xFFi16);
         }
-        m.take(&samples);
+        let mut got: Vec<(Frame, usize)> = Vec::new();
+        m.take(&samples, &mut |f, n| got.push((f.clone(), n)));
+        for (f, _) in &got {
+            m.publish(f);
+        }
         let reader = Reader::open(&path).unwrap();
         let frame = reader.latest().expect("a density frame");
         assert_eq!(frame.peak[0], 0.0);
@@ -298,7 +326,11 @@ mod tests {
             samples.push(((marker << 8) | 0xFF) as i16);
             samples.push(((marker << 8) | 0x55) as i16);
         }
-        m.take(&samples);
+        let mut got: Vec<(Frame, usize)> = Vec::new();
+        m.take(&samples, &mut |f, n| got.push((f.clone(), n)));
+        for (f, _) in &got {
+            m.publish(f);
+        }
         std::thread::sleep(Duration::from_millis(5));
         let frame = Reader::open(&path).unwrap().latest().expect("a DoP frame");
         assert_eq!(frame.peak[0], 1.0, "all ones is beyond full scale");

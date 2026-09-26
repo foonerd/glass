@@ -1072,6 +1072,31 @@ pub struct TapSource {
     rederive: bool,
 }
 
+/// The hops that arrived between two looks at the ring, as one: the peaks,
+/// RMS and bins take the highest of them, the count and sequence the
+/// latest, so a transient inside one frame of the display still shows.
+fn merge_hops(hops: impl Iterator<Item = tap::Frame>) -> Option<tap::Frame> {
+    let mut merged: Option<tap::Frame> = None;
+    for frame in hops {
+        match merged.as_mut() {
+            None => merged = Some(frame),
+            Some(m) => {
+                for ch in 0..tap::MAX_CHANNELS {
+                    m.peak[ch] = m.peak[ch].max(frame.peak[ch]);
+                    m.rms[ch] = m.rms[ch].max(frame.rms[ch]);
+                    for (a, b) in m.spectrum[ch].iter_mut().zip(frame.spectrum[ch].iter()) {
+                        *a = a.max(*b);
+                    }
+                }
+                m.frames = frame.frames;
+                m.seq = frame.seq;
+                m.time_ns = frame.time_ns;
+            }
+        }
+    }
+    merged
+}
+
 /// The meter falls no faster than this from full scale, as the old scope had it.
 const METER_DECAY_MS: u32 = 500;
 /// The old scope's smoothing of the spectrum bins.
@@ -1339,7 +1364,17 @@ impl Source for TapSource {
             if !stale {
                 quiet = false;
                 if info.seq != last_seq {
-                    if let Some(frame) = reader.latest() {
+                    // Every hop since the last look, so no peak between two
+                    // frames of the display is missed.
+                    let first = if last_seq == 0
+                        || info.seq.saturating_sub(last_seq) >= info.slots as u64
+                    {
+                        info.seq
+                    } else {
+                        last_seq + 1
+                    };
+                    let merged = merge_hops((first..=info.seq).filter_map(|seq| reader.slot(seq)));
+                    if let Some(frame) = merged {
                         let elapsed = frame.frames.saturating_sub(self.last_frames).max(1);
                         hop = Some((frame, info.rate.max(1), elapsed));
                     }
@@ -1791,6 +1826,29 @@ mod tests {
         assert_eq!(input.levels.right, 25.0);
         assert_eq!(input.levels.mono, 37.5);
         assert_eq!(input.bins.values, vec![100.0, 0.0]);
+    }
+
+    #[test]
+    fn hops_between_two_looks_merge_into_their_loudest() {
+        let hop = |seq: u64, peak: f32, bin: f32| tap::Frame {
+            seq,
+            time_ns: seq * 10,
+            frames: seq * 1024,
+            peak: [peak, peak / 2.0],
+            rms: [peak / 2.0, peak / 4.0],
+            spectrum: [vec![bin, 0.1], vec![0.0, bin]],
+        };
+        let merged =
+            merge_hops([hop(5, 0.2, 0.5), hop(6, 0.9, 0.1), hop(7, 0.4, 0.3)].into_iter()).unwrap();
+        assert_eq!(merged.peak, [0.9, 0.45]);
+        assert_eq!(merged.rms, [0.45, 0.225]);
+        assert_eq!(merged.spectrum[0], [0.5, 0.1]);
+        assert_eq!(merged.spectrum[1], [0.0, 0.5]);
+        assert_eq!(
+            (merged.seq, merged.frames, merged.time_ns),
+            (7, 7 * 1024, 70)
+        );
+        assert!(merge_hops(std::iter::empty()).is_none());
     }
 
     #[test]
