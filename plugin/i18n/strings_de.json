@@ -468,6 +468,10 @@
     "MANAGER_ERR_NO_DIGEST": "Die Version trägt keine Prüfsumme für ihr Zip.",
     "MANAGER_ERR_APPLY": "Der Plugin-Manager des Players konnte das Plugin nicht ersetzen.",
     "MANAGER_ERR_BUSY": "Eine Aktualisierung läuft bereits.",
-    "MANAGER_UPD_BADGE": "Glass-Update:"
+    "MANAGER_UPD_BADGE": "Glass-Update:",
+    "MANAGER_BK_DOWNLOAD": "Herunterladen",
+    "MANAGER_BK_UPLOAD": "Sicherungs-Zip hochladen",
+    "MANAGER_BK_UPLOADED": "Sicherung hinzugefügt:",
+    "MANAGER_ERR_BAD_BACKUP": "Das Zip ist keine Glass-Einstellungssicherung."
   }
 }
