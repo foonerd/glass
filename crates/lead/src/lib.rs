@@ -146,6 +146,9 @@ pub struct Metadata {
     pub repeat: bool,
     #[serde(default)]
     pub repeat_single: bool,
+    /// Infinity playback as the plugin's channel reports it; false without a channel.
+    #[serde(default)]
+    pub infinity: bool,
 }
 
 /// Where a text sits inside its box when it fits.
@@ -1528,6 +1531,11 @@ pub const RUN_FLAG: &str = "/tmp/glass_running";
 /// The marker the launcher names in this variable; written on a real touch
 /// so the plugin re-arms its timeout instead of restarting at once.
 pub const DISMISS_FILE_VAR: &str = "GLASS_DISMISS_FILE";
+
+/// The plugin's channel: a local socket it serves with the player's state,
+/// named in this variable by the launcher, else at the default path.
+pub const CHANNEL_VAR: &str = "GLASS_CHANNEL";
+pub const CHANNEL_PATH: &str = "/tmp/glass_channel";
 
 /// Whether a touch should leave the dismiss marker: only when the launcher
 /// asked for one, the stop is not the plugin's, and the run flag still stands.

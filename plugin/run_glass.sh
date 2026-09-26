@@ -64,6 +64,8 @@ export DISPLAY=${DISPLAY:-:0}
 export GLASS_HOME=${GLASS_HOME:-$ROOT}
 # A real finger or click writes this marker; the plugin reads it after the player ends.
 export GLASS_DISMISS_FILE=${GLASS_DISMISS_FILE:-/tmp/glass_dismiss}
+# The plugin's channel with the player's state; without it the display asks the player.
+export GLASS_CHANNEL=${GLASS_CHANNEL:-/tmp/glass_channel}
 
 if [ -z "$XAUTHORITY" ] || [ ! -f "$XAUTHORITY" ]; then
   X_PID=$(pgrep -xo Xorg 2>/dev/null || true)

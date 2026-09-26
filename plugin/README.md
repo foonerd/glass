@@ -4,8 +4,8 @@ This directory is the Volumio plugin that ships the `glass` display. It is packa
 
 What is here:
 
-- `index.js`: the plugin. It keeps the audio path up (the ALSA chain with the tap, the MPD side output, Spotify, AirPlay and DSP handling), starts the display after the screensaver timeout while music plays, keeps it up through a pause for the persist time, stops it when the run flag goes, and serves the settings page and the artist fanart cascade. The audio path, the fanart cascade and the settings backups are carried over from PeppyMeter Screensaver (MIT).
-- `run_glass.sh`: the launcher. It sets up the X display and starts the `glass` binary for the machine's architecture with `GLASS_HOME` pointing at the plugin.
+- `index.js`: the plugin. It keeps the audio path up (the ALSA chain with the tap, the MPD side output, Spotify, AirPlay and DSP handling), starts the display after the screensaver timeout while music plays, keeps it up through a pause for the persist time, stops it when the run flag goes, serves the display the player's state over a local socket and takes its commands, and serves the settings page and the artist fanart cascade. The audio path, the fanart cascade and the settings backups are carried over from PeppyMeter Screensaver (MIT).
+- `run_glass.sh`: the launcher. It sets up the X display and starts the `glass` binary for the machine's architecture with `GLASS_HOME` pointing at the plugin and `GLASS_CHANNEL` naming the socket.
 - `config/meter.txt.tmpl` and `config/spectrum.txt.tmpl`: the configurations the display reads, copied to `config/*.txt` on the first install and kept across upgrades.
 - `Glass.postGlass.5.conf.tmpl` and the x64 variant: the ALSA contribution with the tap on the meter PCMs, written into `asound/` at runtime for the audio source the settings name.
 - `mpd_custom.conf`: the MPD side output that feeds the meters on x64 and in the DSD path.

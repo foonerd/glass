@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.7] - 2026-09-26
+
+The channel. The plugin serves a local socket with the player's state and the infinity playback flag, pushed as they change, and takes commands for the player back. The display reads its state from the channel when the plugin runs it, so a track change shows at once and the player is no longer asked once a second; without a channel it asks the player as before. Infinity playback shows on the repeat indicator's fourth state, or on the shuffle indicator's third. The wiki's Contracts page has the lines.
+
 ## [0.5.6] - 2026-09-26
 
 The cross builds survive a restored CI cache, which keeps the links of the unpacked sysroot and drops the files behind them: the ship script looks for each target's SDL and ALSA library at its own path and unpacks it again when the file is gone, and the tap's build script runs again when the library it links appears, changes or goes.
