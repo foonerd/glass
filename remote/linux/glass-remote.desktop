@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=Glass Remote
+Comment=Show a Glass player's meters on this screen
+Exec=@BIN@ --remote
+Icon=glass-remote
+Terminal=false
+Categories=AudioVideo;Audio;
+Keywords=Glass;Volumio;meter;VU;spectrum;
+StartupNotify=false

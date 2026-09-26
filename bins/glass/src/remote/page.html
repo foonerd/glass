@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glass Remote</title>
+<style>
+  :root { --bg: #1c1c1c; --panel: #262626; --panel2: #303030; --line: #404040; --text: #e6e6e6; --muted: #9a9a9a; --accent: #54b948; --accent2: #3f8f37; --warn: #e6a23c; --danger: #d64545; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.4; }
+  button { font: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--panel2); color: var(--text); padding: 8px 14px; border-radius: 6px; }
+  button:hover:not(:disabled) { background: #3a3a3a; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { background: var(--accent2); }
+  button.danger { color: #ffb3b3; border-color: #6b2a2a; }
+  button.small { padding: 5px 10px; font-size: 13px; }
+  input[type=text], input[type=number], select { font: inherit; background: #1a1a1a; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; width: 100%; }
+  input:focus, select:focus { outline: none; border-color: var(--accent); }
+  label { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+  .header { position: sticky; top: 0; z-index: 20; background: #232323; border-bottom: 1px solid var(--line); padding: 12px 20px; display: flex; align-items: center; gap: 16px; }
+  .header h1 { font-size: 19px; font-weight: 600; color: #fff; }
+  .header .sub { color: var(--muted); font-size: 13px; }
+  .header .grow { flex: 1; }
+  .container { max-width: 1100px; margin: 0 auto; padding: 16px 20px 60px; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .panel h2 { font-size: 16px; margin-bottom: 12px; color: #fff; }
+  .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px 18px; }
+  .form .full { grid-column: 1 / -1; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .switch { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+  .switch input { width: 18px; height: 18px; accent-color: var(--accent); }
+  .help { color: var(--muted); font-size: 13px; }
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .item { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .item .grow { flex: 1; min-width: 160px; }
+  .item .name { font-weight: 600; color: #fff; }
+  .item.active { border-color: var(--accent); }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: #444; color: #ddd; text-transform: uppercase; }
+  .badge.green { background: var(--accent); color: #fff; }
+  .badge.orange { background: var(--warn); color: #222; }
+  table.kv { width: 100%; border-collapse: collapse; }
+  table.kv td { padding: 6px 8px; border-bottom: 1px solid #333; vertical-align: top; }
+  table.kv td:first-child { color: var(--muted); width: 36%; }
+  .checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 14px; }
+  .toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 70; }
+  .toast { background: #333; border-left: 4px solid var(--accent); color: #fff; padding: 10px 14px; border-radius: 6px; max-width: 380px; font-size: 14px; }
+  .toast.error { border-left-color: var(--danger); }
+  .hidden { display: none !important; }
+  .dirty { color: var(--warn); font-size: 13px; }
+  @media (max-width: 600px) { .container { padding: 12px 12px 50px; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <div><h1>Glass Remote</h1><div class="sub" id="subtitle"></div></div>
+  <div class="grow"></div>
+  <span class="dirty hidden" id="dirty">Changes not applied yet</span>
+  <button class="primary" id="btn-apply">Apply</button>
+</div>
+<div class="container">
+
+  <div class="panel">
+    <h2>Status</h2>
+    <table class="kv" id="status"></table>
+  </div>
+
+  <div class="panel">
+    <h2>Player</h2>
+    <div class="help" style="margin-bottom:10px">The players this remote knows. The one marked is shown; the others wait. A player found on the network brings its own name and ports.</div>
+    <div class="list" id="players"></div>
+    <div class="row" style="margin-top:12px">
+      <button id="btn-discover">Find players on the network</button>
+      <span class="help" id="discover-note"></span>
+    </div>
+    <div class="list" id="discovered" style="margin-top:8px"></div>
+    <div class="form" style="margin-top:14px">
+      <div><label>Host name or address</label><input type="text" id="add-host" placeholder="volumio.local or 192.168.1.20"></div>
+      <div><label>Manager port</label><input type="number" id="add-port" value="5582" min="1024" max="65535"></div>
+      <div><label>Name, optional</label><input type="text" id="add-name" placeholder="as the player calls itself"></div>
+      <div class="row" style="align-items:flex-end"><button id="btn-add">Add this player</button></div>
+    </div>
+  </div>
+
+  <div class="panel" id="theme-panel">
+    <h2>Theme</h2>
+    <div class="form">
+      <div class="full">
+        <label class="switch"><input type="radio" name="tmode" value="follow" id="tmode-follow"><span>Follow the player: its theme and meter, as it shows them</span></label>
+        <label class="switch"><input type="radio" name="tmode" value="own" id="tmode-own"><span>An own theme of the player's, kept whatever the player shows</span></label>
+      </div>
+      <div id="own-block" class="full hidden">
+        <div class="form">
+          <div><label>Theme</label><select id="own-theme"></select></div>
+          <div><label>Meters</label><select id="own-select"><option value="random">All, at random</option><option value="list">A list</option><option value="single">One meter</option></select></div>
+          <div id="own-interval-block"><label>Change after, seconds</label><input type="number" id="own-interval" min="15" max="1000" value="60"></div>
+          <div id="own-title-block"><label class="switch" style="margin-top:22px"><input type="checkbox" id="own-title"><span>Change with the title instead</span></label></div>
+          <div class="full" id="own-names-block"><label>Which meters</label><div class="checks" id="own-names"></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Display</h2>
+    <div class="form">
+      <div><label>Window</label><select id="d-mode"><option value="fullscreen">Fullscreen</option><option value="windowed">Windowed</option><option value="frameless">Frameless</option></select></div>
+      <div><label>Position X, windowed or frameless</label><input type="number" id="d-x" placeholder="centred"></div>
+      <div><label>Position Y</label><input type="number" id="d-y" placeholder="centred"></div>
+      <div><label>Frame rate, empty for the player's</label><input type="number" id="d-fps" min="10" max="60" placeholder="player's"></div>
+      <div class="full"><label class="switch"><input type="checkbox" id="d-fit"><span>Fit the theme to the screen, keeping its shape</span></label><div class="help">Off, the theme shows pixel for pixel, centred, as on the player's own screen.</div></div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Levels</h2>
+    <div class="form">
+      <div><label>Gain, dB, this remote only</label><input type="number" id="gain" min="-12" max="12" step="0.5" value="0"></div>
+      <div class="full help">Scales what the needles and bars show here. The player's own display and its audio are not touched.</div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>This remote</h2>
+    <div class="form">
+      <div><label>Name, as the player's manager lists it</label><input type="text" id="r-name" placeholder="Kitchen"></div>
+      <div><label>Port of this page</label><input type="number" id="r-port" min="1024" max="65535"></div>
+      <div class="full help" id="paths"></div>
+    </div>
+  </div>
+</div>
+<div class="toasts" id="toasts"></div>
+<script>
+(function () {
+  'use strict';
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var state = { config: null, themes: [], dirty: false };
+  function toast(text, kind) { var el = document.createElement('div'); el.className = 'toast' + (kind ? ' ' + kind : ''); el.textContent = text; $('toasts').appendChild(el); setTimeout(function () { el.remove(); }, kind === 'error' ? 7000 : 3500); }
+  function api(method, url, body) {
+    var opts = { method: method, headers: {} };
+    if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    return fetch(url, opts).then(function (res) { return res.json().catch(function () { return {}; }).then(function (data) { if (!res.ok) { var e = new Error(data.message || data.error || ('HTTP ' + res.status)); e.code = data.error; throw e; } return data; }); });
+  }
+  function setDirty(on) { state.dirty = on; $('dirty').classList.toggle('hidden', !on); }
+
+  // ---- state ----
+  function load() {
+    return api('GET', '/api/state').then(function (s) {
+      state.config = s.config;
+      $('subtitle').textContent = 'Glass ' + s.release + ' · protocol ' + s.protocol;
+      $('paths').textContent = 'Configuration: ' + s.configPath + ' · cache: ' + s.cache;
+      renderStatus(s.status);
+      if (!state.dirty) fill(s.config);
+      renderPlayers(s.config);
+    });
+  }
+  function renderStatus(st) {
+    var rows = [
+      ['Showing', st.phase || ''],
+      ['Player', st.player ? st.player + ' (' + st.host + (st.player_release ? ', Glass ' + st.player_release : '') + ')' : 'none'],
+      ['Channel', st.connected ? 'connected' : 'not connected'],
+      ['Frames', st.frames_per_s ? st.frames_per_s.toFixed(0) + ' a second' : 'none' + (st.received ? '' : '') + (st.refused ? ' (' + st.refused + ' refused)' : '')],
+      ['Theme', st.theme ? st.theme + (st.meter ? ' · ' + st.meter : '') : ''],
+      ['Screen', st.screen && st.screen[0] ? st.screen[0] + '×' + st.screen[1] : ''],
+      ['Synced', st.synced || ''],
+      ['This page', st.page || '']
+    ];
+    var c = state.config; var p = c && c.active ? c.players[c.active] : null;
+    var manager = p ? 'http://' + p.host + ':' + p.manager_port + '/' : '';
+    $('status').innerHTML = rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('') +
+      (manager ? '<tr><td>Player\'s manager</td><td><a href="' + esc(manager) + '" style="color:var(--accent)">' + esc(manager) + '</a></td></tr>' : '');
+  }
+
+  // ---- players ----
+  function renderPlayers(c) {
+    var box = $('players'); box.innerHTML = '';
+    var ids = Object.keys(c.players || {});
+    if (!ids.length) { box.innerHTML = '<div class="help">No player yet. Find one on the network or add one by name.</div>'; return; }
+    ids.forEach(function (id) {
+      var p = c.players[id]; var el = document.createElement('div');
+      el.className = 'item' + (c.active === id ? ' active' : '');
+      el.innerHTML = '<div class="grow"><div class="name">' + esc(p.name || p.host) + ' ' + (c.active === id ? '<span class="badge green">shown</span>' : '') + '</div><div class="help">' + esc(p.host) + ' · manager ' + p.manager_port + ' · ' + (p.theme && p.theme.mode === 'own' ? 'own theme ' + esc(p.theme.folder) : 'follows the player') + '</div></div>' +
+        (c.active === id ? '' : '<button class="small" data-act="show">Show this player</button>') + '<button class="small danger" data-act="remove">Remove</button>';
+      el.querySelector('[data-act=remove]').onclick = function () { api('DELETE', '/api/player/' + encodeURIComponent(id)).then(function () { toast('Removed ' + (p.name || p.host)); setDirty(false); load(); }).catch(function (e) { toast(e.message, 'error'); }); };
+      var show = el.querySelector('[data-act=show]');
+      if (show) show.onclick = function () { api('POST', '/api/active', { id: id }).then(function () { toast('Showing ' + (p.name || p.host)); setDirty(false); load().then(loadThemes); }).catch(function (e) { toast(e.message, 'error'); }); };
+      box.appendChild(el);
+    });
+  }
+  $('btn-discover').onclick = function () {
+    $('btn-discover').disabled = true; $('discover-note').textContent = 'Listening for six seconds';
+    api('GET', '/api/discover?seconds=6').then(function (d) {
+      $('btn-discover').disabled = false;
+      $('discover-note').textContent = d.players.length ? d.players.length + ' found' : 'No player announced itself. Serving remotes may be off on the player, or it is on another network: add it by name.';
+      var box = $('discovered'); box.innerHTML = '';
+      d.players.forEach(function (p) {
+        var el = document.createElement('div'); el.className = 'item';
+        el.innerHTML = '<div class="grow"><div class="name">' + esc(p.name) + '</div><div class="help">' + esc(p.host) + (p.hostname ? ' (' + esc(p.hostname) + ')' : '') + ' · Glass ' + esc(p.release) + ' · ' + esc(p.theme) + '</div></div><button class="small primary">Use this player</button>';
+        el.querySelector('button').onclick = function () { addPlayer(p.hostname || p.host, p.manager_port, p.name); };
+        box.appendChild(el);
+      });
+    }).catch(function (e) { $('btn-discover').disabled = false; $('discover-note').textContent = e.message; });
+  };
+  function addPlayer(host, port, name) {
+    api('POST', '/api/player', { host: host, manager_port: port, name: name }).then(function (d) {
+      toast(d.reached ? 'Added ' + host + (d.release ? ' (Glass ' + d.release + ')' : '') : 'Added ' + host + ', but its manager did not answer: ' + (d.note || ''), d.reached ? '' : 'error');
+      setDirty(false); $('discovered').innerHTML = ''; $('add-host').value = ''; $('add-name').value = '';
+      load().then(loadThemes);
+    }).catch(function (e) { toast(e.message, 'error'); });
+  }
+  $('btn-add').onclick = function () { addPlayer($('add-host').value, parseInt($('add-port').value, 10) || 5582, $('add-name').value); };
+
+  // ---- theme ----
+  function loadThemes() {
+    var c = state.config; if (!c || !c.active) { state.themes = []; renderOwn(); return Promise.resolve(); }
+    return api('GET', '/api/player/themes').then(function (d) { state.themes = d.themes || []; renderOwn(); }).catch(function (e) { state.themes = []; renderOwn(); toast('The player\'s themes could not be read: ' + e.message, 'error'); });
+  }
+  function currentOwn() { var c = state.config; var p = c && c.active ? c.players[c.active] : null; return p && p.theme && p.theme.mode === 'own' ? p.theme : null; }
+  function renderOwn() {
+    var own = currentOwn();
+    var sel = $('own-theme'); var chosen = sel.value || (own && own.folder) || '';
+    sel.innerHTML = state.themes.map(function (t) { return '<option value="' + esc(t.folder) + '">' + esc(t.folder) + (t.width ? ' (' + t.width + '×' + t.height + ')' : '') + (t.active ? ' • on the player' : '') + '</option>'; }).join('');
+    if (chosen && state.themes.some(function (t) { return t.folder === chosen; })) sel.value = chosen;
+    renderNames();
+  }
+  function renderNames() {
+    var t = state.themes.find(function (x) { return x.folder === $('own-theme').value; });
+    var own = currentOwn(); var picked = own && own.meter ? (own.meter.names || (own.meter.name ? [own.meter.name] : [])) : [];
+    var single = $('own-select').value === 'single';
+    $('own-names').innerHTML = ((t && t.meters) || []).map(function (m) { return '<label class="switch"><input type="' + (single ? 'radio' : 'checkbox') + '" name="own-name" value="' + esc(m) + '"' + (picked.indexOf(m) !== -1 ? ' checked' : '') + '><span>' + esc(m) + '</span></label>'; }).join('');
+    var mode = $('own-select').value;
+    $('own-names-block').classList.toggle('hidden', mode === 'random');
+    $('own-interval-block').classList.toggle('hidden', mode === 'single' || $('own-title').checked);
+    $('own-title-block').classList.toggle('hidden', mode === 'single');
+  }
+  $('own-theme').onchange = function () { renderNames(); setDirty(true); };
+  $('own-select').onchange = function () { renderNames(); setDirty(true); };
+  $('own-title').onchange = function () { renderNames(); setDirty(true); };
+  $('own-interval').onchange = function () { setDirty(true); };
+  $('own-names').onchange = function () { setDirty(true); };
+  $('tmode-follow').onchange = $('tmode-own').onchange = function () { $('own-block').classList.toggle('hidden', !$('tmode-own').checked); setDirty(true); };
+
+  // ---- fill and gather ----
+  function fill(c) {
+    var p = c.active ? c.players[c.active] : null;
+    $('theme-panel').classList.toggle('hidden', !p);
+    if (p) {
+      var own = p.theme && p.theme.mode === 'own';
+      $('tmode-own').checked = own; $('tmode-follow').checked = !own;
+      $('own-block').classList.toggle('hidden', !own);
+      if (own) {
+        $('own-theme').value = p.theme.folder;
+        var m = p.theme.meter || { select: 'random' };
+        $('own-select').value = m.select || 'random';
+        $('own-interval').value = m.interval_s || 60;
+        $('own-title').checked = !!m.on_title;
+      }
+    }
+    $('d-mode').value = c.display.mode; $('d-x').value = c.display.position ? c.display.position[0] : ''; $('d-y').value = c.display.position ? c.display.position[1] : '';
+    $('d-fps').value = c.display.fps || ''; $('d-fit').checked = !!c.display.fit;
+    $('gain').value = c.gain_db; $('r-name').value = c.name; $('r-port').value = c.page_port;
+    renderNames();
+  }
+  function gather() {
+    var c = JSON.parse(JSON.stringify(state.config));
+    if (c.active && c.players[c.active]) {
+      if ($('tmode-own').checked) {
+        var select = $('own-select').value; var meter;
+        var names = Array.prototype.map.call(document.querySelectorAll('input[name=own-name]:checked'), function (i) { return i.value; });
+        if (select === 'random') meter = { select: 'random', interval_s: parseInt($('own-interval').value, 10) || 60, on_title: $('own-title').checked };
+        else if (select === 'list') meter = { select: 'list', names: names, interval_s: parseInt($('own-interval').value, 10) || 60, on_title: $('own-title').checked };
+        else meter = { select: 'single', name: names[0] || '' };
+        c.players[c.active].theme = { mode: 'own', folder: $('own-theme').value, meter: meter };
+      } else {
+        c.players[c.active].theme = { mode: 'follow' };
+      }
+    }
+    var x = $('d-x').value.trim(), y = $('d-y').value.trim();
+    c.display = { mode: $('d-mode').value, position: (x !== '' && y !== '') ? [parseInt(x, 10) || 0, parseInt(y, 10) || 0] : null, fit: $('d-fit').checked, fps: $('d-fps').value ? parseInt($('d-fps').value, 10) : null };
+    c.gain_db = parseFloat($('gain').value) || 0; c.name = $('r-name').value.trim(); c.page_port = parseInt($('r-port').value, 10) || 5583;
+    return c;
+  }
+  ['d-mode', 'd-x', 'd-y', 'd-fps', 'd-fit', 'gain', 'r-name', 'r-port'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
+  $('btn-apply').onclick = function () {
+    var c = gather(); var portChanged = state.config && c.page_port !== state.config.page_port;
+    api('POST', '/api/config', c).then(function (d) { state.config = d.config; setDirty(false); toast(portChanged ? 'Applied. The page moves to port ' + c.page_port + ' when the remote starts again.' : 'Applied.'); fill(d.config); renderPlayers(d.config); }).catch(function (e) { toast(e.message, 'error'); });
+  };
+
+  load().then(loadThemes);
+  setInterval(function () { api('GET', '/api/state').then(function (s) { renderStatus(s.status); }).catch(function () {}); }, 2000);
+})();
+</script>
+</body>
+</html>

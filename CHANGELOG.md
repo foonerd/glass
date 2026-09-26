@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.3] - 2026-09-26
+
+A remote display is set up on a page of its own, served by the same `glass` binary on port 5583 while it runs: the players it knows (found on the network or typed, one on show), the theme (the player's, followed as it changes, or one of the player's themes kept as the remote's own with its own meter rotation), the window (full screen with the theme fitted to the screen, a window, or a frameless one at a fixed place), the frame rate and a gain for this remote's needles and bars. A change applies while the display runs: the session starts again in the same process and the window stays up. `glass --remote` alone runs as the page says, and a first start shows the page's address on the screen; `--settings` opens the page in a browser, of a remote already running or of the one it starts. The manager's Remotes tab links to each remote's page. The release archives carry `remote/linux/`: an installer with the two desktop entries, "Glass Remote" and "Glass Remote Settings", an icon, and a user service that keeps the display running with the session. The ship script now refuses a binary that needs a glibc newer than Volumio's 2.36: the browser-opening switch had reached, through the standard library's process spawn, a symbol of glibc 2.39 that the player's loader refused, and the switch now spawns through `posix_spawnp` directly.
+
 ## [0.7.2] - 2026-09-26
 
 The status tab says whether remote displays are served, on which ports, how many receive frames, and any problem the daemon or the channel reported.

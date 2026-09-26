@@ -109,6 +109,8 @@ Channel.prototype.attach = function (conn) {
                     name: String(r.name || '').slice(0, 64),
                     release: String(r.release || '').slice(0, 32),
                     screen: Array.isArray(r.screen) ? r.screen.slice(0, 2).map(function (n) { return parseInt(n, 10) || 0; }) : [0, 0],
+                    // The remote's own settings page, when it serves one.
+                    page: /^https?:\/\/[^\s"'<>]{1,150}$/.test(String(r.page || '')) ? String(r.page) : '',
                     address: String(conn.remoteAddress || '').replace(/^::ffff:/, ''),
                     since: new Date().toISOString()
                 };

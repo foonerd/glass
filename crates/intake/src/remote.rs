@@ -41,6 +41,8 @@ pub struct NetHops {
     /// Datagrams received and refused, for the log.
     pub received: u64,
     pub refused: u64,
+    /// The factor levels are scaled by on this remote, from a gain in decibels.
+    gain: f32,
 }
 
 impl NetHops {
@@ -73,11 +75,23 @@ impl NetHops {
             buffer: vec![0u8; DATAGRAM_MAX],
             received: 0,
             refused: 0,
+            gain: 1.0,
         })
     }
 
     pub fn server(&self) -> SocketAddr {
         self.server
+    }
+
+    /// Scale the levels by a gain in decibels, within plus or minus twelve.
+    pub fn with_gain_db(mut self, db: f32) -> Self {
+        let db = if db.is_finite() {
+            db.clamp(-12.0, 12.0)
+        } else {
+            0.0
+        };
+        self.gain = 10f32.powf(db / 20.0);
+        self
     }
 
     fn subscribe_if_due(&mut self) {
@@ -115,7 +129,11 @@ impl Hops for NetHops {
                             self.last_packet_at = Some(Instant::now());
                             self.rate = packet.rate;
                             elapsed += packet.frames as u64;
-                            frames.push(packet.frame());
+                            let mut frame = packet.frame();
+                            if self.gain != 1.0 {
+                                scale_frame(&mut frame, self.gain);
+                            }
+                            frames.push(frame);
                         }
                         Err(_) => self.refused += 1,
                     }
@@ -129,6 +147,24 @@ impl Hops for NetHops {
         let hop =
             merge_hops(frames.into_iter()).map(|frame| (frame, self.rate.max(1), elapsed.max(1)));
         Taken { hop, quiet }
+    }
+
+    fn stats(&self) -> (u64, u64) {
+        (self.received, self.refused)
+    }
+}
+
+/// Every level of a frame multiplied by `gain`, kept within full scale.
+fn scale_frame(frame: &mut Frame, gain: f32) {
+    for level in frame.peak.iter_mut().chain(frame.rms.iter_mut()) {
+        *level = (*level * gain).min(1.0);
+    }
+    for bin in frame
+        .spectrum
+        .iter_mut()
+        .flat_map(|channel| channel.iter_mut())
+    {
+        *bin = (*bin * gain).min(1.0);
     }
 }
 
@@ -325,6 +361,67 @@ pub fn frames_address(beacon: &Beacon) -> std::io::Result<SocketAddr> {
         })
 }
 
+/// What a remote wants of the player's configuration: the player's own
+/// theme and meter when nothing is set, or a theme of its choosing from
+/// the player's themes with a meter choice of its own.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Choice {
+    /// A theme folder of the player's to bring instead of the one on show.
+    pub theme: Option<String>,
+    /// The `meter` value: a name, a comma list, or `random`.
+    pub meter: Option<String>,
+    /// Seconds between meters when they rotate, 15 to 1000.
+    pub interval_s: Option<u32>,
+    /// Whether a new title moves to the next meter.
+    pub on_title: Option<bool>,
+}
+
+/// The address this host reaches `player` from: what the player sees as
+/// the remote's address, and what a browser on the same network reaches.
+pub fn own_address_towards(player: &str, port: u16) -> Option<IpAddr> {
+    let socket = UdpSocket::bind("0.0.0.0:0").ok()?;
+    socket.connect((player, port)).ok()?;
+    socket.local_addr().ok().map(|a| a.ip())
+}
+
+/// This host's own IPv4 addresses, loopback left out: on Linux from the
+/// kernel's routing trie, elsewhere none.
+pub fn own_addresses() -> Vec<std::net::Ipv4Addr> {
+    #[cfg(target_os = "linux")]
+    {
+        std::fs::read_to_string("/proc/net/fib_trie")
+            .map(|text| local_addresses_in(&text))
+            .unwrap_or_default()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Vec::new()
+    }
+}
+
+/// The `/32 host LOCAL` entries of a routing trie dump: each is an address
+/// of this host's own, named on the line before its `/32` line.
+fn local_addresses_in(trie: &str) -> Vec<std::net::Ipv4Addr> {
+    let mut found: Vec<std::net::Ipv4Addr> = Vec::new();
+    let mut last: Option<std::net::Ipv4Addr> = None;
+    for line in trie.lines() {
+        let line = line.trim_start_matches(['|', '+', '-', ' ']);
+        if let Some(rest) = line.strip_prefix("/32 host LOCAL") {
+            let _ = rest;
+            if let Some(ip) = last.take() {
+                if !ip.is_loopback() && !found.contains(&ip) {
+                    found.push(ip);
+                }
+            }
+        } else if let Some((address, _)) = line.split_once('/') {
+            last = address.trim().parse().ok();
+        } else {
+            last = line.trim().parse().ok();
+        }
+    }
+    found
+}
+
 /// What a sync brought or confirmed.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Synced {
@@ -505,6 +602,12 @@ impl Sync {
     /// The configuration, the assets and the theme on show, brought up to
     /// date. The configuration files are rewritten to point into the home.
     pub fn run(&mut self) -> Result<Synced, String> {
+        self.run_with(&Choice::default())
+    }
+
+    /// The same, with a theme and meter of the remote's own choosing where
+    /// the choice says so.
+    pub fn run_with(&mut self, choice: &Choice) -> Result<Synced, String> {
         self.log.clear();
         std::fs::create_dir_all(self.home.join("config"))
             .map_err(|e| format!("{}: {e}", self.home.display()))?;
@@ -514,16 +617,39 @@ impl Sync {
         let templates = self.home.join("templates");
         let spectrum_templates = self.home.join("templates_spectrum");
         let webfonts = self.home.join("webfonts");
-        let meter_text = rewrite_config(
-            &config.files.meter,
-            &[
-                ("base.folder", &templates.to_string_lossy()),
-                ("font.path", &webfonts.to_string_lossy()),
-            ],
-        );
+        let theme_wanted = choice
+            .theme
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .unwrap_or(&config.theme)
+            .to_string();
+        let templates = templates.to_string_lossy().into_owned();
+        let webfonts = webfonts.to_string_lossy().into_owned();
+        let interval = choice.interval_s.map(|i| i.clamp(15, 1000).to_string());
+        let on_title = choice.on_title.map(|t| if t { "True" } else { "False" });
+        let mut keys: Vec<(&str, &str)> = vec![
+            ("base.folder", &templates),
+            ("font.path", &webfonts),
+            ("meter.folder", &theme_wanted),
+        ];
+        if let Some(meter) = choice.meter.as_deref().filter(|m| !m.trim().is_empty()) {
+            keys.push(("meter", meter));
+        }
+        if let Some(interval) = interval.as_deref() {
+            keys.push(("random.meter.interval", interval));
+        }
+        if let Some(on_title) = on_title {
+            keys.push(("random.change.title", on_title));
+        }
+        let meter_text = rewrite_config(&config.files.meter, &keys);
+        let spectrum_templates = spectrum_templates.to_string_lossy().into_owned();
         let spectrum_text = rewrite_config(
             &config.files.spectrum,
-            &[("base.folder", &spectrum_templates.to_string_lossy())],
+            &[
+                ("base.folder", &spectrum_templates),
+                ("spectrum.folder", &theme_wanted),
+            ],
         );
         std::fs::write(self.home.join("config/meter.txt"), meter_text)
             .map_err(|e| format!("meter.txt: {e}"))?;
@@ -569,7 +695,7 @@ impl Sync {
         let theme: ThemeFiles = serde_json::from_str(&self.get_text(&format!(
             "{}/api/themes/{}/files",
             self.manager,
-            encode(&config.theme)
+            encode(&theme_wanted)
         ))?)
         .map_err(|e| format!("theme files: {e}"))?;
         for file in &theme.files {
@@ -602,12 +728,16 @@ impl Sync {
             }
         }
         self.ledger.version = config.version.clone();
-        self.ledger.theme = config.theme.clone();
+        self.ledger.theme = theme_wanted.clone();
         self.save_ledger()?;
         Ok(Synced {
             version: config.version,
-            theme: config.theme,
-            meter: config.meter,
+            theme: theme_wanted,
+            meter: choice
+                .meter
+                .clone()
+                .filter(|m| !m.trim().is_empty())
+                .unwrap_or(config.meter),
             fetched,
             kept,
         })
@@ -692,6 +822,41 @@ pub fn remote_id(cache: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_hosts_addresses_are_read_from_a_routing_trie() {
+        let trie = "Main:\n  +-- 0.0.0.0/0 3 0 5\n     |-- 0.0.0.0\n        /0 universe UNICAST\n     +-- 127.0.0.0/8 2 0 2\n        +-- 127.0.0.0/31 1 0 0\n           |-- 127.0.0.0\n              /32 link BROADCAST\n              /8 host LOCAL\n           |-- 127.0.0.1\n              /32 host LOCAL\n     +-- 192.168.30.0/24 2 0 2\n        |-- 192.168.30.0\n           /32 link BROADCAST\n           /24 link UNICAST\n        |-- 192.168.30.10\n           /32 host LOCAL\n        |-- 192.168.30.255\n           /32 link BROADCAST\nLocal:\n  +-- 192.168.30.0/24 2 0 2\n        |-- 192.168.30.10\n           /32 host LOCAL\n";
+        let found = local_addresses_in(trie);
+        assert_eq!(
+            found,
+            vec!["192.168.30.10".parse::<std::net::Ipv4Addr>().unwrap()]
+        );
+    }
+
+    #[test]
+    fn a_gain_scales_every_level_within_full_scale() {
+        let mut frame = Frame {
+            seq: 1,
+            time_ns: 0,
+            frames: 1,
+            peak: [0.5, 0.9],
+            rms: [0.25, 0.8],
+            spectrum: [vec![0.5, 1.0], vec![0.1, 0.9]],
+        };
+        scale_frame(&mut frame, 2.0);
+        assert_eq!(frame.peak, [1.0, 1.0]);
+        assert_eq!(frame.rms, [0.5, 1.0]);
+        assert_eq!(frame.spectrum[0], vec![1.0, 1.0]);
+        assert_eq!(frame.spectrum[1], vec![0.2, 1.0]);
+        let hops = NetHops::new("127.0.0.1:1".parse().unwrap(), "id", "name", "0")
+            .unwrap()
+            .with_gain_db(-6.0);
+        assert!((hops.gain - 0.5012).abs() < 0.001);
+        let clamped = NetHops::new("127.0.0.1:1".parse().unwrap(), "id", "name", "0")
+            .unwrap()
+            .with_gain_db(40.0);
+        assert!((clamped.gain - 10f32.powf(0.6)).abs() < 0.001);
+    }
     use std::thread;
 
     #[test]

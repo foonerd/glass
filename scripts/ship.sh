@@ -71,5 +71,24 @@ install -D -m 755 bin/armv7/glass-serve bin/arm/glass-serve
 install -D -m 644 lib/armv7/libglasstap.so lib/arm/libglasstap.so
 ship aarch64-unknown-linux-gnu armv8 aarch64-linux-gnu-strip
 
+# Volumio bookworm runs glibc 2.36 on every architecture. The cross
+# toolchain's sysroot is newer, and a symbol versioned above 2.36 (even a
+# weak one) makes the loader refuse the whole binary on the player.
+echo "ship: glibc"
+glibc_max() {
+  readelf -W --dyn-syms "$1" | grep -o 'GLIBC_2\.[0-9]*' | sort -t. -k2,2n -u | tail -n1
+}
+for bin in bin/*/glass bin/*/tapdump bin/*/glass-serve lib/*/libglasstap.so; do
+  version=$(glibc_max "$bin")
+  case "$version" in
+    GLIBC_2.3[7-9]|GLIBC_2.[4-9]*|GLIBC_2.[1-9][0-9][0-9])
+      echo "ship: $bin needs $version, newer than Volumio's glibc 2.36" >&2
+      readelf -W --dyn-syms "$bin" | grep "$version" >&2
+      exit 1
+      ;;
+  esac
+  echo "ship: $bin needs at most ${version:-no versioned glibc symbol}"
+done
+
 echo "ship: payload"
 file bin/arm/glass bin/armv7/glass bin/armv8/glass bin/x64/glass lib/arm/libglasstap.so lib/armv8/libglasstap.so lib/x64/libglasstap.so

@@ -558,7 +558,7 @@
       var items = (r.remotes || []).map(function (m) {
         seen[m.address] = true;
         var s = subs[m.address];
-        return { name: m.name || m.id, address: m.address, release: m.release, screen: m.screen, since: m.since, frames: !!s, sent: s ? s.sent : 0 };
+        return { name: m.name || m.id, address: m.address, release: m.release, screen: m.screen, since: m.since, page: m.page || '', frames: !!s, sent: s ? s.sent : 0 };
       });
       Object.keys(subs).forEach(function (ip) {
         if (!seen[ip]) items.push({ name: subs[ip].name || subs[ip].id, address: ip, release: subs[ip].release, screen: null, since: null, frames: true, sent: subs[ip].sent });
@@ -570,6 +570,8 @@
         el.innerHTML = '<div class="grow"><div class="name">' + esc(m.name) + ' <span class="muted" style="font-weight:normal">' + esc(m.address) + (m.release ? ' · ' + esc(m.release) : '') + '</span></div>' +
           '<div class="muted" style="font-size:13px">' + (m.screen && m.screen[0] ? esc(t('MANAGER_RM_SCREEN')) + ' ' + m.screen[0] + '×' + m.screen[1] + ' · ' : '') +
           esc(m.frames ? t('MANAGER_RM_SUBSCRIBED') + ' (' + m.sent + ')' : t('MANAGER_RM_NOT_SUBSCRIBED')) + (m.since ? ' · ' + esc(t('MANAGER_RM_SINCE')) + ' ' + esc(fmtDate(m.since)) : '') + '</div></div>' +
+          // The remote's own settings page opens in this window: on the player's own display a new tab cannot be closed.
+          (m.page ? '<a href="' + esc(m.page) + '" style="text-decoration:none"><button class="small">' + esc(t('MANAGER_RM_PAGE')) + '</button></a>' : '') +
           '<span class="badge ' + (m.frames ? 'green' : 'gray') + '">' + esc(m.frames ? 'LIVE' : 'IDLE') + '</span>';
         box.appendChild(el);
       });
