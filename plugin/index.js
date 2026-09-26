@@ -405,6 +405,7 @@ Glass.prototype.onStart = function () {
     self.retireSideOutputs(false)
         .then(self.writeAsoundConfigModular.bind(self))
         .then(self.updateALSAConfigFile.bind(self))
+        .then(function () { return self.tellSoloist(true); })
         .fail(function (e) {
             self.logger.error(id + 'audio path: ' + (e && e.message ? e.message : e));
         });
@@ -670,8 +671,10 @@ Glass.prototype.onInstall = function () {
 
 Glass.prototype.onUninstall = function () {
     var self = this;
-    // Whatever an earlier release put beside the tap goes with it.
+    // Whatever an earlier release put beside the tap goes with it, and
+    // Soloist goes back to the player's own device.
     self.retireSideOutputs(true);
+    self.tellSoloist(false);
 };
 
 // Whether PeppyMeter Screensaver is enabled, in which case Glass stays out
@@ -2497,14 +2500,41 @@ Glass.prototype.retireSideOutputs = function (force) {
                 self.logger.info(id + 'AirPlay plays to volumio again');
             });
     }
-    if (self.getPluginStatus('music_service', 'soloist_connect') === 'STARTED') {
-        try {
-            self.commandRouter.executeOnPlugin('music_service', 'soloist_connect', 'setPeppyMetering', false);
-        } catch (e) {}
-    }
     return chain.then(function () {
         self.config.set('sideOutputsRetired', true);
     });
+};
+
+// Soloist chooses its ALSA device when its daemon starts: with metering on
+// and a `pcm.spotify` in the ALSA file it opens `plug:spotify`, which is
+// the tap; otherwise a device read from the file as it stands, which at a
+// backend start can be one below the tap (`softvolume`), and then its
+// stream is heard but never measured. So Glass says metering is on after
+// every rewrite of the ALSA file, and off when it leaves. Soloist restarts
+// its daemon only when the device it runs with differs.
+// What Soloist may ask at its own start, the way it asks PeppyMeter
+// Screensaver: with Glass running, its stream is to be measured.
+Glass.prototype.soloistMeteringWanted = function () {
+    return true;
+};
+
+Glass.prototype.tellSoloist = function (metering) {
+    var self = this;
+    if (self.getPluginStatus('music_service', 'soloist_connect') !== 'STARTED') { return libQ.resolve(); }
+    var defer = libQ.defer();
+    try {
+        var ret = self.commandRouter.executeOnPlugin('music_service', 'soloist_connect', 'setPeppyMetering', metering);
+        self.logger.info(id + 'Soloist told: metering ' + (metering ? 'on' : 'off'));
+        if (ret && typeof ret.then === 'function') {
+            ret.then(function () { defer.resolve(); }, function () { defer.resolve(); });
+        } else {
+            defer.resolve();
+        }
+    } catch (e) {
+        self.logger.warn(id + 'Soloist: ' + (e && e.message ? e.message : e));
+        defer.resolve();
+    }
+    return defer.promise;
 };
 
 //mount a copy of changed file over 
