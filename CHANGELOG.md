@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.11] - 2026-09-26
+
+The measured line reads a ring stamped a hair ahead of the manager's own clock reading as live, the display's own rule; 0.6.10 could call a playing source unmeasured for that.
+
 ## [0.6.10] - 2026-09-26
 
 The status tab says whether what plays is measured: while the player reports play, a live ring under `/dev/shm` means the source's stream passes through the tap, and none means it plays below the tap and is heard but not measured. Each ring is listed with its stream and whether it is live or how long it has been quiet.

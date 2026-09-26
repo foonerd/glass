@@ -761,7 +761,9 @@ async function readRings() {
       const { bytesRead } = await fd.read(header, 0, 64, 0);
       if (bytesRead < 64 || header.toString('latin1', 0, 8) !== 'GLASSTAP') continue;
       const written = header.readBigUInt64LE(56);
-      const ago = written === 0n ? null : now - written;
+      // A write stamped a hair ahead of this reading counts as now, as the
+      // display's own rule has it.
+      const ago = written === 0n ? null : (written > now ? 0n : now - written);
       const parts = name.slice(RING_PREFIX.length).split('.');
       rings.push({
         name: name,
