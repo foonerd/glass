@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.13] - 2026-09-26
+
+The tap asks its PCM how many frames stand between the last one written and the sound, from its measuring thread, and places every hop from that; the buffer-and-period estimate remains the fallback when the PCM cannot say. A player that keeps its buffer anywhere between a period and full, as one reading from a pipe does, now meters in step with the sound rather than within a period of it.
+
 ## [0.5.12] - 2026-09-26
 
 Hops keep their cadence. When a player writes ahead of the sound, as one does while it fills its buffer or reads from a pipe, each hop now falls due no sooner than one hop after the last, so the ring fills evenly instead of in pairs; and a stream's first frames are timed from an empty buffer, so the meters start with the sound instead of a buffer's length behind it.
