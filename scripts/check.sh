@@ -20,4 +20,14 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 echo "check: ALSA templates"
 scripts/asound_check.sh
 
+echo "check: plugin"
+if command -v node >/dev/null 2>&1; then
+  node --check plugin/index.js
+  node --test plugin/manager/test/*.test.js
+elif command -v docker >/dev/null 2>&1; then
+  docker run --rm -v "$ROOT/plugin:/plugin:ro" -w /plugin node:20-slim sh -c 'node --check index.js && node --test manager/test/*.test.js'
+else
+  echo "check: plugin: neither node nor docker found, skipped" >&2
+fi
+
 echo "check: clean"

@@ -19,6 +19,9 @@ const socket = io.connect('http://localhost:3000');
 const path = require('path');
 const ini = require('ini');
 const pluginVersion = require('./package.json').version;
+const os = require('os');
+const { Manager, DEFAULT_PORT: MANAGER_DEFAULT_PORT } = require('./manager/server');
+const { safeFolderName, sections: configSections } = require('./manager/zip');
 
 const id = 'glass: ';
 const PluginPath = '/data/plugins/user_interface/glass';
@@ -279,7 +282,8 @@ Glass.prototype.onVolumioStart = function () {
     var defaults = {
         themeTagRules: ['string', ''],
         legacyImported: ['boolean', false],
-        displayOutput: ['string', '0']
+        displayOutput: ['string', '0'],
+        managerPort: ['number', MANAGER_DEFAULT_PORT]
     };
     Object.keys(defaults).forEach(function (key) {
         if (self.config.get(key) === undefined) {
@@ -403,6 +407,9 @@ Glass.prototype.onStart = function () {
         .fail(function (e) {
             self.logger.error(id + 'audio path: ' + (e && e.message ? e.message : e));
         });
+
+    // The manager: the web application on its own port.
+    self.startManager();
 
     // The player state drives the display: it opens after the timeout while
     // music plays, stays through a pause for the persist time, and leaves
@@ -645,6 +652,7 @@ Glass.prototype.onStop = function () {
             self.channel.close();
             self.channel = null;
         }
+        self.stopManager();
     });
 
     return libQ.resolve();
@@ -786,8 +794,11 @@ Glass.prototype.importLegacySettings = function () {
     } else if (!imported) {
         var backups = self.listSettingsBackups();
         if (backups.length > 0) {
-            self.restoreSettingsBackup({ selectedBackup: { value: backups[0].name }, quiet: true });
-            imported = true;
+            var restored = self.backupRestore(backups[0].name);
+            if (restored.error) {
+                self.logger.warn(id + 'settings import: backup ' + backups[0].name + ': ' + restored.error);
+            }
+            imported = !restored.error;
         }
     }
     self.config.set('legacyImported', true);
@@ -880,17 +891,19 @@ Glass.prototype.getUIConfig = function () {
             }
             pick('formatTypeMode', formatTypeMode);
 
-            // Themes and artwork.
-            self.configManager.pushUIConfigParam(uiconf, P('themeToRemove'), {
-                value: '',
-                label: self.commandRouter.getI18nString('GLASS.THEME_REMOVE_NONE')
-            });
+            // The manager: where themes, artwork and backups are managed.
+            var managerUrl = self.managerUrl();
+            C('managerOpen').onClick.url = '/iframe-page/' + managerUrl.replace(/\//g, '~2F');
+            C('managerOpenTab').onClick.url = managerUrl;
+            C('managerOpenTab').doc = self.commandRouter.getI18nString('GLASS.MANAGER_OPEN_TAB_DOC') + ' ' + managerUrl;
+
+            // Themes: the active theme, the tag rules and whether themes stay.
             var files = [];
             try { files = fs.readdirSync(base_folder_P); } catch (e) {}
             files.forEach(function (file) {
                 var stat;
                 try { stat = fs.statSync(base_folder_P + file); } catch (e) { return; }
-                if (!stat.isDirectory()) { return; }
+                if (!stat.isDirectory() || file.indexOf('.') === 0) { return; }
                 var str_empty = fs.existsSync(base_folder_P + file + '/meters.txt') ? '' : ' (empty)';
                 var folderLabel = file + str_empty;
                 if (file.includes('_')) {
@@ -898,10 +911,7 @@ Glass.prototype.getUIConfig = function () {
                     folderLabel = (partFile[1] || '').replace(upperc, function (c) { return c.toUpperCase(); }) + '-' + (partFile[2] || '') + ' ' + partFile[0] + str_empty;
                 }
                 self.configManager.pushUIConfigParam(uiconf, P('activeFolder'), { value: file, label: folderLabel });
-                self.configManager.pushUIConfigParam(uiconf, P('themeToRemove'), { value: file, label: folderLabel });
             });
-            C('themeToRemove').value.value = '';
-            C('themeToRemove').value.label = self.commandRouter.getI18nString('GLASS.THEME_REMOVE_NONE');
             var meterFolder = meterConfig.current[meterFolderStr] || '';
             C('activeFolder').value.value = meterFolder;
             if (meterFolder.includes('_')) {
@@ -912,22 +922,6 @@ Glass.prototype.getUIConfig = function () {
             }
             C('themeTagRules').value = self.config.get('themeTagRules') || '';
             C('doNotDeleteThemes').value = self.config.get('doNotDeleteThemes') === true;
-            C('fanartEnabled').value = self.config.get('fanartEnabled') === true;
-            var fanartKeyMode = self.config.get('fanartKeyMode') || 'personal';
-            C('fanartKeyMode').value.value = fanartKeyMode;
-            C('fanartKeyMode').value.label = self.commandRouter.getI18nString(fanartKeyMode === 'project' ? 'GLASS.FANART_KEY_MODE_PROJECT' : 'GLASS.FANART_KEY_MODE_PERSONAL');
-            C('fanart_personal_key').value = self.config.get('fanart_personal_key') || '';
-            C('fanartInterval').value = parseInt(self.config.get('fanartInterval'), 10) || 0;
-            var fanartOrder = self.config.get('fanartOrder') || 'sequential';
-            if (['sequential', 'random'].indexOf(fanartOrder) === -1) { fanartOrder = 'sequential'; }
-            C('fanartOrder').value.value = fanartOrder;
-            C('fanartOrder').value.label = self.commandRouter.getI18nString(fanartOrder === 'random' ? 'GLASS.FANART_ORDER_RANDOM' : 'GLASS.FANART_ORDER_SEQUENTIAL');
-            var fanartTransition = self.config.get('fanartTransition') || 'none';
-            var fanartTransitionLabels = { none: 'GLASS.FANART_TRANSITION_NONE', fade: 'GLASS.FANART_TRANSITION_FADE', merge: 'GLASS.FANART_TRANSITION_MERGE' };
-            C('fanartTransition').value.value = fanartTransition;
-            C('fanartTransition').value.label = self.commandRouter.getI18nString(fanartTransitionLabels[fanartTransition] || fanartTransitionLabels.none);
-            C('fanartTransitionMs').value = parseInt(self.config.get('fanartTransitionMs'), 10) || 600;
-            C('fanartUnlimitedImages').value = self.config.get('fanartUnlimitedImages') === true;
 
             // Meter.
             C('smoothBuffer').value = parseInt(meterConfig.data.source['smooth.buffer.size'], 10) || 0;
@@ -1027,22 +1021,6 @@ Glass.prototype.getUIConfig = function () {
             C('persist_display').value.label = self.commandRouter.getI18nString(persistDisplayVal === 'countdown' ? 'GLASS.PERSIST_DISPLAY_COUNTDOWN' : 'GLASS.PERSIST_DISPLAY_FREEZE');
             var queueMode = meterConfig.current['queue.mode'] || 'track';
             pick('queueMode', queueMode);
-
-            // Backups.
-            var backupList = self.listSettingsBackups();
-            if (backupList.length > 0) {
-                var firstLabel = backupList[0].name + ' (' + backupList[0].createdLabel + ', v' + backupList[0].pluginVersion + ')';
-                var firstValue = { value: backupList[0].name, label: firstLabel };
-                C('selectedBackup').options = [];
-                C('selectedBackupDelete').options = [];
-                backupList.forEach(function (b) {
-                    var entry = { value: b.name, label: b.name + ' (' + b.createdLabel + ', v' + b.pluginVersion + ')' };
-                    self.configManager.pushUIConfigParam(uiconf, P('selectedBackup'), entry);
-                    self.configManager.pushUIConfigParam(uiconf, P('selectedBackupDelete'), entry);
-                });
-                C('selectedBackup').value = firstValue;
-                C('selectedBackupDelete').value = firstValue;
-            }
 
             defer.resolve(uiconf);
         })
@@ -1369,8 +1347,8 @@ Glass.prototype.savePerformanceConf = function (confData) {
     }, 500);
 };
 
-// Themes and artwork: the active theme, the tag rules, whether themes
-// survive an uninstall, and the artist fanart slideshow.
+// Themes: the active theme, the tag rules and whether themes survive an
+// uninstall. The rest of theme and artwork management is the manager's.
 Glass.prototype.saveThemesArtwork = function (data) {
     var self = this;
     var defer = libQ.defer();
@@ -1386,42 +1364,11 @@ Glass.prototype.saveThemesArtwork = function (data) {
                 self.commandRouter.pushToastMessage('error', pluginName, self.commandRouter.getI18nString('GLASS.THEME_GALLERY_INVALID'));
             }
         }
-        var rules = (data && typeof data.themeTagRules === 'string') ? data.themeTagRules : '';
-        if ((self.config.get('themeTagRules') || '') !== rules) {
-            self.config.set('themeTagRules', rules);
-            noChanges = false;
-            try { self.applyThemeTag(self.lastState); } catch (e) {}
-        }
-        var preserve = !!(data && (data.doNotDeleteThemes === true || data.doNotDeleteThemes === 'true'));
-        if ((self.config.get('doNotDeleteThemes') === true) !== preserve) {
-            self.config.set('doNotDeleteThemes', preserve);
-            noChanges = false;
-        }
-        self.syncPreserveFlag(preserve);
-
-        var enabled = !!(data && (data.fanartEnabled === true || data.fanartEnabled === 'true'));
-        var keyMode = (data && data.fanartKeyMode && typeof data.fanartKeyMode === 'object') ? data.fanartKeyMode.value : (data && data.fanartKeyMode);
-        if (keyMode !== 'project') { keyMode = 'personal'; }
-        var key = (data && typeof data.fanart_personal_key === 'string') ? data.fanart_personal_key.trim() : '';
-        var interval = parseInt(data && data.fanartInterval, 10);
-        if (isNaN(interval) || interval < 0) { interval = 0; }
-        if (interval > 3600) { interval = 3600; }
-        var transition = (data && data.fanartTransition && typeof data.fanartTransition === 'object') ? data.fanartTransition.value : (data && data.fanartTransition);
-        if (['none', 'fade', 'merge'].indexOf(transition) === -1) { transition = 'none'; }
-        var transitionMs = parseInt(data && data.fanartTransitionMs, 10);
-        if (isNaN(transitionMs) || transitionMs < 50) { transitionMs = 600; }
-        if (transitionMs > 3000) { transitionMs = 3000; }
-        var order = (data && data.fanartOrder && typeof data.fanartOrder === 'object') ? data.fanartOrder.value : (data && data.fanartOrder);
-        if (['sequential', 'random'].indexOf(order) === -1) { order = 'sequential'; }
-        var unlimited = !!(data && (data.fanartUnlimitedImages === true || data.fanartUnlimitedImages === 'true'));
-        var wanted = { fanartEnabled: enabled, fanartKeyMode: keyMode, fanart_personal_key: key, fanartInterval: interval, fanartTransition: transition, fanartTransitionMs: transitionMs, fanartOrder: order, fanartUnlimitedImages: unlimited };
-        Object.keys(wanted).forEach(function (k) {
-            if (self.config.get(k) !== wanted[k]) {
-                self.config.set(k, wanted[k]);
-                noChanges = false;
-            }
+        var settings = self.setManagerSettings({
+            themeTagRules: (data && typeof data.themeTagRules === 'string') ? data.themeTagRules : '',
+            doNotDeleteThemes: !!(data && (data.doNotDeleteThemes === true || data.doNotDeleteThemes === 'true'))
         });
-        if (!noChanges && fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+        if (settings.changed) { noChanges = false; }
         if (noChanges) {
             self.commandRouter.pushToastMessage('info', pluginName, self.commandRouter.getI18nString('GLASS.NO_CHANGES'));
         } else {
@@ -2115,37 +2062,6 @@ Glass.prototype.getArtistFanart = async function (data) {
   }
 };
 
-Glass.prototype.clearFanartCache = function () {
-  var self = this;
-  var defer = libQ.defer();
-  var pluginName = self.commandRouter.getI18nString('GLASS.PLUGIN_NAME');
-  self.commandRouter.broadcastMessage('openModal', {
-    title: self.commandRouter.getI18nString('GLASS.CLEAR_FANART_CACHE_CONFIRM_TITLE'),
-    message: self.commandRouter.getI18nString('GLASS.CLEAR_FANART_CACHE_CONFIRM_MSG'),
-    size: 'md',
-    buttons: [
-      {
-        name: self.commandRouter.getI18nString('COMMON.CANCEL'),
-        class: 'btn btn-default',
-        emit: 'closeModals',
-        payload: ''
-      },
-      {
-        name: self.commandRouter.getI18nString('GLASS.CLEAR_FANART_CACHE'),
-        class: 'btn btn-warning',
-        emit: 'callMethod',
-        payload: {
-          endpoint: 'user_interface/glass',
-          method: 'clearFanartCacheConfirmed',
-          data: {}
-        }
-      }
-    ]
-  });
-  defer.resolve();
-  return defer.promise;
-};
-
 /** Clear cached fanart images (keep mbid.json). Returns true on success. */
 Glass.prototype._clearFanartImageCache = function () {
   var self = this;
@@ -2160,20 +2076,17 @@ Glass.prototype._clearFanartImageCache = function () {
   return true;
 };
 
-Glass.prototype.clearFanartCacheConfirmed = function () {
+// The manager's clear: the cached pictures go and the display reloads.
+Glass.prototype.clearFanartImages = function () {
   var self = this;
-  var defer = libQ.defer();
-  var pluginName = self.commandRouter.getI18nString('GLASS.PLUGIN_NAME');
   try {
     self._clearFanartImageCache();
     if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
-    self.commandRouter.pushToastMessage('success', pluginName, self.commandRouter.getI18nString('GLASS.CLEAR_FANART_CACHE_DONE'));
+    return { ok: true };
   } catch (e) {
-    self.logger.error(id + 'clearFanartCacheConfirmed: ' + e.message);
-    self.commandRouter.pushToastMessage('error', pluginName, e.message);
+    self.logger.error(id + 'clearFanartImages: ' + e.message);
+    return { error: 'GLASS.CLEAR_FANART_CACHE_FAILED', message: e.message };
   }
-  defer.resolve();
-  return defer.promise;
 };
 
 function escapeThemeGalleryHtml(text) {
@@ -2307,50 +2220,6 @@ Glass.prototype.applyActiveThemeFolder = function (folder, opts) {
 };
 
 
-Glass.prototype.removeThemeFolder = function (data) {
-  var self = this;
-  var defer = libQ.defer();
-  var pluginName = self.commandRouter.getI18nString('GLASS.PLUGIN_NAME');
-  var folder = (data && data.themeToRemove && typeof data.themeToRemove === 'object')
-    ? data.themeToRemove.value
-    : (data && data.themeToRemove);
-
-  if (!self.isValidThemeFolderName(folder)) {
-    self.commandRouter.pushToastMessage('error', pluginName, self.commandRouter.getI18nString('GLASS.THEME_REMOVE_INVALID'));
-    defer.resolve();
-    return defer.promise;
-  }
-
-  var title = self.commandRouter.getI18nString('GLASS.THEME_REMOVE_CONFIRM_TITLE');
-  var msg = self.commandRouter.getI18nString('GLASS.THEME_REMOVE_CONFIRM_MSG') + ' ' + folder;
-  self.commandRouter.broadcastMessage('openModal', {
-    title: title,
-    message: msg,
-    size: 'lg',
-    buttons: [
-      {
-        name: self.commandRouter.getI18nString('COMMON.CANCEL'),
-        class: 'btn btn-default',
-        emit: 'closeModals',
-        payload: ''
-      },
-      {
-        name: self.commandRouter.getI18nString('GLASS.THEME_REMOVE_BTN'),
-        class: 'btn btn-warning',
-        emit: 'callMethod',
-        payload: {
-          endpoint: 'user_interface/glass',
-          method: 'removeThemeFolderConfirmed',
-          data: { folder: folder }
-        }
-      }
-    ]
-  });
-
-  defer.resolve();
-  return defer.promise;
-};
-
 Glass.prototype.isValidThemeFolderName = function (folder) {
   return !!folder && typeof folder === 'string' &&
     folder.indexOf('/') === -1 && folder.indexOf('..') === -1 && folder.indexOf('_') !== -1;
@@ -2375,50 +2244,24 @@ Glass.prototype.removeThemeTreeFolder = function (baseDir, folder) {
   return false;
 };
 
-Glass.prototype.removeThemeFolderConfirmed = function (data) {
+// Remove a theme from both trees. The last theme stays; removing the
+// active one moves the display to another first so the configuration
+// never names a folder that is gone.
+Glass.prototype.removeTheme = function (folder) {
   var self = this;
-  var defer = libQ.defer();
-  var pluginName = self.commandRouter.getI18nString('GLASS.PLUGIN_NAME');
-  var folder = data && data.folder;
-
-  self.commandRouter.closeModals();
-
-  if (!self.isValidThemeFolderName(folder)) {
-    self.commandRouter.pushToastMessage('error', pluginName, self.commandRouter.getI18nString('GLASS.THEME_REMOVE_INVALID'));
-    defer.resolve();
-    return defer.promise;
+  if (!self.isValidThemeFolderName(folder) || !safeFolderName(folder)) {
+    return { error: 'GLASS.THEME_REMOVE_INVALID' };
   }
-
-  // Reload configs so base paths and active folder are current
   try {
-    if (fs.existsSync(MeterConfigFile)) {
-      meterConfig = ini.parse(fs.readFileSync(MeterConfigFile, 'utf-8'));
-      base_folder_P = meterConfig.current['base.folder'] + '/';
-      if (base_folder_P === '/') {
-        base_folder_P = DATA_DIR + '/templates/';
-      }
-    }
-    if (fs.existsSync(SpectrumConfigFile)) {
-      spectrum_config = ini.parse(fs.readFileSync(SpectrumConfigFile, 'utf-8'));
-      base_folder_S = spectrum_config.current['base.folder'] + '/';
-      if (base_folder_S === '/') {
-        base_folder_S = DATA_DIR + '/templates_spectrum/';
-      }
-    }
+    self.loadConfigs();
   } catch (e) {
-    self.logger.error(id + 'removeThemeFolderConfirmed: failed to reload config: ' + e.message);
-    self.commandRouter.pushToastMessage('error', pluginName, self.commandRouter.getI18nString('GLASS.THEME_REMOVE_INVALID'));
-    defer.resolve();
-    return defer.promise;
+    self.logger.error(id + 'removeTheme: failed to reload config: ' + e.message);
+    return { error: 'GLASS.THEME_REMOVE_INVALID' };
+  }
+  if (!meterConfig || !fs.existsSync(base_folder_P + folder)) {
+    return { error: 'GLASS.THEME_REMOVE_INVALID' };
   }
 
-  if (!fs.existsSync(base_folder_P + folder)) {
-    self.commandRouter.pushToastMessage('error', pluginName, self.commandRouter.getI18nString('GLASS.THEME_REMOVE_INVALID'));
-    defer.resolve();
-    return defer.promise;
-  }
-
-  // Enumerate remaining meter theme folders to guard the last-skin case
   var allFolders = [];
   try {
     fs.readdirSync(base_folder_P).forEach(function (f) {
@@ -2427,57 +2270,27 @@ Glass.prototype.removeThemeFolderConfirmed = function (data) {
       }
     });
   } catch (e) {
-    self.logger.error(id + 'removeThemeFolderConfirmed: enumerate failed: ' + e.message);
+    self.logger.error(id + 'removeTheme: enumerate failed: ' + e.message);
   }
   var remaining = allFolders.filter(function (f) { return f !== folder; });
   if (remaining.length === 0) {
-    self.commandRouter.pushToastMessage('warning', pluginName, self.commandRouter.getI18nString('GLASS.THEME_REMOVE_LAST'));
-    defer.resolve();
-    return defer.promise;
+    return { error: 'GLASS.THEME_REMOVE_LAST' };
   }
 
-  // If removing the active theme, switch to another one first so configs stay valid
   var wasActive = (meterConfig.current[meterFolderStr] === folder);
   var switchedTo = null;
   if (wasActive) {
     switchedTo = remaining[0];
-    self.applyActiveThemeFolder(switchedTo);
+    self.applyActiveThemeFolder(switchedTo, { allowBuiltin: true });
   }
 
-  // Delete from both trees (meters + spectrum); spectrum twin is optional
   self.removeThemeTreeFolder(base_folder_P, folder);
   self.removeThemeTreeFolder(base_folder_S, folder);
 
-  // Drop the cached gallery preview for the removed folder, if present
-  try {
-    if (fs.existsSync(ThemeGalleryDir)) {
-      fs.readdirSync(ThemeGalleryDir).forEach(function (f) {
-        var cacheExt = path.extname(f).toLowerCase();
-        var cacheBase = cacheExt ? f.slice(0, -cacheExt.length) : f;
-        if (f === folder + '.select.html' || (cacheBase === folder && THEME_GALLERY_CACHE_EXTS.indexOf(cacheExt) !== -1)) {
-          fs.removeSync(ThemeGalleryDir + '/' + f);
-        }
-      });
-    }
-  } catch (e) {
-    galleryLog(self.logger, 'verbose', 'removeThemeFolderConfirmed: cache cleanup failed: ' + e.message);
-  }
-
-  galleryLog(self.logger, 'basic', 'removeThemeFolderConfirmed removed ' + folder + (wasActive ? ' (was active -> ' + switchedTo + ')' : ''));
-
-  if (wasActive) {
-    self.commandRouter.pushToastMessage('success', pluginName,
-      self.commandRouter.getI18nString('GLASS.THEME_REMOVE_ACTIVE_RESET') + ' ' + switchedTo);
-  } else {
-    self.commandRouter.pushToastMessage('success', pluginName,
-      self.commandRouter.getI18nString('GLASS.THEME_REMOVE_DONE') + ' ' + folder);
-  }
-
+  galleryLog(self.logger, 'basic', 'removeTheme removed ' + folder + (wasActive ? ' (was active -> ' + switchedTo + ')' : ''));
   uiNeedsUpdate = true;
   self.updateUIConfig();
-
-  defer.resolve();
-  return defer.promise;
+  return { ok: true, switchedTo: switchedTo };
 };
 
 
@@ -2866,102 +2679,43 @@ Glass.prototype.listSettingsBackups = function () {
     return results;
 };
 
-// Create a new backup with the name typed in the UI.
-// Copies config.json, peppymeter config.txt and spectrum config.txt into
-// a named subdirectory of BackupsPath and writes a manifest.json.
-Glass.prototype.createSettingsBackup = function (data) {
+// A backup by name: config.json, the meter and the spectrum configuration
+// under a named directory with a manifest. Results carry an error code
+// that is a string of the plugin's, so the manager's page can say it.
+Glass.prototype.backupCreate = function (name) {
     var self = this;
-    var defer = libQ.defer();
-    
     try {
-        var rawName = (data && data.backupName !== undefined) ? String(data.backupName) : '';
-        var backupName = rawName.trim();
-        
-        if (!backupName) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_NAME_REQUIRED'));
-            defer.resolve();
-            return defer.promise;
-        }
+        var backupName = String(name === undefined || name === null ? '' : name).trim();
+        if (!backupName) { return { error: 'GLASS.BACKUP_NAME_REQUIRED' }; }
         if (!BackupNameRegex.test(backupName) || backupName.indexOf('..') !== -1) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_NAME_INVALID'));
-            defer.resolve();
-            return defer.promise;
+            return { error: 'GLASS.BACKUP_NAME_INVALID' };
         }
-        
         if (!fs.existsSync(BackupsPath)) {
             fs.mkdirSync(BackupsPath, { recursive: true });
         }
-        
         var targetDir = BackupsPath + '/' + backupName;
-        
-        // Collision: reject with toast, do not overwrite
-        if (fs.existsSync(targetDir)) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_NAME_EXISTS'));
-            defer.resolve();
-            return defer.promise;
-        }
-        
-        // Disk-space guard. Skipped silently if statfsSync is unavailable
-        // for any reason (older filesystems, mount quirks, etc).
+        if (fs.existsSync(targetDir)) { return { error: 'GLASS.BACKUP_NAME_EXISTS' }; }
         try {
             if (typeof fs.statfsSync === 'function') {
                 var stats = fs.statfsSync(BackupsPath);
-                var freeBytes = stats.bavail * stats.bsize;
-                if (freeBytes < BackupMinFreeBytes) {
-                    self.commandRouter.pushToastMessage('error',
-                        self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                        self.commandRouter.getI18nString('GLASS.BACKUP_DISK_FULL'));
-                    defer.resolve();
-                    return defer.promise;
+                if (stats.bavail * stats.bsize < BackupMinFreeBytes) {
+                    return { error: 'GLASS.BACKUP_DISK_FULL' };
                 }
             }
         } catch (e) {
-            self.logger.warn(id + 'createSettingsBackup: statfsSync failed, skipping disk check: ' + e.message);
+            self.logger.warn(id + 'backupCreate: statfsSync failed, skipping disk check: ' + e.message);
         }
-        
-        // Non-blocking warning for clutter. Create still proceeds.
-        var existingList = self.listSettingsBackups();
-        if (existingList.length >= BackupWarnCount) {
-            self.commandRouter.pushToastMessage('warning',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_COUNT_WARN'));
-        }
-        
-        // Verify source files exist before we create any destination files
         var configFile = self.commandRouter.pluginManager.getConfigurationFile(self.context, 'config.json');
-        if (!fs.existsSync(configFile)) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_SOURCE_MISSING') + ': config.json');
-            defer.resolve();
-            return defer.promise;
+        var sources = [[configFile, 'config.json'], [MeterConfigFile, 'meter.txt'], [SpectrumConfigFile, 'spectrum.txt']];
+        for (var i = 0; i < sources.length; i++) {
+            if (!fs.existsSync(sources[i][0])) {
+                return { error: 'GLASS.BACKUP_SOURCE_MISSING', message: sources[i][1] };
+            }
         }
-        if (!fs.existsSync(MeterConfigFile)) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_SOURCE_MISSING') + ': peppymeter config.txt');
-            defer.resolve();
-            return defer.promise;
-        }
-        if (!fs.existsSync(SpectrumConfigFile)) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_SOURCE_MISSING') + ': spectrum config.txt');
-            defer.resolve();
-            return defer.promise;
-        }
-        
         fs.mkdirSync(targetDir, { recursive: true });
         fs.copySync(configFile, targetDir + '/config.json');
         fs.copySync(MeterConfigFile, targetDir + '/' + PeppyConfBackupName);
         fs.copySync(SpectrumConfigFile, targetDir + '/' + SpectrumConfBackupName);
-        
         var manifest = {
             schema_version: BackupSchemaVersion,
             plugin_version: pluginVersion,
@@ -2970,265 +2724,426 @@ Glass.prototype.createSettingsBackup = function (data) {
             files: ['config.json', PeppyConfBackupName, SpectrumConfBackupName]
         };
         fs.writeFileSync(targetDir + '/' + BackupManifestName, JSON.stringify(manifest, null, 2));
-        
-        self.logger.info(id + 'createSettingsBackup: created backup "' + backupName + '"');
-        self.commandRouter.pushToastMessage('success',
-            self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-            self.commandRouter.getI18nString('GLASS.BACKUP_CREATED'));
-        
-        self.updateUIConfig();
-        defer.resolve();
+        self.logger.info(id + 'backupCreate: created backup "' + backupName + '"');
+        return { ok: true, name: backupName, warn: self.listSettingsBackups().length >= BackupWarnCount ? 'GLASS.BACKUP_COUNT_WARN' : null };
     } catch (e) {
-        self.logger.error(id + 'createSettingsBackup: ' + e.message);
-        self.commandRouter.pushToastMessage('error',
-            self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-            self.commandRouter.getI18nString('GLASS.BACKUP_CREATE_FAILED'));
-        defer.resolve();
+        self.logger.error(id + 'backupCreate: ' + e.message);
+        return { error: 'GLASS.BACKUP_CREATE_FAILED', message: e.message };
     }
-    
-    return defer.promise;
 };
 
-// Restore a backup by name. Validates manifest and parses all files
-// before overwriting anything, so a corrupt backup cannot damage the
-// current live config.
-Glass.prototype.restoreSettingsBackup = function (data) {
+// A backup's directory, when its name is one and it exists.
+Glass.prototype.backupDir = function (name) {
+    var backupName = String(name === undefined || name === null ? '' : name).trim();
+    if (!backupName) { return { error: 'GLASS.BACKUP_NOT_SELECTED' }; }
+    if (!BackupNameRegex.test(backupName) || backupName.indexOf('..') !== -1 || backupName.indexOf('/') !== -1 || backupName.indexOf('\\') !== -1) {
+        return { error: 'GLASS.BACKUP_NAME_INVALID' };
+    }
+    var dir = BackupsPath + '/' + backupName;
+    var resolved = path.resolve(dir);
+    var root = path.resolve(BackupsPath);
+    if (resolved.indexOf(root + '/') !== 0) { return { error: 'GLASS.BACKUP_NAME_INVALID' }; }
+    if (!fs.existsSync(dir)) { return { error: 'GLASS.BACKUP_NOT_FOUND' }; }
+    return { name: backupName, dir: dir };
+};
+
+// Restore a backup by name. Everything in it is parsed before a live file
+// is touched, so a damaged backup changes nothing.
+Glass.prototype.backupRestore = function (name) {
     var self = this;
-    var defer = libQ.defer();
-    
     try {
-        var backupName = '';
-        if (data && data.selectedBackup) {
-            backupName = (typeof data.selectedBackup === 'object') ? data.selectedBackup.value : String(data.selectedBackup);
-        }
-        backupName = (backupName || '').trim();
-        
-        if (!backupName) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_NOT_SELECTED'));
-            defer.resolve();
-            return defer.promise;
-        }
-        
-        // Path-traversal guard
-        if (!BackupNameRegex.test(backupName) || backupName.indexOf('..') !== -1 || backupName.indexOf('/') !== -1 || backupName.indexOf('\\') !== -1) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_NAME_INVALID'));
-            defer.resolve();
-            return defer.promise;
-        }
-        
-        var sourceDir = BackupsPath + '/' + backupName;
+        var found = self.backupDir(name);
+        if (found.error) { return found; }
+        var sourceDir = found.dir;
         var manifestPath = sourceDir + '/' + BackupManifestName;
-        
-        if (!fs.existsSync(sourceDir) || !fs.existsSync(manifestPath)) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_NOT_FOUND'));
-            defer.resolve();
-            return defer.promise;
-        }
-        
+        if (!fs.existsSync(manifestPath)) { return { error: 'GLASS.BACKUP_NOT_FOUND' }; }
         var manifest;
         try {
             manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
         } catch (e) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_MANIFEST_INVALID'));
-            defer.resolve();
-            return defer.promise;
+            return { error: 'GLASS.BACKUP_MANIFEST_INVALID' };
         }
-        
         if (!manifest || typeof manifest !== 'object' || manifest.schema_version === undefined) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_MANIFEST_INVALID'));
-            defer.resolve();
-            return defer.promise;
+            return { error: 'GLASS.BACKUP_MANIFEST_INVALID' };
         }
-        
         if (manifest.schema_version > BackupSchemaVersion) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_SCHEMA_UNSUPPORTED'));
-            defer.resolve();
-            return defer.promise;
+            return { error: 'GLASS.BACKUP_SCHEMA_UNSUPPORTED' };
         }
-        
         var srcConfigJson = sourceDir + '/config.json';
         var srcPeppyConf = sourceDir + '/' + PeppyConfBackupName;
         var srcSpectrumConf = sourceDir + '/' + SpectrumConfBackupName;
-        
         if (!fs.existsSync(srcConfigJson) || !fs.existsSync(srcPeppyConf) || !fs.existsSync(srcSpectrumConf)) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_FILES_MISSING'));
-            defer.resolve();
-            return defer.promise;
+            return { error: 'GLASS.BACKUP_FILES_MISSING' };
         }
-        
-        // Parse everything in the backup before touching live files, so a
-        // corrupt backup is detected and rejected without any damage.
-        try {
-            JSON.parse(fs.readFileSync(srcConfigJson, 'utf8'));
-        } catch (e) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_CONFIG_CORRUPT'));
-            defer.resolve();
-            return defer.promise;
-        }
-        try {
-            ini.parse(fs.readFileSync(srcPeppyConf, 'utf8'));
-        } catch (e) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_PEPPYCONF_CORRUPT'));
-            defer.resolve();
-            return defer.promise;
-        }
-        try {
-            ini.parse(fs.readFileSync(srcSpectrumConf, 'utf8'));
-        } catch (e) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_SPECTRUMCONF_CORRUPT'));
-            defer.resolve();
-            return defer.promise;
-        }
-        
-        // All checks passed: perform the restore
+        try { JSON.parse(fs.readFileSync(srcConfigJson, 'utf8')); } catch (e) { return { error: 'GLASS.BACKUP_CONFIG_CORRUPT' }; }
+        try { ini.parse(fs.readFileSync(srcPeppyConf, 'utf8')); } catch (e) { return { error: 'GLASS.BACKUP_PEPPYCONF_CORRUPT' }; }
+        try { ini.parse(fs.readFileSync(srcSpectrumConf, 'utf8')); } catch (e) { return { error: 'GLASS.BACKUP_SPECTRUMCONF_CORRUPT' }; }
+
         var configFile = self.commandRouter.pluginManager.getConfigurationFile(self.context, 'config.json');
-        
         fs.copySync(srcConfigJson, configFile);
         fs.copySync(srcPeppyConf, MeterConfigFile);
         fs.copySync(srcSpectrumConf, SpectrumConfigFile);
-        
-        // Reload in-memory caches so subsequent saves do not stomp the restored values
+
+        // The caches follow the files, so later saves keep the restored values.
         self.config.loadFile(configFile);
-        meterConfig = ini.parse(fs.readFileSync(MeterConfigFile, 'utf-8'));
-        base_folder_P = meterConfig.current['base.folder'] + '/';
-        if (base_folder_P == '/') { base_folder_P = DATA_DIR + '/templates/'; }
-        spectrum_config = ini.parse(fs.readFileSync(SpectrumConfigFile, 'utf-8'));
-        base_folder_S = spectrum_config.current['base.folder'] + '/';
-        if (base_folder_S == '/') { base_folder_S = DATA_DIR + '/templates_spectrum/'; }
-        
-        // Re-apply what the restored config.json decides: the display port
-        // (in the launcher) and the share permissions. The audio path is the
-        // tap on every source and needs nothing from the settings.
+        self.loadConfigs();
+
+        // What the restored config.json decides is applied again: the
+        // display port at the next launch and whether the themes stay.
         var dispOut = parseInt(self.config.get('displayOutput'), 10);
         self.switch_DisplayPort(dispOut);
-
-        var smbEnabled = self.config.get('smbShareAccess') === true;
-        self.normalizeTemplatePermissions(smbEnabled);
-        
-        // Keep the doNotDeleteThemes .preserve flag file in sync with the
-        // restored value so uninstall/install behaves as the restored
-        // config.json expects.
-        try {
-            var doNotDelete = self.config.get('doNotDeleteThemes') === true;
-            if (doNotDelete) {
-                if (!fs.existsSync(DATA_DIR)) { fs.mkdirSync(DATA_DIR, { recursive: true }); }
-                fs.writeFileSync(DATA_DIR + '/.preserve', '', 'utf8');
-            } else {
-                if (fs.existsSync(DATA_DIR + '/.preserve')) { fs.unlinkSync(DATA_DIR + '/.preserve'); }
-            }
-        } catch (e) {
-            self.logger.warn(id + 'restoreSettingsBackup: preserve flag sync failed: ' + e.message);
-        }
-        
-        // Update config version hash so remote clients pick up the new config
+        self.syncPreserveFlag(self.config.get('doNotDeleteThemes') === true);
         self.updateConfigVersion();
-        
-        // Remove runFlag so peppymeter restarts on next trigger
         if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
-        
-        self.logger.info(id + 'restoreSettingsBackup: restored backup "' + backupName + '"');
-        self.commandRouter.pushToastMessage('success',
-            self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-            self.commandRouter.getI18nString('GLASS.BACKUP_RESTORED'));
-        
+
+        self.logger.info(id + 'backupRestore: restored backup "' + found.name + '"');
+        uiNeedsUpdate = true;
         self.updateUIConfig();
-        defer.resolve();
+        return { ok: true, name: found.name };
     } catch (e) {
-        self.logger.error(id + 'restoreSettingsBackup: ' + e.message);
-        self.commandRouter.pushToastMessage('error',
-            self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-            self.commandRouter.getI18nString('GLASS.BACKUP_RESTORE_FAILED'));
-        defer.resolve();
+        self.logger.error(id + 'backupRestore: ' + e.message);
+        return { error: 'GLASS.BACKUP_RESTORE_FAILED', message: e.message };
     }
-    
-    return defer.promise;
 };
 
-// Delete a backup by name. Refuses to touch anything outside BackupsPath
-// even if a traversal attempt somehow slips past the name regex.
-Glass.prototype.deleteSettingsBackup = function (data) {
+// Delete a backup by name; only a directory under the backups root goes.
+Glass.prototype.backupDelete = function (name) {
     var self = this;
-    var defer = libQ.defer();
-    
     try {
-        var backupName = '';
-        if (data && data.selectedBackupDelete) {
-            backupName = (typeof data.selectedBackupDelete === 'object') ? data.selectedBackupDelete.value : String(data.selectedBackupDelete);
-        }
-        backupName = (backupName || '').trim();
-        
-        if (!backupName) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_NOT_SELECTED'));
-            defer.resolve();
-            return defer.promise;
-        }
-        
-        if (!BackupNameRegex.test(backupName) || backupName.indexOf('..') !== -1 || backupName.indexOf('/') !== -1 || backupName.indexOf('\\') !== -1) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_NAME_INVALID'));
-            defer.resolve();
-            return defer.promise;
-        }
-        
-        var targetDir = BackupsPath + '/' + backupName;
-        if (!fs.existsSync(targetDir)) {
-            self.commandRouter.pushToastMessage('error',
-                self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-                self.commandRouter.getI18nString('GLASS.BACKUP_NOT_FOUND'));
-            defer.resolve();
-            return defer.promise;
-        }
-        
-        // Belt-and-braces: resolve and confirm still within BackupsPath
-        var resolved = path.resolve(targetDir);
-        var resolvedRoot = path.resolve(BackupsPath);
-        if (resolved.indexOf(resolvedRoot + '/') !== 0 && resolved !== resolvedRoot) {
-            self.logger.error(id + 'deleteSettingsBackup: refusing to delete outside backups root: ' + resolved);
-            defer.resolve();
-            return defer.promise;
-        }
-        
-        fs.removeSync(targetDir);
-        
-        self.logger.info(id + 'deleteSettingsBackup: deleted backup "' + backupName + '"');
-        self.commandRouter.pushToastMessage('success',
-            self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-            self.commandRouter.getI18nString('GLASS.BACKUP_DELETED'));
-        
-        self.updateUIConfig();
-        defer.resolve();
+        var found = self.backupDir(name);
+        if (found.error) { return found; }
+        fs.removeSync(found.dir);
+        self.logger.info(id + 'backupDelete: deleted backup "' + found.name + '"');
+        return { ok: true, name: found.name };
     } catch (e) {
-        self.logger.error(id + 'deleteSettingsBackup: ' + e.message);
-        self.commandRouter.pushToastMessage('error',
-            self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
-            self.commandRouter.getI18nString('GLASS.BACKUP_DELETE_FAILED'));
-        defer.resolve();
+        self.logger.error(id + 'backupDelete: ' + e.message);
+        return { error: 'GLASS.BACKUP_DELETE_FAILED', message: e.message };
     }
-    
-    return defer.promise;
+};
+
+// ---- The manager's view of the plugin --------------------------------
+// The manager (manager/server.js) reaches the plugin through these. They
+// return plain results and show no toasts: the manager's page speaks for
+// itself, and an error is the code of one of the plugin's strings.
+
+Glass.prototype.startManager = function () {
+    var self = this;
+    if (self.manager) { return; }
+    var manager = new Manager(self);
+    self.manager = manager;
+    manager.start(self.config.get('managerPort') || MANAGER_DEFAULT_PORT).catch(function (e) {
+        self.logger.error(id + 'manager: ' + (e && e.message ? e.message : e));
+        if (self.manager === manager) { self.manager = null; }
+    });
+};
+
+Glass.prototype.stopManager = function () {
+    var self = this;
+    var manager = self.manager;
+    self.manager = null;
+    if (!manager) { return; }
+    manager.stop().catch(function (e) {
+        self.logger.warn(id + 'manager stop: ' + (e && e.message ? e.message : e));
+    });
+};
+
+// Where a browser on the network reaches the manager: the player's host
+// name as mDNS announces it, and the manager's port.
+Glass.prototype.managerHost = function () {
+    var host = '';
+    try { host = os.hostname(); } catch (e) {}
+    host = String(host || '').trim().toLowerCase();
+    if (!host) {
+        try { host = String(this.commandRouter.sharedVars.get('system.name') || '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-'); } catch (e) {}
+    }
+    return (host || 'volumio') + '.local';
+};
+
+Glass.prototype.managerUrl = function () {
+    var self = this;
+    var port = parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT;
+    return 'http://' + self.managerHost() + ':' + port + '/';
+};
+
+Glass.prototype.managerLanguage = function () {
+    try { return String(this.commandRouter.sharedVars.get('language_code') || 'en'); } catch (e) { return 'en'; }
+};
+
+// The plugin's strings in a language, with English behind them.
+Glass.prototype.managerStrings = function (lang) {
+    var read = function (code) {
+        try {
+            return JSON.parse(fs.readFileSync(__dirname + '/i18n/strings_' + code + '.json', 'utf8')).GLASS || null;
+        } catch (e) {
+            return null;
+        }
+    };
+    var base = read('en') || {};
+    var wanted = (lang && /^[a-z]{2,5}$/i.test(lang) && lang !== 'en') ? read(lang) : null;
+    return Object.assign({}, base, wanted || {});
+};
+
+Glass.prototype.managerPaths = function () {
+    var self = this;
+    self.loadConfigs();
+    return {
+        pluginPath: PluginPath,
+        dataDir: DATA_DIR,
+        meterBase: String(base_folder_P || (DATA_DIR + '/templates/')).replace(/\/$/, ''),
+        spectrumBase: String(base_folder_S || (DATA_DIR + '/templates_spectrum/')).replace(/\/$/, ''),
+        launcher: LaunchScript,
+        version: pluginVersion
+    };
+};
+
+Glass.prototype.activeTheme = function () {
+    return (meterConfig && meterConfig.current) ? String(meterConfig.current[meterFolderStr] || '') : '';
+};
+
+// The sections of a meters or spectrum file, or none.
+function themeSections(file) {
+    try {
+        return configSections(fs.readFileSync(file, 'utf8'));
+    } catch (e) {
+        return [];
+    }
+}
+
+// Every folder under the meter templates, with what it holds and whether
+// a spectrum twin stands beside it.
+Glass.prototype.themeList = function () {
+    var self = this;
+    self.loadConfigs();
+    var active = self.activeTheme();
+    var list = [];
+    var entries = [];
+    try { entries = fs.readdirSync(base_folder_P); } catch (e) { return list; }
+    entries.sort().forEach(function (folder) {
+        if (folder.indexOf('.') === 0) { return; }
+        var dir = base_folder_P + folder;
+        var stat;
+        try { stat = fs.statSync(dir); } catch (e) { return; }
+        if (!stat.isDirectory()) { return; }
+        var hasMeters = fs.existsSync(dir + '/meters.txt');
+        var spectrumDir = (base_folder_S || '') + folder;
+        var hasSpectrum = !!base_folder_S && fs.existsSync(spectrumDir + '/spectrum.txt');
+        var bytes = 0;
+        var files = 0;
+        try {
+            fs.readdirSync(dir).forEach(function (f) {
+                try {
+                    var s = fs.statSync(dir + '/' + f);
+                    if (s.isFile()) { bytes += s.size; files++; }
+                } catch (e) {}
+            });
+        } catch (e) {}
+        list.push({
+            folder: folder,
+            meters: hasMeters ? themeSections(dir + '/meters.txt') : [],
+            spectra: hasSpectrum ? themeSections(spectrumDir + '/spectrum.txt') : [],
+            spectrum: hasSpectrum,
+            empty: !hasMeters,
+            bytes: bytes,
+            files: files,
+            mtime: stat.mtimeMs,
+            active: folder === active,
+            builtin: folder.indexOf('_') === -1
+        });
+    });
+    return list;
+};
+
+Glass.prototype.activateTheme = function (folder) {
+    var self = this;
+    if (!safeFolderName(folder)) { return { changed: false, error: 'invalid' }; }
+    self.loadConfigs();
+    if (!meterConfig) { return { changed: false, error: 'no_config' }; }
+    return self.applyActiveThemeFolder(folder, { allowBuiltin: true });
+};
+
+// The meter rotation of the active theme: one meter, a list, or all of
+// them, changing on a timer or with the title.
+Glass.prototype.meterSelection = function () {
+    var self = this;
+    self.loadConfigs();
+    var current = (meterConfig && meterConfig.current) || {};
+    var theme = self.activeTheme();
+    var available = theme ? themeSections(base_folder_P + theme + '/meters.txt') : [];
+    var raw = String(current.meter || 'random').trim();
+    var mode = raw === 'random' ? 'random' : (raw.indexOf(',') !== -1 ? 'list' : 'single');
+    var names = mode === 'random' ? [] : raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    return {
+        theme: theme,
+        mode: mode,
+        names: names,
+        available: available,
+        onTitle: String(current['random.change.title'] || 'False').toLowerCase() === 'true',
+        interval: parseInt(current['random.meter.interval'], 10) || 60
+    };
+};
+
+Glass.prototype.setMeterSelection = function (data) {
+    var self = this;
+    self.loadConfigs();
+    if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return { error: 'GLASS.NO_PEPPYCONFIG' }; }
+    var now = self.meterSelection();
+    var mode = String(data.mode || now.mode);
+    if (['random', 'list', 'single'].indexOf(mode) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    var names = Array.isArray(data.names) ? data.names.map(function (s) { return String(s).trim(); }).filter(Boolean) : now.names;
+    if (mode !== 'random') {
+        if (names.length === 0 || (mode === 'single' && names.length !== 1)) { return { error: 'GLASS.MANAGER_METER_NAMES' }; }
+        var unknown = names.filter(function (n) { return now.available.indexOf(n) === -1; });
+        if (unknown.length) { return { error: 'GLASS.MANAGER_METER_UNKNOWN', message: unknown.join(', ') }; }
+    }
+    var onTitle = data.onTitle === undefined ? now.onTitle : (data.onTitle === true || data.onTitle === 'true');
+    var interval = data.interval === undefined ? now.interval : parseInt(data.interval, 10);
+    if (isNaN(interval)) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    interval = Math.min(1000, Math.max(15, interval));
+    var meter = mode === 'random' ? 'random' : names.join(',');
+    var changed = false;
+    if (String(meterConfig.current.meter) !== meter) { meterConfig.current.meter = meter; changed = true; }
+    var title = onTitle ? 'True' : 'False';
+    if (String(meterConfig.current['random.change.title']) !== title) { meterConfig.current['random.change.title'] = title; changed = true; }
+    if (parseInt(meterConfig.current['random.meter.interval'], 10) !== interval) { meterConfig.current['random.meter.interval'] = interval; changed = true; }
+    self.config.set('randomSelection', mode === 'list' ? meter : '');
+    if (changed) {
+        fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+        try { self.updateConfigVersion(); } catch (e) {}
+        if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+        uiNeedsUpdate = true;
+        self.updateUIConfig();
+    }
+    return { ok: true, changed: changed };
+};
+
+// The artist fanart slideshow's settings.
+Glass.prototype.artworkSettings = function () {
+    var self = this;
+    var keyMode = self.config.get('fanartKeyMode') || 'personal';
+    var order = self.config.get('fanartOrder') || 'sequential';
+    var transition = self.config.get('fanartTransition') || 'none';
+    return {
+        enabled: self.config.get('fanartEnabled') === true,
+        keyMode: keyMode === 'project' ? 'project' : 'personal',
+        personalKey: String(self.config.get('fanart_personal_key') || ''),
+        interval: parseInt(self.config.get('fanartInterval'), 10) || 0,
+        order: order === 'random' ? 'random' : 'sequential',
+        transition: ['none', 'fade', 'merge'].indexOf(transition) === -1 ? 'none' : transition,
+        transitionMs: parseInt(self.config.get('fanartTransitionMs'), 10) || 600,
+        unlimited: self.config.get('fanartUnlimitedImages') === true,
+        maxImages: FANART_MAX_IMAGES
+    };
+};
+
+Glass.prototype.setArtworkSettings = function (data) {
+    var self = this;
+    var now = self.artworkSettings();
+    var pickBool = function (v, fallback) { return v === undefined ? fallback : (v === true || v === 'true'); };
+    var enabled = pickBool(data.enabled, now.enabled);
+    var keyMode = data.keyMode === undefined ? now.keyMode : (data.keyMode === 'project' ? 'project' : 'personal');
+    var key = data.personalKey === undefined ? now.personalKey : String(data.personalKey).trim();
+    var interval = data.interval === undefined ? now.interval : parseInt(data.interval, 10);
+    if (isNaN(interval) || interval < 0) { interval = 0; }
+    if (interval > 3600) { interval = 3600; }
+    var transition = data.transition === undefined ? now.transition : String(data.transition);
+    if (['none', 'fade', 'merge'].indexOf(transition) === -1) { transition = 'none'; }
+    var transitionMs = data.transitionMs === undefined ? now.transitionMs : parseInt(data.transitionMs, 10);
+    if (isNaN(transitionMs) || transitionMs < 50) { transitionMs = 600; }
+    if (transitionMs > 3000) { transitionMs = 3000; }
+    var order = data.order === undefined ? now.order : (data.order === 'random' ? 'random' : 'sequential');
+    var unlimited = pickBool(data.unlimited, now.unlimited);
+    var wanted = { fanartEnabled: enabled, fanartKeyMode: keyMode, fanart_personal_key: key, fanartInterval: interval, fanartTransition: transition, fanartTransitionMs: transitionMs, fanartOrder: order, fanartUnlimitedImages: unlimited };
+    var changed = false;
+    Object.keys(wanted).forEach(function (k) {
+        if (self.config.get(k) !== wanted[k]) {
+            self.config.set(k, wanted[k]);
+            changed = true;
+        }
+    });
+    if (unlimited && !now.unlimited) {
+        try { self._clearFanartImageCache(); } catch (e) {}
+    }
+    if (changed && fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+    return { ok: true, changed: changed };
+};
+
+// The settings the manager and the settings page share.
+Glass.prototype.managerSettings = function () {
+    var self = this;
+    return {
+        themeTagRules: String(self.config.get('themeTagRules') || ''),
+        doNotDeleteThemes: self.config.get('doNotDeleteThemes') === true,
+        managerPort: parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT
+    };
+};
+
+Glass.prototype.setManagerSettings = function (data) {
+    var self = this;
+    var changed = false;
+    if (data.themeTagRules !== undefined) {
+        var rules = String(data.themeTagRules || '').slice(0, 800);
+        if ((self.config.get('themeTagRules') || '') !== rules) {
+            self.config.set('themeTagRules', rules);
+            changed = true;
+            try { self.applyThemeTag(self.lastState); } catch (e) {}
+        }
+    }
+    if (data.doNotDeleteThemes !== undefined) {
+        var preserve = data.doNotDeleteThemes === true || data.doNotDeleteThemes === 'true';
+        if ((self.config.get('doNotDeleteThemes') === true) !== preserve) {
+            self.config.set('doNotDeleteThemes', preserve);
+            changed = true;
+        }
+        self.syncPreserveFlag(preserve);
+    }
+    return { ok: true, changed: changed };
+};
+
+// After the manager put folders in place: the lists are read again, the
+// settings page's theme list follows, and a display showing a theme that
+// was replaced starts over with the new files.
+Glass.prototype.afterThemesChanged = function (folders) {
+    var self = this;
+    self.loadConfigs();
+    var active = self.activeTheme();
+    var replacedActive = (folders || []).some(function (f) { return f.install === 'templates' && f.folder === active; });
+    if (replacedActive && fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+    try { self.updateConfigVersion(); } catch (e) {}
+    uiNeedsUpdate = true;
+    self.updateUIConfig();
+};
+
+Glass.prototype.backupList = function () {
+    return this.listSettingsBackups().map(function (b) {
+        return { name: b.name, created: b.createdMs ? new Date(b.createdMs).toISOString() : null, pluginVersion: b.pluginVersion };
+    });
+};
+
+// What the status page shows about the plugin and the display.
+Glass.prototype.statusInfo = function () {
+    var self = this;
+    var arch = self.volumioArch();
+    var state = self.lastState || {};
+    self.loadConfigs();
+    return {
+        version: pluginVersion,
+        arch: arch,
+        binary: fs.existsSync(PluginPath + '/bin/' + arch + '/glass'),
+        running: fs.existsSync(runFlag),
+        display: String(self.config.get('displayOutput') || '0'),
+        timeout: parseInt(self.config.get('timeout'), 10) || 0,
+        activeTheme: self.activeTheme(),
+        meter: self.meterSelection(),
+        channel: {
+            clients: self.channel ? self.channel.clients.length : 0,
+            status: state.status || null,
+            service: state.service || null,
+            title: state.title || null,
+            artist: state.artist || null
+        },
+        legacy: self.legacyEnabled(),
+        language: self.managerLanguage()
+    };
 };
 
 

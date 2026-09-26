@@ -1,0 +1,961 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Glass Manager</title>
+<style>
+  :root {
+    --bg: #1c1c1c; --panel: #262626; --panel2: #303030; --line: #404040;
+    --text: #e6e6e6; --muted: #9a9a9a; --accent: #54b948; --accent2: #3f8f37;
+    --warn: #e6a23c; --danger: #d64545; --info: #4a90e2;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; background: var(--bg); color: var(--text); font-size: 15px; line-height: 1.4; }
+  a { color: var(--accent); }
+  button { font: inherit; cursor: pointer; border: 1px solid var(--line); background: var(--panel2); color: var(--text); padding: 8px 14px; border-radius: 6px; transition: background .15s, border-color .15s; }
+  button:hover:not(:disabled) { background: #3a3a3a; border-color: #555; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+  button.primary:hover:not(:disabled) { background: var(--accent2); border-color: var(--accent2); }
+  button.danger { color: #ffb3b3; border-color: #6b2a2a; }
+  button.danger:hover:not(:disabled) { background: #4a1f1f; }
+  button.small { padding: 5px 10px; font-size: 13px; }
+  input[type=text], input[type=number], input[type=search], input[type=password], select, textarea { font: inherit; background: #1a1a1a; color: var(--text); border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; width: 100%; }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  label { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+  .header { position: sticky; top: 0; z-index: 20; background: #232323; border-bottom: 1px solid var(--line); padding: 12px 20px; display: flex; align-items: center; gap: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.35); }
+  .header h1 { font-size: 19px; font-weight: 600; color: #fff; }
+  .header .sub { color: var(--muted); font-size: 13px; }
+  .header .grow { flex: 1; }
+  .container { max-width: 1400px; margin: 0 auto; padding: 16px 20px 60px; }
+  .tabs { display: flex; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 18px; overflow-x: auto; }
+  .tab { background: none; border: none; border-bottom: 2px solid transparent; border-radius: 0; color: var(--muted); padding: 10px 18px; white-space: nowrap; }
+  .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+  .tab:hover { background: none; color: #fff; }
+  .view { display: none; }
+  .view.active { display: block; }
+  .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin-bottom: 16px; }
+  .toolbar .grow { flex: 1; min-width: 200px; }
+  .toolbar select { width: auto; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(270px, 1fr)); gap: 14px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; display: flex; flex-direction: column; }
+  .card.active-theme { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .thumb { position: relative; background: #111; aspect-ratio: 16 / 9; display: flex; align-items: center; justify-content: center; overflow: hidden; cursor: pointer; }
+  .thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .thumb .placeholder { color: var(--muted); font-size: 13px; text-align: center; padding: 10px; }
+  .thumb .badge { position: absolute; top: 8px; left: 8px; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .3px; padding: 2px 8px; border-radius: 10px; background: #444; color: #ddd; text-transform: uppercase; }
+  .badge.green { background: var(--accent); color: #fff; }
+  .badge.blue { background: var(--info); color: #fff; }
+  .badge.orange { background: var(--warn); color: #222; }
+  .badge.gray { background: #3a3a3a; color: #bbb; }
+  .card .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
+  .card .title { font-weight: 600; color: #fff; word-break: break-word; }
+  .card .meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px 12px; }
+  .card .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: auto; padding-top: 6px; }
+  .progress { height: 6px; background: #1a1a1a; border-radius: 3px; overflow: hidden; margin-top: 6px; }
+  .progress > div { height: 100%; background: var(--accent); width: 0; transition: width .3s; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 16px; margin-bottom: 16px; }
+  .panel h2 { font-size: 16px; margin-bottom: 12px; color: #fff; }
+  .panel h3 { font-size: 14px; margin: 14px 0 8px; color: #ddd; }
+  .form { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 18px; }
+  .form .full { grid-column: 1 / -1; }
+  .row { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .switch { display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text); font-size: 15px; }
+  .switch input { width: 18px; height: 18px; accent-color: var(--accent); }
+  .help { color: var(--muted); font-size: 13px; }
+  .muted { color: var(--muted); }
+  .empty { color: var(--muted); padding: 30px; text-align: center; border: 1px dashed var(--line); border-radius: 10px; }
+  table.kv { width: 100%; border-collapse: collapse; }
+  table.kv td { padding: 7px 8px; border-bottom: 1px solid #333; vertical-align: top; }
+  table.kv td:first-child { color: var(--muted); width: 38%; }
+  .list { display: flex; flex-direction: column; gap: 8px; }
+  .item { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+  .item .grow { flex: 1; min-width: 160px; }
+  .item .name { font-weight: 600; color: #fff; }
+  .meters { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 10px; }
+  .meters .m { background: #111; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; cursor: pointer; }
+  .meters .m img { width: 100%; display: block; aspect-ratio: 16 / 9; object-fit: contain; background: #0a0a0a; }
+  .meters .m div { padding: 6px 8px; font-size: 13px; color: #ddd; word-break: break-word; }
+  .checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 14px; }
+  .modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.65); display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
+  .modal-back.open { display: flex; }
+  .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; width: min(1000px, 100%); max-height: 92vh; overflow: auto; padding: 18px 20px 20px; box-shadow: 0 10px 40px rgba(0,0,0,.6); }
+  .modal.small { width: min(520px, 100%); }
+  .modal h2 { font-size: 18px; color: #fff; margin-bottom: 10px; word-break: break-word; }
+  .modal .foot { display: flex; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+  .lightbox { position: fixed; inset: 0; background: rgba(0,0,0,.9); display: none; align-items: center; justify-content: center; z-index: 60; cursor: zoom-out; }
+  .lightbox.open { display: flex; }
+  .lightbox img { max-width: 96vw; max-height: 92vh; }
+  .toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 70; }
+  .toast { background: #333; border-left: 4px solid var(--accent); color: #fff; padding: 10px 14px; border-radius: 6px; box-shadow: 0 4px 14px rgba(0,0,0,.5); max-width: 380px; font-size: 14px; animation: fade .2s; }
+  .toast.error { border-left-color: var(--danger); }
+  .toast.warn { border-left-color: var(--warn); }
+  @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+  .jobs { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; }
+  .job { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; font-size: 14px; }
+  .job .progress { margin-top: 6px; }
+  .hidden { display: none !important; }
+  @media (max-width: 600px) {
+    .header { padding: 10px 12px; }
+    .container { padding: 12px 12px 50px; }
+    .card .actions button { flex: 1; }
+  }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1 id="title">Glass Manager</h1>
+    <div class="sub" id="subtitle"></div>
+  </div>
+  <div class="grow"></div>
+  <button id="btn-close" class="hidden"></button>
+</div>
+
+<div class="container">
+  <div class="tabs" id="tabs">
+    <button class="tab active" data-view="themes"></button>
+    <button class="tab" data-view="catalog"></button>
+    <button class="tab" data-view="artwork"></button>
+    <button class="tab" data-view="backups"></button>
+    <button class="tab" data-view="status"></button>
+  </div>
+
+  <!-- Themes -->
+  <section class="view active" id="view-themes">
+    <div class="toolbar">
+      <input type="search" id="themes-search" class="grow">
+      <button id="btn-upload"></button>
+      <input type="file" id="upload-file" accept=".zip,application/zip" class="hidden">
+      <button id="btn-render-all"></button>
+      <button id="btn-themes-refresh"></button>
+    </div>
+    <div class="jobs" id="jobs-themes"></div>
+    <div class="grid" id="themes-grid"></div>
+    <div class="panel" style="margin-top:18px">
+      <h2 id="rules-title"></h2>
+      <div class="form">
+        <div class="full">
+          <label id="rules-label"></label>
+          <input type="text" id="rules-input">
+          <div class="help" id="rules-help"></div>
+        </div>
+        <div class="full">
+          <label class="switch"><input type="checkbox" id="preserve-input"><span id="preserve-label"></span></label>
+          <div class="help" id="preserve-help"></div>
+        </div>
+        <div class="full row">
+          <button class="primary" id="btn-rules-save"></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Catalog -->
+  <section class="view" id="view-catalog">
+    <div class="toolbar">
+      <input type="search" id="catalog-search" class="grow">
+      <select id="catalog-size"></select>
+      <select id="catalog-kind"></select>
+      <select id="catalog-state"></select>
+      <button id="btn-catalog-refresh"></button>
+    </div>
+    <div class="help" id="catalog-info" style="margin-bottom:12px"></div>
+    <div class="jobs" id="jobs-catalog"></div>
+    <div class="grid" id="catalog-grid"></div>
+  </section>
+
+  <!-- Artwork -->
+  <section class="view" id="view-artwork">
+    <div class="panel">
+      <h2 id="art-title"></h2>
+      <div class="help" id="art-help" style="margin-bottom:12px"></div>
+      <div class="form">
+        <div class="full">
+          <label class="switch"><input type="checkbox" id="art-enabled"><span id="art-enabled-label"></span></label>
+        </div>
+        <div>
+          <label id="art-keymode-label"></label>
+          <select id="art-keymode">
+            <option value="personal"></option>
+            <option value="project"></option>
+          </select>
+        </div>
+        <div>
+          <label id="art-key-label"></label>
+          <input type="text" id="art-key" autocomplete="off">
+        </div>
+        <div>
+          <label id="art-interval-label"></label>
+          <input type="number" id="art-interval" min="0" max="3600">
+        </div>
+        <div>
+          <label id="art-order-label"></label>
+          <select id="art-order">
+            <option value="sequential"></option>
+            <option value="random"></option>
+          </select>
+        </div>
+        <div>
+          <label id="art-transition-label"></label>
+          <select id="art-transition">
+            <option value="none"></option>
+            <option value="fade"></option>
+            <option value="merge"></option>
+          </select>
+        </div>
+        <div>
+          <label id="art-ms-label"></label>
+          <input type="number" id="art-ms" min="50" max="3000">
+        </div>
+        <div class="full">
+          <label class="switch"><input type="checkbox" id="art-unlimited"><span id="art-unlimited-label"></span></label>
+          <div class="help" id="art-unlimited-help"></div>
+        </div>
+        <div class="full row">
+          <button class="primary" id="btn-art-save"></button>
+          <button id="btn-art-clear"></button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Backups -->
+  <section class="view" id="view-backups">
+    <div class="panel">
+      <h2 id="bk-title"></h2>
+      <div class="help" id="bk-help" style="margin-bottom:12px"></div>
+      <div class="row">
+        <input type="text" id="bk-name" maxlength="64" style="flex:1;min-width:200px">
+        <button class="primary" id="btn-bk-create"></button>
+      </div>
+    </div>
+    <div class="list" id="bk-list"></div>
+  </section>
+
+  <!-- Status -->
+  <section class="view" id="view-status">
+    <div class="panel">
+      <div class="row" style="justify-content:space-between">
+        <h2 id="st-title" style="margin:0"></h2>
+        <button class="small" id="btn-status-refresh"></button>
+      </div>
+      <table class="kv" id="st-table" style="margin-top:10px"></table>
+    </div>
+  </section>
+</div>
+
+<!-- Theme details -->
+<div class="modal-back" id="theme-modal">
+  <div class="modal">
+    <div class="row" style="justify-content:space-between;align-items:flex-start">
+      <div>
+        <h2 id="tm-title"></h2>
+        <div class="meta muted" id="tm-meta"></div>
+      </div>
+      <button class="small" id="tm-close"></button>
+    </div>
+    <div class="row" style="margin:12px 0">
+      <button class="primary" id="tm-activate"></button>
+      <button id="tm-render"></button>
+      <button class="danger" id="tm-remove"></button>
+    </div>
+    <h3 id="tm-previews-title"></h3>
+    <div id="tm-previews" class="meters"></div>
+    <div id="tm-rotation" class="hidden">
+      <h3 id="tm-rotation-title"></h3>
+      <div class="help" id="tm-rotation-help" style="margin-bottom:10px"></div>
+      <div class="form">
+        <div>
+          <label id="tm-mode-label"></label>
+          <select id="tm-mode">
+            <option value="random"></option>
+            <option value="list"></option>
+            <option value="single"></option>
+          </select>
+        </div>
+        <div>
+          <label id="tm-change-label"></label>
+          <select id="tm-change">
+            <option value="interval"></option>
+            <option value="title"></option>
+          </select>
+        </div>
+        <div>
+          <label id="tm-interval-label"></label>
+          <input type="number" id="tm-interval" min="15" max="1000">
+        </div>
+        <div class="full">
+          <label id="tm-names-label"></label>
+          <div class="checks" id="tm-names"></div>
+        </div>
+        <div class="full row">
+          <button class="primary" id="tm-save"></button>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Confirm -->
+<div class="modal-back" id="confirm-modal">
+  <div class="modal small">
+    <h2 id="cf-title"></h2>
+    <div id="cf-text"></div>
+    <div class="foot">
+      <button id="cf-cancel"></button>
+      <button class="danger" id="cf-ok"></button>
+    </div>
+  </div>
+</div>
+
+<div class="lightbox" id="lightbox"><img id="lightbox-img" alt=""></div>
+<div class="toasts" id="toasts"></div>
+
+<script>
+(function () {
+  'use strict';
+  var S = {};                 // strings
+  var state = { themes: null, active: '', catalog: null, status: null, jobs: {}, meterSel: null, previews: {}, currentTheme: null };
+  var $ = function (id) { return document.getElementById(id); };
+  var t = function (key) { return S[key] !== undefined ? S[key] : key; };
+  var esc = function (s) { return String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
+  var fmtBytes = function (n) { if (!n && n !== 0) return ''; if (n < 1024) return n + ' B'; if (n < 1048576) return (n / 1024).toFixed(0) + ' kB'; if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB'; return (n / 1073741824).toFixed(2) + ' GB'; };
+  var fmtDate = function (iso) { if (!iso) return ''; var d = new Date(iso); if (isNaN(d.getTime())) return String(iso); var p = function (n) { return n < 10 ? '0' + n : n; }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); };
+
+  // ---- transport --------------------------------------------------------
+  function api(method, url, body, raw) {
+    var opts = { method: method, headers: {} };
+    if (body !== undefined && !raw) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
+    if (raw) { opts.headers['Content-Type'] = 'application/zip'; opts.body = body; }
+    return fetch(url, opts).then(function (res) {
+      return res.json().catch(function () { return {}; }).then(function (data) {
+        if (!res.ok) {
+          var err = new Error(data.message || data.error || ('HTTP ' + res.status));
+          err.code = data.error || ('http-' + res.status);
+          err.data = data;
+          throw err;
+        }
+        return data;
+      });
+    });
+  }
+  function errorText(e) {
+    if (!e) return t('MANAGER_ERROR');
+    var code = e.code || '';
+    if (code.indexOf('GLASS.') === 0) {
+      var key = code.slice(6);
+      return t(key) + (e.data && e.data.message ? ' ' + e.data.message : '');
+    }
+    var known = { 'checksum': 'MANAGER_ERR_CHECKSUM', 'size': 'MANAGER_ERR_SIZE', 'units-differ': 'MANAGER_ERR_UNITS', 'bad-theme': 'MANAGER_ERR_BAD_THEME', 'not-a-zip': 'MANAGER_ERR_NOT_ZIP', 'timeout': 'MANAGER_ERR_NETWORK', 'network': 'MANAGER_ERR_NETWORK', 'too-large': 'MANAGER_ERR_TOO_LARGE', 'render-failed': 'MANAGER_ERR_RENDER' };
+    if (known[code]) return t(known[code]) + (e.message && e.message !== code ? ' (' + e.message + ')' : '');
+    return e.message || t('MANAGER_ERROR');
+  }
+
+  // ---- toasts and confirm ---------------------------------------------
+  function toast(text, kind) {
+    var el = document.createElement('div');
+    el.className = 'toast' + (kind ? ' ' + kind : '');
+    el.textContent = text;
+    $('toasts').appendChild(el);
+    setTimeout(function () { el.remove(); }, kind === 'error' ? 7000 : 3500);
+  }
+  var confirmResolve = null;
+  function confirmDialog(title, text, okLabel) {
+    $('cf-title').textContent = title;
+    $('cf-text').textContent = text;
+    $('cf-ok').textContent = okLabel || t('MANAGER_CONFIRM');
+    $('confirm-modal').classList.add('open');
+    return new Promise(function (resolve) { confirmResolve = resolve; });
+  }
+  $('cf-cancel').onclick = function () { $('confirm-modal').classList.remove('open'); if (confirmResolve) confirmResolve(false); };
+  $('cf-ok').onclick = function () { $('confirm-modal').classList.remove('open'); if (confirmResolve) confirmResolve(true); };
+  $('lightbox').onclick = function () { $('lightbox').classList.remove('open'); };
+  function lightbox(url) { $('lightbox-img').src = url; $('lightbox').classList.add('open'); }
+
+  // ---- static text ------------------------------------------------------
+  function applyStrings() {
+    document.title = t('MANAGER_TITLE');
+    $('title').textContent = t('MANAGER_TITLE');
+    $('btn-close').textContent = t('MANAGER_CLOSE');
+    var tabs = { themes: 'MANAGER_TAB_THEMES', catalog: 'MANAGER_TAB_CATALOG', artwork: 'MANAGER_TAB_ARTWORK', backups: 'MANAGER_TAB_BACKUPS', status: 'MANAGER_TAB_STATUS' };
+    document.querySelectorAll('.tab').forEach(function (b) { b.textContent = t(tabs[b.dataset.view]); });
+    $('themes-search').placeholder = t('MANAGER_SEARCH');
+    $('btn-upload').textContent = t('MANAGER_UPLOAD');
+    $('btn-render-all').textContent = t('MANAGER_RENDER_ALL');
+    $('btn-themes-refresh').textContent = t('MANAGER_REFRESH');
+    $('rules-title').textContent = t('MANAGER_RULES_TITLE');
+    $('rules-label').textContent = t('THEME_TAG_RULES');
+    $('rules-input').placeholder = 'Vinyl=1920x1080_name_Vinyl, Tape=1920x1080_name_Tape';
+    $('rules-help').textContent = t('THEME_TAG_RULES_DOC');
+    $('preserve-label').textContent = t('DO_NOT_DELETE_THEMES');
+    $('preserve-help').textContent = t('DO_NOT_DELETE_THEMES_DOC');
+    $('btn-rules-save').textContent = t('MANAGER_SAVE');
+    $('catalog-search').placeholder = t('MANAGER_SEARCH');
+    $('btn-catalog-refresh').textContent = t('MANAGER_CATALOG_REFRESH');
+    $('art-title').textContent = t('MANAGER_ARTWORK_TITLE');
+    $('art-help').textContent = t('FANART_ENABLE_DOC');
+    $('art-enabled-label').textContent = t('FANART_ENABLE_LABEL');
+    $('art-keymode-label').textContent = t('FANART_KEY_MODE_LABEL');
+    $('art-keymode').options[0].textContent = t('FANART_KEY_MODE_PERSONAL');
+    $('art-keymode').options[1].textContent = t('FANART_KEY_MODE_PROJECT');
+    $('art-key-label').textContent = t('FANART_KEY_LABEL');
+    $('art-interval-label').textContent = t('FANART_INTERVAL_LABEL');
+    $('art-order-label').textContent = t('FANART_ORDER_LABEL');
+    $('art-order').options[0].textContent = t('FANART_ORDER_SEQUENTIAL');
+    $('art-order').options[1].textContent = t('FANART_ORDER_RANDOM');
+    $('art-transition-label').textContent = t('FANART_TRANSITION_LABEL');
+    $('art-transition').options[0].textContent = t('FANART_TRANSITION_NONE');
+    $('art-transition').options[1].textContent = t('FANART_TRANSITION_FADE');
+    $('art-transition').options[2].textContent = t('FANART_TRANSITION_MERGE');
+    $('art-ms-label').textContent = t('FANART_TRANSITION_MS_LABEL');
+    $('art-unlimited-label').textContent = t('FANART_UNLIMITED_LABEL');
+    $('art-unlimited-help').textContent = t('MANAGER_UNLIMITED_HELP');
+    $('btn-art-save').textContent = t('MANAGER_SAVE');
+    $('btn-art-clear').textContent = t('CLEAR_FANART_CACHE');
+    $('bk-title').textContent = t('BACKUP_CONF');
+    $('bk-help').textContent = t('BACKUP_INFO');
+    $('bk-name').placeholder = t('BACKUP_NAME');
+    $('btn-bk-create').textContent = t('BACKUP_CREATE');
+    $('st-title').textContent = t('MANAGER_TAB_STATUS');
+    $('btn-status-refresh').textContent = t('MANAGER_REFRESH');
+    $('tm-close').textContent = t('MANAGER_CLOSE');
+    $('tm-activate').textContent = t('MANAGER_ACTIVATE');
+    $('tm-render').textContent = t('MANAGER_RENDER');
+    $('tm-remove').textContent = t('THEME_REMOVE_BTN');
+    $('tm-previews-title').textContent = t('MANAGER_PREVIEWS');
+    $('tm-rotation-title').textContent = t('MANAGER_ROTATION');
+    $('tm-rotation-help').textContent = t('MANAGER_ROTATION_HELP');
+    $('tm-mode-label').textContent = t('METER');
+    $('tm-mode').options[0].textContent = t('MANAGER_MODE_RANDOM');
+    $('tm-mode').options[1].textContent = t('MANAGER_MODE_LIST');
+    $('tm-mode').options[2].textContent = t('MANAGER_MODE_SINGLE');
+    $('tm-change-label').textContent = t('RANDOMMODE');
+    $('tm-change').options[0].textContent = t('MANAGER_CHANGE_INTERVAL');
+    $('tm-change').options[1].textContent = t('MANAGER_CHANGE_TITLE');
+    $('tm-interval-label').textContent = t('RANDOMINTERVAL');
+    $('tm-names-label').textContent = t('MANAGER_METERS');
+    $('tm-save').textContent = t('MANAGER_SAVE');
+    $('cf-cancel').textContent = t('MANAGER_CANCEL');
+    var sizeSel = $('catalog-size'); sizeSel.innerHTML = '<option value="">' + esc(t('MANAGER_ALL_SIZES')) + '</option>';
+    var kindSel = $('catalog-kind'); kindSel.innerHTML = '<option value="">' + esc(t('MANAGER_ALL_KINDS')) + '</option><option value="meter">' + esc(t('MANAGER_KIND_METER')) + '</option><option value="meter+spectrum">' + esc(t('MANAGER_KIND_BOTH')) + '</option><option value="spectrum">' + esc(t('MANAGER_KIND_SPECTRUM')) + '</option>';
+    var stateSel = $('catalog-state'); stateSel.innerHTML = '<option value="">' + esc(t('MANAGER_ALL_STATES')) + '</option><option value="absent">' + esc(t('MANAGER_STATE_ABSENT')) + '</option><option value="installed">' + esc(t('MANAGER_STATE_INSTALLED')) + '</option><option value="update">' + esc(t('MANAGER_STATE_UPDATE')) + '</option>';
+  }
+
+  // ---- tabs -----------------------------------------------------------
+  document.querySelectorAll('.tab').forEach(function (b) {
+    b.onclick = function () { showView(b.dataset.view); };
+  });
+  function showView(name) {
+    document.querySelectorAll('.tab').forEach(function (b) { b.classList.toggle('active', b.dataset.view === name); });
+    document.querySelectorAll('.view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + name); });
+    try { localStorage.setItem('glass-manager-tab', name); } catch (e) {}
+    if (name === 'catalog' && !state.catalog) loadCatalog(false);
+    if (name === 'artwork') loadArtwork();
+    if (name === 'backups') loadBackups();
+    if (name === 'status') loadStatus();
+  }
+
+  // ---- themes -----------------------------------------------------------
+  function loadThemes() {
+    return api('GET', '/api/themes').then(function (data) {
+      state.themes = data.themes;
+      state.active = data.active;
+      renderThemes();
+      // The rendered previews come in behind the list; the cards are drawn again once they have.
+      var loads = data.themes.filter(function (th) { return th.previews === 'fresh' || th.previews === 'stale'; })
+        .map(function (th) { return loadPreviews(th.folder, false).catch(function () {}); });
+      return Promise.all(loads).then(renderThemes);
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  function themeSize(th) { return th.width && th.height ? th.width + '×' + th.height : ''; }
+  function renderThemes() {
+    var q = $('themes-search').value.trim().toLowerCase();
+    var grid = $('themes-grid');
+    grid.innerHTML = '';
+    var shown = 0;
+    (state.themes || []).forEach(function (th) {
+      if (q && th.folder.toLowerCase().indexOf(q) === -1 && !th.meters.some(function (m) { return m.toLowerCase().indexOf(q) !== -1; })) return;
+      shown++;
+      var card = document.createElement('div');
+      card.className = 'card' + (th.active ? ' active-theme' : '');
+      var pv = state.previews[th.folder];
+      var first = pv && pv.meters && pv.meters.length ? pv.meters[0] : null;
+      var thumbHtml;
+      if (first) {
+        thumbHtml = '<img loading="lazy" src="' + esc(first.thumb) + '&v=' + encodeURIComponent(th.mtime) + '" alt="">';
+      } else if (th.empty) {
+        thumbHtml = '<div class="placeholder">' + esc(t('MANAGER_EMPTY_THEME')) + '</div>';
+      } else if (th.previews === 'rendering' || th.previews === 'queued') {
+        thumbHtml = '<div class="placeholder">' + esc(t('MANAGER_RENDERING')) + '</div>';
+      } else {
+        thumbHtml = '<div class="placeholder">' + esc(t('MANAGER_NO_PREVIEW')) + '</div>';
+      }
+      var badges = '';
+      if (th.active) badges += '<span class="badge green">' + esc(t('THEME_GALLERY_ACTIVE')) + '</span> ';
+      card.innerHTML =
+        '<div class="thumb">' + thumbHtml + (badges ? '<div class="badge-wrap" style="position:absolute;top:8px;left:8px">' + badges + '</div>' : '') + '</div>' +
+        '<div class="body">' +
+          '<div class="title">' + esc(th.folder) + '</div>' +
+          '<div class="meta">' +
+            (themeSize(th) ? '<span>' + esc(themeSize(th)) + '</span>' : '') +
+            '<span>' + th.meters.length + ' ' + esc(t('MANAGER_METERS_N')) + '</span>' +
+            (th.spectrum ? '<span class="badge blue">' + esc(t('MANAGER_KIND_SPECTRUM')) + '</span>' : '') +
+            (th.catalog ? '<span class="badge gray">' + esc(t('MANAGER_FROM_CATALOG')) + '</span>' : '') +
+            '<span>' + esc(fmtBytes(th.bytes)) + '</span>' +
+          '</div>' +
+          '<div class="actions">' +
+            (th.active ? '' : '<button class="small primary" data-act="activate">' + esc(t('MANAGER_ACTIVATE')) + '</button>') +
+            '<button class="small" data-act="details">' + esc(t('MANAGER_DETAILS')) + '</button>' +
+            '<button class="small danger" data-act="remove">' + esc(t('THEME_REMOVE_BTN')) + '</button>' +
+          '</div>' +
+        '</div>';
+      card.querySelector('.thumb').onclick = function () { openTheme(th.folder); };
+      card.querySelectorAll('button').forEach(function (b) {
+        b.onclick = function () {
+          if (b.dataset.act === 'activate') activateTheme(th.folder);
+          else if (b.dataset.act === 'details') openTheme(th.folder);
+          else if (b.dataset.act === 'remove') removeTheme(th.folder);
+        };
+      });
+      grid.appendChild(card);
+    });
+    if (!shown) grid.innerHTML = '<div class="empty" style="grid-column:1/-1">' + esc(t('MANAGER_NO_THEMES')) + '</div>';
+  }
+  $('themes-search').oninput = renderThemes;
+  $('btn-themes-refresh').onclick = loadThemes;
+
+  function loadPreviews(folder, rerender) {
+    return api('GET', '/api/themes/' + encodeURIComponent(folder) + '/previews').then(function (data) {
+      state.previews[folder] = data;
+      var th = (state.themes || []).find(function (x) { return x.folder === folder; });
+      if (th) th.previews = data.state;
+      if (rerender !== false) renderThemes();
+      if (state.currentTheme === folder) renderThemeModal();
+      return data;
+    });
+  }
+
+  function activateTheme(folder) {
+    return api('POST', '/api/themes/' + encodeURIComponent(folder) + '/activate').then(function () {
+      toast(t('MANAGER_ACTIVATED') + ' ' + folder);
+      return loadThemes().then(function () { if (state.currentTheme === folder) openTheme(folder); });
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+
+  function removeTheme(folder) {
+    confirmDialog(t('THEME_REMOVE_CONFIRM_TITLE'), t('THEME_REMOVE_CONFIRM_MSG') + ' ' + folder, t('THEME_REMOVE_BTN')).then(function (ok) {
+      if (!ok) return;
+      return api('DELETE', '/api/themes/' + encodeURIComponent(folder)).then(function (data) {
+        toast(data.switchedTo ? t('THEME_REMOVE_ACTIVE_RESET') + ' ' + data.switchedTo : t('THEME_REMOVE_DONE') + ' ' + folder);
+        delete state.previews[folder];
+        closeTheme();
+        return loadThemes().then(function () { if (state.catalog) loadCatalog(false); });
+      }).catch(function (e) { toast(errorText(e), 'error'); });
+    });
+  }
+
+  function renderTheme(folder, force) {
+    return api('POST', '/api/themes/' + encodeURIComponent(folder) + '/render', { force: !!force }).then(function (data) {
+      state.previews[folder] = data;
+      var th = (state.themes || []).find(function (x) { return x.folder === folder; });
+      if (th) th.previews = data.state;
+      renderThemes();
+      if (state.currentTheme === folder) renderThemeModal();
+      pollPreviews(folder);
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  var previewPolls = {};
+  function pollPreviews(folder) {
+    if (previewPolls[folder]) return;
+    previewPolls[folder] = setInterval(function () {
+      loadPreviews(folder).then(function (data) {
+        if (data.state !== 'rendering' && data.state !== 'queued') { clearInterval(previewPolls[folder]); delete previewPolls[folder]; }
+      }).catch(function () { clearInterval(previewPolls[folder]); delete previewPolls[folder]; });
+    }, 2000);
+  }
+  $('btn-render-all').onclick = function () {
+    (state.themes || []).forEach(function (th) {
+      if (!th.empty && th.previews !== 'fresh' && th.previews !== 'rendering' && th.previews !== 'queued') renderTheme(th.folder, false);
+    });
+  };
+
+  // Theme details.
+  function openTheme(folder) {
+    state.currentTheme = folder;
+    $('theme-modal').classList.add('open');
+    renderThemeModal();
+    var th = (state.themes || []).find(function (x) { return x.folder === folder; });
+    if (th && th.active) loadMeterSelection();
+    if (th && !th.empty && (!state.previews[folder] || state.previews[folder].state !== 'fresh')) {
+      if (th.previews === 'rendering' || th.previews === 'queued') pollPreviews(folder);
+      else renderTheme(folder, false);
+    }
+  }
+  function closeTheme() { state.currentTheme = null; $('theme-modal').classList.remove('open'); }
+  $('tm-close').onclick = closeTheme;
+  $('theme-modal').onclick = function (e) { if (e.target === $('theme-modal')) closeTheme(); };
+  function renderThemeModal() {
+    var folder = state.currentTheme;
+    var th = (state.themes || []).find(function (x) { return x.folder === folder; });
+    if (!th) return;
+    $('tm-title').textContent = th.folder;
+    $('tm-meta').textContent = [themeSize(th), th.meters.length + ' ' + t('MANAGER_METERS_N'), th.spectrum ? t('MANAGER_HAS_SPECTRUM') : '', fmtBytes(th.bytes), th.catalog ? t('MANAGER_FROM_CATALOG') + ': ' + th.catalog : ''].filter(Boolean).join(' · ');
+    $('tm-activate').classList.toggle('hidden', !!th.active);
+    var pv = state.previews[folder];
+    var box = $('tm-previews');
+    box.innerHTML = '';
+    if (pv && pv.meters && pv.meters.length) {
+      pv.meters.forEach(function (m) {
+        var el = document.createElement('div');
+        el.className = 'm';
+        el.innerHTML = '<img loading="lazy" src="' + esc(m.thumb) + '&v=' + encodeURIComponent(th.mtime) + '" alt=""><div>' + esc(m.meter) + '</div>';
+        el.onclick = function () { lightbox(m.url + '?v=' + encodeURIComponent(th.mtime)); };
+        box.appendChild(el);
+      });
+      if (pv.state === 'rendering' || pv.state === 'queued') box.insertAdjacentHTML('afterbegin', '<div class="help" style="grid-column:1/-1">' + esc(t('MANAGER_RENDERING')) + '</div>');
+    } else {
+      box.innerHTML = '<div class="help" style="grid-column:1/-1">' + esc(th.empty ? t('MANAGER_EMPTY_THEME') : (pv && (pv.state === 'rendering' || pv.state === 'queued') ? t('MANAGER_RENDERING') : t('MANAGER_NO_PREVIEW'))) + '</div>';
+    }
+    $('tm-render').disabled = !!th.empty || (pv && (pv.state === 'rendering' || pv.state === 'queued'));
+    $('tm-rotation').classList.toggle('hidden', !th.active);
+    if (th.active && state.meterSel) renderRotation();
+  }
+  $('tm-activate').onclick = function () { activateTheme(state.currentTheme); };
+  $('tm-render').onclick = function () { renderTheme(state.currentTheme, true); };
+  $('tm-remove').onclick = function () { removeTheme(state.currentTheme); };
+
+  // Rotation of the active theme.
+  function loadMeterSelection() {
+    return api('GET', '/api/meter').then(function (data) { state.meterSel = data; renderRotation(); }).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  function renderRotation() {
+    var sel = state.meterSel;
+    if (!sel) return;
+    $('tm-mode').value = sel.mode;
+    $('tm-change').value = sel.onTitle ? 'title' : 'interval';
+    $('tm-interval').value = sel.interval;
+    var box = $('tm-names');
+    box.innerHTML = '';
+    sel.available.forEach(function (name) {
+      var id = 'tmn-' + name.replace(/[^a-z0-9]/gi, '_');
+      var lab = document.createElement('label');
+      lab.className = 'switch';
+      var type = $('tm-mode').value === 'single' ? 'radio' : 'checkbox';
+      lab.innerHTML = '<input type="' + type + '" name="tmn" value="' + esc(name) + '" id="' + id + '"' + (sel.names.indexOf(name) !== -1 ? ' checked' : '') + '><span>' + esc(name) + '</span>';
+      box.appendChild(lab);
+    });
+    updateRotationVisibility();
+  }
+  function updateRotationVisibility() {
+    var mode = $('tm-mode').value;
+    $('tm-names').parentElement.classList.toggle('hidden', mode === 'random');
+    $('tm-names').querySelectorAll('input').forEach(function (i) { i.type = mode === 'single' ? 'radio' : 'checkbox'; });
+    $('tm-change').parentElement.classList.toggle('hidden', mode === 'single');
+    $('tm-interval').parentElement.classList.toggle('hidden', mode === 'single' || $('tm-change').value === 'title');
+  }
+  $('tm-mode').onchange = updateRotationVisibility;
+  $('tm-change').onchange = updateRotationVisibility;
+  $('tm-save').onclick = function () {
+    var mode = $('tm-mode').value;
+    var names = [];
+    $('tm-names').querySelectorAll('input:checked').forEach(function (i) { names.push(i.value); });
+    api('POST', '/api/meter', { mode: mode, names: names, onTitle: $('tm-change').value === 'title', interval: parseInt($('tm-interval').value, 10) }).then(function (data) {
+      state.meterSel = data;
+      renderRotation();
+      toast(t('MANAGER_SAVED'));
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
+
+  // Upload.
+  $('btn-upload').onclick = function () { $('upload-file').click(); };
+  $('upload-file').onchange = function () {
+    var file = $('upload-file').files[0];
+    if (!file) return;
+    $('upload-file').value = '';
+    api('POST', '/api/upload?name=' + encodeURIComponent(file.name), file, true).then(function (data) {
+      watchJob(data.job);
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
+
+  // Rules and preserve.
+  function loadSettings() {
+    return api('GET', '/api/settings').then(function (s) {
+      $('rules-input').value = s.themeTagRules || '';
+      $('preserve-input').checked = !!s.doNotDeleteThemes;
+    }).catch(function () {});
+  }
+  $('btn-rules-save').onclick = function () {
+    api('POST', '/api/settings', { themeTagRules: $('rules-input').value, doNotDeleteThemes: $('preserve-input').checked }).then(function () {
+      toast(t('MANAGER_SAVED'));
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
+
+  // ---- jobs -------------------------------------------------------------
+  function watchJob(job) {
+    state.jobs[job.id] = job;
+    renderJobs();
+    if (!jobTimer) jobTimer = setInterval(pollJobs, 1000);
+  }
+  var jobTimer = null;
+  function pollJobs() {
+    var active = Object.keys(state.jobs).filter(function (id) { var j = state.jobs[id]; return j.state !== 'done' && j.state !== 'failed'; });
+    if (!active.length) { clearInterval(jobTimer); jobTimer = null; return; }
+    active.forEach(function (id) {
+      api('GET', '/api/jobs/' + id).then(function (data) {
+        var before = state.jobs[id].state;
+        state.jobs[id] = data.job;
+        renderJobs();
+        if (before !== data.job.state && (data.job.state === 'done' || data.job.state === 'failed' || data.job.state === 'rendering')) {
+          if (data.job.state === 'failed') toast(t('MANAGER_JOB_FAILED') + ' ' + data.job.name + ': ' + errorText(data.job.error ? { code: data.job.error.error, message: data.job.error.message } : null), 'error');
+          if (data.job.state === 'done' || data.job.state === 'rendering') {
+            if (before !== 'rendering' && before !== 'done') {
+              toast(t('MANAGER_JOB_DONE') + ' ' + data.job.folders.map(function (f) { return f.folder; }).join(', '));
+              loadThemes().then(function () { data.job.folders.forEach(function (f) { if (f.install === 'templates') pollPreviews(f.folder); }); });
+              if (state.catalog) loadCatalog(false);
+            }
+          }
+          if (data.job.state === 'done' || data.job.state === 'failed') setTimeout(function () { delete state.jobs[id]; renderJobs(); }, 8000);
+        }
+      }).catch(function () {});
+    });
+  }
+  function renderJobs() {
+    var html = '';
+    Object.keys(state.jobs).forEach(function (id) {
+      var j = state.jobs[id];
+      var pct = j.progress && j.progress.total ? Math.round(j.progress.done * 100 / j.progress.total) : 0;
+      var label = { queued: 'MANAGER_JOB_QUEUED', downloading: 'MANAGER_JOB_DOWNLOADING', checking: 'MANAGER_JOB_CHECKING', unpacking: 'MANAGER_JOB_UNPACKING', rendering: 'MANAGER_JOB_RENDERING', done: 'MANAGER_JOB_DONE', failed: 'MANAGER_JOB_FAILED' }[j.state] || j.state;
+      html += '<div class="job"><b>' + esc(j.name) + '</b> · ' + esc(t(label)) +
+        (j.state === 'downloading' || j.state === 'unpacking' ? ' ' + pct + '%' + (j.progress.total ? ' (' + fmtBytes(j.progress.done) + ' / ' + fmtBytes(j.progress.total) + ')' : '') : '') +
+        (j.state === 'failed' && j.error ? ' <span class="muted">' + esc(errorText({ code: j.error.error, message: j.error.message })) + '</span>' : '') +
+        (j.state === 'downloading' || j.state === 'unpacking' ? '<div class="progress"><div style="width:' + pct + '%"></div></div>' : '') +
+        '</div>';
+    });
+    $('jobs-themes').innerHTML = html;
+    $('jobs-catalog').innerHTML = html;
+  }
+
+  // ---- catalog ----------------------------------------------------------
+  function loadCatalog(refresh) {
+    var call = refresh ? api('POST', '/api/catalog/refresh') : api('GET', '/api/catalog');
+    $('catalog-info').textContent = t('MANAGER_LOADING');
+    return call.then(function (data) {
+      state.catalog = data;
+      fillSizes();
+      renderCatalog();
+    }).catch(function (e) {
+      if (e.data && e.data.entries) { state.catalog = e.data; fillSizes(); renderCatalog(); }
+      toast(errorText(e), 'error');
+    });
+  }
+  var sizesFilled = false;
+  function fillSizes() {
+    var sel = $('catalog-size');
+    var sizes = {};
+    (state.catalog.entries || []).forEach(function (e) { sizes[e.width + 'x' + e.height] = (sizes[e.width + 'x' + e.height] || 0) + 1; });
+    var keys = Object.keys(sizes).sort(function (a, b) { var pa = a.split('x'), pb = b.split('x'); return (pa[0] - pb[0]) || (pa[1] - pb[1]); });
+    var current = sel.value;
+    sel.innerHTML = '<option value="">' + esc(t('MANAGER_ALL_SIZES')) + '</option>';
+    keys.forEach(function (k) { sel.innerHTML += '<option value="' + k + '">' + k.replace('x', '×') + ' (' + sizes[k] + ')</option>'; });
+    if (!sizesFilled) {
+      sizesFilled = true;
+      var active = (state.themes || []).find(function (x) { return x.active; });
+      var guess = active && active.width ? active.width + 'x' + active.height : '';
+      try { guess = localStorage.getItem('glass-manager-size') || guess; } catch (e) {}
+      sel.value = sizes[guess] ? guess : '';
+    } else {
+      sel.value = sizes[current] ? current : '';
+    }
+  }
+  function renderCatalog() {
+    var data = state.catalog;
+    if (!data) return;
+    var info = [];
+    if (data.updated) info.push(t('MANAGER_CATALOG_UPDATED') + ' ' + fmtDate(data.updated));
+    if (data.fetchedAt) info.push(t('MANAGER_CATALOG_FETCHED') + ' ' + fmtDate(data.fetchedAt));
+    info.push((data.entries || []).length + ' ' + t('MANAGER_CATALOG_ENTRIES'));
+    if (data.error) info.push(t('MANAGER_CATALOG_ERROR') + ' ' + (data.error.message || data.error.error));
+    $('catalog-info').textContent = info.join(' · ');
+    var q = $('catalog-search').value.trim().toLowerCase();
+    var size = $('catalog-size').value;
+    var kind = $('catalog-kind').value;
+    var st = $('catalog-state').value;
+    try { localStorage.setItem('glass-manager-size', size); } catch (e) {}
+    var grid = $('catalog-grid');
+    grid.innerHTML = '';
+    var shown = 0;
+    (data.entries || []).forEach(function (e) {
+      if (size && e.width + 'x' + e.height !== size) return;
+      if (kind && e.kind !== kind) return;
+      if (st && e.state !== st && !(st === 'installed' && e.state === 'present')) return;
+      if (q && e.name.toLowerCase().indexOf(q) === -1 && !e.units.some(function (u) { return u.names.some(function (n) { return n.toLowerCase().indexOf(q) !== -1; }); })) return;
+      shown++;
+      var meters = e.units.filter(function (u) { return u.kind === 'meter'; }).reduce(function (n, u) { return n + u.names.length; }, 0);
+      var card = document.createElement('div');
+      card.className = 'card';
+      var stateBadge = { installed: '<span class="badge green">' + esc(t('MANAGER_STATE_INSTALLED')) + '</span>', update: '<span class="badge orange">' + esc(t('MANAGER_STATE_UPDATE')) + '</span>', present: '<span class="badge gray">' + esc(t('MANAGER_STATE_PRESENT')) + '</span>' }[e.state] || '';
+      var button = e.state === 'installed' ? '<button class="small" data-act="install">' + esc(t('MANAGER_REINSTALL')) + '</button>' :
+        e.state === 'update' ? '<button class="small primary" data-act="install">' + esc(t('MANAGER_UPDATE')) + '</button>' :
+        e.state === 'present' ? '<button class="small" data-act="install">' + esc(t('MANAGER_REPLACE')) + '</button>' :
+        '<button class="small primary" data-act="install">' + esc(t('MANAGER_INSTALL')) + '</button>';
+      card.innerHTML =
+        '<div class="thumb">' + (e.thumb ? '<img loading="lazy" src="' + esc(e.thumb) + '" alt="">' : '<div class="placeholder">' + esc(t('MANAGER_NO_PREVIEW')) + '</div>') + (stateBadge ? '<div style="position:absolute;top:8px;left:8px">' + stateBadge + '</div>' : '') + '</div>' +
+        '<div class="body">' +
+          '<div class="title">' + esc(e.name) + '</div>' +
+          '<div class="meta"><span>' + e.width + '×' + e.height + '</span><span>' + esc({ meter: t('MANAGER_KIND_METER'), 'meter+spectrum': t('MANAGER_KIND_BOTH'), spectrum: t('MANAGER_KIND_SPECTRUM') }[e.kind] || e.kind) + '</span>' + (meters ? '<span>' + meters + ' ' + esc(t('MANAGER_METERS_N')) + '</span>' : '') + '<span>' + esc(fmtBytes(e.bytes)) + '</span></div>' +
+          '<div class="actions">' + button + (e.preview ? '<button class="small" data-act="preview">' + esc(t('MANAGER_PREVIEW')) + '</button>' : '') + '</div>' +
+        '</div>';
+      if (e.preview) card.querySelector('.thumb').onclick = function () { lightbox(e.preview); };
+      card.querySelectorAll('button').forEach(function (b) {
+        b.onclick = function () {
+          if (b.dataset.act === 'preview') lightbox(e.preview);
+          else installEntry(e, b);
+        };
+      });
+      grid.appendChild(card);
+    });
+    if (!shown) grid.innerHTML = '<div class="empty" style="grid-column:1/-1">' + esc(t('MANAGER_NO_MATCH')) + '</div>';
+  }
+  function installEntry(e, button) {
+    var go = function () {
+      button.disabled = true;
+      api('POST', '/api/catalog/install', { name: e.name }).then(function (data) {
+        watchJob(data.job);
+        showView('catalog');
+      }).catch(function (err) { toast(errorText(err), 'error'); button.disabled = false; });
+    };
+    if (e.state === 'installed' || e.state === 'update' || e.state === 'present') {
+      confirmDialog(t('MANAGER_REPLACE_TITLE'), t('MANAGER_REPLACE_MSG') + ' ' + e.units.map(function (u) { return u.install + '/' + u.folder; }).join(', '), t('MANAGER_CONFIRM')).then(function (ok) { if (ok) go(); });
+    } else {
+      go();
+    }
+  }
+  $('catalog-search').oninput = renderCatalog;
+  $('catalog-size').onchange = renderCatalog;
+  $('catalog-kind').onchange = renderCatalog;
+  $('catalog-state').onchange = renderCatalog;
+  $('btn-catalog-refresh').onclick = function () { loadCatalog(true); };
+
+  // ---- artwork ----------------------------------------------------------
+  function loadArtwork() {
+    api('GET', '/api/artwork').then(function (a) {
+      $('art-enabled').checked = a.enabled;
+      $('art-keymode').value = a.keyMode;
+      $('art-key').value = a.personalKey;
+      $('art-interval').value = a.interval;
+      $('art-order').value = a.order;
+      $('art-transition').value = a.transition;
+      $('art-ms').value = a.transitionMs;
+      $('art-unlimited').checked = a.unlimited;
+      state.artwork = a;
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  $('btn-art-save').onclick = function () {
+    var body = {
+      enabled: $('art-enabled').checked, keyMode: $('art-keymode').value, personalKey: $('art-key').value,
+      interval: parseInt($('art-interval').value, 10), order: $('art-order').value, transition: $('art-transition').value,
+      transitionMs: parseInt($('art-ms').value, 10), unlimited: $('art-unlimited').checked
+    };
+    var save = function () {
+      api('POST', '/api/artwork', body).then(function () { toast(t('MANAGER_SAVED')); loadArtwork(); }).catch(function (e) { toast(errorText(e), 'error'); });
+    };
+    if (body.unlimited && !(state.artwork && state.artwork.unlimited)) {
+      confirmDialog(t('FANART_UNLIMITED_CONFIRM_TITLE'), t('MANAGER_UNLIMITED_CONFIRM'), t('FANART_UNLIMITED_CONFIRM_BTN')).then(function (ok) { if (ok) save(); else $('art-unlimited').checked = false; });
+    } else {
+      save();
+    }
+  };
+  $('btn-art-clear').onclick = function () {
+    confirmDialog(t('CLEAR_FANART_CACHE_CONFIRM_TITLE'), t('MANAGER_CLEAR_CACHE_MSG'), t('CLEAR_FANART_CACHE')).then(function (ok) {
+      if (!ok) return;
+      api('POST', '/api/artwork/clear-cache').then(function () { toast(t('CLEAR_FANART_CACHE_DONE')); }).catch(function (e) { toast(errorText(e), 'error'); });
+    });
+  };
+
+  // ---- backups ----------------------------------------------------------
+  function loadBackups() {
+    api('GET', '/api/backups').then(function (data) { renderBackups(data.backups); }).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  function renderBackups(list) {
+    var box = $('bk-list');
+    box.innerHTML = '';
+    if (!list.length) { box.innerHTML = '<div class="empty">' + esc(t('BACKUP_NONE_YET')) + '</div>'; return; }
+    list.forEach(function (b) {
+      var el = document.createElement('div');
+      el.className = 'item';
+      el.innerHTML = '<div class="grow"><div class="name">' + esc(b.name) + '</div><div class="muted" style="font-size:13px">' + esc(fmtDate(b.created)) + ' · v' + esc(b.pluginVersion) + '</div></div>' +
+        '<button class="small" data-act="restore">' + esc(t('MANAGER_RESTORE')) + '</button><button class="small danger" data-act="delete">' + esc(t('MANAGER_DELETE')) + '</button>';
+      el.querySelector('[data-act=restore]').onclick = function () {
+        confirmDialog(t('BACKUP_SECTION_RESTORE'), t('BACKUP_SECTION_RESTORE_DESC') + ' (' + b.name + ')', t('MANAGER_RESTORE')).then(function (ok) {
+          if (!ok) return;
+          api('POST', '/api/backups/' + encodeURIComponent(b.name) + '/restore').then(function () { toast(t('BACKUP_RESTORED')); loadThemes(); }).catch(function (e) { toast(errorText(e), 'error'); });
+        });
+      };
+      el.querySelector('[data-act=delete]').onclick = function () {
+        confirmDialog(t('BACKUP_SECTION_DELETE'), t('BACKUP_SECTION_DELETE_DESC') + ' (' + b.name + ')', t('MANAGER_DELETE')).then(function (ok) {
+          if (!ok) return;
+          api('DELETE', '/api/backups/' + encodeURIComponent(b.name)).then(function (data) { toast(t('BACKUP_DELETED')); renderBackups(data.backups); }).catch(function (e) { toast(errorText(e), 'error'); });
+        });
+      };
+      box.appendChild(el);
+    });
+  }
+  $('btn-bk-create').onclick = function () {
+    api('POST', '/api/backups', { name: $('bk-name').value }).then(function (data) {
+      $('bk-name').value = '';
+      toast(t('BACKUP_CREATED'));
+      renderBackups(data.backups);
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
+
+  // ---- status -----------------------------------------------------------
+  function loadStatus() {
+    api('GET', '/api/status').then(function (s) {
+      state.status = s;
+      $('subtitle').textContent = (s.hostname || '') + ' · Glass ' + s.version;
+      var rows = [
+        ['MANAGER_ST_VERSION', s.version + ' (' + s.arch + (s.binary ? '' : ', ' + t('MANAGER_ST_NO_BINARY')) + ')'],
+        ['MANAGER_ST_DISPLAY', (s.running ? t('MANAGER_ST_RUNNING') : t('MANAGER_ST_IDLE')) + ' · DISPLAY=:' + s.display + ' · ' + t('MANAGER_ST_TIMEOUT') + ' ' + s.timeout + ' s'],
+        ['MANAGER_ST_THEME', s.activeTheme + ' · ' + ({ random: t('MANAGER_MODE_RANDOM'), list: t('MANAGER_MODE_LIST'), single: t('MANAGER_MODE_SINGLE') }[s.meter.mode] || s.meter.mode) + (s.meter.mode !== 'random' ? ': ' + s.meter.names.join(', ') : '')],
+        ['MANAGER_ST_PLAYER', (s.channel.status || '-') + (s.channel.service ? ' · ' + s.channel.service : '') + (s.channel.title ? ' · ' + (s.channel.artist ? s.channel.artist + ' - ' : '') + s.channel.title : '')],
+        ['MANAGER_ST_CHANNEL', s.channel.clients + ' ' + t('MANAGER_ST_CLIENTS')],
+        ['MANAGER_ST_RINGS', s.rings.length ? s.rings.join(', ') : t('MANAGER_ST_NONE')],
+        ['MANAGER_ST_CATALOG', s.catalog.count + ' ' + t('MANAGER_CATALOG_ENTRIES') + (s.catalog.updated ? ' · ' + t('MANAGER_CATALOG_UPDATED') + ' ' + fmtDate(s.catalog.updated) : '') + ' · ' + s.catalog.installed + ' ' + t('MANAGER_ST_INSTALLED_FROM')],
+        ['MANAGER_ST_DISK', s.diskFree !== null ? fmtBytes(s.diskFree) + ' ' + t('MANAGER_ST_FREE') : '-'],
+        ['MANAGER_ST_MANAGER', s.manager.url + ' · ' + t('MANAGER_ST_UPTIME') + ' ' + Math.round(s.manager.uptimeS / 60) + ' min'],
+        ['MANAGER_ST_LEGACY', s.legacy ? t('MANAGER_ST_YES') : t('MANAGER_ST_NO')]
+      ];
+      $('st-table').innerHTML = rows.map(function (r) { return '<tr><td>' + esc(t(r[0])) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  $('btn-status-refresh').onclick = loadStatus;
+
+  // ---- start ------------------------------------------------------------
+  if (window.parent === window) {
+    $('btn-close').classList.remove('hidden');
+    $('btn-close').onclick = function () {
+      window.close();
+      setTimeout(function () { if (!window.closed) { if (window.history.length > 1) window.history.back(); else window.location.href = '/'; } }, 100);
+    };
+  }
+  api('GET', '/api/i18n').then(function (data) { S = data.strings || {}; }).catch(function () {}).then(function () {
+    applyStrings();
+    loadThemes().then(loadSettings);
+    loadStatus();
+    // The tab: from the address (#catalog), else the one last looked at.
+    var saved = (window.location.hash || '').slice(1);
+    if (!saved) { try { saved = localStorage.getItem('glass-manager-tab'); } catch (e) {} }
+    if (saved && saved !== 'themes' && $('view-' + saved)) showView(saved);
+  });
+  window.addEventListener('hashchange', function () {
+    var name = (window.location.hash || '').slice(1);
+    if (name && $('view-' + name)) showView(name);
+  });
+})();
+</script>
+</body>
+</html>
