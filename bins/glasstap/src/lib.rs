@@ -1,18 +1,22 @@
-//! `glasstap`: an ALSA scope. The `meter` PCM in the player's chain hands it
-//! the stream a period at a time; it measures the peak and RMS of each
-//! channel and the spectrum, publishes them into the shared ring, and, when
-//! the configuration names them, writes the two FIFOs of the previous tap.
+//! `glasstap`: the tap inside the audio player, in two forms. As an ALSA
+//! PCM (`type glasstap`, the `pcm` module) the stream passes through it
+//! byte for byte and is measured on the way. As an ALSA scope (this file)
+//! a `meter` PCM hands it the stream a period at a time. Both publish the
+//! peak and RMS of each channel and the spectrum into the shared ring, and
+//! the scope, when the configuration names them, writes the two FIFOs of
+//! the previous tap.
 //!
-//! ALSA loads this library into the audio player's process and calls the
-//! scope from the thread that writes audio. Every entry point catches a
-//! panic, nothing allocates once the stream is set up, and nothing blocks.
+//! ALSA loads this library into the audio player's process and calls it
+//! from the thread that writes audio. Every entry point catches a panic,
+//! nothing allocates once the stream is set up, and nothing blocks.
 //!
-//! Configuration keys, in the `pcm_scope` node: `meter` and `spectrum` (the
-//! FIFO paths, optional), `meter_max`, `spectrum_max`, `spectrum_size`,
-//! `decay_ms`, `logarithmic_frequency`, `logarithmic_amplitude`,
-//! `smoothing_factor` (as before), plus `fft_size` (default 2048), `hop`
-//! (default half the FFT), `ring` (a tag in the ring's file name) and
-//! `slots` (hops kept in the ring, default 64).
+//! Configuration keys, in the `pcm_scope` or the `pcm` node: `fft_size`
+//! (default 2048), `hop` (default half the FFT), `ring` (a tag in the
+//! ring's file name) and `slots` (hops kept in the ring, default 64); for
+//! the scope also `meter` and `spectrum` (the FIFO paths, optional),
+//! `meter_max`, `spectrum_max`, `spectrum_size`, `decay_ms`,
+//! `logarithmic_frequency`, `logarithmic_amplitude` and `smoothing_factor`
+//! as before.
 
 use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -23,8 +27,10 @@ use tap::fifo::{ignore_sigpipe, Fifo};
 use tap::legacy;
 use tap::ring::{Frame, Writer};
 
+mod pcm;
+
 #[allow(non_camel_case_types)]
-mod ffi {
+pub(crate) mod ffi {
     use super::*;
 
     #[repr(C)]
@@ -95,7 +101,7 @@ mod ffi {
 use ffi::*;
 
 /// What the configuration asked for.
-struct Settings {
+pub(crate) struct Settings {
     meter_fifo: Option<String>,
     spectrum_fifo: Option<String>,
     meter_max: u32,
@@ -164,12 +170,12 @@ fn state<'a>(scope: *mut snd_pcm_scope_t) -> Option<&'a mut State> {
     }
 }
 
-fn note(msg: &str) {
+pub(crate) fn note(msg: &str) {
     eprintln!("glasstap: {msg}");
 }
 
-/// Read the scope's configuration node.
-unsafe fn settings_from(conf: *const snd_config_t) -> Settings {
+/// Read the tap's configuration node, the scope's or the PCM's.
+pub(crate) unsafe fn settings_from(conf: *const snd_config_t) -> Settings {
     let mut s = Settings::default();
     let end = snd_config_iterator_end(conf);
     let mut it = snd_config_iterator_first(conf);
@@ -198,7 +204,7 @@ unsafe fn settings_from(conf: *const snd_config_t) -> Settings {
             }
         };
         match key.as_str() {
-            "comment" | "type" | "meter_show" | "window" => {}
+            "comment" | "type" | "slave" | "hint" | "meter_show" | "window" => {}
             "meter" => s.meter_fifo = string(node).filter(|p| !p.is_empty()),
             "spectrum" => s.spectrum_fifo = string(node).filter(|p| !p.is_empty()),
             "meter_max" => s.meter_max = integer(node).unwrap_or(100).clamp(1, 65535) as u32,

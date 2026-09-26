@@ -18,10 +18,12 @@ jobs:
       - uses: actions/checkout@v7
       - run: rustup toolchain install && rustup show active-toolchain
       - name: Cross compilers and the libraries the host build links against
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu libc6-dev-armhf-cross libc6-dev-arm64-cross libsdl2-dev libasound2-dev
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu libc6-dev-armhf-cross libc6-dev-arm64-cross libsdl2-dev libasound2-dev alsa-utils
       - uses: Swatinem/rust-cache@v2
       - run: scripts/check.sh
       - run: scripts/ship.sh
+      - name: The tap passes every format through byte for byte
+        run: scripts/tap_exact.sh lib/x64/libglasstap.so bin/x64/tapdump
       - run: scripts/package.sh
       - name: Notes from the changelog
         run: scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > dist/notes.md

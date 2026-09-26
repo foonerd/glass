@@ -403,15 +403,13 @@ Glass.prototype.onStart = function () {
         self.logger.warn(id + 'settings import: ' + (e && e.message ? e.message : e));
     }
 
-    // The MPD side output feeds the meters on x64 and in the DSD path; the
-    // modular ALSA path on the Pi meters inline and keeps output 1 disabled.
-    // The side output is ours now; an include from an earlier release is replaced.
+    // The tap sits on every path, so the MPD side output of earlier
+    // releases stays disabled; the include is kept so an existing player
+    // configuration still loads, and one from an earlier release is replaced.
     var includeIsOurs = false;
     try { includeIsOurs = fs.existsSync(MPD_include) && fs.readFileSync(MPD_include, 'utf8').indexOf('output glass') !== -1; } catch (e) {}
     if (!includeIsOurs) { self.copy_MPD_include(MPD_include_tmpl, MPD_include); }
-    var isX64 = self.volumioArch() === 'x64';
-    var enableDSD = parseInt(self.config.get('alsaSelection'), 10) == 1;
-    var enableMPDOutput = isX64 ? true : enableDSD;
+    var enableMPDOutput = false;
     self.MPD_setOutput(MPD_include, enableMPDOutput);
     var mpcCmd = enableMPDOutput ? 'mpc enable 1' : 'mpc disable 1';
     setTimeout(function () {
@@ -536,10 +534,6 @@ Glass.prototype.onStart = function () {
                         var startDisplayOnce = function () {
                             if (self.meterChild && self.meterChild.exitCode === null) {
                                 return;
-                            }
-                            var alsaConf = parseInt(self.config.get('alsaSelection'), 10);
-                            if ((alsaConf == 1 || self.volumioArch() === 'x64') && state.service === 'mpd') {
-                                exec('mpc enable 1 2>/dev/null', function () {});
                             }
                             var child = exec(LaunchScript, { uid: 1000, gid: 1000, env: self.launchEnv() }, function (error, stdout, stderr) {
                                 if (error !== null) {
@@ -2877,10 +2871,9 @@ Glass.prototype.switch_alsaConfig = function (alsaConf) {
     var arch = '';
     try { arch = execSync(arch_cmd).toString().trim(); } catch(e) {}
     var isX64 = (arch === 'x64');
-    // MPD output for meter: enable on x64 (always) or Pi DSD mode
-    // Disable for Pi modular ALSA - uses inline meter instead
-    var enableDSD = alsaConf == 1 ? true : false;
-    var enableMPDOutput = isX64 ? true : enableDSD;
+    // The tap sits on every path, so the MPD side output stays off in
+    // both selections and on every architecture.
+    var enableMPDOutput = false;
     alsaLog(self.logger, 'basic', 'switch_alsaConfig: alsaConf=' + alsaConf + ' isX64=' + isX64 + ' enableMPDOutput=' + enableMPDOutput);
     
     self.MPD_setOutput(MPD_include, enableMPDOutput)
@@ -3249,32 +3242,10 @@ Glass.prototype.writeAsoundConfigModular = function (alsaConf) {
 
   if (fs.existsSync(asoundTmpl)) {
     var asounddata = fs.readFileSync(asoundTmpl, 'utf8');
-    var tapMode;
-    
-    if (alsaConf == 1) { // DSD native
-        if (!useDSP) {
-            conf = asounddata.replace('${alsaDirect}', 'Glass');
-            tapMode = 'DSD-passthrough';
-        } else {
-            tapMode = 'DSD-with-bridge (no tap in the chain)';
-        }
-
-    } else {  // modular alsa
-        if (useDSP) {
-            // Fusion bridge on: inline meter (no multi, no dummy, no rate constraint)
-            conf = asounddata.replace('${alsaInlineMeter}', 'Glass');
-            tapMode = 'inline-meter (bridge on)';
-        } else {
-            // Use inline meter to capture ALL audio sources (MPD, DAB/FM, airplay, etc.)
-            conf = asounddata.replace('${alsaMeter}', 'Glass');
-            tapMode = 'multi-duplicate (bridge off)';
-        }
-    }
-    alsaLog(self.logger, 'basic', 'tap mode: ' + tapMode);
-
-    conf = conf.replace('${alsaInlineMeter}', 'peppy3_off');
-    conf = conf.replace('${alsaMeter}', 'peppy1_off');
-    conf = conf.replace('${alsaDirect}', 'peppy2_off');
+    // The tap heads the section on every path in both selections; the
+    // selection still decides the MPD include and the Soloist naming.
+    conf = asounddata;
+    alsaLog(self.logger, 'basic', 'tap mode: the tap on every path (alsaConf=' + alsaConf + ', bridge=' + useDSP + ')');
     conf = conf.replace('${type}', plugType);
 
     //for spotify / Soloist — exclusive. Conflict leaves pcm.spotify empty.
