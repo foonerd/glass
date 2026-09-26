@@ -501,6 +501,17 @@
     "MANAGER_RM_SINCE": "seit",
     "MANAGER_RM_SUBSCRIBED": "empfängt Frames",
     "MANAGER_RM_NOT_SUBSCRIBED": "verbunden, noch keine Frames",
-    "MANAGER_RM_SCREEN": "Bildschirm"
+    "MANAGER_RM_SCREEN": "Bildschirm",
+    "DISPLAY_OUTPUT_NONE": "Kein eigener Bildschirm: nur Fernanzeigen",
+    "MANAGER_RM_SETTINGS": "Bereitstellung",
+    "MANAGER_RM_ENABLE": "Fernanzeigen bedienen",
+    "MANAGER_RM_ENABLE_DOC": "Eingeschaltet sendet dieser Player seine Frames an Fernanzeigen, die sich anmelden, stellt ihnen den Kanal bereit und meldet sich im Netzwerk. Ausgeschaltet verlässt nichts den Player. Ports gelten sofort nach dem Anwenden; ein von etwas anderem belegter Port wird hier gemeldet.",
+    "MANAGER_RM_PORT_FRAMES": "Frames-Port (UDP)",
+    "MANAGER_RM_PORT_CHANNEL": "Kanal-Port (TCP)",
+    "MANAGER_RM_PORT_BEACON": "Signal-Port (UDP)",
+    "MANAGER_RM_PORTS_INVALID": "Ports müssen Zahlen von 1024 bis 65535 sein.",
+    "MANAGER_RM_PORTS_CLASH": "Die drei Ports und der Manager-Port müssen sich alle unterscheiden.",
+    "MANAGER_RM_APPLIED": "Angewendet.",
+    "MANAGER_RM_PROBLEM": "Problem:"
   }
 }

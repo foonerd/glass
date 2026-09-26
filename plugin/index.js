@@ -137,12 +137,34 @@ Channel.prototype.listenTcp = function (port) {
         conn.setNoDelay(true);
         self.attach(conn);
     });
+    self.tcpError = null;
     self.tcpServer.on('error', function (err) {
-        self.logger.error(id + 'channel: tcp ' + port + ': ' + (err && err.message ? err.message : err));
+        self.tcpError = 'tcp ' + port + ': ' + (err && err.message ? err.message : err);
+        self.logger.error(id + 'channel: ' + self.tcpError);
         self.tcpServer = null;
     });
     self.tcpServer.listen(port, function () {
         self.logger.info(id + 'channel: serving tcp ' + port);
+    });
+};
+
+// Close the TCP listener and the remotes on it. Resolves once the port is free.
+Channel.prototype.unlistenTcp = function () {
+    var self = this;
+    self.clients.slice().forEach(function (c) {
+        if (c.remote || (c.remoteAddress && c.remoteAddress !== '')) {
+            try { c.destroy(); } catch (e) {}
+        }
+    });
+    var server = self.tcpServer;
+    self.tcpServer = null;
+    self.tcpError = null;
+    if (!server) { return Promise.resolve(); }
+    return new Promise(function (resolve) {
+        var done = false;
+        var finish = function () { if (!done) { done = true; resolve(); } };
+        try { server.close(finish); } catch (e) { finish(); }
+        setTimeout(finish, 2000);
     });
 };
 
@@ -321,9 +343,10 @@ Glass.prototype.onVolumioStart = function () {
         themeTagRules: ['string', ''],
         legacyImported: ['boolean', false],
         displayOutput: ['string', '0'],
+        headless: ['boolean', false],
         managerPort: ['number', MANAGER_DEFAULT_PORT],
         managerHost: ['string', ''],
-        remotesEnabled: ['boolean', true],
+        remotesEnabled: ['boolean', false],
         remoteFramesPort: ['number', 5580],
         remoteChannelPort: ['number', 5581],
         remoteBeaconPort: ['number', 5579]
@@ -526,6 +549,10 @@ Glass.prototype.onStart = function () {
 
                 if (ScreenTimeout > 0) {
                     var startDisplayOnce = function () {
+                        // A player with no screen of its own serves remote displays and opens no window.
+                        if (self.config.get('headless') === true) {
+                            return;
+                        }
                         if (self.meterChild && self.meterChild.exitCode === null) {
                             return;
                         }
@@ -939,8 +966,13 @@ Glass.prototype.getUIConfig = function () {
             minmax[2] = [C('position_y').attributes[2].min, C('position_y').attributes[3].max, C('position_y').attributes[0].placeholder];
             var mouseSupport = String(meterConfig.sdl.env['mouse.enabled'] || 'True').toLowerCase() == 'true';
             C('mouseEnabled').value = mouseSupport;
-            C('displayOutput').value.value = self.config.get('displayOutput');
-            C('displayOutput').value.label = 'Display=' + self.config.get('displayOutput');
+            if (self.config.get('headless') === true) {
+                C('displayOutput').value.value = 'none';
+                C('displayOutput').value.label = self.commandRouter.getI18nString('GLASS.DISPLAY_OUTPUT_NONE');
+            } else {
+                C('displayOutput').value.value = self.config.get('displayOutput');
+                C('displayOutput').value.label = 'Display=' + self.config.get('displayOutput');
+            }
             var formatTypeMode = meterConfig.current['playinfo.type.mode'] || 'icon';
             if (formatTypeMode !== 'icon' && formatTypeMode !== 'text' && formatTypeMode !== 'both') {
                 formatTypeMode = 'icon';
@@ -1176,11 +1208,24 @@ Glass.prototype.saveDisplayConf = function (confData) {
     }
 
     // write display port (config.json + live switch)
-    if (self.config.get('displayOutput') != confData.displayOutput.value) {
-        self.config.set('displayOutput', confData.displayOutput.value);
-        var DispOut = parseInt(confData.displayOutput.value,10);
-        self.switch_DisplayPort(DispOut);
-        noChanges = false;
+    // The screen: one of the X displays, or none at all (a player that only serves remote displays).
+    var chosenDisplay = String((confData.displayOutput && confData.displayOutput.value) || '0');
+    if (chosenDisplay === 'none') {
+        if (self.config.get('headless') !== true) {
+            self.config.set('headless', true);
+            self.logger.info(id + 'display: none of its own, remote displays only');
+            noChanges = false;
+        }
+    } else {
+        if (self.config.get('headless') === true) {
+            self.config.set('headless', false);
+            noChanges = false;
+        }
+        if (String(self.config.get('displayOutput')) != chosenDisplay) {
+            self.config.set('displayOutput', chosenDisplay.replace(/[^0-9]/g, '') || '0');
+            self.switch_DisplayPort(parseInt(chosenDisplay, 10));
+            noChanges = false;
+        }
     }
 
     // write format / type display mode (like scrolling.mode: config.txt [current] only)
@@ -3078,16 +3123,68 @@ Glass.prototype.startRemotes = function () {
     self.logger.info(id + 'remotes: frames ' + ports.frames + ', channel ' + ports.channel + ', beacon ' + ports.beacon);
 };
 
+// Stop serving: the beacon, the daemon (told to leave, made to after two
+// seconds) and the channel's TCP listener. Resolves once the daemon has
+// left and the listener closed, so a start right after finds the ports free.
 Glass.prototype.stopRemotes = function () {
     var self = this;
     self.remotesStopping = true;
     if (self.beaconTimer) { clearInterval(self.beaconTimer); self.beaconTimer = null; }
     if (self.beaconSocket) { try { self.beaconSocket.close(); } catch (e) {} self.beaconSocket = null; }
-    if (self.serveChild) {
-        try { self.serveChild.kill('SIGTERM'); } catch (e) {}
-        self.serveChild = null;
-    }
     if (self.serveRestart) { clearTimeout(self.serveRestart); self.serveRestart = null; }
+    var waits = [];
+    var child = self.serveChild;
+    self.serveChild = null;
+    if (child) {
+        child.stopping = true;
+        waits.push(new Promise(function (resolve) {
+            var done = false;
+            var finish = function () { if (!done) { done = true; resolve(); } };
+            child.once('exit', finish);
+            var force = setTimeout(function () { try { child.kill('SIGKILL'); } catch (e) {} }, 2000);
+            child.once('exit', function () { clearTimeout(force); });
+            setTimeout(finish, 3000);
+            try { child.kill('SIGTERM'); } catch (e) { finish(); }
+        }));
+    }
+    if (self.channel) { waits.push(self.channel.unlistenTcp()); }
+    self.serveError = null;
+    try { if (fs.existsSync(REMOTE_SERVE_STATUS)) { fs.unlinkSync(REMOTE_SERVE_STATUS); } } catch (e) {}
+    return Promise.all(waits).then(function () {});
+};
+
+// The manager's remote settings: whether this player serves remotes, and the ports.
+Glass.prototype.remoteSettings = function () {
+    var ports = this.remotePorts();
+    return { enabled: ports.enabled, framesPort: ports.frames, channelPort: ports.channel, beaconPort: ports.beacon, managerPort: ports.manager };
+};
+
+Glass.prototype.setRemoteSettings = function (data) {
+    var self = this;
+    var now = self.remoteSettings();
+    var enabled = data.enabled === undefined ? now.enabled : (data.enabled === true || data.enabled === 'true');
+    var port = function (key, current) {
+        if (data[key] === undefined) { return current; }
+        var v = parseInt(data[key], 10);
+        return (v >= 1024 && v <= 65535) ? v : NaN;
+    };
+    var frames = port('framesPort', now.framesPort);
+    var channel = port('channelPort', now.channelPort);
+    var beacon = port('beaconPort', now.beaconPort);
+    if ([frames, channel, beacon].some(isNaN)) { return { error: 'GLASS.MANAGER_RM_PORTS_INVALID' }; }
+    var all = [frames, channel, beacon, now.managerPort];
+    if (new Set(all).size !== all.length) { return { error: 'GLASS.MANAGER_RM_PORTS_CLASH' }; }
+    var changed = enabled !== now.enabled || frames !== now.framesPort || channel !== now.channelPort || beacon !== now.beaconPort;
+    self.config.set('remotesEnabled', enabled);
+    self.config.set('remoteFramesPort', frames);
+    self.config.set('remoteChannelPort', channel);
+    self.config.set('remoteBeaconPort', beacon);
+    if (!changed) { return Promise.resolve({ ok: true, changed: false }); }
+    self.logger.info(id + 'remotes: settings ' + (enabled ? 'on' : 'off') + ' ' + frames + '/' + channel + '/' + beacon);
+    return self.stopRemotes().then(function () {
+        if (enabled) { self.startRemotes(); }
+        return { ok: true, changed: true };
+    });
 };
 
 // The frames daemon, restarted a few seconds after it leaves.
@@ -3109,16 +3206,27 @@ Glass.prototype.startServe = function () {
         return;
     }
     self.serveChild = child;
+    self.serveError = null;
+    var startedAt = Date.now();
     var say = function (chunk) {
         String(chunk).split('\n').forEach(function (line) { if (line.trim()) { self.logger.info(id + line.trim()); } });
     };
     child.stdout.on('data', say);
-    child.stderr.on('data', say);
+    child.stderr.on('data', function (chunk) {
+        say(chunk);
+        var last = String(chunk).trim().split('\n').pop();
+        if (last) { self.serveError = last.replace(/^glass-serve:\s*/, ''); }
+    });
     child.on('exit', function (code, signal) {
         if (self.serveChild === child) { self.serveChild = null; }
-        if (self.remotesStopping) { return; }
-        self.logger.warn(id + 'remotes: glass-serve left (' + (signal || code) + '), starting it again in 5 s');
-        self.serveRestart = setTimeout(function () { self.serveRestart = null; if (!self.remotesStopping) { self.startServe(); } }, 5000);
+        // A daemon told to leave is not one that died.
+        if (child.stopping || self.remotesStopping) { return; }
+        // A daemon that ran a while starts again at once; one that leaves at
+        // once (its port taken, say) is tried again later, later each time.
+        if (Date.now() - startedAt > 30000) { self.serveBackoff = 0; }
+        self.serveBackoff = Math.min((self.serveBackoff || 2500) * 2, 60000);
+        self.logger.warn(id + 'remotes: glass-serve left (' + (signal || code) + (self.serveError ? ', ' + self.serveError : '') + '), starting it again in ' + Math.round(self.serveBackoff / 1000) + ' s');
+        self.serveRestart = setTimeout(function () { self.serveRestart = null; if (!self.remotesStopping) { self.startServe(); } }, self.serveBackoff);
     });
 };
 
@@ -3182,6 +3290,11 @@ Glass.prototype.remoteInfo = function () {
         beacon: self.beacon(),
         serve: serve,
         serving: !!self.serveChild,
+        errors: {
+            serve: self.serveChild ? null : (self.serveError || null),
+            channel: self.channel ? (self.channel.tcpError || null) : null
+        },
+        headless: self.config.get('headless') === true,
         remotes: self.channel ? self.channel.remotes() : []
     };
 };
@@ -3704,6 +3817,7 @@ Glass.prototype.statusInfo = function () {
         binary: fs.existsSync(PluginPath + '/bin/' + arch + '/glass'),
         running: fs.existsSync(runFlag),
         display: String(self.config.get('displayOutput') || '0'),
+        headless: self.config.get('headless') === true,
         timeout: parseInt(self.config.get('timeout'), 10) || 0,
         activeTheme: self.activeTheme(),
         meter: self.meterSelection(),

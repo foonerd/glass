@@ -81,7 +81,7 @@
   },
   "remotesEnabled": {
     "type": "boolean",
-    "value": true
+    "value": false
   },
   "remoteFramesPort": {
     "type": "number",
@@ -94,5 +94,9 @@
   "remoteBeaconPort": {
     "type": "number",
     "value": 5579
+  },
+  "headless": {
+    "type": "boolean",
+    "value": false
   }
 }
