@@ -472,6 +472,14 @@
     "MANAGER_BK_DOWNLOAD": "Télécharger",
     "MANAGER_BK_UPLOAD": "Envoyer un zip de sauvegarde",
     "MANAGER_BK_UPLOADED": "Sauvegarde ajoutée :",
-    "MANAGER_ERR_BAD_BACKUP": "Le zip n'est pas une sauvegarde de réglages Glass."
+    "MANAGER_ERR_BAD_BACKUP": "Le zip n'est pas une sauvegarde de réglages Glass.",
+    "MANAGER_PORT": "Port du gestionnaire",
+    "MANAGER_PORT_DOC": "Le port sur lequel le gestionnaire écoute, 5582 sauf si un autre service de ce lecteur l'utilise. Un changement s'applique aussitôt : le gestionnaire passe sur le nouveau port et les boutons suivent.",
+    "MANAGER_HOST": "Adresse du gestionnaire",
+    "MANAGER_HOST_DOC": "Comment les navigateurs atteignent ce lecteur. Vide, le nom du lecteur avec .local est utilisé, que mDNS résout sur la plupart des réseaux. Saisissez l'adresse IP ou un nom d'hôte du lecteur quand les noms .local ne se résolvent pas sur le vôtre.",
+    "MANAGER_PORT_INVALID": "Le port du gestionnaire doit être un nombre de 1024 à 65535.",
+    "MANAGER_PORT_IN_USE": "Ce port est déjà utilisé par autre chose sur ce lecteur. Le gestionnaire reste sur le port",
+    "MANAGER_HOST_INVALID": "L'adresse du gestionnaire doit être un nom d'hôte ou une adresse IP, sans http:// ni port.",
+    "MANAGER_MOVED": "Le gestionnaire écoute maintenant sur le port"
   }
 }

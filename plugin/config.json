@@ -74,5 +74,9 @@
   "managerPort": {
     "type": "number",
     "value": 5582
+  },
+  "managerHost": {
+    "type": "string",
+    "value": ""
   }
 }

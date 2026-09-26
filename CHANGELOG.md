@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.5] - 2026-09-26
+
+The settings page sets the manager's port and address. A new port is taken at once, the manager moves and the buttons follow; a port something else holds is refused with a message and the old one stays, and a manager that finds its port taken at start says so. The address is what the buttons and the status page name: empty is the player's name with `.local`, or an IP address or host name for networks where `.local` names do not resolve.
+
 ## [0.6.4] - 2026-09-26
 
 A settings backup downloads from the manager as a zip, and a zip uploads as a backup: its manifest and files are checked the way a restore checks them before it lands, under its own name or a numbered one when taken. Settings move from one player to another this way.
