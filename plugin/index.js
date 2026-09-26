@@ -2694,8 +2694,9 @@ Glass.prototype.listSettingsBackups = function () {
 // A backup by name: config.json, the meter and the spectrum configuration
 // under a named directory with a manifest. Results carry an error code
 // that is a string of the plugin's, so the manager's page can say it.
-Glass.prototype.backupCreate = function (name) {
+Glass.prototype.backupCreate = function (name, options) {
     var self = this;
+    options = options || {};
     try {
         var backupName = String(name === undefined || name === null ? '' : name).trim();
         if (!backupName) { return { error: 'GLASS.BACKUP_NAME_REQUIRED' }; }
@@ -2735,12 +2736,44 @@ Glass.prototype.backupCreate = function (name) {
             name: backupName,
             files: ['config.json', PeppyConfBackupName, SpectrumConfBackupName]
         };
+        if (options.automatic) { manifest.automatic = true; }
         fs.writeFileSync(targetDir + '/' + BackupManifestName, JSON.stringify(manifest, null, 2));
         self.logger.info(id + 'backupCreate: created backup "' + backupName + '"');
         return { ok: true, name: backupName, warn: self.listSettingsBackups().length >= BackupWarnCount ? 'GLASS.BACKUP_COUNT_WARN' : null };
     } catch (e) {
         self.logger.error(id + 'backupCreate: ' + e.message);
         return { error: 'GLASS.BACKUP_CREATE_FAILED', message: e.message };
+    }
+};
+
+// The backups an upgrade writes on its own accumulate one per upgrade or
+// rollback; the newest `keep` stay and the rest go. A backup counts as
+// automatic by its manifest, or by the `before-<version>` name the
+// upgrades gave them before the manifest said so. Named backups are
+// never touched.
+Glass.prototype.backupPruneAutomatic = function (keep) {
+    var self = this;
+    var removed = [];
+    try {
+        var automatic = self.listSettingsBackups().filter(function (b) {
+            try {
+                var manifest = JSON.parse(fs.readFileSync(b.path + '/' + BackupManifestName, 'utf8'));
+                return manifest.automatic === true || /^before-\d+\.\d+\.\d+(-\d{8}-\d{6})?$/.test(b.name);
+            } catch (e) {
+                return false;
+            }
+        });
+        automatic.slice(Math.max(0, keep)).forEach(function (b) {
+            var found = self.backupDir(b.name);
+            if (found.error) { return; }
+            fs.removeSync(found.dir);
+            removed.push(b.name);
+        });
+        if (removed.length) { self.logger.info(id + 'backups: pruned automatic backups ' + removed.join(', ')); }
+        return { ok: true, removed: removed };
+    } catch (e) {
+        self.logger.warn(id + 'backups: prune: ' + e.message);
+        return { error: 'GLASS.BACKUP_DELETE_FAILED', message: e.message, removed: removed };
     }
 };
 
