@@ -330,7 +330,7 @@
     "MANAGER_CONF": "Glass Manager",
     "MANAGER_DESC": "Themes, der Katalog, Artwork, Sicherungen und der Status der Anzeige werden im Glass Manager verwaltet, einer Seite, die das Plugin auf einem eigenen Port bereitstellt.",
     "MANAGER_OPEN": "Manager hier öffnen",
-    "MANAGER_OPEN_DOC": "Öffnet den Manager in diesem Fenster.",
+    "MANAGER_OPEN_DOC": "Öffnet den Manager in diesem Fenster, innerhalb der Volumio-Seite.",
     "MANAGER_OPEN_TAB": "Manager in neuem Tab öffnen",
     "MANAGER_OPEN_TAB_DOC": "Öffnet den Manager in einem eigenen Browser-Tab. Seine Adresse:",
     "THEMES_CONF": "Theme",

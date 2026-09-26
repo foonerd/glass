@@ -1074,6 +1074,56 @@
     setTimeout(tick, 1000);
   }
 
+  // ---- the kiosk's keyboard ----------------------------------------------
+  // Inside Volumio's page on the player's own display, text is typed on
+  // Volumio's on-screen keyboard: the page tells the parent when an input
+  // takes focus and takes the keystrokes the parent relays back.
+  if (window.parent !== window) {
+    var kbInput = null;
+    var kbRelay = false;
+    var kbHide = null;
+    var kbStyle = document.createElement('style');
+    kbStyle.textContent = '.volumio-keyboard-focused { outline: 2px solid var(--accent) !important; outline-offset: -2px !important; }';
+    document.head.appendChild(kbStyle);
+    var kbTell = function (action) {
+      try { window.parent.postMessage({ type: 'volumio-input-focus', action: action }, '*'); } catch (e) {}
+    };
+    document.addEventListener('focusin', function (e) {
+      if (!e.target.matches('input[type=text], input[type=search], input[type=number], textarea')) return;
+      kbInput = e.target;
+      kbRelay = true;
+      e.target.classList.add('volumio-keyboard-focused');
+      if (kbHide) { clearTimeout(kbHide); kbHide = null; }
+      kbTell('show-keyboard');
+    }, true);
+    document.addEventListener('focusout', function (e) {
+      if (!e.target.matches('input, textarea') || kbRelay) return;
+      kbHide = setTimeout(function () {
+        kbInput = null;
+        e.target.classList.remove('volumio-keyboard-focused');
+        kbTell('hide-keyboard');
+        kbHide = null;
+      }, 300);
+    }, true);
+    document.addEventListener('click', function (e) {
+      if (!kbRelay || e.target.matches('input, textarea')) return;
+      kbRelay = false;
+      if (kbInput) { kbInput.classList.remove('volumio-keyboard-focused'); kbInput = null; }
+      kbTell('hide-keyboard');
+    }, true);
+    window.addEventListener('message', function (e) {
+      if (!e.data || e.data.type !== 'volumio-keystroke' || e.data.action !== 'input' || !kbInput) return;
+      var input = kbInput;
+      var at = input.selectionStart || 0;
+      var text = input.value || '';
+      var typed = String(e.data.value || '');
+      input.value = text.substring(0, at) + typed + text.substring(at);
+      try { input.setSelectionRange(at + typed.length, at + typed.length); } catch (err) {}
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+      input.classList.add('volumio-keyboard-focused');
+    }, false);
+  }
+
   // ---- start ------------------------------------------------------------
   if (window.parent === window) {
     $('btn-close').classList.remove('hidden');

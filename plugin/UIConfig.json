@@ -73,8 +73,10 @@
           "label": "TRANSLATE.GLASS.MANAGER_OPEN",
           "doc": "TRANSLATE.GLASS.MANAGER_OPEN_DOC",
           "onClick": {
-            "type": "openUrl",
-            "url": ""
+            "type": "oauth",
+            "plugin": "glass",
+            "performerUrl": "",
+            "scopes": []
           }
         },
         {

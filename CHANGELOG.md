@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.6] - 2026-09-26
+
+"Open the manager here" opens the manager in this window, inside Volumio's own page with its title bar and way back, instead of a new tab; on the player's own display a new tab had no way to close. Volumio's interface opens every link button in a new tab, so the button now goes through the one button type the interface navigates in place. Inside Volumio's page the manager's inputs take the kiosk's on-screen keyboard, the way the radio plugin's page does.
+
 ## [0.6.5] - 2026-09-26
 
 The settings page sets the manager's port and address. A new port is taken at once, the manager moves and the buttons follow; a port something else holds is refused with a message and the old one stays, and a manager that finds its port taken at start says so. The address is what the buttons and the status page name: empty is the player's name with `.local`, or an IP address or host name for networks where `.local` names do not resolve.
