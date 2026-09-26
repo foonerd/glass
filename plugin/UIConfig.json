@@ -22,6 +22,36 @@
       "content": []
     },
     {
+      "id": "manager_conf",
+      "element": "section",
+      "label": "TRANSLATE.GLASS.MANAGER_CONF",
+      "description": "TRANSLATE.GLASS.MANAGER_DESC",
+      "icon": "fa-th-large",
+      "hidden": false,
+      "content": [
+        {
+          "id": "managerOpen",
+          "element": "button",
+          "label": "TRANSLATE.GLASS.MANAGER_OPEN",
+          "doc": "TRANSLATE.GLASS.MANAGER_OPEN_DOC",
+          "onClick": {
+            "type": "openUrl",
+            "url": ""
+          }
+        },
+        {
+          "id": "managerOpenTab",
+          "element": "button",
+          "label": "TRANSLATE.GLASS.MANAGER_OPEN_TAB",
+          "doc": "TRANSLATE.GLASS.MANAGER_OPEN_TAB_DOC",
+          "onClick": {
+            "type": "openUrl",
+            "url": ""
+          }
+        }
+      ]
+    },
+    {
       "id": "display_conf",
       "element": "section",
       "label": "TRANSLATE.GLASS.DISPLAY_CONF",
@@ -196,8 +226,8 @@
     {
       "id": "theme_gallery_conf",
       "element": "section",
-      "label": "TRANSLATE.GLASS.THEMES_ARTWORK_CONF",
-      "description": "TRANSLATE.GLASS.THEMES_ARTWORK_DESC",
+      "label": "TRANSLATE.GLASS.THEMES_CONF",
+      "description": "TRANSLATE.GLASS.THEMES_DESC",
       "icon": "fa-picture-o",
       "hidden": false,
       "onSave": {
@@ -210,16 +240,7 @@
         "data": [
           "activeFolder",
           "themeTagRules",
-          "themeToRemove",
-          "doNotDeleteThemes",
-          "fanartEnabled",
-          "fanartKeyMode",
-          "fanart_personal_key",
-          "fanartInterval",
-          "fanartOrder",
-          "fanartTransition",
-          "fanartTransitionMs",
-          "fanartUnlimitedImages"
+          "doNotDeleteThemes"
         ]
       },
       "content": [
@@ -267,195 +288,11 @@
           ]
         },
         {
-          "id": "themeToRemove",
-          "element": "select",
-          "doc": "TRANSLATE.GLASS.THEME_REMOVE_DOC",
-          "label": "TRANSLATE.GLASS.THEME_REMOVE_LABEL",
-          "value": {
-            "value": "",
-            "label": ""
-          },
-          "options": []
-        },
-        {
           "id": "doNotDeleteThemes",
           "element": "switch",
           "doc": "TRANSLATE.GLASS.DO_NOT_DELETE_THEMES_DOC",
           "label": "TRANSLATE.GLASS.DO_NOT_DELETE_THEMES",
           "value": false
-        },
-        {
-          "id": "fanartEnabled",
-          "element": "switch",
-          "doc": "TRANSLATE.GLASS.FANART_ENABLE_DOC",
-          "label": "TRANSLATE.GLASS.FANART_ENABLE_LABEL",
-          "value": false
-        },
-        {
-          "id": "fanartKeyMode",
-          "element": "select",
-          "visibleIf": {
-            "field": "fanartEnabled",
-            "value": true
-          },
-          "doc": "TRANSLATE.GLASS.FANART_KEY_MODE_DOC",
-          "label": "TRANSLATE.GLASS.FANART_KEY_MODE_LABEL",
-          "value": {
-            "value": "personal",
-            "label": "TRANSLATE.GLASS.FANART_KEY_MODE_PERSONAL"
-          },
-          "options": [
-            {
-              "value": "personal",
-              "label": "TRANSLATE.GLASS.FANART_KEY_MODE_PERSONAL"
-            },
-            {
-              "value": "project",
-              "label": "TRANSLATE.GLASS.FANART_KEY_MODE_PROJECT"
-            }
-          ]
-        },
-        {
-          "id": "fanart_personal_key",
-          "element": "input",
-          "type": "text",
-          "visibleIf": {
-            "field": "fanartEnabled",
-            "value": true
-          },
-          "doc": "TRANSLATE.GLASS.FANART_KEY_DOC",
-          "label": "TRANSLATE.GLASS.FANART_KEY_LABEL",
-          "value": ""
-        },
-        {
-          "id": "fanartInterval",
-          "element": "input",
-          "type": "number",
-          "visibleIf": {
-            "field": "fanartEnabled",
-            "value": true
-          },
-          "doc": "TRANSLATE.GLASS.FANART_INTERVAL_DOC",
-          "label": "TRANSLATE.GLASS.FANART_INTERVAL_LABEL",
-          "attributes": [
-            {
-              "placeholder": 0
-            },
-            {
-              "maxlength": 4
-            },
-            {
-              "min": 0
-            },
-            {
-              "max": 3600
-            }
-          ],
-          "value": 0
-        },
-        {
-          "id": "fanartOrder",
-          "element": "select",
-          "visibleIf": {
-            "field": "fanartEnabled",
-            "value": true
-          },
-          "doc": "TRANSLATE.GLASS.FANART_ORDER_DOC",
-          "label": "TRANSLATE.GLASS.FANART_ORDER_LABEL",
-          "value": {
-            "value": "sequential",
-            "label": "TRANSLATE.GLASS.FANART_ORDER_SEQUENTIAL"
-          },
-          "options": [
-            {
-              "value": "sequential",
-              "label": "TRANSLATE.GLASS.FANART_ORDER_SEQUENTIAL"
-            },
-            {
-              "value": "random",
-              "label": "TRANSLATE.GLASS.FANART_ORDER_RANDOM"
-            }
-          ]
-        },
-        {
-          "id": "fanartTransition",
-          "element": "select",
-          "visibleIf": {
-            "field": "fanartEnabled",
-            "value": true
-          },
-          "doc": "TRANSLATE.GLASS.FANART_TRANSITION_DOC",
-          "label": "TRANSLATE.GLASS.FANART_TRANSITION_LABEL",
-          "value": {
-            "value": "none",
-            "label": "TRANSLATE.GLASS.FANART_TRANSITION_NONE"
-          },
-          "options": [
-            {
-              "value": "none",
-              "label": "TRANSLATE.GLASS.FANART_TRANSITION_NONE"
-            },
-            {
-              "value": "fade",
-              "label": "TRANSLATE.GLASS.FANART_TRANSITION_FADE"
-            },
-            {
-              "value": "merge",
-              "label": "TRANSLATE.GLASS.FANART_TRANSITION_MERGE"
-            }
-          ]
-        },
-        {
-          "id": "fanartTransitionMs",
-          "element": "input",
-          "type": "number",
-          "visibleIf": {
-            "field": "fanartEnabled",
-            "value": true
-          },
-          "doc": "TRANSLATE.GLASS.FANART_TRANSITION_MS_DOC",
-          "label": "TRANSLATE.GLASS.FANART_TRANSITION_MS_LABEL",
-          "attributes": [
-            {
-              "placeholder": 600
-            },
-            {
-              "maxlength": 4
-            },
-            {
-              "min": 50
-            },
-            {
-              "max": 3000
-            }
-          ],
-          "value": 600
-        },
-        {
-          "id": "fanartUnlimitedImages",
-          "element": "switch",
-          "visibleIf": {
-            "field": "fanartEnabled",
-            "value": true
-          },
-          "doc": "TRANSLATE.GLASS.FANART_UNLIMITED_DOC",
-          "label": "TRANSLATE.GLASS.FANART_UNLIMITED_LABEL",
-          "value": false
-        },
-        {
-          "id": "clearFanartCache",
-          "element": "button",
-          "visibleIf": {
-            "field": "fanartEnabled",
-            "value": true
-          },
-          "doc": "TRANSLATE.GLASS.CLEAR_FANART_CACHE_DOC",
-          "label": "TRANSLATE.GLASS.CLEAR_FANART_CACHE",
-          "onClick": {
-            "type": "controller",
-            "endpoint": "user_interface/glass",
-            "method": "clearFanartCache"
-          }
         }
       ]
     },
@@ -1192,115 +1029,6 @@
             {
               "value": "queue",
               "label": "TRANSLATE.GLASS.QUEUE_MODE_QUEUE"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "backup_create_conf",
-      "element": "section",
-      "label": "TRANSLATE.GLASS.BACKUP_SECTION_CREATE",
-      "description": "TRANSLATE.GLASS.BACKUP_DESC",
-      "icon": "fa-save",
-      "hidden": false,
-      "onSave": {
-        "type": "controller",
-        "endpoint": "user_interface/glass",
-        "method": "createSettingsBackup"
-      },
-      "saveButton": {
-        "label": "TRANSLATE.GLASS.BACKUP_CREATE",
-        "data": [
-          "backupName"
-        ]
-      },
-      "content": [
-        {
-          "id": "backupInfo",
-          "element": "section",
-          "label": "",
-          "description": "TRANSLATE.GLASS.BACKUP_INFO"
-        },
-        {
-          "id": "backupName",
-          "element": "input",
-          "type": "string",
-          "doc": "TRANSLATE.GLASS.BACKUP_NAME_DOC",
-          "label": "TRANSLATE.GLASS.BACKUP_NAME",
-          "value": ""
-        }
-      ]
-    },
-    {
-      "id": "backup_restore_conf",
-      "element": "section",
-      "label": "TRANSLATE.GLASS.BACKUP_SECTION_RESTORE",
-      "description": "TRANSLATE.GLASS.BACKUP_SECTION_RESTORE_DESC",
-      "icon": "fa-undo",
-      "hidden": false,
-      "onSave": {
-        "type": "controller",
-        "endpoint": "user_interface/glass",
-        "method": "restoreSettingsBackup"
-      },
-      "saveButton": {
-        "label": "TRANSLATE.GLASS.BACKUP_RESTORE",
-        "data": [
-          "selectedBackup"
-        ]
-      },
-      "content": [
-        {
-          "id": "selectedBackup",
-          "element": "select",
-          "doc": "TRANSLATE.GLASS.BACKUP_SELECTED_DOC",
-          "label": "TRANSLATE.GLASS.BACKUP_SELECTED",
-          "value": {
-            "value": "",
-            "label": "TRANSLATE.GLASS.BACKUP_NONE_YET"
-          },
-          "options": [
-            {
-              "value": "",
-              "label": "TRANSLATE.GLASS.BACKUP_NONE_YET"
-            }
-          ]
-        }
-      ]
-    },
-    {
-      "id": "backup_delete_conf",
-      "element": "section",
-      "label": "TRANSLATE.GLASS.BACKUP_SECTION_DELETE",
-      "description": "TRANSLATE.GLASS.BACKUP_SECTION_DELETE_DESC",
-      "icon": "fa-trash",
-      "hidden": false,
-      "onSave": {
-        "type": "controller",
-        "endpoint": "user_interface/glass",
-        "method": "deleteSettingsBackup"
-      },
-      "saveButton": {
-        "label": "TRANSLATE.GLASS.BACKUP_DELETE",
-        "data": [
-          "selectedBackupDelete"
-        ]
-      },
-      "content": [
-        {
-          "id": "selectedBackupDelete",
-          "element": "select",
-          "doc": "TRANSLATE.GLASS.BACKUP_SELECTED_DOC",
-          "label": "TRANSLATE.GLASS.BACKUP_SELECTED",
-          "value": {
-            "value": "",
-            "label": "TRANSLATE.GLASS.BACKUP_NONE_YET"
-          },
-          "options": [
-            {
-              "value": "",
-              "label": "TRANSLATE.GLASS.BACKUP_NONE_YET"
             }
           ]
         }

@@ -70,5 +70,9 @@
   "legacyImported": {
     "type": "boolean",
     "value": false
+  },
+  "managerPort": {
+    "type": "number",
+    "value": 5582
   }
 }

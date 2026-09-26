@@ -276,6 +276,7 @@ fn main() -> ExitCode {
     let mut overrides = Overrides::default();
     let mut list = false;
     let mut snapshot: Option<String> = None;
+    let mut thumb: Option<u32> = None;
     let mut settle_s: f32 = 4.0;
     let mut threads: Option<usize> = None;
     let mut args = env::args().skip(1);
@@ -347,12 +348,19 @@ fn main() -> ExitCode {
                     return ExitCode::from(2);
                 }
             },
+            "--thumb" => match args.next().and_then(|s| s.parse::<u32>().ok()) {
+                Some(width) => thumb = Some(width.clamp(16, 4096)),
+                None => {
+                    eprintln!("glass: --thumb needs a width in pixels");
+                    return ExitCode::from(2);
+                }
+            },
             "--list" => list = true,
             "--help" => {
                 println!(
                     "glass [--once] [--headless] [--print] [--output frame.png|frame.ppm] [--record step.json]\n      \
                      [--theme FOLDER] [--meter NAME|random|a,b,c] [--interval SECONDS] [--fps N] [--threads N]\n      \
-                     [--list] [--snapshot DIR [--settle SECONDS]]\n\
+                     [--list] [--snapshot DIR [--settle SECONDS] [--thumb WIDTH]]\n\
                      Reads the tap's ring under /dev/shm and the player's state.\n\
                      A window opens when DISPLAY is set. --headless skips it.\n\
                      --output writes every frame as a PNG or PPM and still rasters.\n\
@@ -361,7 +369,8 @@ fn main() -> ExitCode {
                      --threads N paints every frame on N threads; by default a frame takes from one thread up to one a core as it needs.\n\
                      --list prints the installed themes and their meters.\n\
                      --snapshot shows each meter of the theme (or of the --meter list) for --settle seconds\n\
-                     and writes DIR/<theme>/<meter>.png, then leaves."
+                     and writes DIR/<theme>/<meter>.png, then leaves.\n\
+                     --thumb writes DIR/<theme>/<meter>.thumb.png beside each snapshot, WIDTH pixels wide."
                 );
                 return ExitCode::SUCCESS;
             }
@@ -577,10 +586,22 @@ fn main() -> ExitCode {
                         .unwrap_or_else(|| "theme".into());
                     let folder = std::path::Path::new(dir).join(theme);
                     let _ = std::fs::create_dir_all(&folder);
-                    let file = folder.join(format!("{}.png", skin.name.replace('/', "_")));
+                    let stem = skin.name.replace('/', "_");
+                    let file = folder.join(format!("{stem}.png"));
                     match write_png(&file, frame) {
                         Ok(()) => println!("glass: snapshot {}", file.display()),
                         Err(err) => eprintln!("glass: snapshot {}: {err}", file.display()),
+                    }
+                    // The thumbnail keeps the frame's shape at the asked width.
+                    if let Some(width) = thumb {
+                        let height = (u64::from(frame.height) * u64::from(width)
+                            / u64::from(frame.width.max(1)))
+                        .max(1) as u32;
+                        let small = fit_art(frame, width, height);
+                        let file = folder.join(format!("{stem}.thumb.png"));
+                        if let Err(err) = write_png(&file, &small) {
+                            eprintln!("glass: thumbnail {}: {err}", file.display());
+                        }
                     }
                 }
                 snapshot_index += 1;
