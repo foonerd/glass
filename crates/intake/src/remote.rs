@@ -26,6 +26,9 @@ pub const DEFAULT_PLAYER_PORT: u16 = 3000;
 const SUBSCRIBE_EVERY: Duration = Duration::from_secs(5);
 /// No frame for this long is silence, as a ring gone quiet is.
 const QUIET: Duration = Duration::from_millis(500);
+/// Stamps further apart than this are not in order, or a stream started
+/// again; the packet's own count stands in then.
+const MAX_GAP_NS: u64 = 2_000_000_000;
 const DATAGRAM_MAX: usize = 8192;
 
 /// The frames as they arrive from the player, merged between two looks.
@@ -36,6 +39,9 @@ pub struct NetHops {
     subscribed_at: Option<Instant>,
     last_seq: Option<u32>,
     last_packet_at: Option<Instant>,
+    /// The player's stamp on the last packet: the next one's elapsed
+    /// frames are the time between them at the stream's rate.
+    last_time_ns: Option<u64>,
     rate: u32,
     buffer: Vec<u8>,
     /// Datagrams received and refused, for the log.
@@ -71,6 +77,7 @@ impl NetHops {
             subscribed_at: None,
             last_seq: None,
             last_packet_at: None,
+            last_time_ns: None,
             rate: 0,
             buffer: vec![0u8; DATAGRAM_MAX],
             received: 0,
@@ -126,9 +133,31 @@ impl Hops for NetHops {
                                 continue;
                             }
                             self.last_seq = Some(packet.seq);
+                            // The frames elapsed since the last packet: the time between
+                            // the player's stamps at the stream's rate, which spans dropped
+                            // datagrams too; the packet's own count for the first one, or
+                            // when the stamps are not in order.
+                            let by_stamp = self
+                                .last_time_ns
+                                .map(|last| packet.time_ns.saturating_sub(last))
+                                .filter(|ns| (1..=MAX_GAP_NS).contains(ns))
+                                .map(|ns| {
+                                    ns.saturating_mul(u64::from(packet.rate)) / 1_000_000_000
+                                });
+                            let in_hop = by_stamp.unwrap_or(u64::from(packet.frames)).max(1);
+                            self.last_time_ns = Some(packet.time_ns);
+                            // A frame of silence, the daemon's word that the ring went quiet or a
+                            // hop with nothing in it: the levels fall the way they fall at a stop.
+                            let silent = packet.peak.iter().all(|p| *p <= 0.0)
+                                && packet.rms.iter().all(|r| *r <= 0.0)
+                                && packet.bins.iter().all(|b| *b == 0);
+                            if silent {
+                                self.last_packet_at = None;
+                                continue;
+                            }
                             self.last_packet_at = Some(Instant::now());
                             self.rate = packet.rate;
-                            elapsed += packet.frames as u64;
+                            elapsed += in_hop;
                             let mut frame = packet.frame();
                             if self.gain != 1.0 {
                                 scale_frame(&mut frame, self.gain);
@@ -910,6 +939,74 @@ mod tests {
         assert_eq!(hops.received, 4);
         thread::sleep(Duration::from_millis(600));
         assert!(hops.take().quiet, "no frame for half a second is silence");
+    }
+
+    #[test]
+    fn elapsed_frames_follow_the_players_stamps_and_silence_is_a_stop() {
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let server_addr = server.local_addr().unwrap();
+        server
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        let mut hops = NetHops::new(server_addr, "t", "Test", "0.7.4").unwrap();
+        let _ = hops.take();
+        let mut buf = [0u8; 2048];
+        let (_, client) = server.recv_from(&mut buf).unwrap();
+        // A daemon of an earlier release put the ring's running count on the
+        // wire, capped at 65535: the stamps say what really passed.
+        let mut one = Frame {
+            seq: 1,
+            time_ns: 1_000_000_000,
+            frames: 65535,
+            peak: [0.5, 0.5],
+            rms: [0.3, 0.3],
+            spectrum: [vec![0.5; 4], vec![0.5; 4]],
+        };
+        server
+            .send_to(&wire::encode(&one, 48000, 2, 0), client)
+            .unwrap();
+        thread::sleep(Duration::from_millis(30));
+        let (_, _, elapsed) = hops.take().hop.expect("the first packet");
+        assert_eq!(elapsed, 65535, "the first packet has only its own count");
+        one.seq = 2;
+        one.time_ns += 20_000_000;
+        server
+            .send_to(&wire::encode(&one, 48000, 2, 0), client)
+            .unwrap();
+        thread::sleep(Duration::from_millis(30));
+        let (_, _, elapsed) = hops.take().hop.expect("the second packet");
+        assert_eq!(
+            elapsed, 960,
+            "twenty milliseconds at 48 kHz, whatever the count says"
+        );
+        // Silence from the daemon: no hop, and quiet at once.
+        let silence = Frame {
+            seq: 3,
+            time_ns: one.time_ns + 500_000_000,
+            spectrum: [vec![0.0; 4], vec![0.0; 4]],
+            ..Default::default()
+        };
+        server
+            .send_to(&wire::encode(&silence, 48000, 2, 0), client)
+            .unwrap();
+        thread::sleep(Duration::from_millis(30));
+        let taken = hops.take();
+        assert!(taken.hop.is_none() && taken.quiet, "silence is a stop");
+        // Sound again after the pause: the stamps are in order, so the gap
+        // since the silence frame's stamp counts.
+        one.seq = 4;
+        one.time_ns += 1_000_000_000;
+        server
+            .send_to(&wire::encode(&one, 48000, 2, 0), client)
+            .unwrap();
+        thread::sleep(Duration::from_millis(30));
+        let taken = hops.take();
+        let (_, _, elapsed) = taken.hop.expect("sound again");
+        assert!(!taken.quiet);
+        assert_eq!(
+            elapsed, 24000,
+            "half a second at 48 kHz since the silence frame"
+        );
     }
 
     #[test]
