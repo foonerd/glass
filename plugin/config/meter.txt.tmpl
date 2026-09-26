@@ -1,0 +1,123 @@
+[current]
+meter = random
+random.meter.interval = 60
+base.folder = /data/INTERNAL/glass/templates
+meter.folder = 800x480
+screen.width = 
+screen.height = 
+exit.on.touch = True
+stop.display.on.touch = True
+output.display = True
+output.serial = False
+output.i2c = False
+output.pwm = False
+output.http = False
+use.logging = False
+use.cache = True
+cache.size = 20
+frame.rate = 30
+random.change.title = True
+color.depth = 24
+position.type = center
+position.x = 0
+position.y = 0
+start.animation = True
+font.path = /volumio/http/www3/app/themes/volumio3/assets/variants/volumio/fonts
+font.light = /Lato-Light.ttf
+font.regular = /Lato-Regular.ttf
+font.bold = /Lato-Bold.ttf
+use.system.fonts = False
+playinfo.type.mode = icon
+rotation.quality = custom
+reel.direction = ccw
+rotation.fps = 25
+rotation.speed = 2
+spool.left.speed = 1
+spool.right.speed = 1
+spool.adaptive = true
+scrolling.mode = custom
+scrolling.speed.artist = 10
+scrolling.speed.title = 8
+scrolling.speed.album = 8
+queue.mode = track
+remote.server.enabled = true
+remote.server.mode = server_local
+remote.server.port = 5580
+remote.discovery.port = 5579
+remote.spectrum.port = 5581
+remote.spectrum.always = true
+remote.config.sync.interval = 1
+debug.level = trace
+debug.trace.meters = true
+debug.trace.spectrum = false
+debug.trace.vinyl = false
+debug.trace.reel.left = false
+debug.trace.reel.right = false
+debug.trace.tonearm = false
+debug.trace.albumart = false
+debug.trace.scrolling = false
+debug.trace.volume = false
+debug.trace.mute = false
+debug.trace.shuffle = false
+debug.trace.repeat = false
+debug.trace.playstate = false
+debug.trace.progress = false
+debug.trace.metadata = true
+debug.trace.seek = false
+debug.trace.time = false
+debug.trace.init = true
+debug.trace.fade = false
+debug.trace.frame = false
+debug.trace.remote = false
+debug.trace.remote.packets = false
+
+[sdl.env]
+framebuffer.device = /dev/fb0
+mouse.device = /dev/input/event0
+mouse.driver = TSLIB
+mouse.enabled = True
+video.driver = x11
+video.display = :0
+double.buffer = True
+no.frame = True
+
+[serial.interface]
+device.name = /dev/serial0
+baud.rate = 9600
+include.time = False
+update.period = 0.1
+
+[i2c.interface]
+port = 1
+left.channel.address = 0x21
+right.channel.address = 0x20
+output.size = 10
+update.period = 0.1
+
+[pwm.interface]
+frequency = 500
+gpio.pin.left = 24
+gpio.pin.right = 25
+update.period = 0.1
+
+[http.interface]
+target.url = http://localhost:8000/vumeter
+update.period = 0.033
+
+[web.server]
+http.port = 8001
+
+[data.source]
+type = pipe
+polling.interval = 0.04
+pipe.name = /tmp/myfifo
+volume.constant = 80.0
+volume.min = 0.0
+volume.max = 100.0
+volume.max.in.pipe = 100.0
+volume.gain.db = 0
+volume.gain.db.source = 
+step = 6
+mono.algorithm = average
+stereo.algorithm = new
+smooth.buffer.size = 2

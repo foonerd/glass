@@ -1,0 +1,112 @@
+#------ Glass section (x64) -------
+#
+# x64 version: Meter NOT inline with main audio path.
+# Reason: volumioswitch uses mmap which meter plugin cannot handle.
+# Solution: Main audio bypasses meter, Spotify duplicates to Loopback for meter.
+# Requires: snd_aloop module loaded (modprobe snd_aloop index=6 pcm_substreams=2)
+#
+
+# ---> pass through audio pipeline
+# if separate alsa pipeline enabled (DSD direct)
+pcm.${alsaDirect} {
+  type empty
+  slave.pcm "postglass"
+}
+
+# ---> input from modular alsa
+# x64: Empty passthrough - meter data comes from separate MPD output
+pcm.${alsaMeter} {
+  type empty
+  slave.pcm "postglass"
+}
+
+# ---> input from exclusive MPD output for peppyalsa
+# This receives audio from mpd_custom.conf output
+pcm.mpd_peppyalsa {
+  type meter
+  slave.pcm "hw:Loopback"
+  scopes.0 peppyalsa
+}
+
+# ---> separate airplay input
+# x64: Empty passthrough to avoid mmap issues
+pcm.airplay {
+  type empty
+  slave.pcm "postglass"
+}
+
+# ---> separate spotify input
+pcm.${spotDirect} {
+  type empty
+  slave.pcm "postglass"
+}
+
+# spotify with meter using multi/duplicate pattern
+# main audio to postglass, duplicate to Loopback for meter
+# Loopback has flexible buffer negotiation unlike hw:Dummy
+pcm.${spotMeter} {
+  type plug
+  route_policy "duplicate"
+  slave {
+    pcm {
+      type multi
+
+      slaves.a.pcm "postglass"
+      slaves.a.channels 2
+      slaves.b.pcm "spd_peppyalsa"
+      slaves.b.channels 2
+
+      bindings.0 { slave a; channel 0; }
+      bindings.1 { slave a; channel 1; }
+      bindings.2 { slave b; channel 0; }
+      bindings.3 { slave b; channel 1; }
+    }
+    rate 44100
+    format S16_LE
+    channels 4
+  }
+}
+
+# spotify meter to Loopback - snd_aloop has flexible buffer params
+pcm.spd_peppyalsa {
+  type meter
+  slave.pcm "hw:Loopback"
+  scopes.0 peppyalsa
+}
+
+# standard scope
+pcm_scope.peppyalsa {
+  type peppyalsa
+  decay_ms 500
+  meter "/tmp/myfifo"
+  meter_max 100
+  meter_show 0
+  spectrum "/tmp/myfifosa"
+  spectrum_max 100
+  spectrum_size 20
+  logarithmic_frequency 1
+  logarithmic_amplitude 1
+  smoothing_factor 40
+}
+
+pcm_scope_type.peppyalsa {
+  lib /data/plugins/user_interface/glass/lib/libpeppyalsa.so
+}
+
+# dummy kept for MPD output compatibility
+pcm.dummy {
+  type hw
+  card Dummy
+}
+
+# needed for some sound cards otherwise Spotify stops playing after 10 seconds
+pcm.copy_output {
+  type ${type}
+  slave.pcm "postglass"
+}
+
+pcm.postglass {
+  type empty
+  slave.pcm "postGlass"
+}
+#------ End of Glass section ------

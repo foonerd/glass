@@ -22,9 +22,20 @@ pub const DEFAULT_FRAME_RATE: u32 = 30;
 pub const MIN_FRAME_RATE: u32 = 10;
 pub const MAX_FRAME_RATE: u32 = 60;
 
-/// Plugin `config.txt`. The UI writes `frame.rate` into `[current]`.
-pub const CONFIG_TXT: &str =
-    "/data/plugins/user_interface/peppy_screensaver/screensaver/peppymeter/config.txt";
+/// The environment variable that names the plugin's home directory.
+pub const HOME_VAR: &str = "GLASS_HOME";
+/// Where the plugin lives when `GLASS_HOME` is not set.
+pub const DEFAULT_HOME: &str = "/data/plugins/user_interface/glass";
+/// The meter configuration under the home: `[current]` names the theme,
+/// the meter, the rotation and the frame rate.
+pub const METER_CONFIG: &str = "config/meter.txt";
+/// The spectrum configuration beside it.
+pub const SPECTRUM_CONFIG: &str = "config/spectrum.txt";
+
+/// The plugin's home directory: `GLASS_HOME`, or the default.
+pub fn home() -> std::path::PathBuf {
+    std::env::var_os(HOME_VAR).map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(DEFAULT_HOME))
+}
 
 use serde::{Deserialize, Serialize};
 
@@ -1280,11 +1291,11 @@ pub fn run_settings(text: &str) -> RunSettings {
 
 /// The player's run flag: the plugin removes it to stop the player, and the
 /// player creates it while it runs.
-pub const RUN_FLAG: &str = "/tmp/peppyrunning";
+pub const RUN_FLAG: &str = "/tmp/glass_running";
 
 /// The marker the launcher names in this variable; written on a real touch
 /// so the plugin re-arms its timeout instead of restarting at once.
-pub const DISMISS_FILE_VAR: &str = "PEPPY_USER_DISMISS_FILE";
+pub const DISMISS_FILE_VAR: &str = "GLASS_DISMISS_FILE";
 
 /// Whether a touch should leave the dismiss marker: only when the launcher
 /// asked for one, the stop is not the plugin's, and the run flag still stands.
@@ -2812,9 +2823,9 @@ mod tests {
         let s = run_settings("[current]\nexit.on.touch = False\nstop.display.on.touch = True\nposition.type = custom\nposition.x = 10\nposition.y = 20\n");
         assert_eq!(s, RunSettings { exit_on_touch: true, centered: false, x: 10, y: 20 });
         assert_eq!(run_settings(""), RunSettings::default());
-        assert!(should_mark_dismiss(Some("/tmp/peppy_user_dismiss"), false, true));
-        assert!(!should_mark_dismiss(Some("/tmp/peppy_user_dismiss"), true, true), "the plugin's own stop is not a dismiss");
-        assert!(!should_mark_dismiss(Some("/tmp/peppy_user_dismiss"), false, false), "no run flag, no plugin to re-arm");
+        assert!(should_mark_dismiss(Some("/tmp/glass_dismiss"), false, true));
+        assert!(!should_mark_dismiss(Some("/tmp/glass_dismiss"), true, true), "the plugin's own stop is not a dismiss");
+        assert!(!should_mark_dismiss(Some("/tmp/glass_dismiss"), false, false), "no run flag, no plugin to re-arm");
         assert!(!should_mark_dismiss(None, false, true), "a remote launcher sets no marker");
     }
 

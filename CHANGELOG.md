@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-09-26
+
+Glass is a Volumio plugin. The `plugin` directory holds it and `scripts/package.sh` builds the zip Volumio installs, with the display binaries, the ALSA scope and the node modules. The plugin keeps the audio path up, starts the display after the screensaver timeout while music plays, keeps it up through a pause for the persist time, and serves the settings page, the artist fanart cascade and the settings backups. Glass replaces PeppyMeter Screensaver: the installer refuses while that plugin is enabled, the plugin refuses to start while it is enabled and offers to disable it, and themes and settings are taken over from an installed or a preserved PeppyMeter Screensaver. The bundled themes are the PeppyMeter and PeppySpectrum defaults.
+
+The display reads its configuration from the plugin's home, `GLASS_HOME`, by default `/data/plugins/user_interface/glass`: `config/meter.txt` and `config/spectrum.txt`, with `fonts` and `format-icons` beside them. The run contract's files are `/tmp/glass_running`, `/tmp/glass_dismiss` and `/tmp/glass_persist`, the dismiss marker's variable `GLASS_DISMISS_FILE`, the fade lock `glass_fade_lock`, and the fanart endpoint `glass_artistfanart`.
+
 ## [0.4.28] - 2026-09-25
 
 Less memory. Font files are mapped rather than read, so a face costs the pages its glyphs touch and a file named by several styles is mapped once; a turned picture not shown for ten seconds is let go and the turned pictures share 16 MB; the meter foreground keeps only the pixels of its opaque spans. On a Pi 5 the Thorens turntable's resident set went from 125 MB to 87 MB. With `GLASS_PROFILE=1` Glass says what each store holds.

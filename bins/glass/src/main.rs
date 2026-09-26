@@ -201,7 +201,7 @@ impl PlainSlot {
 /// Whether a fade may start now: the engine's lock file is older than the
 /// fade plus a second, or absent. Touching it claims the fade.
 fn fade_lock_free(duration_s: f32) -> bool {
-    let lock = std::env::temp_dir().join("peppy_fade_lock");
+    let lock = std::env::temp_dir().join("glass_fade_lock");
     let cooldown = std::time::Duration::from_secs_f32(duration_s.max(0.0) + 1.0);
     let free = match std::fs::metadata(&lock).and_then(|m| m.modified()) {
         Ok(modified) => modified.elapsed().map_or(true, |age| age > cooldown),

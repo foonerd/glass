@@ -19,7 +19,7 @@ use lead::{
     meter_indicators, meter_reels, meter_tonearm, meter_vinyl, rotation_settings, run_settings, transition_settings,
     meter_texts, meter_type, random_change_title_from_config, random_interval_from_config,
     screen_from_config, scroll_speeds_from_config, selection_from_config, spectrum_from_theme,
-    spectrum_settings, Bins, DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec, CONFIG_TXT,
+    spectrum_settings, Bins, DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec, METER_CONFIG, SPECTRUM_CONFIG,
     DEFAULT_FRAME_RATE, DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO,
     STOCK_ICONS, current_value,
 };
@@ -124,8 +124,21 @@ fn theme_dir_from(text: &str, config_path: &str) -> Option<PathBuf> {
     Some(root.join(folder))
 }
 
+/// The meter configuration file: `GLASS_CONFIG`, or the one under the
+/// plugin's home. The spectrum configuration, the fonts and the icon set
+/// are found from it: `spectrum.txt` beside it, `fonts` and `format-icons`
+/// one level up.
 fn config_path() -> String {
-    std::env::var("GLASS_CONFIG").unwrap_or_else(|_| CONFIG_TXT.to_string())
+    std::env::var("GLASS_CONFIG").unwrap_or_else(|_| lead::home().join(METER_CONFIG).to_string_lossy().into_owned())
+}
+
+/// The spectrum configuration beside the meter configuration.
+fn spectrum_config_path() -> PathBuf {
+    let config = PathBuf::from(config_path());
+    match config.parent() {
+        Some(dir) => dir.join(Path::new(SPECTRUM_CONFIG).file_name().unwrap_or_default()),
+        None => lead::home().join(SPECTRUM_CONFIG),
+    }
 }
 
 /// Values that stand in for the installed configuration's `[current]`
@@ -306,7 +319,7 @@ fn fanart_list(artist: &str, uri: &str) -> FanartAnswer {
         .build()
         .new_agent();
     let body = serde_json::json!({
-        "endpoint": "peppy_screensaver_artistfanart",
+        "endpoint": "glass_artistfanart",
         "data": { "artist": artist, "uri": uri },
     });
     let Ok(mut response) = agent
@@ -568,7 +581,7 @@ impl Slideshow {
 }
 
 /// The plugin's persist file: `duration:start_ms:mode`.
-pub const PERSIST_FILE: &str = "/tmp/peppy_persist";
+pub const PERSIST_FILE: &str = "/tmp/glass_persist";
 
 /// Persist mode and seconds left, from the plugin's file and the wall clock.
 /// Empty mode and zero when the file is absent or malformed.
@@ -1424,8 +1437,8 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         skin.type_area = meter_type(&meters, &skin.name, default_mode.as_deref());
         skin.skin_icons = theme.join("format-icons").to_string_lossy().into_owned();
     }
-    // The clock font and the player's icon set ship next to the player's
-    // handlers: <plugin>/screensaver/fonts and <plugin>/screensaver/format-icons.
+    // The clock font and the player's icon set ship in the plugin's home:
+    // <home>/fonts and <home>/format-icons, one level above the configuration.
     let handlers_dir = Path::new(&path).parent().and_then(Path::parent);
     let digi_default = handlers_dir
         .map(|dir| dir.join("fonts").join("DSEG7Classic-Italic.ttf"))
@@ -1441,13 +1454,13 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
     skin.fonts = fonts_from_config(&text, &digi_default, &italic_default);
     skin.data_source = data_source_from_config(&text);
     skin.meter_max = skin.data_source.max_ui;
-    // The spectrum engine's own configuration sits beside the handlers; the
+    // The spectrum configuration sits beside the meter configuration; the
     // meter names which of the theme's spectra it shows and how big.
     let placed = std::fs::read_to_string(theme.join("meters.txt"))
         .ok()
         .and_then(|meters| meter_spectrum(&meters, &skin.name));
-    if let (Some((name, w, h)), Some(dir)) = (placed, handlers_dir) {
-        if let Ok(config) = std::fs::read_to_string(dir.join("spectrum").join("config.txt")) {
+    if let Some((name, w, h)) = placed {
+        if let Ok(config) = std::fs::read_to_string(spectrum_config_path()) {
             let settings = spectrum_settings(&config);
             // The spectrum theme carries the meter theme's folder name; the
             // player keeps `spectrum.folder` in step with `meter.folder`, and

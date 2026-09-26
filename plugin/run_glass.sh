@@ -7,7 +7,16 @@ log() {
   echo "glass-launcher: $*"
 }
 
-ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+# The plugin's home holds bin/<arch>/glass; in the repository the binaries
+# sit one level above this script.
+HERE=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
+if [ -n "$GLASS_HOME" ] && [ -d "$GLASS_HOME/bin" ]; then
+  ROOT=$GLASS_HOME
+elif [ -d "$HERE/bin" ]; then
+  ROOT=$HERE
+else
+  ROOT=$(CDPATH= cd -- "$HERE/.." && pwd)
+fi
 
 if [ -n "$GLASS_BIN" ]; then
   BIN=$GLASS_BIN
@@ -51,8 +60,10 @@ if [ -z "$ARCH" ]; then
 fi
 
 export DISPLAY=${DISPLAY:-:0}
+# The plugin's home: the configuration, fonts and icon set are found under it.
+export GLASS_HOME=${GLASS_HOME:-$ROOT}
 # A real finger or click writes this marker; the plugin reads it after the player ends.
-export PEPPY_USER_DISMISS_FILE=${PEPPY_USER_DISMISS_FILE:-/tmp/peppy_user_dismiss}
+export GLASS_DISMISS_FILE=${GLASS_DISMISS_FILE:-/tmp/glass_dismiss}
 
 if [ -z "$XAUTHORITY" ] || [ ! -f "$XAUTHORITY" ]; then
   X_PID=$(pgrep -xo Xorg 2>/dev/null || true)
