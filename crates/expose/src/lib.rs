@@ -8,13 +8,16 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use ab_glyph::{Font, FontRef, PxScale, ScaleFont};
-use lead::{Direction, Fill, FolderLayerSpec, FontFiles, LinearSpec, MeterKind, Scale, ScrollDirection, SpectrumSpec, TextAlign, TextStyle, TypeAlign, TypeMode, ZOrder};
-use lead::{GaugeSpec, GaugeStyle, StateIndicator, StateLook, TonearmSpec};
-use plot::{Fanart, Indicators, Scene, Text, TypeArea};
 #[cfg(test)]
 use lead::MeterSpec;
+use lead::{
+    Direction, Fill, FolderLayerSpec, FontFiles, LinearSpec, MeterKind, Scale, ScrollDirection,
+    SpectrumSpec, TextAlign, TextStyle, TypeAlign, TypeMode, ZOrder,
+};
+use lead::{GaugeSpec, GaugeStyle, StateIndicator, StateLook, TonearmSpec};
 #[cfg(test)]
 use plot::Art;
+use plot::{Fanart, Indicators, Scene, Text, TypeArea};
 
 const BG: [u8; 4] = [12, 12, 16, 255];
 
@@ -121,10 +124,16 @@ impl Fonts {
 
     /// How many of the five styles have a font file of their own.
     pub fn loaded(&self) -> usize {
-        [&self.light, &self.regular, &self.bold, &self.italic, &self.digi]
-            .iter()
-            .filter(|f| f.is_some())
-            .count()
+        [
+            &self.light,
+            &self.regular,
+            &self.bold,
+            &self.italic,
+            &self.digi,
+        ]
+        .iter()
+        .filter(|f| f.is_some())
+        .count()
     }
 }
 
@@ -162,7 +171,7 @@ const METER: [u8; 4] = [80, 220, 120, 255];
 const BAR: [u8; 4] = [90, 170, 255, 255];
 
 /// One finished picture. `pane` uploads it once.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Frame {
     pub width: u32,
     pub height: u32,
@@ -179,16 +188,6 @@ impl Frame {
 /// The bytes a set of optional pictures take.
 pub fn bytes_of<'a>(pictures: impl IntoIterator<Item = &'a Option<Frame>>) -> usize {
     pictures.into_iter().flatten().map(Frame::bytes).sum()
-}
-
-impl Default for Frame {
-    fn default() -> Self {
-        Self {
-            width: 0,
-            height: 0,
-            rgba: Vec::new(),
-        }
-    }
 }
 
 /// Rectangles the raster fills. Tests sample these instead of guessing pixels.
@@ -297,7 +296,8 @@ pub fn fit_art(frame: &Frame, w: u32, h: u32) -> Frame {
     if frame.width == w && frame.height == h {
         return frame.clone();
     }
-    let Some(image) = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone()) else {
+    let Some(image) = image::RgbaImage::from_raw(frame.width, frame.height, frame.rgba.clone())
+    else {
         return frame.clone();
     };
     let scaled = image::imageops::resize(&image, w, h, image::imageops::FilterType::Triangle);
@@ -351,7 +351,12 @@ pub struct Stack<'a> {
 /// every line of text is set in type, which is where `motion` changes. Then
 /// the drawing steps, which only read, are painted over the base in row
 /// bands shared among the threads `motion` allows.
-pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, now_ms: u64) -> Painted<'m> {
+pub fn raster_over<'m>(
+    scene: &Scene,
+    stack: Stack<'_>,
+    motion: &'m mut Motion,
+    now_ms: u64,
+) -> Painted<'m> {
     // A start ramps the levels up over the engine's first frames.
     let ramp = motion.ramp.factor(now_ms);
     let ramped;
@@ -360,7 +365,11 @@ pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, 
             left: scene.left * ramp,
             right: scene.right * ramp,
             mono: scene.mono * ramp,
-            bar_heights: scene.bar_heights.iter().map(|&h| (h as f32 * ramp) as u32).collect(),
+            bar_heights: scene
+                .bar_heights
+                .iter()
+                .map(|&h| (h as f32 * ramp) as u32)
+                .collect(),
             ..scene.clone()
         };
         &ramped
@@ -371,7 +380,25 @@ pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, 
     let height = scene.height.max(1);
     let mut taken = motion.profile.take();
     let mut stages = Stages::new(taken.as_mut());
-    let Motion { text, spectrum, vinyl, tonearm, reels, fade, needles, labels, canvas, painters, profile, last_steps, last_base, damage, paint_all, reaches, .. } = motion;
+    let Motion {
+        text,
+        spectrum,
+        vinyl,
+        tonearm,
+        reels,
+        fade,
+        needles,
+        labels,
+        canvas,
+        painters,
+        profile,
+        last_steps,
+        last_base,
+        damage,
+        paint_all,
+        reaches,
+        ..
+    } = motion;
     // The meter engine composes the screen picture and the meter face into
     // one static background; the frame starts as a copy of it. A prepared
     // base is used as it is, otherwise it is composed here.
@@ -386,107 +413,250 @@ pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, 
 
     // Everything that moves, advanced once for this frame. The tonearm's
     // state decides whether the record keeps turning while it lifts.
-    let tonearm_animating = scene.tonearm.as_ref().map_or(false, |spec| {
-        tonearm.update(spec, scene.playing, scene.progress_pct, scene.time_remaining, now_ms);
+    let tonearm_animating = scene.tonearm.as_ref().is_some_and(|spec| {
+        tonearm.update(
+            spec,
+            scene.playing,
+            scene.progress_pct,
+            scene.time_remaining,
+            now_ms,
+        );
         tonearm.is_animating()
     });
     let lift_s = scene.tonearm.as_ref().map_or(1.5, |spec| spec.lift_s);
     let vinyl_rpm = scene.vinyl.as_ref().map_or(0.0, |v| v.spec.rpm);
-    let art_rpm = scene.art.as_ref().filter(|a| a.rotation).map_or(0.0, |a| a.rpm);
-    let turn_rpm = if scene.vinyl.is_some() { vinyl_rpm } else { art_rpm };
-    let angle = vinyl.advance(turn_rpm, scene.vinyl.as_ref().map_or(true, |v| v.spec.clockwise), scene.playing, scene.transitional, tonearm_animating, lift_s, now_ms);
+    let art_rpm = scene
+        .art
+        .as_ref()
+        .filter(|a| a.rotation)
+        .map_or(0.0, |a| a.rpm);
+    let turn_rpm = if scene.vinyl.is_some() {
+        vinyl_rpm
+    } else {
+        art_rpm
+    };
+    let angle = vinyl.advance(
+        turn_rpm,
+        scene.vinyl.as_ref().is_none_or(|v| v.spec.clockwise),
+        scene.playing,
+        scene.transitional,
+        tonearm_animating,
+        lift_s,
+        now_ms,
+    );
     let mut reel_angles = [0.0f32; 2];
     if let Some(spec) = &scene.reels {
         let spin = scene.playing || scene.transitional;
         let p = scene.progress_pct / 100.0;
         let (left_mult, right_mult) = if spec.spec.adaptive {
             if spec.spec.clockwise {
-                (spec.spec.spool_left * (1.5 - p), spec.spec.spool_right * (0.5 + p))
+                (
+                    spec.spec.spool_left * (1.5 - p),
+                    spec.spec.spool_right * (0.5 + p),
+                )
             } else {
-                (spec.spec.spool_left * (0.5 + p), spec.spec.spool_right * (1.5 - p))
+                (
+                    spec.spec.spool_left * (0.5 + p),
+                    spec.spec.spool_right * (1.5 - p),
+                )
             }
         } else {
             (spec.spec.spool_left, spec.spec.spool_right)
         };
-        let sides = [(&spec.spec.left, left_mult, &mut reels.0), (&spec.spec.right, right_mult, &mut reels.1)];
+        let sides = [
+            (&spec.spec.left, left_mult, &mut reels.0),
+            (&spec.spec.right, right_mult, &mut reels.1),
+        ];
         for (i, (side, mult, turn)) in sides.into_iter().enumerate() {
             if let Some(side) = side {
                 reel_angles[i] = turn.advance(side.rpm * mult, spec.spec.clockwise, spin, now_ms);
             }
         }
     }
-    let linear = matches!((scene.meter.kind, &scene.meter.linear), (MeterKind::Linear, Some(_)));
-    let needle_turns = if scene.meter.visible && !linear { needle_turns(scene, &stack, needles, now_ms) } else { Vec::new() };
+    let linear = matches!(
+        (scene.meter.kind, &scene.meter.linear),
+        (MeterKind::Linear, Some(_))
+    );
+    let needle_turns = if scene.meter.visible && !linear {
+        needle_turns(scene, &stack, needles, now_ms)
+    } else {
+        Vec::new()
+    };
     let tonearm_turn = match (&scene.tonearm, stack.tonearm) {
         (Some(spec), Some(picture)) => {
-            let key = needles.ensure(2, picture, (spec.pivot_image.0 as f32, spec.pivot_image.1 as f32), tonearm.angle(), now_ms);
-            Some((key, (spec.pivot_screen.0 as f32, spec.pivot_screen.1 as f32)))
+            let key = needles.ensure(
+                2,
+                picture,
+                (spec.pivot_image.0 as f32, spec.pivot_image.1 as f32),
+                tonearm.angle(),
+                now_ms,
+            );
+            Some((
+                key,
+                (spec.pivot_screen.0 as f32, spec.pivot_screen.1 as f32),
+            ))
         }
         _ => None,
     };
-    let text_plans: Vec<TextPlan> = scene.texts.iter().map(|t| text.advance(t, stack.fonts, now_ms)).collect();
+    let text_plans: Vec<TextPlan> = scene
+        .texts
+        .iter()
+        .map(|t| text.advance(t, stack.fonts, now_ms))
+        .collect();
     let spectrum_plan = match (&scene.spectrum, stack.spectrum) {
         (Some(spec), Some(_)) => Some(spectrum.advance(spec, &scene.bar_heights)),
         _ => None,
     };
     labels.sweep(now_ms);
-    let type_label = scene.type_area.as_ref().and_then(|area| labels.ensure(stack.fonts, area.font_style, area.font_size, area.color, &area.label, now_ms));
-    let indicator_labels = scene.indicators.as_ref().map(|i| indicator_labels(i, stack.fonts, labels, now_ms));
+    let type_label = scene.type_area.as_ref().and_then(|area| {
+        labels.ensure(
+            stack.fonts,
+            area.font_style,
+            area.font_size,
+            area.color,
+            &area.label,
+            now_ms,
+        )
+    });
+    let indicator_labels = scene
+        .indicators
+        .as_ref()
+        .map(|i| indicator_labels(i, stack.fonts, labels, now_ms));
     let overlay = fade.overlay(now_ms);
 
     // The drawing steps, in the theme's order.
     let mut ops: Vec<Op> = Vec::with_capacity(48);
     if let Some(spec) = &scene.reels {
-        for (i, (side, picture)) in [(&spec.spec.left, stack.reels.0), (&spec.spec.right, stack.reels.1)].into_iter().enumerate() {
+        for (i, (side, picture)) in [
+            (&spec.spec.left, stack.reels.0),
+            (&spec.spec.right, stack.reels.1),
+        ]
+        .into_iter()
+        .enumerate()
+        {
             if let (Some(side), Some(picture)) = (side, picture) {
                 let reach = reaches.reach(picture, centre_of(picture));
-                ops.push(Op::Turn { src: picture, pivot_image: centre_of(picture), pivot_screen: (side.center.0 as f32, side.center.1 as f32), degrees: -reel_angles[i], smooth: false, reach });
+                ops.push(Op::Turn {
+                    src: picture,
+                    pivot_image: centre_of(picture),
+                    pivot_screen: (side.center.0 as f32, side.center.1 as f32),
+                    degrees: -reel_angles[i],
+                    smooth: false,
+                    reach,
+                });
             }
         }
     }
     if let (Some(v), Some(picture)) = (&scene.vinyl, stack.vinyl) {
         let reach = reaches.reach(picture, centre_of(picture));
-        ops.push(Op::Turn { src: picture, pivot_image: centre_of(picture), pivot_screen: (v.spec.center.0 as f32, v.spec.center.1 as f32), degrees: -angle, smooth: false, reach });
+        ops.push(Op::Turn {
+            src: picture,
+            pivot_image: centre_of(picture),
+            pivot_screen: (v.spec.center.0 as f32, v.spec.center.1 as f32),
+            degrees: -angle,
+            smooth: false,
+            reach,
+        });
     }
     if let (Some(art), Some(place)) = (stack.art, &scene.art) {
-        let color = [place.border_color[0], place.border_color[1], place.border_color[2], 255];
+        let color = [
+            place.border_color[0],
+            place.border_color[1],
+            place.border_color[2],
+            255,
+        ];
         if place.rotation && place.rpm > 0.0 {
             // Turning art sits on the record's centre when there is one.
             let centre = scene
                 .vinyl
                 .as_ref()
                 .map(|v| (v.spec.center.0 as f32, v.spec.center.1 as f32))
-                .unwrap_or((place.x as f32 + place.w as f32 / 2.0, place.y as f32 + place.h as f32 / 2.0));
+                .unwrap_or((
+                    place.x as f32 + place.w as f32 / 2.0,
+                    place.y as f32 + place.h as f32 / 2.0,
+                ));
             let reach = reaches.reach(art, centre_of(art));
-            ops.push(Op::Turn { src: art, pivot_image: centre_of(art), pivot_screen: centre, degrees: -angle, smooth: false, reach });
+            ops.push(Op::Turn {
+                src: art,
+                pivot_image: centre_of(art),
+                pivot_screen: centre,
+                degrees: -angle,
+                smooth: false,
+                reach,
+            });
             let (cx, cy) = (centre.0.round() as i32, centre.1.round() as i32);
             if place.border > 0 {
-                ops.push(Op::Ring { cx, cy, r: (place.w.min(place.h) / 2) as i32, thickness: place.border as i32, color });
+                ops.push(Op::Ring {
+                    cx,
+                    cy,
+                    r: (place.w.min(place.h) / 2) as i32,
+                    thickness: place.border as i32,
+                    color,
+                });
             }
-            ops.push(Op::Ring { cx, cy, r: 5, thickness: 6, color });
-            ops.push(Op::Ring { cx, cy, r: (place.w.min(place.h) / 10).max(3) as i32, thickness: 1, color });
+            ops.push(Op::Ring {
+                cx,
+                cy,
+                r: 5,
+                thickness: 6,
+                color,
+            });
+            ops.push(Op::Ring {
+                cx,
+                cy,
+                r: (place.w.min(place.h) / 10).max(3) as i32,
+                thickness: 1,
+                color,
+            });
         } else {
             ops.push(blit_op(art, (place.x as i32, place.y as i32)));
             if place.border > 0 {
-                ops.push(Op::Border { rect: (place.x, place.y, place.w, place.h), thickness: place.border, color });
+                ops.push(Op::Border {
+                    rect: (place.x, place.y, place.w, place.h),
+                    thickness: place.border,
+                    color,
+                });
             }
         }
     }
     plan_folder_layers(scene, stack.folder_pictures, ZOrder::Background, &mut ops);
-    plan_fanart(scene.fanart.as_ref(), stack.fanart, ZOrder::Background, &mut ops);
+    plan_fanart(
+        scene.fanart.as_ref(),
+        stack.fanart,
+        ZOrder::Background,
+        &mut ops,
+    );
     if scene.meter.visible {
         if let (true, Some(linear), Some(sprite)) = (linear, &scene.meter.linear, stack.needle) {
             let right_sprite = stack.needle_right.or(stack.needle);
             if scene.meter.channels == 1 {
                 if let Some(at) = scene.meter.mono_at {
-                    ops.extend(bar_op(sprite, at, linear.bar_width(scene.mono), linear, true));
+                    ops.extend(bar_op(
+                        sprite,
+                        at,
+                        linear.bar_width(scene.mono),
+                        linear,
+                        true,
+                    ));
                 }
             } else {
                 if let Some(at) = scene.left_at {
-                    ops.extend(bar_op(sprite, at, linear.bar_width(scene.left), linear, true));
+                    ops.extend(bar_op(
+                        sprite,
+                        at,
+                        linear.bar_width(scene.left),
+                        linear,
+                        true,
+                    ));
                 }
                 if let (Some(at), Some(sprite)) = (scene.right_at, right_sprite) {
-                    ops.extend(bar_op(sprite, at, linear.bar_width(scene.right), linear, false));
+                    ops.extend(bar_op(
+                        sprite,
+                        at,
+                        linear.bar_width(scene.right),
+                        linear,
+                        false,
+                    ));
                 }
             }
         }
@@ -494,7 +664,9 @@ pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, 
             ops.extend(turned_op(needles, *key, *at));
         }
     }
-    if let (Some(spec), Some(assets), Some(plan)) = (&scene.spectrum, stack.spectrum, &spectrum_plan) {
+    if let (Some(spec), Some(assets), Some(plan)) =
+        (&scene.spectrum, stack.spectrum, &spectrum_plan)
+    {
         plan_spectrum(spec, assets, plan, &mut ops);
     }
     // A scene without a theme shows plain meter columns and spectrum bars.
@@ -502,8 +674,16 @@ pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, 
         let layout = layout(width, height);
         let left_meter = place(layout.left_meter, scene.left_at, width, height);
         let right_meter = place(layout.right_meter, scene.right_at, width, height);
-        ops.push(Op::Column { rect: left_meter, level: scene.left, color: METER });
-        ops.push(Op::Column { rect: right_meter, level: scene.right, color: METER });
+        ops.push(Op::Column {
+            rect: left_meter,
+            level: scene.left,
+            color: METER,
+        });
+        ops.push(Op::Column {
+            rect: right_meter,
+            level: scene.right,
+            color: METER,
+        });
         plan_bars(&layout.spectrum, &scene.bars, BAR, &mut ops);
     }
     for plan in &text_plans {
@@ -514,31 +694,61 @@ pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, 
     if let Some((key, at)) = tonearm_turn {
         ops.extend(turned_op(needles, key, at));
     }
-    if let (Some(indicators), Some(assets), Some(names)) = (&scene.indicators, stack.indicators, &indicator_labels) {
+    if let (Some(indicators), Some(assets), Some(names)) =
+        (&scene.indicators, stack.indicators, &indicator_labels)
+    {
         plan_indicators(indicators, assets, labels, names, &mut ops);
     }
     if let Some(area) = &scene.type_area {
-        plan_type_area(area, stack.icon, type_label.as_deref().and_then(|k| labels.get(k)), &mut ops);
+        plan_type_area(
+            area,
+            stack.icon,
+            type_label.as_deref().and_then(|k| labels.get(k)),
+            &mut ops,
+        );
     }
     // Overlay folder layers sit above everything but the meter foreground,
     // which the meter engine draws last of all.
     plan_folder_layers(scene, stack.folder_pictures, ZOrder::Overlay, &mut ops);
-    plan_fanart(scene.fanart.as_ref(), stack.fanart, ZOrder::Overlay, &mut ops);
+    plan_fanart(
+        scene.fanart.as_ref(),
+        stack.fanart,
+        ZOrder::Overlay,
+        &mut ops,
+    );
     if let Some(front) = stack.front {
-        ops.push(Op::Front { spans: front, at: stack.face_at });
+        ops.push(Op::Front {
+            spans: front,
+            at: stack.face_at,
+        });
     }
     if let Some((color, alpha)) = overlay {
         ops.push(Op::Fade { color, alpha });
     }
     // Only the boxes of steps that differ from the last frame's are
     // painted; the canvas keeps the rest. A new base or size repaints all.
-    let steps: Vec<(u64, Option<Box4>)> = ops.iter().map(|op| (op.key(), op.bounds(width, height))).collect();
+    let steps: Vec<(u64, Option<Box4>)> = ops
+        .iter()
+        .map(|op| (op.key(), op.bounds(width, height)))
+        .collect();
     let base_id = (base.rgba.as_ptr() as usize, base.rgba.len());
-    let whole = *paint_all || last_steps.is_empty() || *last_base != base_id || canvas.width != width || canvas.height != height;
+    let whole = *paint_all
+        || last_steps.is_empty()
+        || *last_base != base_id
+        || canvas.width != width
+        || canvas.height != height;
     let rects: Vec<Rect> = if whole {
-        vec![Rect { x: 0, y: 0, w: width, h: height }]
+        vec![Rect {
+            x: 0,
+            y: 0,
+            w: width,
+            h: height,
+        }]
     } else {
-        merge_boxes(changed_boxes(last_steps, &steps)).into_iter().map(box_rect).collect()
+        merge_boxes(changed_boxes(last_steps, &steps))
+            .into_iter()
+            .map(box_rect)
+            .collect()
     };
     *last_steps = steps;
     *last_base = base_id;
@@ -551,9 +761,11 @@ pub fn raster_over<'m>(scene: &Scene, stack: Stack<'_>, motion: &'m mut Motion, 
     painters.settle(painting.elapsed().as_micros() as u64, now_ms);
     *damage = rects;
     stages.mark("paint");
-    drop(stages);
     *profile = taken;
-    Painted { frame: canvas, damage }
+    Painted {
+        frame: canvas,
+        damage,
+    }
 }
 
 /// A finished frame and the boxes of it that this raster painted; the rest
@@ -565,7 +777,12 @@ pub struct Painted<'m> {
 
 /// The needle turns of this frame, each turned once and kept: the cache key
 /// and where the pivot sits on screen, in drawing order.
-fn needle_turns(scene: &Scene, stack: &Stack<'_>, needles: &mut Turned, tick: u64) -> Vec<((usize, i32), (f32, f32))> {
+fn needle_turns(
+    scene: &Scene,
+    stack: &Stack<'_>,
+    needles: &mut Turned,
+    tick: u64,
+) -> Vec<((usize, i32), (f32, f32))> {
     let mut turns = Vec::with_capacity(2);
     let (Some(sprite), Some((start, stop, distance))) = (stack.needle, scene.needle) else {
         return turns;
@@ -579,16 +796,31 @@ fn needle_turns(scene: &Scene, stack: &Stack<'_>, needles: &mut Turned, tick: u6
     };
     if scene.meter.channels == 1 {
         if let Some(at) = scene.meter.mono_at {
-            turn(0, sprite, at, left_start + (left_stop - left_start) * scene.mono);
+            turn(
+                0,
+                sprite,
+                at,
+                left_start + (left_stop - left_start) * scene.mono,
+            );
         }
     } else {
         if let Some(at) = scene.left_at {
-            turn(0, sprite, at, left_start + (left_stop - left_start) * scene.left);
+            turn(
+                0,
+                sprite,
+                at,
+                left_start + (left_stop - left_start) * scene.left,
+            );
         }
         if let (Some(at), Some(sprite)) = (scene.right_at, right_sprite) {
             let (right_start, right_stop) = scene.meter.right_angles.unwrap_or((start, stop));
             let slot = if stack.needle_right.is_some() { 1 } else { 0 };
-            turn(slot, sprite, at, right_start + (right_stop - right_start) * scene.right);
+            turn(
+                slot,
+                sprite,
+                at,
+                right_start + (right_stop - right_start) * scene.right,
+            );
         }
     }
     turns
@@ -612,7 +844,15 @@ pub struct Band<'a> {
 impl<'a> Band<'a> {
     /// A whole buffer of `width` by `height` pixels.
     pub fn over(rgba: &'a mut [u8], width: u32, height: u32) -> Self {
-        Self { rgba, width, top: 0, x0: 0, x1: width, y0: 0, y1: height }
+        Self {
+            rgba,
+            width,
+            top: 0,
+            x0: 0,
+            x1: width,
+            y0: 0,
+            y1: height,
+        }
     }
 
     /// A whole frame.
@@ -655,7 +895,12 @@ impl<'a> Band<'a> {
 type Box4 = (i32, i32, i32, i32);
 
 fn clip_box(b: Box4, width: u32, height: u32) -> Option<Box4> {
-    let clipped = (b.0.max(0), b.1.max(0), b.2.min(width as i32), b.3.min(height as i32));
+    let clipped = (
+        b.0.max(0),
+        b.1.max(0),
+        b.2.min(width as i32),
+        b.3.min(height as i32),
+    );
     (clipped.2 > clipped.0 && clipped.3 > clipped.1).then_some(clipped)
 }
 
@@ -672,7 +917,12 @@ fn box_area(b: Box4) -> i64 {
 }
 
 fn box_rect(b: Box4) -> Rect {
-    Rect { x: b.0 as u32, y: b.1 as u32, w: (b.2 - b.0) as u32, h: (b.3 - b.1) as u32 }
+    Rect {
+        x: b.0 as u32,
+        y: b.1 as u32,
+        w: (b.2 - b.0) as u32,
+        h: (b.3 - b.1) as u32,
+    }
 }
 
 /// How far a picture reaches from its pivot when turned, plus a pixel.
@@ -697,7 +947,12 @@ pub struct Reaches {
 
 impl Reaches {
     fn reach(&mut self, src: &Frame, pivot: (f32, f32)) -> f32 {
-        let key = (src.rgba.as_ptr() as usize, src.rgba.len(), pivot.0.to_bits(), pivot.1.to_bits());
+        let key = (
+            src.rgba.as_ptr() as usize,
+            src.rgba.len(),
+            pivot.0.to_bits(),
+            pivot.1.to_bits(),
+        );
         if let Some((_, reach)) = self.known.iter().find(|(k, _)| *k == key) {
             return *reach;
         }
@@ -707,10 +962,13 @@ impl Reaches {
             let dy = y as f32 + 0.5 - pivot.1;
             // The first and last pixel of the row with any alpha are its furthest.
             let first = (0..src.width).find(|&x| row[(x * 4 + 3) as usize] != 0);
-            let last = (0..src.width).rev().find(|&x| row[(x * 4 + 3) as usize] != 0);
+            let last = (0..src.width)
+                .rev()
+                .find(|&x| row[(x * 4 + 3) as usize] != 0);
             for x in [first, last].into_iter().flatten() {
                 for edge in [x as f32, x as f32 + 1.0] {
-                    furthest = furthest.max(((edge - pivot.0).powi(2) + (dy.abs() + 0.5).powi(2)).sqrt());
+                    furthest =
+                        furthest.max(((edge - pivot.0).powi(2) + (dy.abs() + 0.5).powi(2)).sqrt());
                 }
             }
         }
@@ -774,18 +1032,61 @@ impl Fnv {
 enum Op<'a> {
     /// Blend `part` (x, y, w, h) of a picture at `at`, its alpha scaled by
     /// `alpha`, showing only what falls inside `clip` (x, y, w, h).
-    Blit { src: &'a Frame, at: (i32, i32), part: (u32, u32, u32, u32), clip: Option<(i32, i32, i32, i32)>, alpha: u8 },
+    Blit {
+        src: &'a Frame,
+        at: (i32, i32),
+        part: (u32, u32, u32, u32),
+        clip: Option<(i32, i32, i32, i32)>,
+        alpha: u8,
+    },
     /// A picture turned about `pivot_image`, that point on `pivot_screen`.
     /// `reach` is how far from the pivot the picture has pixels.
-    Turn { src: &'a Frame, pivot_image: (f32, f32), pivot_screen: (f32, f32), degrees: f32, smooth: bool, reach: f32 },
+    Turn {
+        src: &'a Frame,
+        pivot_image: (f32, f32),
+        pivot_screen: (f32, f32),
+        degrees: f32,
+        smooth: bool,
+        reach: f32,
+    },
     /// A rectangle outline inside the box.
-    Border { rect: (u32, u32, u32, u32), thickness: u32, color: [u8; 4] },
+    Border {
+        rect: (u32, u32, u32, u32),
+        thickness: u32,
+        color: [u8; 4],
+    },
     /// A ring of `thickness` inside radius `r`; a thickness past `r` fills the disc.
-    Ring { cx: i32, cy: i32, r: i32, thickness: i32, color: [u8; 4] },
-    RoundRect { x: i32, y: i32, w: i32, h: i32, radius: i32, color: [u8; 4] },
-    Arc { x: i32, y: i32, w: u32, h: u32, start: f32, stop: f32, ring: u32, color: [u8; 3] },
+    Ring {
+        cx: i32,
+        cy: i32,
+        r: i32,
+        thickness: i32,
+        color: [u8; 4],
+    },
+    RoundRect {
+        x: i32,
+        y: i32,
+        w: i32,
+        h: i32,
+        radius: i32,
+        color: [u8; 4],
+    },
+    Arc {
+        x: i32,
+        y: i32,
+        w: u32,
+        h: u32,
+        start: f32,
+        stop: f32,
+        ring: u32,
+        color: [u8; 3],
+    },
     /// A meter column lit from the bottom, for a scene without a theme.
-    Column { rect: Rect, level: f32, color: [u8; 4] },
+    Column {
+        rect: Rect,
+        level: f32,
+        color: [u8; 4],
+    },
     /// The meter foreground, blended only where it has pixels.
     Front { spans: &'a Spans, at: (u32, u32) },
     /// A colour over the whole frame at `alpha`.
@@ -796,22 +1097,62 @@ impl Op<'_> {
     /// The box the step may paint, clipped to the frame.
     fn bounds(&self, width: u32, height: u32) -> Option<Box4> {
         let b = match *self {
-            Op::Blit { src, at, part, clip, .. } => {
-                let mut b = (at.0, at.1, at.0.saturating_add(part.2.min(src.width) as i32), at.1.saturating_add(part.3.min(src.height) as i32));
+            Op::Blit {
+                src,
+                at,
+                part,
+                clip,
+                ..
+            } => {
+                let mut b = (
+                    at.0,
+                    at.1,
+                    at.0.saturating_add(part.2.min(src.width) as i32),
+                    at.1.saturating_add(part.3.min(src.height) as i32),
+                );
                 if let Some((cx, cy, cw, ch)) = clip {
-                    b = (b.0.max(cx), b.1.max(cy), b.2.min(cx.saturating_add(cw)), b.3.min(cy.saturating_add(ch)));
+                    b = (
+                        b.0.max(cx),
+                        b.1.max(cy),
+                        b.2.min(cx.saturating_add(cw)),
+                        b.3.min(cy.saturating_add(ch)),
+                    );
                 }
                 b
             }
-            Op::Turn { pivot_screen, reach, .. } => {
-                ((pivot_screen.0 - reach).floor() as i32, (pivot_screen.1 - reach).floor() as i32, (pivot_screen.0 + reach).ceil() as i32 + 1, (pivot_screen.1 + reach).ceil() as i32 + 1)
-            }
-            Op::Border { rect, .. } => (rect.0 as i32, rect.1 as i32, rect.0.saturating_add(rect.2) as i32, rect.1.saturating_add(rect.3) as i32),
+            Op::Turn {
+                pivot_screen,
+                reach,
+                ..
+            } => (
+                (pivot_screen.0 - reach).floor() as i32,
+                (pivot_screen.1 - reach).floor() as i32,
+                (pivot_screen.0 + reach).ceil() as i32 + 1,
+                (pivot_screen.1 + reach).ceil() as i32 + 1,
+            ),
+            Op::Border { rect, .. } => (
+                rect.0 as i32,
+                rect.1 as i32,
+                rect.0.saturating_add(rect.2) as i32,
+                rect.1.saturating_add(rect.3) as i32,
+            ),
             Op::Ring { cx, cy, r, .. } => (cx - r, cy - r, cx + r + 1, cy + r + 1),
             Op::RoundRect { x, y, w, h, .. } => (x, y, x.saturating_add(w), y.saturating_add(h)),
-            Op::Arc { x, y, w, h, .. } => (x, y, x.saturating_add(w as i32), y.saturating_add(h as i32)),
-            Op::Column { rect, .. } => (rect.x as i32, rect.y as i32, (rect.x + rect.w) as i32, (rect.y + rect.h) as i32),
-            Op::Front { spans, at } => (at.0 as i32, at.1 as i32, (at.0 + spans.width) as i32, (at.1 + spans.height) as i32),
+            Op::Arc { x, y, w, h, .. } => {
+                (x, y, x.saturating_add(w as i32), y.saturating_add(h as i32))
+            }
+            Op::Column { rect, .. } => (
+                rect.x as i32,
+                rect.y as i32,
+                (rect.x + rect.w) as i32,
+                (rect.y + rect.h) as i32,
+            ),
+            Op::Front { spans, at } => (
+                at.0 as i32,
+                at.1 as i32,
+                (at.0 + spans.width) as i32,
+                (at.1 + spans.height) as i32,
+            ),
             Op::Fade { .. } => (0, 0, width as i32, height as i32),
         };
         clip_box(b, width, height)
@@ -822,7 +1163,13 @@ impl Op<'_> {
     fn key(&self) -> u64 {
         let mut h = Fnv::default();
         match *self {
-            Op::Blit { src, at, part, clip, alpha } => {
+            Op::Blit {
+                src,
+                at,
+                part,
+                clip,
+                alpha,
+            } => {
                 h.tag(1);
                 h.pic(src);
                 h.i32s(&[at.0, at.1]);
@@ -833,28 +1180,67 @@ impl Op<'_> {
                 }
                 h.tag(alpha);
             }
-            Op::Turn { src, pivot_image, pivot_screen, degrees, smooth, .. } => {
+            Op::Turn {
+                src,
+                pivot_image,
+                pivot_screen,
+                degrees,
+                smooth,
+                ..
+            } => {
                 h.tag(2);
                 h.pic(src);
-                h.f32s(&[pivot_image.0, pivot_image.1, pivot_screen.0, pivot_screen.1, degrees]);
+                h.f32s(&[
+                    pivot_image.0,
+                    pivot_image.1,
+                    pivot_screen.0,
+                    pivot_screen.1,
+                    degrees,
+                ]);
                 h.tag(smooth as u8);
             }
-            Op::Border { rect, thickness, color } => {
+            Op::Border {
+                rect,
+                thickness,
+                color,
+            } => {
                 h.tag(3);
                 h.u32s(&[rect.0, rect.1, rect.2, rect.3, thickness]);
                 h.bytes(&color);
             }
-            Op::Ring { cx, cy, r, thickness, color } => {
+            Op::Ring {
+                cx,
+                cy,
+                r,
+                thickness,
+                color,
+            } => {
                 h.tag(4);
                 h.i32s(&[cx, cy, r, thickness]);
                 h.bytes(&color);
             }
-            Op::RoundRect { x, y, w, h: hh, radius, color } => {
+            Op::RoundRect {
+                x,
+                y,
+                w,
+                h: hh,
+                radius,
+                color,
+            } => {
                 h.tag(5);
                 h.i32s(&[x, y, w, hh, radius]);
                 h.bytes(&color);
             }
-            Op::Arc { x, y, w, h: hh, start, stop, ring, color } => {
+            Op::Arc {
+                x,
+                y,
+                w,
+                h: hh,
+                start,
+                stop,
+                ring,
+                color,
+            } => {
                 h.tag(6);
                 h.i32s(&[x, y]);
                 h.u32s(&[w, hh, ring]);
@@ -883,12 +1269,51 @@ impl Op<'_> {
 
     fn paint(&self, band: &mut Band) {
         match *self {
-            Op::Blit { src, at, part, clip, alpha } => blit_into(band, src, at, part, clip, alpha),
-            Op::Turn { src, pivot_image, pivot_screen, degrees, smooth, .. } => turn_onto(band, src, pivot_image, pivot_screen, degrees, smooth, false),
-            Op::Border { rect, thickness, color } => draw_border(band, rect, thickness, color),
-            Op::Ring { cx, cy, r, thickness, color } => draw_ring(band, cx, cy, r, thickness, color),
-            Op::RoundRect { x, y, w, h, radius, color } => fill_round_rect(band, x, y, w, h, radius, color),
-            Op::Arc { x, y, w, h, start, stop, ring, color } => fill_arc(band, x, y, w, h, start, stop, ring, color),
+            Op::Blit {
+                src,
+                at,
+                part,
+                clip,
+                alpha,
+            } => blit_into(band, src, at, part, clip, alpha),
+            Op::Turn {
+                src,
+                pivot_image,
+                pivot_screen,
+                degrees,
+                smooth,
+                ..
+            } => turn_onto(band, src, pivot_image, pivot_screen, degrees, smooth, false),
+            Op::Border {
+                rect,
+                thickness,
+                color,
+            } => draw_border(band, rect, thickness, color),
+            Op::Ring {
+                cx,
+                cy,
+                r,
+                thickness,
+                color,
+            } => draw_ring(band, cx, cy, r, thickness, color),
+            Op::RoundRect {
+                x,
+                y,
+                w,
+                h,
+                radius,
+                color,
+            } => fill_round_rect(band, x, y, w, h, radius, color),
+            Op::Arc {
+                x,
+                y,
+                w,
+                h,
+                start,
+                stop,
+                ring,
+                color,
+            } => fill_arc(band, x, y, w, h, start, stop, ring, color),
             Op::Column { rect, level, color } => fill_column(band, &rect, level, color),
             Op::Front { spans, at } => spans.blit(band, at),
             Op::Fade { color, alpha } => fade_band(band, color, alpha),
@@ -912,7 +1337,10 @@ fn paint(canvas: &mut Frame, base: &Frame, ops: &[Op], rects: &[Rect], threads: 
     if stride == 0 {
         return;
     }
-    let boxes: Vec<Option<Box4>> = ops.iter().map(|op| op.bounds(width, canvas.height)).collect();
+    let boxes: Vec<Option<Box4>> = ops
+        .iter()
+        .map(|op| op.bounds(width, canvas.height))
+        .collect();
     // The row strips some rectangle touches, each with its pieces of them.
     let units: Vec<(Band, Vec<Box4>)> = canvas
         .rgba
@@ -925,10 +1353,26 @@ fn paint(canvas: &mut Frame, base: &Frame, ops: &[Op], rects: &[Rect], threads: 
                 .iter()
                 .filter_map(|r| {
                     let (y0, y1) = (r.y.max(top), (r.y + r.h).min(bottom));
-                    (y1 > y0 && r.w > 0).then_some((r.x as i32, y0 as i32, (r.x + r.w).min(width) as i32, y1 as i32))
+                    (y1 > y0 && r.w > 0).then_some((
+                        r.x as i32,
+                        y0 as i32,
+                        (r.x + r.w).min(width) as i32,
+                        y1 as i32,
+                    ))
                 })
                 .collect();
-            (!pieces.is_empty()).then_some((Band { rgba: chunk, width, top, x0: 0, x1: width, y0: top, y1: bottom }, pieces))
+            (!pieces.is_empty()).then_some((
+                Band {
+                    rgba: chunk,
+                    width,
+                    top,
+                    x0: 0,
+                    x1: width,
+                    y0: top,
+                    y1: bottom,
+                },
+                pieces,
+            ))
         })
         .collect();
     let work = |band: &mut Band, pieces: &[Box4]| {
@@ -964,12 +1408,14 @@ fn paint(canvas: &mut Frame, base: &Frame, ops: &[Op], rects: &[Rect], threads: 
     let queue = std::sync::Mutex::new(units);
     let pull = || loop {
         let next = queue.lock().map(|mut q| q.pop()).unwrap_or(None);
-        let Some((mut band, pieces)) = next else { break };
+        let Some((mut band, pieces)) = next else {
+            break;
+        };
         work(&mut band, &pieces);
     };
     std::thread::scope(|scope| {
         for _ in 1..threads {
-            scope.spawn(&pull);
+            scope.spawn(pull);
         }
         pull();
     });
@@ -1020,7 +1466,10 @@ fn merge_boxes(mut boxes: Vec<Box4>) -> Vec<Box4> {
         let mut merged = false;
         'pairs: for i in 0..boxes.len() {
             for j in i + 1..boxes.len() {
-                if boxes_meet(boxes[i], boxes[j]) && box_area(box_union(boxes[i], boxes[j])) <= box_area(boxes[i]) + box_area(boxes[j]) {
+                if boxes_meet(boxes[i], boxes[j])
+                    && box_area(box_union(boxes[i], boxes[j]))
+                        <= box_area(boxes[i]) + box_area(boxes[j])
+                {
                     let union = box_union(boxes[i], boxes[j]);
                     boxes.swap_remove(j);
                     boxes[i] = union;
@@ -1037,7 +1486,9 @@ fn merge_boxes(mut boxes: Vec<Box4>) -> Vec<Box4> {
         let mut best = (i64::MAX, 0, 1);
         for i in 0..boxes.len() {
             for j in i + 1..boxes.len() {
-                let waste = box_area(box_union(boxes[i], boxes[j])) - box_area(boxes[i]) - box_area(boxes[j]);
+                let waste = box_area(box_union(boxes[i], boxes[j]))
+                    - box_area(boxes[i])
+                    - box_area(boxes[j]);
                 if waste < best.0 {
                     best = (waste, i, j);
                 }
@@ -1059,7 +1510,7 @@ fn paint_onto(band: &mut Band, ops: &[Op]) {
 fn fade_band(band: &mut Band, color: [u8; 3], alpha: u8) {
     let (x0, x1) = (band.x0 as usize * 4, band.x1 as usize * 4);
     for y in band.y0..band.y1 {
-        for px in band.row(y)[x0..x1].chunks_exact_mut(4) {
+        for px in band.row(y)[x0..x1].as_chunks_mut::<4>().0 {
             blend(px, 0, [color[0], color[1], color[2], alpha]);
         }
     }
@@ -1070,7 +1521,13 @@ fn whole(picture: &Frame) -> (u32, u32, u32, u32) {
 }
 
 fn blit_op(src: &Frame, at: (i32, i32)) -> Op<'_> {
-    Op::Blit { src, at, part: whole(src), clip: None, alpha: 255 }
+    Op::Blit {
+        src,
+        at,
+        part: whole(src),
+        clip: None,
+        alpha: 255,
+    }
 }
 
 fn centre_of(picture: &Frame) -> (f32, f32) {
@@ -1080,11 +1537,23 @@ fn centre_of(picture: &Frame) -> (f32, f32) {
 /// A kept turn blitted with its top left offset from the pivot on screen.
 fn turned_op(needles: &Turned, key: (usize, i32), at: (f32, f32)) -> Option<Op<'_>> {
     let (picture, offset) = needles.get(key)?;
-    Some(blit_op(picture, (at.0.round() as i32 + offset.0, at.1.round() as i32 + offset.1)))
+    Some(blit_op(
+        picture,
+        (
+            at.0.round() as i32 + offset.0,
+            at.1.round() as i32 + offset.1,
+        ),
+    ))
 }
 
 fn text_op<'a>(plan: &TextPlan, line: &'a Frame) -> Op<'a> {
-    Op::Blit { src: line, at: plan.at, part: (0, 0, plan.width.unwrap_or(line.width), line.height), clip: plan.clip, alpha: 255 }
+    Op::Blit {
+        src: line,
+        at: plan.at,
+        part: (0, 0, plan.width.unwrap_or(line.width), line.height),
+        clip: plan.clip,
+        alpha: 255,
+    }
 }
 
 fn align_text_x(box_x: u32, box_w: u32, item_w: u32, align: TextAlign) -> u32 {
@@ -1112,21 +1581,38 @@ impl TextMotion {
     /// offset, and the box clips. The line is set in type once and kept.
     pub fn advance(&mut self, text: &Text, fonts: Option<&Fonts>, now_ms: u64) -> TextPlan {
         let key = (text.x, text.y);
-        let line_key = format!("{}\0{:?}\0{}\0{:?}\0{}", text.text, text.style, text.size, text.color, text.font_file);
-        if self.lines.get(&key).map_or(true, |(k, _)| *k != line_key) {
+        let line_key = format!(
+            "{}\0{:?}\0{}\0{:?}\0{}",
+            text.text, text.style, text.size, text.color, text.font_file
+        );
+        if self.lines.get(&key).is_none_or(|(k, _)| *k != line_key) {
             let font = fonts.and_then(|f| f.get_for(text.style, &text.font_file));
-            let line = render_line(font, text.size, text.color, &text.text, 0).unwrap_or_else(|| bitmap_line(&text.text));
+            let line = render_line(font, text.size, text.color, &text.text, 0)
+                .unwrap_or_else(|| bitmap_line(&text.text));
             self.lines.insert(key, (line_key, line));
         }
         let line_w = self.lines[&key].1.width;
         let box_w = text.max_width;
         if box_w == 0 || line_w <= box_w || text.speed <= 0.0 {
             self.states.remove(&key);
-            let x = if box_w == 0 { text.x } else { align_text_x(text.x, box_w, line_w, text.align) };
-            return TextPlan { key, at: (x as i32, text.y as i32), width: (box_w > 0).then_some(box_w.min(line_w)), clip: None };
+            let x = if box_w == 0 {
+                text.x
+            } else {
+                align_text_x(text.x, box_w, line_w, text.align)
+            };
+            return TextPlan {
+                key,
+                at: (x as i32, text.y as i32),
+                width: (box_w > 0).then_some(box_w.min(line_w)),
+                clip: None,
+            };
         }
         let limit = (line_w - box_w) as f32;
-        let segment = if text.loop_thirds { (line_w / 3) as f32 } else { 0.0 };
+        let segment = if text.loop_thirds {
+            (line_w / 3) as f32
+        } else {
+            0.0
+        };
         let state = self.states.entry(key).or_default();
         if state.text != text.text || state.box_w != box_w {
             state.text = text.text.clone();
@@ -1180,7 +1666,12 @@ impl TextMotion {
             }
         }
         let draw_x = text.x as i32 - state.offset.floor() as i32;
-        TextPlan { key, at: (draw_x, text.y as i32), width: None, clip: Some((text.x as i32, 0, box_w as i32, i32::MAX / 2)) }
+        TextPlan {
+            key,
+            at: (draw_x, text.y as i32),
+            width: None,
+            clip: Some((text.x as i32, 0, box_w as i32, i32::MAX / 2)),
+        }
     }
 
     /// The line set for a text position.
@@ -1190,7 +1681,13 @@ impl TextMotion {
 }
 
 /// Draw one text in its box straight onto a frame.
-pub fn draw_text_moving(frame: &mut Frame, text: &Text, fonts: Option<&Fonts>, motion: &mut TextMotion, now_ms: u64) {
+pub fn draw_text_moving(
+    frame: &mut Frame,
+    text: &Text,
+    fonts: Option<&Fonts>,
+    motion: &mut TextMotion,
+    now_ms: u64,
+) {
     let plan = motion.advance(text, fonts, now_ms);
     if let Some(line) = motion.line(plan.key) {
         text_op(&plan, line).paint(&mut Band::whole(frame));
@@ -1231,7 +1728,12 @@ fn align_x(box_x: u32, box_w: u32, item_w: u32, align: TypeAlign) -> u32 {
 /// the box, placed by `align`, and centred vertically. `both` puts the icon
 /// on the left and the label three pixels to its right. Text mode without a
 /// box draws the label at the position.
-fn plan_type_area<'a>(area: &TypeArea, icon: Option<&'a Frame>, label: Option<&'a Frame>, ops: &mut Vec<Op<'a>>) {
+fn plan_type_area<'a>(
+    area: &TypeArea,
+    icon: Option<&'a Frame>,
+    label: Option<&'a Frame>,
+    ops: &mut Vec<Op<'a>>,
+) {
     const GAP: u32 = 3;
     let Some((w, h)) = area.box_size else {
         if let (TypeMode::Text, Some(label)) = (area.mode, label) {
@@ -1244,7 +1746,13 @@ fn plan_type_area<'a>(area: &TypeArea, icon: Option<&'a Frame>, label: Option<&'
         let (iw, ih) = fitted(item);
         let x = align_x(area.x, w, iw, area.align);
         let y = area.y + h.saturating_sub(ih) / 2;
-        ops.push(Op::Blit { src: item, at: (x as i32, y as i32), part: (0, 0, iw, ih), clip: None, alpha: 255 });
+        ops.push(Op::Blit {
+            src: item,
+            at: (x as i32, y as i32),
+            part: (0, 0, iw, ih),
+            clip: None,
+            alpha: 255,
+        });
     };
     match area.mode {
         TypeMode::Text => {
@@ -1263,17 +1771,35 @@ fn plan_type_area<'a>(area: &TypeArea, icon: Option<&'a Frame>, label: Option<&'
             (Some(icon), None) => {
                 let (iw, ih) = fitted(icon);
                 let y = area.y + h.saturating_sub(ih) / 2;
-                ops.push(Op::Blit { src: icon, at: (area.x as i32, y as i32), part: (0, 0, iw, ih), clip: None, alpha: 255 });
+                ops.push(Op::Blit {
+                    src: icon,
+                    at: (area.x as i32, y as i32),
+                    part: (0, 0, iw, ih),
+                    clip: None,
+                    alpha: 255,
+                });
             }
             (Some(icon), Some(label)) => {
                 let (iw, ih) = fitted(icon);
                 let iy = area.y + h.saturating_sub(ih) / 2;
-                ops.push(Op::Blit { src: icon, at: (area.x as i32, iy as i32), part: (0, 0, iw, ih), clip: None, alpha: 255 });
+                ops.push(Op::Blit {
+                    src: icon,
+                    at: (area.x as i32, iy as i32),
+                    part: (0, 0, iw, ih),
+                    clip: None,
+                    alpha: 255,
+                });
                 let text_x = iw + GAP;
                 if text_x < w {
                     let (lw, lh) = (label.width.min(w - text_x), label.height.min(h));
                     let ty = area.y + h.saturating_sub(lh) / 2;
-                    ops.push(Op::Blit { src: label, at: ((area.x + text_x) as i32, ty as i32), part: (0, 0, lw, lh), clip: None, alpha: 255 });
+                    ops.push(Op::Blit {
+                        src: label,
+                        at: ((area.x + text_x) as i32, ty as i32),
+                        part: (0, 0, lw, lh),
+                        clip: None,
+                        alpha: 255,
+                    });
                 }
             }
         },
@@ -1281,11 +1807,28 @@ fn plan_type_area<'a>(area: &TypeArea, icon: Option<&'a Frame>, label: Option<&'
 }
 
 /// Draw the type area straight onto a frame.
-pub fn draw_type_area(frame: &mut Frame, area: &TypeArea, icon: Option<&Frame>, fonts: Option<&Fonts>) {
+pub fn draw_type_area(
+    frame: &mut Frame,
+    area: &TypeArea,
+    icon: Option<&Frame>,
+    fonts: Option<&Fonts>,
+) {
     let mut labels = Labels::default();
-    let key = labels.ensure(fonts, area.font_style, area.font_size, area.color, &area.label, 0);
+    let key = labels.ensure(
+        fonts,
+        area.font_style,
+        area.font_size,
+        area.color,
+        &area.label,
+        0,
+    );
     let mut ops = Vec::new();
-    plan_type_area(area, icon, key.as_deref().and_then(|k| labels.get(k)), &mut ops);
+    plan_type_area(
+        area,
+        icon,
+        key.as_deref().and_then(|k| labels.get(k)),
+        &mut ops,
+    );
     paint_onto(&mut Band::whole(frame), &ops);
 }
 
@@ -1294,7 +1837,9 @@ pub fn draw_type_area(frame: &mut Frame, area: &TypeArea, icon: Option<&Frame>, 
 /// its own colours. A picture smaller than the box is enlarged to it.
 pub fn read_icon(path: &Path, w: u32, h: u32, tint: Option<[u8; 3]>) -> Option<Frame> {
     let (w, h) = (w.max(1), h.max(1));
-    let is_svg = path.extension().is_some_and(|e| e.eq_ignore_ascii_case("svg"));
+    let is_svg = path
+        .extension()
+        .is_some_and(|e| e.eq_ignore_ascii_case("svg"));
     let mut frame = if is_svg {
         let bytes = std::fs::read(path).ok()?;
         let tree = resvg::usvg::Tree::from_data(&bytes, &resvg::usvg::Options::default()).ok()?;
@@ -1324,13 +1869,14 @@ pub fn read_icon(path: &Path, w: u32, h: u32, tint: Option<[u8; 3]>) -> Option<F
         }
     } else {
         let picture = read_png(path)?;
-        let scale = (w as f32 / picture.width.max(1) as f32).min(h as f32 / picture.height.max(1) as f32);
+        let scale =
+            (w as f32 / picture.width.max(1) as f32).min(h as f32 / picture.height.max(1) as f32);
         let fw = ((picture.width as f32 * scale) as u32).clamp(1, w);
         let fh = ((picture.height as f32 * scale) as u32).clamp(1, h);
         fit_art(&picture, fw, fh)
     };
     if let (true, Some(tint)) = (is_svg, tint) {
-        for px in frame.rgba.chunks_exact_mut(4) {
+        for px in frame.rgba.as_chunks_mut::<4>().0 {
             if px[3] > 0 {
                 px[..3].copy_from_slice(&tint);
             }
@@ -1343,8 +1889,15 @@ pub fn read_icon(path: &Path, w: u32, h: u32, tint: Option<[u8; 3]>) -> Option<F
 /// its black kept, as the player's engine does with `albumart.mask`.
 pub fn apply_mask(art: &mut Frame, mask: &Frame) {
     let mask = fit_art(mask, art.width, art.height);
-    for (px, mpx) in art.rgba.chunks_exact_mut(4).zip(mask.rgba.chunks_exact(4)) {
-        let luminance = (u32::from(mpx[0]) * 299 + u32::from(mpx[1]) * 587 + u32::from(mpx[2]) * 114) / 1000;
+    for (px, mpx) in art
+        .rgba
+        .as_chunks_mut::<4>()
+        .0
+        .iter_mut()
+        .zip(mask.rgba.as_chunks::<4>().0)
+    {
+        let luminance =
+            (u32::from(mpx[0]) * 299 + u32::from(mpx[1]) * 587 + u32::from(mpx[2]) * 114) / 1000;
         let keep = 255 - luminance.min(255) as u8;
         px[3] = ((u32::from(px[3]) * u32::from(keep)) / 255) as u8;
     }
@@ -1354,18 +1907,45 @@ pub fn apply_mask(art: &mut Frame, mask: &Frame) {
 /// the player's renderer places it, and `max_width` clips the line. Without
 /// a font for its style the bitmap font stands in.
 pub fn draw_text_styled(frame: &mut Frame, text: &Text, fonts: Option<&Fonts>) {
-    let line = render_text(fonts, text.style, text.size, text.color, &text.text, text.max_width).unwrap_or_else(|| bitmap_line(&text.text));
+    let line = render_text(
+        fonts,
+        text.style,
+        text.size,
+        text.color,
+        &text.text,
+        text.max_width,
+    )
+    .unwrap_or_else(|| bitmap_line(&text.text));
     blit_op(&line, (text.x as i32, text.y as i32)).paint(&mut Band::whole(frame));
 }
 
 /// Set a line of text in a font: a transparent frame one line high whose
 /// width is the text's advance, or `max_width` when that is smaller and not
 /// zero. `None` when the style has no font or the text is empty.
-pub fn render_text(fonts: Option<&Fonts>, style: TextStyle, size: u32, color: [u8; 3], text: &str, max_width: u32) -> Option<Frame> {
-    render_line(fonts.and_then(|f| f.get(style)), size, color, text, max_width)
+pub fn render_text(
+    fonts: Option<&Fonts>,
+    style: TextStyle,
+    size: u32,
+    color: [u8; 3],
+    text: &str,
+    max_width: u32,
+) -> Option<Frame> {
+    render_line(
+        fonts.and_then(|f| f.get(style)),
+        size,
+        color,
+        text,
+        max_width,
+    )
 }
 
-fn render_line(font: Option<&FontRef<'static>>, size: u32, color: [u8; 3], text: &str, max_width: u32) -> Option<Frame> {
+fn render_line(
+    font: Option<&FontRef<'static>>,
+    size: u32,
+    color: [u8; 3],
+    text: &str,
+    max_width: u32,
+) -> Option<Frame> {
     let font = font?;
     if text.is_empty() {
         return None;
@@ -1467,14 +2047,30 @@ fn plan_bars(rect: &Rect, bars: &[f32], color: [u8; 4], ops: &mut Vec<Op<'_>>) {
             break;
         }
         let w = bar_w.min(rect.x + rect.w - x);
-        ops.push(Op::Column { rect: Rect { x, y: rect.y, w, h: rect.h }, level: *level, color });
+        ops.push(Op::Column {
+            rect: Rect {
+                x,
+                y: rect.y,
+                w,
+                h: rect.h,
+            },
+            level: *level,
+            color,
+        });
     }
 }
 
 /// Blend `part` (x, y, w, h) of a picture at `at`, which may lie partly
 /// outside the frame, its alpha scaled by `alpha` (255 is as is), and only
 /// inside `clip` (x, y, w, h) when one is given.
-fn blit_into(band: &mut Band, src: &Frame, at: (i32, i32), part: (u32, u32, u32, u32), clip: Option<(i32, i32, i32, i32)>, alpha: u8) {
+fn blit_into(
+    band: &mut Band,
+    src: &Frame,
+    at: (i32, i32),
+    part: (u32, u32, u32, u32),
+    clip: Option<(i32, i32, i32, i32)>,
+    alpha: u8,
+) {
     if alpha == 0 {
         return;
     }
@@ -1509,11 +2105,21 @@ fn blit_into(band: &mut Band, src: &Frame, at: (i32, i32), part: (u32, u32, u32,
         let d = dx_from as usize * 4;
         let dst_row = &mut band.row(dy)[d..d + cols * 4];
         if alpha == 255 {
-            for (dp, sp) in dst_row.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+            for (dp, sp) in dst_row
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(src_row.as_chunks::<4>().0)
+            {
                 blend(dp, 0, [sp[0], sp[1], sp[2], sp[3]]);
             }
         } else {
-            for (dp, sp) in dst_row.chunks_exact_mut(4).zip(src_row.chunks_exact(4)) {
+            for (dp, sp) in dst_row
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(src_row.as_chunks::<4>().0)
+            {
                 let a = (sp[3] as u32 * alpha as u32 / 255) as u8;
                 blend(dp, 0, [sp[0], sp[1], sp[2], a]);
             }
@@ -1545,7 +2151,12 @@ fn texel(src: &Frame, x: i32, y: i32) -> [u8; 4] {
         return [0, 0, 0, 0];
     }
     let s = (y as usize * src.width as usize + x as usize) * 4;
-    [src.rgba[s], src.rgba[s + 1], src.rgba[s + 2], src.rgba[s + 3]]
+    [
+        src.rgba[s],
+        src.rgba[s + 1],
+        src.rgba[s + 2],
+        src.rgba[s + 3],
+    ]
 }
 
 /// Bilinear sample at a continuous position, where texel centres sit at
@@ -1594,7 +2205,15 @@ fn blit_rotated(band: &mut Band, src: &Frame, at: (i32, i32), degrees: f32, dist
     // The needle turns about a point `distance` below its picture's centre,
     // which the theme places on the origin.
     let pivot = (src.width as f32 / 2.0, src.height as f32 / 2.0 + distance);
-    turn_onto(band, src, pivot, (at.0 as f32, at.1 as f32), degrees, true, false);
+    turn_onto(
+        band,
+        src,
+        pivot,
+        (at.0 as f32, at.1 as f32),
+        degrees,
+        true,
+        false,
+    );
 }
 
 /// Draw a picture turned `degrees` counter-clockwise about `pivot_image`,
@@ -1604,7 +2223,15 @@ fn blit_rotated(band: &mut Band, src: &Frame, at: (i32, i32), degrees: f32, dist
 /// rotation does for records, reels, art and knobs. `store` writes each
 /// turned pixel with its own alpha into a transparent canvas, for a picture
 /// kept turned; otherwise pixels blend onto the opaque frame.
-fn turn_onto(band: &mut Band, src: &Frame, pivot_image: (f32, f32), pivot_screen: (f32, f32), degrees: f32, smooth: bool, store: bool) {
+fn turn_onto(
+    band: &mut Band,
+    src: &Frame,
+    pivot_image: (f32, f32),
+    pivot_screen: (f32, f32),
+    degrees: f32,
+    smooth: bool,
+    store: bool,
+) {
     if src.width == 0 || src.height == 0 || band.x1 <= band.x0 {
         return;
     }
@@ -1619,7 +2246,11 @@ fn turn_onto(band: &mut Band, src: &Frame, pivot_image: (f32, f32), pivot_screen
     // sy = a_y + vx sin. Each bound gives an interval of vx.
     let bound = |coef: f32, base: f32, limit: f32| -> Option<(f32, f32)> {
         if coef.abs() < 1e-6 {
-            return if base >= 0.0 && base <= limit { Some((f32::MIN, f32::MAX)) } else { None };
+            return if base >= 0.0 && base <= limit {
+                Some((f32::MIN, f32::MAX))
+            } else {
+                None
+            };
         }
         let (a, b) = ((0.0 - base) / coef, (limit - base) / coef);
         Some((a.min(b), a.max(b)))
@@ -1743,7 +2374,16 @@ pub struct VinylMotion {
 impl VinylMotion {
     /// Move the record on and give its angle in degrees, growing clockwise.
     #[allow(clippy::too_many_arguments)]
-    pub fn advance(&mut self, rpm: f32, clockwise: bool, playing: bool, transitional: bool, tonearm_animating: bool, lift_s: f32, now_ms: u64) -> f32 {
+    pub fn advance(
+        &mut self,
+        rpm: f32,
+        clockwise: bool,
+        playing: bool,
+        transitional: bool,
+        tonearm_animating: bool,
+        lift_s: f32,
+        now_ms: u64,
+    ) -> f32 {
         if self.was_playing && !playing {
             self.decel_start_ms = Some(now_ms);
             self.decel_ms = (lift_s.max(0.0) * 1000.0) as u64;
@@ -1768,7 +2408,9 @@ impl VinylMotion {
             }
         }
         let spinning = playing || transitional || decelerating || tonearm_animating;
-        let dt = self.last_ms.map_or(0.0, |last| (now_ms.saturating_sub(last) as f32 / 1000.0).min(0.5));
+        let dt = self.last_ms.map_or(0.0, |last| {
+            (now_ms.saturating_sub(last) as f32 / 1000.0).min(0.5)
+        });
         self.last_ms = Some(now_ms);
         if rpm > 0.0 && spinning && (playing || transitional || factor > 0.0) {
             let direction = if clockwise { 1.0 } else { -1.0 };
@@ -1792,7 +2434,9 @@ pub struct ReelMotion {
 
 impl ReelMotion {
     pub fn advance(&mut self, rpm: f32, clockwise: bool, spinning: bool, now_ms: u64) -> f32 {
-        let dt = self.last_ms.map_or(0.0, |last| (now_ms.saturating_sub(last) as f32 / 1000.0).min(0.5));
+        let dt = self.last_ms.map_or(0.0, |last| {
+            (now_ms.saturating_sub(last) as f32 / 1000.0).min(0.5)
+        });
         self.last_ms = Some(now_ms);
         if rpm > 0.0 && spinning {
             let direction = if clockwise { 1.0 } else { -1.0 };
@@ -1837,7 +2481,11 @@ impl Fade {
     /// A finished fade out keeps the frame covered.
     pub fn overlay(&mut self, now_ms: u64) -> Option<([u8; 3], u8)> {
         let started = self.started_ms?;
-        let p = if self.duration_ms == 0 { 1.0 } else { (now_ms.saturating_sub(started) as f32 / self.duration_ms as f32).min(1.0) };
+        let p = if self.duration_ms == 0 {
+            1.0
+        } else {
+            (now_ms.saturating_sub(started) as f32 / self.duration_ms as f32).min(1.0)
+        };
         if self.out {
             return Some((self.color, (self.max_alpha as f32 * p) as u8));
         }
@@ -1849,7 +2497,8 @@ impl Fade {
     }
 
     pub fn running(&self, now_ms: u64) -> bool {
-        self.started_ms.is_some_and(|s| now_ms.saturating_sub(s) < self.duration_ms)
+        self.started_ms
+            .is_some_and(|s| now_ms.saturating_sub(s) < self.duration_ms)
     }
 }
 
@@ -1867,7 +2516,9 @@ impl Ramp {
 
     /// The share of the level to show, 0.0 to 1.0.
     pub fn factor(&mut self, now_ms: u64) -> f32 {
-        let Some(started) = self.started_ms else { return 1.0 };
+        let Some(started) = self.started_ms else {
+            return 1.0;
+        };
         let steps = now_ms.saturating_sub(started) / 70;
         if steps >= 10 {
             self.started_ms = None;
@@ -1921,7 +2572,14 @@ impl TonearmMotion {
         p >= 1.0
     }
 
-    pub fn update(&mut self, spec: &TonearmSpec, playing: bool, progress_pct: f32, time_remaining: Option<f32>, now_ms: u64) {
+    pub fn update(
+        &mut self,
+        spec: &TonearmSpec,
+        playing: bool,
+        progress_pct: f32,
+        time_remaining: Option<f32>,
+        now_ms: u64,
+    ) {
         if !self.started {
             self.started = true;
             self.angle = spec.rest;
@@ -2020,7 +2678,13 @@ pub fn flip_x(src: &Frame) -> Frame {
 /// end the direction names, anchored at the channel origin; `edges-center`
 /// and `center-edges` anchor the two channels at opposite ends. A single
 /// indicator moves by `w`. The place and the part of the picture.
-fn bar_part(sprite: &Frame, at: (i32, i32), w: u32, linear: &LinearSpec, left: bool) -> Option<((i32, i32), (u32, u32, u32, u32))> {
+fn bar_part(
+    sprite: &Frame,
+    at: (i32, i32),
+    w: u32,
+    linear: &LinearSpec,
+    left: bool,
+) -> Option<((i32, i32), (u32, u32, u32, u32))> {
     let (cw, ch) = (sprite.width, sprite.height);
     if cw == 0 || ch == 0 {
         return None;
@@ -2042,14 +2706,21 @@ fn bar_part(sprite: &Frame, at: (i32, i32), w: u32, linear: &LinearSpec, left: b
     let down = w.min(ch);
     Some(match linear.direction {
         Direction::LeftRight => ((ox, oy), (0, 0, across, ch)),
-        Direction::RightLeft => ((ox + (cw - across) as i32, oy), (cw - across, 0, across, ch)),
+        Direction::RightLeft => (
+            (ox + (cw - across) as i32, oy),
+            (cw - across, 0, across, ch),
+        ),
         Direction::BottomTop => ((ox, oy + (ch - down) as i32), (0, ch - down, cw, down)),
         Direction::TopBottom => ((ox, oy), (0, 0, cw, down)),
         Direction::EdgesCenter => {
             if left {
                 ((ox, oy), (0, 0, across, ch))
             } else {
-                let x = if linear.flip_right { ox - across as i32 } else { ox };
+                let x = if linear.flip_right {
+                    ox - across as i32
+                } else {
+                    ox
+                };
                 ((x, oy), (cw - across, 0, across, ch))
             }
         }
@@ -2063,13 +2734,32 @@ fn bar_part(sprite: &Frame, at: (i32, i32), w: u32, linear: &LinearSpec, left: b
     })
 }
 
-fn bar_op<'a>(sprite: &'a Frame, at: (i32, i32), w: u32, linear: &LinearSpec, left: bool) -> Option<Op<'a>> {
-    bar_part(sprite, at, w, linear, left).map(|(at, part)| Op::Blit { src: sprite, at, part, clip: None, alpha: 255 })
+fn bar_op<'a>(
+    sprite: &'a Frame,
+    at: (i32, i32),
+    w: u32,
+    linear: &LinearSpec,
+    left: bool,
+) -> Option<Op<'a>> {
+    bar_part(sprite, at, w, linear, left).map(|(at, part)| Op::Blit {
+        src: sprite,
+        at,
+        part,
+        clip: None,
+        alpha: 255,
+    })
 }
 
 /// One channel of a linear meter straight onto a band.
 #[cfg(test)]
-fn draw_bar(band: &mut Band, sprite: &Frame, at: (i32, i32), w: u32, linear: &LinearSpec, left: bool) {
+fn draw_bar(
+    band: &mut Band,
+    sprite: &Frame,
+    at: (i32, i32),
+    w: u32,
+    linear: &LinearSpec,
+    left: bool,
+) {
     if let Some(op) = bar_op(sprite, at, w, linear, left) {
         op.paint(band);
     }
@@ -2117,7 +2807,10 @@ impl Motion {
     /// frame rate, only as many threads as a frame needs are used, from one
     /// up; without one, all of them, always.
     pub fn new(threads: usize, frame_rate: Option<u32>) -> Self {
-        Self { painters: Painters::new(threads, frame_rate), ..Self::default() }
+        Self {
+            painters: Painters::new(threads, frame_rate),
+            ..Self::default()
+        }
     }
 
     /// How many threads paint the next frame.
@@ -2136,8 +2829,14 @@ impl Motion {
         [
             ("canvas", self.canvas.bytes()),
             ("turned", self.needles.bytes()),
-            ("labels", self.labels.lines.values().map(|(f, _)| f.bytes()).sum()),
-            ("lines", self.text.lines.values().map(|(_, f)| f.bytes()).sum()),
+            (
+                "labels",
+                self.labels.lines.values().map(|(f, _)| f.bytes()).sum(),
+            ),
+            (
+                "lines",
+                self.text.lines.values().map(|(_, f)| f.bytes()).sum(),
+            ),
         ]
     }
 }
@@ -2181,9 +2880,23 @@ impl Default for Painters {
 impl Painters {
     fn new(most: usize, frame_rate: Option<u32>) -> Self {
         let most = most.max(1);
-        let period_us = frame_rate.filter(|&fps| fps > 0).map_or(0.0, |fps| 1_000_000.0 / fps as f64);
+        let period_us = frame_rate
+            .filter(|&fps| fps > 0)
+            .map_or(0.0, |fps| 1_000_000.0 / fps as f64);
         let active = if period_us > 0.0 { 1 } else { most };
-        Self { most, active, budget_us: period_us * 0.8, period_us, mean_us: 0.0, seen_us: vec![None; most + 1], frames: 0, overruns: 0, window_ms: 0, quiet_until_ms: 0, changed_ms: 0 }
+        Self {
+            most,
+            active,
+            budget_us: period_us * 0.8,
+            period_us,
+            mean_us: 0.0,
+            seen_us: vec![None; most + 1],
+            frames: 0,
+            overruns: 0,
+            window_ms: 0,
+            quiet_until_ms: 0,
+            changed_ms: 0,
+        }
     }
 
     /// Note how long a frame's painting took and settle the count for the next.
@@ -2204,7 +2917,11 @@ impl Painters {
         if paint_us as f64 > self.budget_us {
             self.overruns += 1;
         }
-        self.mean_us = if self.mean_us <= 0.0 { paint_us as f64 } else { self.mean_us * 0.9 + paint_us as f64 * 0.1 };
+        self.mean_us = if self.mean_us <= 0.0 {
+            paint_us as f64
+        } else {
+            self.mean_us * 0.9 + paint_us as f64 * 0.1
+        };
         if now_ms.saturating_sub(self.window_ms) < 1000 || self.frames < 20 {
             return;
         }
@@ -2213,7 +2930,12 @@ impl Painters {
         // a measurement or when the load has eased since, as if painting
         // shared out perfectly.
         let projected = self.mean_us * self.active as f64 / (self.active as f64 - 1.0).max(1.0);
-        let one_fewer = self.seen_us.get(self.active - 1).copied().flatten().map_or(projected, |seen| seen.min(projected));
+        let one_fewer = self
+            .seen_us
+            .get(self.active - 1)
+            .copied()
+            .flatten()
+            .map_or(projected, |seen| seen.min(projected));
         if self.overruns * 20 > self.frames && self.active < self.most {
             self.seen_us[self.active] = Some(self.mean_us);
             self.active += 1;
@@ -2243,7 +2965,15 @@ pub struct Labels {
 impl Labels {
     /// Set a label in type unless it is kept already; the key to find it by.
     /// `None` for an empty label or a style without a font.
-    fn ensure(&mut self, fonts: Option<&Fonts>, style: TextStyle, size: u32, color: [u8; 3], text: &str, tick: u64) -> Option<String> {
+    fn ensure(
+        &mut self,
+        fonts: Option<&Fonts>,
+        style: TextStyle,
+        size: u32,
+        color: [u8; 3],
+        text: &str,
+        tick: u64,
+    ) -> Option<String> {
         if text.is_empty() {
             return None;
         }
@@ -2264,7 +2994,8 @@ impl Labels {
     /// Once a few dozen lines are kept, drop those not shown for ten seconds.
     fn sweep(&mut self, tick: u64) {
         if self.lines.len() > 48 {
-            self.lines.retain(|_, (_, used)| tick.saturating_sub(*used) < 10_000);
+            self.lines
+                .retain(|_, (_, used)| tick.saturating_sub(*used) < 10_000);
         }
     }
 }
@@ -2296,7 +3027,14 @@ const TURNED_KEEP_MS: u64 = 10_000;
 impl Turned {
     /// Turn `src` by `degrees` about `pivot_image` unless that turn is kept
     /// already. `slot` tells pictures apart. The key to find the turn by.
-    fn ensure(&mut self, slot: usize, src: &Frame, pivot_image: (f32, f32), degrees: f32, tick: u64) -> (usize, i32) {
+    fn ensure(
+        &mut self,
+        slot: usize,
+        src: &Frame,
+        pivot_image: (f32, f32),
+        degrees: f32,
+        tick: u64,
+    ) -> (usize, i32) {
         let key = (slot, (degrees * 2.0).round() as i32);
         if let Some((_, entry)) = self.entries.iter_mut().find(|(k, _)| *k == key) {
             entry.used = tick;
@@ -2313,8 +3051,16 @@ impl Turned {
             }
             kept
         });
-        while !self.entries.is_empty() && (self.entries.len() >= TURNED_KEEP || self.bytes + size > TURNED_BUDGET) {
-            let oldest = self.entries.iter().enumerate().min_by_key(|(_, (_, p))| p.used).map(|(i, _)| i).unwrap_or(0);
+        while !self.entries.is_empty()
+            && (self.entries.len() >= TURNED_KEEP || self.bytes + size > TURNED_BUDGET)
+        {
+            let oldest = self
+                .entries
+                .iter()
+                .enumerate()
+                .min_by_key(|(_, (_, p))| p.used)
+                .map(|(i, _)| i)
+                .unwrap_or(0);
             let (_, gone) = self.entries.swap_remove(oldest);
             self.bytes -= gone.frame.rgba.len();
         }
@@ -2326,7 +3072,10 @@ impl Turned {
     /// A kept turn: the picture and where its top left sits relative to the
     /// pivot on screen.
     fn get(&self, key: (usize, i32)) -> Option<(&Frame, (i32, i32))> {
-        self.entries.iter().find(|(k, _)| *k == key).map(|(_, entry)| (&entry.frame, entry.offset))
+        self.entries
+            .iter()
+            .find(|(k, _)| *k == key)
+            .map(|(_, entry)| (&entry.frame, entry.offset))
     }
 
     /// What the kept pictures hold, in bytes.
@@ -2339,16 +3088,29 @@ impl Turned {
 /// offset from the pivot, sampled as a turn onto the frame samples.
 fn turn_picture(src: &Frame, pivot_image: (f32, f32), degrees: f32) -> TurnedPicture {
     let (px, py) = pivot_image;
-    let reach = [(0.0, 0.0), (src.width as f32, 0.0), (0.0, src.height as f32), (src.width as f32, src.height as f32)]
-        .iter()
-        .map(|(x, y)| ((x - px).powi(2) + (y - py).powi(2)).sqrt())
-        .fold(0.0f32, f32::max)
-        .ceil() as i32
+    let reach = [
+        (0.0, 0.0),
+        (src.width as f32, 0.0),
+        (0.0, src.height as f32),
+        (src.width as f32, src.height as f32),
+    ]
+    .iter()
+    .map(|(x, y)| ((x - px).powi(2) + (y - py).powi(2)).sqrt())
+    .fold(0.0f32, f32::max)
+    .ceil() as i32
         + 1;
     let side = (reach * 2 + 1) as u32;
     let mut frame = empty_frame(side, side);
     // The pivot sits at the centre of the square frame.
-    turn_onto(&mut Band::whole(&mut frame), src, pivot_image, (reach as f32 + 0.5, reach as f32 + 0.5), degrees, true, true);
+    turn_onto(
+        &mut Band::whole(&mut frame),
+        src,
+        pivot_image,
+        (reach as f32 + 0.5, reach as f32 + 0.5),
+        degrees,
+        true,
+        true,
+    );
     // Trim to the rows and columns that hold anything.
     let (mut x0, mut y0, mut x1, mut y1) = (side, side, 0u32, 0u32);
     for y in 0..side {
@@ -2362,15 +3124,24 @@ fn turn_picture(src: &Frame, pivot_image: (f32, f32), degrees: f32) -> TurnedPic
         }
     }
     if x1 <= x0 || y1 <= y0 {
-        return TurnedPicture { frame: empty_frame(1, 1), offset: (0, 0), used: 0 };
+        return TurnedPicture {
+            frame: empty_frame(1, 1),
+            offset: (0, 0),
+            used: 0,
+        };
     }
     let mut trimmed = empty_frame(x1 - x0, y1 - y0);
     for y in y0..y1 {
         let from = ((y * side + x0) * 4) as usize;
         let to = (((y - y0) * (x1 - x0)) * 4) as usize;
-        trimmed.rgba[to..to + ((x1 - x0) * 4) as usize].copy_from_slice(&frame.rgba[from..from + ((x1 - x0) * 4) as usize]);
+        trimmed.rgba[to..to + ((x1 - x0) * 4) as usize]
+            .copy_from_slice(&frame.rgba[from..from + ((x1 - x0) * 4) as usize]);
     }
-    TurnedPicture { frame: trimmed, offset: (x0 as i32 - reach, y0 as i32 - reach), used: 0 }
+    TurnedPicture {
+        frame: trimmed,
+        offset: (x0 as i32 - reach, y0 as i32 - reach),
+        used: 0,
+    }
 }
 
 /// A picture kept as the opaque span of every row, so a mostly transparent
@@ -2390,9 +3161,12 @@ impl Spans {
         let mut rows = Vec::with_capacity(frame.height as usize);
         let mut pixels = Vec::new();
         for y in 0..frame.height {
-            let row = &frame.rgba[(y * frame.width * 4) as usize..((y + 1) * frame.width * 4) as usize];
+            let row =
+                &frame.rgba[(y * frame.width * 4) as usize..((y + 1) * frame.width * 4) as usize];
             let first = (0..frame.width).find(|&x| row[(x * 4 + 3) as usize] != 0);
-            let last = (0..frame.width).rev().find(|&x| row[(x * 4 + 3) as usize] != 0);
+            let last = (0..frame.width)
+                .rev()
+                .find(|&x| row[(x * 4 + 3) as usize] != 0);
             match (first, last) {
                 (Some(a), Some(b)) => {
                     rows.push((a, b + 1, pixels.len()));
@@ -2401,15 +3175,23 @@ impl Spans {
                 _ => rows.push((0, 0, pixels.len())),
             }
         }
-        Self { width: frame.width, height: frame.height, rows, pixels }
+        Self {
+            width: frame.width,
+            height: frame.height,
+            rows,
+            pixels,
+        }
     }
 
     pub fn bytes(&self) -> usize {
-        self.pixels.len() + self.rows.len() * std::mem::size_of::<(u32, u32, usize)>()
+        self.pixels.len() + self.rows.len() * size_of::<(u32, u32, usize)>()
     }
 
     fn blit(&self, band: &mut Band, at: (u32, u32)) {
-        for dy in band.rows(at.1 as i32, at.1.saturating_add(self.rows.len() as u32) as i32) {
+        for dy in band.rows(
+            at.1 as i32,
+            at.1.saturating_add(self.rows.len() as u32) as i32,
+        ) {
             let y = dy - at.1;
             let (x0, x1, start) = self.rows[y as usize];
             let cols = band.cols((at.0 + x0) as i32, (at.0 + x1) as i32);
@@ -2420,7 +3202,12 @@ impl Spans {
             let d = (cols.start * 4) as usize;
             let n = ((cols.end - cols.start) * 4) as usize;
             let row = band.row(dy);
-            for (dp, sp) in row[d..d + n].chunks_exact_mut(4).zip(self.pixels[s..s + n].chunks_exact(4)) {
+            for (dp, sp) in row[d..d + n]
+                .as_chunks_mut::<4>()
+                .0
+                .iter_mut()
+                .zip(self.pixels[s..s + n].as_chunks::<4>().0)
+            {
                 blend(dp, 0, [sp[0], sp[1], sp[2], sp[3]]);
             }
         }
@@ -2435,7 +3222,10 @@ struct Stages<'a> {
 
 impl<'a> Stages<'a> {
     fn new(sink: Option<&'a mut Vec<(&'static str, u64)>>) -> Self {
-        Self { sink, last: std::time::Instant::now() }
+        Self {
+            sink,
+            last: std::time::Instant::now(),
+        }
     }
 
     fn mark(&mut self, name: &'static str) {
@@ -2464,15 +3254,26 @@ pub struct SpectrumAssets {
 
 impl SpectrumAssets {
     pub fn bytes(&self) -> usize {
-        bytes_of([&self.background, &self.bar, &self.reflection, &self.foreground])
+        bytes_of([
+            &self.background,
+            &self.bar,
+            &self.reflection,
+            &self.foreground,
+        ])
     }
 
     pub fn load(spec: &SpectrumSpec) -> Self {
         let bar_box = (spec.bar_w, spec.bar_h);
         Self {
-            background: spec.background.as_ref().and_then(|f| fill_frame(f, (spec.w, spec.h), false)),
+            background: spec
+                .background
+                .as_ref()
+                .and_then(|f| fill_frame(f, (spec.w, spec.h), false)),
             bar: spec.bar.as_ref().and_then(|f| fill_frame(f, bar_box, true)),
-            reflection: spec.reflection.as_ref().and_then(|f| fill_frame(f, bar_box, true)),
+            reflection: spec
+                .reflection
+                .as_ref()
+                .and_then(|f| fill_frame(f, bar_box, true)),
             foreground: if spec.foreground.is_empty() {
                 None
             } else {
@@ -2490,7 +3291,11 @@ fn fill_frame(fill: &Fill, (w, h): (u32, u32), stretch: bool) -> Option<Frame> {
         Fill::Gradient(colors) => Some(gradient_frame(w, h, colors)),
         Fill::Image(path) => {
             let picture = read_png(Path::new(path))?;
-            Some(if stretch { fit_art(&picture, w, h) } else { picture })
+            Some(if stretch {
+                fit_art(&picture, w, h)
+            } else {
+                picture
+            })
         }
         Fill::ImageExtended(path) => Some(fit_art(&read_png(Path::new(path))?, w, h)),
     }
@@ -2513,7 +3318,11 @@ pub fn gradient_frame(w: u32, h: u32, colors: &[[u8; 4]]) -> Frame {
     let mut rgba = vec![0u8; (w * h * 4) as usize];
     let last = colors.len().saturating_sub(1);
     for y in 0..h {
-        let down = if h > 1 { y as f32 / (h - 1) as f32 } else { 0.0 };
+        let down = if h > 1 {
+            y as f32 / (h - 1) as f32
+        } else {
+            0.0
+        };
         let pos = (1.0 - down) * last as f32;
         let i = (pos.floor() as usize).min(last);
         let f = pos - i as f32;
@@ -2569,7 +3378,8 @@ impl SpectrumMotion {
                                     topping = Some((fallen, src_y as u32));
                                 }
                             } else {
-                                self.toppings[r] = Some(top - topping_h as i32 - topping_step as i32);
+                                self.toppings[r] =
+                                    Some(top - topping_h as i32 - topping_step as i32);
                             }
                         }
                     }
@@ -2585,33 +3395,81 @@ impl SpectrumMotion {
 /// centred in the box, each bar's bottom `height` rows rising from the
 /// origin, the reflection's top rows hanging below it, a falling topping,
 /// and the foreground over everything.
-fn plan_spectrum<'a>(spec: &SpectrumSpec, assets: &'a SpectrumAssets, plan: &SpectrumPlan, ops: &mut Vec<Op<'a>>) {
+fn plan_spectrum<'a>(
+    spec: &SpectrumSpec,
+    assets: &'a SpectrumAssets,
+    plan: &SpectrumPlan,
+    ops: &mut Vec<Op<'a>>,
+) {
     let clip = Some((spec.x, spec.y, spec.w as i32, spec.h as i32));
-    let centred = |picture: &Frame| (spec.x + (spec.w as i32 - picture.width as i32) / 2, spec.y + (spec.h as i32 - picture.height as i32) / 2);
+    let centred = |picture: &Frame| {
+        (
+            spec.x + (spec.w as i32 - picture.width as i32) / 2,
+            spec.y + (spec.h as i32 - picture.height as i32) / 2,
+        )
+    };
     if let Some(background) = &assets.background {
-        ops.push(Op::Blit { src: background, at: centred(background), part: whole(background), clip, alpha: 255 });
+        ops.push(Op::Blit {
+            src: background,
+            at: centred(background),
+            part: whole(background),
+            clip,
+            alpha: 255,
+        });
     }
     let baseline = spec.y + spec.origin_y;
     for &(bx, height, topping) in &plan.bars {
         if height > 0 {
             if let Some(bar) = &assets.bar {
-                ops.push(Op::Blit { src: bar, at: (bx, baseline - height as i32), part: (0, spec.bar_h - height, spec.bar_w, height), clip, alpha: 255 });
+                ops.push(Op::Blit {
+                    src: bar,
+                    at: (bx, baseline - height as i32),
+                    part: (0, spec.bar_h - height, spec.bar_w, height),
+                    clip,
+                    alpha: 255,
+                });
             }
             if let Some(reflection) = &assets.reflection {
-                ops.push(Op::Blit { src: reflection, at: (bx, baseline + spec.reflection_gap), part: (0, 0, spec.bar_w, height), clip, alpha: 255 });
+                ops.push(Op::Blit {
+                    src: reflection,
+                    at: (bx, baseline + spec.reflection_gap),
+                    part: (0, 0, spec.bar_w, height),
+                    clip,
+                    alpha: 255,
+                });
             }
         }
-        if let (Some((topping_h, _)), Some(bar), Some((top, src_y))) = (spec.topping, &assets.bar, topping) {
-            ops.push(Op::Blit { src: bar, at: (bx, top), part: (0, src_y, spec.bar_w, topping_h), clip, alpha: 255 });
+        if let (Some((topping_h, _)), Some(bar), Some((top, src_y))) =
+            (spec.topping, &assets.bar, topping)
+        {
+            ops.push(Op::Blit {
+                src: bar,
+                at: (bx, top),
+                part: (0, src_y, spec.bar_w, topping_h),
+                clip,
+                alpha: 255,
+            });
         }
     }
     if let Some(foreground) = &assets.foreground {
-        ops.push(Op::Blit { src: foreground, at: centred(foreground), part: whole(foreground), clip, alpha: 255 });
+        ops.push(Op::Blit {
+            src: foreground,
+            at: centred(foreground),
+            part: whole(foreground),
+            clip,
+            alpha: 255,
+        });
     }
 }
 
 /// The spectrum straight onto a band.
-pub fn draw_spectrum(band: &mut Band, spec: &SpectrumSpec, heights: &[u32], assets: &SpectrumAssets, motion: &mut SpectrumMotion) {
+pub fn draw_spectrum(
+    band: &mut Band,
+    spec: &SpectrumSpec,
+    heights: &[u32],
+    assets: &SpectrumAssets,
+    motion: &mut SpectrumMotion,
+) {
     let plan = motion.advance(spec, heights);
     let mut ops = Vec::new();
     plan_spectrum(spec, assets, &plan, &mut ops);
@@ -2640,7 +3498,8 @@ impl FolderPicture {
                 at: (layer.x, layer.y),
             },
             Scale::Fit => {
-                let ratio = (bw as f32 / picture.width as f32).min(bh as f32 / picture.height as f32);
+                let ratio =
+                    (bw as f32 / picture.width as f32).min(bh as f32 / picture.height as f32);
                 let nw = ((picture.width as f32 * ratio) as u32).max(1);
                 let nh = ((picture.height as f32 * ratio) as u32).max(1);
                 Self {
@@ -2653,7 +3512,12 @@ impl FolderPicture {
 }
 
 /// The folder layers of one z-order, each with its border when it has a picture.
-fn plan_folder_layers<'a>(scene: &Scene, pictures: &'a [Option<FolderPicture>], zorder: ZOrder, ops: &mut Vec<Op<'a>>) {
+fn plan_folder_layers<'a>(
+    scene: &Scene,
+    pictures: &'a [Option<FolderPicture>],
+    zorder: ZOrder,
+    ops: &mut Vec<Op<'a>>,
+) {
     for (layer, picture) in scene.folder_layers.iter().zip(pictures.iter()) {
         if layer.spec.zorder != zorder {
             continue;
@@ -2661,24 +3525,42 @@ fn plan_folder_layers<'a>(scene: &Scene, pictures: &'a [Option<FolderPicture>], 
         let Some(picture) = picture else {
             continue;
         };
-        ops.push(blit_op(&picture.frame, (picture.at.0 as i32, picture.at.1 as i32)));
+        ops.push(blit_op(
+            &picture.frame,
+            (picture.at.0 as i32, picture.at.1 as i32),
+        ));
         if layer.spec.border > 0 {
             let c = layer.spec.border_color;
-            ops.push(Op::Border { rect: (layer.spec.x, layer.spec.y, layer.spec.w, layer.spec.h), thickness: layer.spec.border, color: [c[0], c[1], c[2], 255] });
+            ops.push(Op::Border {
+                rect: (layer.spec.x, layer.spec.y, layer.spec.w, layer.spec.h),
+                thickness: layer.spec.border,
+                color: [c[0], c[1], c[2], 255],
+            });
         }
     }
 }
 
 /// A picture at its place with its alpha scaled by `alpha` (255 is as is).
 fn alpha_op(picture: &FolderPicture, alpha: u8) -> Op<'_> {
-    Op::Blit { src: &picture.frame, at: (picture.at.0 as i32, picture.at.1 as i32), part: whole(&picture.frame), clip: None, alpha }
+    Op::Blit {
+        src: &picture.frame,
+        at: (picture.at.0 as i32, picture.at.1 as i32),
+        part: whole(&picture.frame),
+        clip: None,
+        alpha,
+    }
 }
 
 /// The fanart slot of one z-order. A `merge` crossfades the old picture into
 /// the new over the transition; a `fade` takes the old one out in the first
 /// half and the new one in over the second, or the new one in alone when
 /// there is no old picture; `none` shows the picture as it is.
-fn plan_fanart<'a>(fanart: Option<&Fanart>, pictures: (Option<&'a FolderPicture>, Option<&'a FolderPicture>), zorder: ZOrder, ops: &mut Vec<Op<'a>>) {
+fn plan_fanart<'a>(
+    fanart: Option<&Fanart>,
+    pictures: (Option<&'a FolderPicture>, Option<&'a FolderPicture>),
+    zorder: ZOrder,
+    ops: &mut Vec<Op<'a>>,
+) {
     let Some(fanart) = fanart else {
         return;
     };
@@ -2686,7 +3568,9 @@ fn plan_fanart<'a>(fanart: Option<&Fanart>, pictures: (Option<&'a FolderPicture>
         return;
     }
     let (current, previous) = pictures;
-    let running = fanart.transition_ms > 0 && fanart.elapsed_ms < fanart.transition_ms && fanart.transition != "none";
+    let running = fanart.transition_ms > 0
+        && fanart.elapsed_ms < fanart.transition_ms
+        && fanart.transition != "none";
     if !running {
         if let Some(picture) = current {
             ops.push(alpha_op(picture, 255));
@@ -2767,7 +3651,10 @@ pub fn blur(src: &Frame, radius: u32) -> Frame {
     Frame {
         width: src.width,
         height: src.height,
-        rgba: a.iter().map(|v| v.round().clamp(0.0, 255.0) as u8).collect(),
+        rgba: a
+            .iter()
+            .map(|v| v.round().clamp(0.0, 255.0) as u8)
+            .collect(),
     }
 }
 
@@ -2800,21 +3687,52 @@ fn paint_shape(frame: &mut Frame, x: u32, y: u32, w: u32, h: u32, circle: bool, 
 
 /// One state of an LED indicator: the glow behind, the shape on top, in a
 /// canvas padded by twice the glow radius as the player pads it.
-pub fn led_state_frame(w: u32, h: u32, circle: bool, color: [u8; 3], glow: u32, intensity: f32, glow_color: [u8; 3]) -> Frame {
+pub fn led_state_frame(
+    w: u32,
+    h: u32,
+    circle: bool,
+    color: [u8; 3],
+    glow: u32,
+    intensity: f32,
+    glow_color: [u8; 3],
+) -> Frame {
     let pad = if glow > 0 { glow * 2 } else { 0 };
     let mut frame = empty_frame(w + pad * 2, h + pad * 2);
     if glow > 0 && intensity > 0.0 {
         let mut halo = empty_frame(w + pad * 2, h + pad * 2);
         let alpha = (255.0 * intensity.clamp(0.0, 1.0)) as u8;
-        paint_shape(&mut halo, pad, pad, w, h, circle, [glow_color[0], glow_color[1], glow_color[2], alpha]);
+        paint_shape(
+            &mut halo,
+            pad,
+            pad,
+            w,
+            h,
+            circle,
+            [glow_color[0], glow_color[1], glow_color[2], alpha],
+        );
         frame = blur(&halo, glow);
     }
     if circle {
         let r = (w.min(h) / 2) as i32;
         let (cx, cy) = ((pad + w / 2) as i32, (pad + h / 2) as i32);
-        draw_ring(&mut Band::whole(&mut frame), cx, cy, r, r + 1, [color[0], color[1], color[2], 255]);
+        draw_ring(
+            &mut Band::whole(&mut frame),
+            cx,
+            cy,
+            r,
+            r + 1,
+            [color[0], color[1], color[2], 255],
+        );
     } else {
-        paint_shape(&mut frame, pad, pad, w, h, false, [color[0], color[1], color[2], 255]);
+        paint_shape(
+            &mut frame,
+            pad,
+            pad,
+            w,
+            h,
+            false,
+            [color[0], color[1], color[2], 255],
+        );
     }
     frame
 }
@@ -2822,7 +3740,13 @@ pub fn led_state_frame(w: u32, h: u32, circle: bool, color: [u8; 3], glow: u32, 
 /// One state of a picture indicator: the picture's own alpha in the glow
 /// colour, blurred, behind the picture, in a canvas of the largest picture
 /// padded by twice the glow radius.
-pub fn icon_state_frame(icon: &Frame, canvas: (u32, u32), glow: u32, intensity: f32, glow_color: Option<[u8; 3]>) -> Frame {
+pub fn icon_state_frame(
+    icon: &Frame,
+    canvas: (u32, u32),
+    glow: u32,
+    intensity: f32,
+    glow_color: Option<[u8; 3]>,
+) -> Frame {
     let pad = if glow > 0 { glow * 2 } else { 0 };
     let (cw, ch) = (canvas.0 + pad * 2, canvas.1 + pad * 2);
     let mut frame = empty_frame(cw, ch);
@@ -2835,7 +3759,12 @@ pub fn icon_state_frame(icon: &Frame, canvas: (u32, u32), glow: u32, intensity: 
                 let a = icon.rgba[((y * icon.width + x) * 4 + 3) as usize];
                 if a > 0 {
                     let i = (((y + pad) * halo.width + x + pad) * 4) as usize;
-                    halo.rgba[i..i + 4].copy_from_slice(&[color[0], color[1], color[2], (a as f32 / 255.0 * level) as u8]);
+                    halo.rgba[i..i + 4].copy_from_slice(&[
+                        color[0],
+                        color[1],
+                        color[2],
+                        (a as f32 / 255.0 * level) as u8,
+                    ]);
                 }
             }
         }
@@ -2874,7 +3803,8 @@ fn over_onto(dst: &mut Frame, src: &Frame, at: (i32, i32)) {
             for c in 0..3 {
                 let sc = src.rgba[s + c] as u32;
                 let dc = dst.rgba[d + c] as u32;
-                dst.rgba[d + c] = ((sc * sa * 255 + dc * da * (255 - sa) + out_a / 2) / out_a.max(1)) as u8;
+                dst.rgba[d + c] =
+                    ((sc * sa * 255 + dc * da * (255 - sa) + out_a / 2) / out_a.max(1)) as u8;
             }
             dst.rgba[d + 3] = ((out_a + 127) / 255) as u8;
         }
@@ -2905,38 +3835,98 @@ pub struct GaugeAssets {
 
 impl IndicatorAssets {
     pub fn bytes(&self) -> usize {
-        let gauge = |g: &GaugeAssets| bytes_of([&g.knob, &g.track, &g.tip, &g.head]) + bytes_of(&g.markers);
-        bytes_of(&self.mute) + bytes_of(&self.shuffle) + bytes_of(&self.repeat) + bytes_of(&self.playstate) + gauge(&self.volume) + gauge(&self.progress)
+        let gauge =
+            |g: &GaugeAssets| bytes_of([&g.knob, &g.track, &g.tip, &g.head]) + bytes_of(&g.markers);
+        bytes_of(&self.mute)
+            + bytes_of(&self.shuffle)
+            + bytes_of(&self.repeat)
+            + bytes_of(&self.playstate)
+            + gauge(&self.volume)
+            + gauge(&self.progress)
     }
 
     pub fn load(spec: &lead::IndicatorsSpec) -> Self {
         let states = |indicator: &Option<StateIndicator>| -> Vec<Option<Frame>> {
-            let Some(indicator) = indicator else { return Vec::new() };
+            let Some(indicator) = indicator else {
+                return Vec::new();
+            };
             match &indicator.look {
-                StateLook::Led { w, h, circle, colors } => colors
+                StateLook::Led {
+                    w,
+                    h,
+                    circle,
+                    colors,
+                } => colors
                     .iter()
                     .enumerate()
                     .map(|(i, &color)| {
-                        let glow_color = indicator.glow_colors.get(i).or(indicator.glow_colors.last()).copied().unwrap_or(color);
-                        Some(led_state_frame(*w, *h, *circle, color, indicator.glow, indicator.glow_intensity, glow_color))
+                        let glow_color = indicator
+                            .glow_colors
+                            .get(i)
+                            .or(indicator.glow_colors.last())
+                            .copied()
+                            .unwrap_or(color);
+                        Some(led_state_frame(
+                            *w,
+                            *h,
+                            *circle,
+                            color,
+                            indicator.glow,
+                            indicator.glow_intensity,
+                            glow_color,
+                        ))
                     })
                     .collect(),
                 StateLook::Icons { files } => {
-                    let icons: Vec<Option<Frame>> = files.iter().map(|f| if f.is_empty() { None } else { read_png(Path::new(f)) }).collect();
-                    let canvas = icons.iter().flatten().fold((0, 0), |(w, h), f| (w.max(f.width), h.max(f.height)));
+                    let icons: Vec<Option<Frame>> = files
+                        .iter()
+                        .map(|f| {
+                            if f.is_empty() {
+                                None
+                            } else {
+                                read_png(Path::new(f))
+                            }
+                        })
+                        .collect();
+                    let canvas = icons
+                        .iter()
+                        .flatten()
+                        .fold((0, 0), |(w, h), f| (w.max(f.width), h.max(f.height)));
                     icons
                         .iter()
                         .enumerate()
-                        .map(|(i, icon)| icon.as_ref().map(|icon| icon_state_frame(icon, canvas, indicator.glow, indicator.glow_intensity, indicator.glow_colors.get(i).copied())))
+                        .map(|(i, icon)| {
+                            icon.as_ref().map(|icon| {
+                                icon_state_frame(
+                                    icon,
+                                    canvas,
+                                    indicator.glow,
+                                    indicator.glow_intensity,
+                                    indicator.glow_colors.get(i).copied(),
+                                )
+                            })
+                        })
                         .collect()
                 }
             }
         };
         let gauge = |gauge: &Option<GaugeSpec>| -> GaugeAssets {
-            let Some(g) = gauge else { return GaugeAssets::default() };
-            let picture = |file: &str| if file.is_empty() { None } else { read_png(Path::new(file)) };
+            let Some(g) = gauge else {
+                return GaugeAssets::default();
+            };
+            let picture = |file: &str| {
+                if file.is_empty() {
+                    None
+                } else {
+                    read_png(Path::new(file))
+                }
+            };
             GaugeAssets {
-                knob: if g.style == GaugeStyle::Knob { picture(&g.knob_image) } else { None },
+                knob: if g.style == GaugeStyle::Knob {
+                    picture(&g.knob_image)
+                } else {
+                    None
+                },
                 track: picture(&g.track),
                 tip: picture(&g.tip),
                 head: picture(&g.head_image),
@@ -2983,7 +3973,17 @@ fn fill_round_rect(band: &mut Band, x: i32, y: i32, w: i32, h: i32, radius: i32,
 /// `ring` inside it, from `start` counter-clockwise to `stop` degrees with 0
 /// pointing right, sampled four times a pixel for a soft rim.
 #[allow(clippy::too_many_arguments)]
-fn fill_arc(band: &mut Band, x: i32, y: i32, w: u32, h: u32, start: f32, stop: f32, ring: u32, color: [u8; 3]) {
+fn fill_arc(
+    band: &mut Band,
+    x: i32,
+    y: i32,
+    w: u32,
+    h: u32,
+    start: f32,
+    stop: f32,
+    ring: u32,
+    color: [u8; 3],
+) {
     if w == 0 || h == 0 {
         return;
     }
@@ -3018,7 +4018,11 @@ fn fill_arc(band: &mut Band, x: i32, y: i32, w: u32, h: u32, start: f32, stop: f
                 }
             }
             if hits > 0 {
-                blend(row, px as usize * 4, [color[0], color[1], color[2], (255 * hits / 4) as u8]);
+                blend(
+                    row,
+                    px as usize * 4,
+                    [color[0], color[1], color[2], (255 * hits / 4) as u8],
+                );
             }
         }
     }
@@ -3030,7 +4034,10 @@ fn gauge_point(g: &GaugeSpec, pct: f32) -> (i32, i32) {
     match g.style {
         GaugeStyle::Slider => {
             if g.vertical() {
-                (g.x + g.w as i32 / 2, g.y + g.h as i32 - (p * g.h as f32) as i32)
+                (
+                    g.x + g.w as i32 / 2,
+                    g.y + g.h as i32 - (p * g.h as f32) as i32,
+                )
             } else {
                 (g.x + (p * g.w as f32) as i32, g.y + g.h as i32 / 2)
             }
@@ -3053,18 +4060,54 @@ struct GaugeLabels {
     markers: Vec<Option<String>>,
 }
 
-fn gauge_labels(g: &GaugeSpec, value: u32, fonts: Option<&Fonts>, labels: &mut Labels, tick: u64) -> GaugeLabels {
+fn gauge_labels(
+    g: &GaugeSpec,
+    value: u32,
+    fonts: Option<&Fonts>,
+    labels: &mut Labels,
+    tick: u64,
+) -> GaugeLabels {
     let value = value.min(100);
     let numeric = match g.style {
-        GaugeStyle::Numeric => labels.ensure(fonts, TextStyle::Regular, g.font_size, g.color, &format!("{value}%"), tick),
+        GaugeStyle::Numeric => labels.ensure(
+            fonts,
+            TextStyle::Regular,
+            g.font_size,
+            g.color,
+            &format!("{value}%"),
+            tick,
+        ),
         _ => None,
     };
-    let markers = g.markers.iter().map(|m| labels.ensure(fonts, TextStyle::Regular, m.font_size.unwrap_or(g.font_size), g.color, &m.label, tick)).collect();
-    GaugeLabels { value: numeric, markers }
+    let markers = g
+        .markers
+        .iter()
+        .map(|m| {
+            labels.ensure(
+                fonts,
+                TextStyle::Regular,
+                m.font_size.unwrap_or(g.font_size),
+                g.color,
+                &m.label,
+                tick,
+            )
+        })
+        .collect();
+    GaugeLabels {
+        value: numeric,
+        markers,
+    }
 }
 
 /// One gauge at a value from 0 to 100, as the player's slider indicator draws it.
-fn plan_gauge<'a>(g: &GaugeSpec, value: u32, assets: &'a GaugeAssets, labels: &'a Labels, names: &GaugeLabels, ops: &mut Vec<Op<'a>>) {
+fn plan_gauge<'a>(
+    g: &GaugeSpec,
+    value: u32,
+    assets: &'a GaugeAssets,
+    labels: &'a Labels,
+    names: &GaugeLabels,
+    ops: &mut Vec<Op<'a>>,
+) {
     let value = value.min(100);
     let rgb = |c: [u8; 3]| [c[0], c[1], c[2], 255];
     match g.style {
@@ -3080,12 +4123,25 @@ fn plan_gauge<'a>(g: &GaugeSpec, value: u32, assets: &'a GaugeAssets, labels: &'
                 }
                 let (tw, th) = (tip.width as i32, tip.height as i32);
                 let (w, h) = (g.w as i32, g.h as i32);
-                let travel = g.travel.unwrap_or(if g.vertical() { (0, h - th) } else { (0, w - tw) });
+                let travel = g.travel.unwrap_or(if g.vertical() {
+                    (0, h - th)
+                } else {
+                    (0, w - tw)
+                });
                 let range = travel.1 - travel.0;
                 let (tip_x, tip_y) = if g.vertical() {
-                    (g.x + g.tip_offset.0 + (w - tw) / 2, g.y + travel.1 - (value as f32 / 100.0 * range as f32) as i32 + g.tip_offset.1)
+                    (
+                        g.x + g.tip_offset.0 + (w - tw) / 2,
+                        g.y + travel.1 - (value as f32 / 100.0 * range as f32) as i32
+                            + g.tip_offset.1,
+                    )
                 } else {
-                    (g.x + travel.0 + (value as f32 / 100.0 * range as f32) as i32 + g.tip_offset.0, g.y + g.tip_offset.1 + (h - th) / 2)
+                    (
+                        g.x + travel.0
+                            + (value as f32 / 100.0 * range as f32) as i32
+                            + g.tip_offset.0,
+                        g.y + g.tip_offset.1 + (h - th) / 2,
+                    )
                 };
                 if let Some(fill) = g.fill_color {
                     let (dx, dy) = g.fill_offset;
@@ -3096,7 +4152,14 @@ fn plan_gauge<'a>(g: &GaugeSpec, value: u32, assets: &'a GaugeAssets, labels: &'
                         let zero = g.y + travel.1 + g.tip_offset.1 + th / 2;
                         let top = current.min(zero) + dy;
                         let fill_h = (zero - current).abs();
-                        ops.push(Op::RoundRect { x: cx - thickness / 2, y: top, w: thickness, h: fill_h, radius: g.fill_radius as i32, color: rgb(fill) });
+                        ops.push(Op::RoundRect {
+                            x: cx - thickness / 2,
+                            y: top,
+                            w: thickness,
+                            h: fill_h,
+                            radius: g.fill_radius as i32,
+                            color: rgb(fill),
+                        });
                     } else {
                         let thickness = g.fill_width.map_or(th, |f| f as i32).max(1);
                         let cy = tip_y + th / 2 + dy;
@@ -3104,28 +4167,60 @@ fn plan_gauge<'a>(g: &GaugeSpec, value: u32, assets: &'a GaugeAssets, labels: &'
                         let zero = g.x + travel.0 + g.tip_offset.0 + tw / 2;
                         let left = current.min(zero) + dx;
                         let fill_w = (current - zero).abs();
-                        ops.push(Op::RoundRect { x: left, y: cy - thickness / 2, w: fill_w, h: thickness, radius: g.fill_radius as i32, color: rgb(fill) });
+                        ops.push(Op::RoundRect {
+                            x: left,
+                            y: cy - thickness / 2,
+                            w: fill_w,
+                            h: thickness,
+                            radius: g.fill_radius as i32,
+                            color: rgb(fill),
+                        });
                     }
                 }
                 ops.push(blit_op(tip, (tip_x, tip_y)));
             } else {
                 let (w, h) = (g.w as i32, g.h as i32);
                 if let Some(bg) = g.bg_color {
-                    ops.push(Op::RoundRect { x: g.x, y: g.y, w, h, radius: g.fill_radius as i32, color: rgb(bg) });
+                    ops.push(Op::RoundRect {
+                        x: g.x,
+                        y: g.y,
+                        w,
+                        h,
+                        radius: g.fill_radius as i32,
+                        color: rgb(bg),
+                    });
                 }
                 if g.vertical() {
                     let fill_h = (value as f32 / 100.0 * h as f32) as i32;
                     if fill_h > 0 {
-                        ops.push(Op::RoundRect { x: g.x, y: g.y + h - fill_h, w, h: fill_h, radius: g.fill_radius as i32, color: rgb(g.color) });
+                        ops.push(Op::RoundRect {
+                            x: g.x,
+                            y: g.y + h - fill_h,
+                            w,
+                            h: fill_h,
+                            radius: g.fill_radius as i32,
+                            color: rgb(g.color),
+                        });
                     }
                 } else {
                     let fill_w = (value as f32 / 100.0 * w as f32) as i32;
                     if fill_w > 0 {
-                        ops.push(Op::RoundRect { x: g.x, y: g.y, w: fill_w, h, radius: g.fill_radius as i32, color: rgb(g.color) });
+                        ops.push(Op::RoundRect {
+                            x: g.x,
+                            y: g.y,
+                            w: fill_w,
+                            h,
+                            radius: g.fill_radius as i32,
+                            color: rgb(g.color),
+                        });
                     }
                 }
                 if g.border > 0 && g.x >= 0 && g.y >= 0 {
-                    ops.push(Op::Border { rect: (g.x as u32, g.y as u32, g.w, g.h), thickness: g.border, color: rgb(g.border_color) });
+                    ops.push(Op::Border {
+                        rect: (g.x as u32, g.y as u32, g.w, g.h),
+                        thickness: g.border,
+                        color: rgb(g.border_color),
+                    });
                 }
             }
         }
@@ -3133,34 +4228,79 @@ fn plan_gauge<'a>(g: &GaugeSpec, value: u32, assets: &'a GaugeAssets, labels: &'
             if let Some(knob) = &assets.knob {
                 let angle = g.knob_start - value as f32 / 100.0 * (g.knob_start - g.knob_end);
                 let centre = (g.x as f32 + g.w as f32 / 2.0, g.y as f32 + g.h as f32 / 2.0);
-                ops.push(Op::Turn { src: knob, pivot_image: centre_of(knob), pivot_screen: centre, degrees: angle, smooth: false, reach: reach_of(knob, centre_of(knob)) });
+                ops.push(Op::Turn {
+                    src: knob,
+                    pivot_image: centre_of(knob),
+                    pivot_screen: centre,
+                    degrees: angle,
+                    smooth: false,
+                    reach: reach_of(knob, centre_of(knob)),
+                });
             } else {
                 plan_arc_gauge(g, value, ops);
             }
         }
         GaugeStyle::Arc => plan_arc_gauge(g, value, ops),
     }
-    for ((marker, picture), name) in g.markers.iter().zip(assets.markers.iter()).zip(names.markers.iter()) {
+    for ((marker, picture), name) in g
+        .markers
+        .iter()
+        .zip(assets.markers.iter())
+        .zip(names.markers.iter())
+    {
         let (px, py) = gauge_point(g, marker.pos);
         if let Some(picture) = picture {
-            ops.push(blit_op(picture, (px - picture.width as i32 / 2, py - picture.height as i32 / 2)));
+            ops.push(blit_op(
+                picture,
+                (
+                    px - picture.width as i32 / 2,
+                    py - picture.height as i32 / 2,
+                ),
+            ));
         } else if let Some(line) = name.as_deref().and_then(|k| labels.get(k)) {
-            ops.push(blit_op(line, (px - line.width as i32 / 2, py - line.height as i32 / 2)));
+            ops.push(blit_op(
+                line,
+                (px - line.width as i32 / 2, py - line.height as i32 / 2),
+            ));
         }
     }
     if let Some(head) = &assets.head {
         let (px, py) = gauge_point(g, value as f32);
-        ops.push(blit_op(head, (px - head.width as i32 / 2 + g.head_offset.0, py - head.height as i32 / 2 + g.head_offset.1)));
+        ops.push(blit_op(
+            head,
+            (
+                px - head.width as i32 / 2 + g.head_offset.0,
+                py - head.height as i32 / 2 + g.head_offset.1,
+            ),
+        ));
     }
 }
 
 fn plan_arc_gauge(g: &GaugeSpec, value: u32, ops: &mut Vec<Op<'_>>) {
     if let Some(bg) = g.bg_color {
-        ops.push(Op::Arc { x: g.x, y: g.y, w: g.w, h: g.h, start: g.arc_end, stop: g.arc_start, ring: g.arc_width, color: bg });
+        ops.push(Op::Arc {
+            x: g.x,
+            y: g.y,
+            w: g.w,
+            h: g.h,
+            start: g.arc_end,
+            stop: g.arc_start,
+            ring: g.arc_width,
+            color: bg,
+        });
     }
     if value > 0 {
         let current = g.arc_start - value as f32 / 100.0 * (g.arc_start - g.arc_end);
-        ops.push(Op::Arc { x: g.x, y: g.y, w: g.w, h: g.h, start: current, stop: g.arc_start, ring: g.arc_width, color: g.color });
+        ops.push(Op::Arc {
+            x: g.x,
+            y: g.y,
+            w: g.w,
+            h: g.h,
+            start: current,
+            stop: g.arc_start,
+            ring: g.arc_width,
+            color: g.color,
+        });
     }
 }
 
@@ -3170,41 +4310,98 @@ struct IndicatorLabels {
     progress: Option<GaugeLabels>,
 }
 
-fn indicator_labels(indicators: &Indicators, fonts: Option<&Fonts>, labels: &mut Labels, tick: u64) -> IndicatorLabels {
+fn indicator_labels(
+    indicators: &Indicators,
+    fonts: Option<&Fonts>,
+    labels: &mut Labels,
+    tick: u64,
+) -> IndicatorLabels {
     IndicatorLabels {
-        volume: indicators.spec.volume.as_ref().map(|g| gauge_labels(g, indicators.volume, fonts, labels, tick)),
-        progress: indicators.spec.progress.as_ref().map(|g| gauge_labels(g, indicators.progress, fonts, labels, tick)),
+        volume: indicators
+            .spec
+            .volume
+            .as_ref()
+            .map(|g| gauge_labels(g, indicators.volume, fonts, labels, tick)),
+        progress: indicators
+            .spec
+            .progress
+            .as_ref()
+            .map(|g| gauge_labels(g, indicators.progress, fonts, labels, tick)),
     }
 }
 
 /// The indicators in their states: a state past a look's last state takes
 /// the last, as the player clamps it.
-fn plan_indicators<'a>(indicators: &Indicators, assets: &'a IndicatorAssets, labels: &'a Labels, names: &IndicatorLabels, ops: &mut Vec<Op<'a>>) {
+fn plan_indicators<'a>(
+    indicators: &Indicators,
+    assets: &'a IndicatorAssets,
+    labels: &'a Labels,
+    names: &IndicatorLabels,
+    ops: &mut Vec<Op<'a>>,
+) {
     let mut state = |spec: &Option<StateIndicator>, frames: &'a [Option<Frame>], index: usize| {
-        let (Some(spec), false) = (spec, frames.is_empty()) else { return };
+        let (Some(spec), false) = (spec, frames.is_empty()) else {
+            return;
+        };
         let index = index.min(frames.len() - 1);
         if let Some(picture) = &frames[index] {
             ops.push(blit_op(picture, (spec.x, spec.y)));
         }
     };
     state(&indicators.spec.mute, &assets.mute, indicators.mute_state);
-    state(&indicators.spec.shuffle, &assets.shuffle, indicators.shuffle_state);
-    state(&indicators.spec.repeat, &assets.repeat, indicators.repeat_state);
-    state(&indicators.spec.playstate, &assets.playstate, indicators.play_state);
+    state(
+        &indicators.spec.shuffle,
+        &assets.shuffle,
+        indicators.shuffle_state,
+    );
+    state(
+        &indicators.spec.repeat,
+        &assets.repeat,
+        indicators.repeat_state,
+    );
+    state(
+        &indicators.spec.playstate,
+        &assets.playstate,
+        indicators.play_state,
+    );
     if let (Some(volume), Some(names)) = (&indicators.spec.volume, &names.volume) {
-        plan_gauge(volume, indicators.volume, &assets.volume, labels, names, ops);
+        plan_gauge(
+            volume,
+            indicators.volume,
+            &assets.volume,
+            labels,
+            names,
+            ops,
+        );
     }
     if let (Some(progress), Some(names)) = (&indicators.spec.progress, &names.progress) {
-        plan_gauge(progress, indicators.progress, &assets.progress, labels, names, ops);
+        plan_gauge(
+            progress,
+            indicators.progress,
+            &assets.progress,
+            labels,
+            names,
+            ops,
+        );
     }
 }
 
 /// The static background: the dark fill, the screen picture over it, and
 /// the meter face at its position.
-pub fn compose_base(width: u32, height: u32, screen: Option<&Frame>, face: Option<&Frame>, face_at: (u32, u32)) -> Frame {
+pub fn compose_base(
+    width: u32,
+    height: u32,
+    screen: Option<&Frame>,
+    face: Option<&Frame>,
+    face_at: (u32, u32),
+) -> Frame {
     let (width, height) = (width.max(1), height.max(1));
-    let mut frame = Frame { width, height, rgba: vec![0u8; (width * height * 4) as usize] };
-    for px in frame.rgba.chunks_exact_mut(4) {
+    let mut frame = Frame {
+        width,
+        height,
+        rgba: vec![0u8; (width * height * 4) as usize],
+    };
+    for px in frame.rgba.as_chunks_mut::<4>().0 {
         px.copy_from_slice(&BG);
     }
     if let Some(screen) = screen {
@@ -3250,7 +4447,15 @@ fn copy_top_left(dst: &mut Frame, src: &Frame) {
 /// Write a frame as a PNG, through a part file renamed into place.
 pub fn write_png(path: &Path, frame: &Frame) -> Result<(), String> {
     let part = path.with_extension("png.part");
-    image::save_buffer_with_format(&part, &frame.rgba, frame.width, frame.height, image::ColorType::Rgba8, image::ImageFormat::Png).map_err(|e| e.to_string())?;
+    image::save_buffer_with_format(
+        &part,
+        &frame.rgba,
+        frame.width,
+        frame.height,
+        image::ColorType::Rgba8,
+        image::ImageFormat::Png,
+    )
+    .map_err(|e| e.to_string())?;
     std::fs::rename(&part, path).map_err(|e| e.to_string())
 }
 
@@ -3348,7 +4553,11 @@ mod tests {
     #[test]
     fn a_bar_shows_the_picture_from_the_end_its_direction_names() {
         // A 4 wide, 2 tall picture whose columns are 1, 2, 3, 4 in red.
-        let mut pic = Frame { width: 4, height: 2, rgba: vec![0; 4 * 2 * 4] };
+        let mut pic = Frame {
+            width: 4,
+            height: 2,
+            rgba: vec![0; 4 * 2 * 4],
+        };
         for y in 0..2 {
             for x in 0..4u32 {
                 let i = ((y * 4 + x) * 4) as usize;
@@ -3366,28 +4575,105 @@ mod tests {
         };
         // left-right: the first two columns at the origin.
         let mut dst = vec![0u8; 10 * 6 * 4];
-        draw_bar(&mut Band::over(&mut dst, 10, 6), &pic, (2, 1), 2, &spec(Direction::LeftRight, false, false), true);
-        assert_eq!((lit(&dst, 10, 2, 1), lit(&dst, 10, 3, 1), lit(&dst, 10, 4, 1)), (1, 2, 0));
+        draw_bar(
+            &mut Band::over(&mut dst, 10, 6),
+            &pic,
+            (2, 1),
+            2,
+            &spec(Direction::LeftRight, false, false),
+            true,
+        );
+        assert_eq!(
+            (
+                lit(&dst, 10, 2, 1),
+                lit(&dst, 10, 3, 1),
+                lit(&dst, 10, 4, 1)
+            ),
+            (1, 2, 0)
+        );
         // right-left: the last two columns, at the picture's right end.
         let mut dst = vec![0u8; 10 * 6 * 4];
-        draw_bar(&mut Band::over(&mut dst, 10, 6), &pic, (2, 1), 2, &spec(Direction::RightLeft, false, false), true);
-        assert_eq!((lit(&dst, 10, 3, 1), lit(&dst, 10, 4, 1), lit(&dst, 10, 5, 1)), (0, 3, 4));
+        draw_bar(
+            &mut Band::over(&mut dst, 10, 6),
+            &pic,
+            (2, 1),
+            2,
+            &spec(Direction::RightLeft, false, false),
+            true,
+        );
+        assert_eq!(
+            (
+                lit(&dst, 10, 3, 1),
+                lit(&dst, 10, 4, 1),
+                lit(&dst, 10, 5, 1)
+            ),
+            (0, 3, 4)
+        );
         // center-edges, left channel: the last two columns end at the origin.
         let mut dst = vec![0u8; 10 * 6 * 4];
-        draw_bar(&mut Band::over(&mut dst, 10, 6), &pic, (5, 1), 2, &spec(Direction::CenterEdges, false, false), true);
-        assert_eq!((lit(&dst, 10, 3, 1), lit(&dst, 10, 4, 1), lit(&dst, 10, 5, 1)), (3, 4, 0));
+        draw_bar(
+            &mut Band::over(&mut dst, 10, 6),
+            &pic,
+            (5, 1),
+            2,
+            &spec(Direction::CenterEdges, false, false),
+            true,
+        );
+        assert_eq!(
+            (
+                lit(&dst, 10, 3, 1),
+                lit(&dst, 10, 4, 1),
+                lit(&dst, 10, 5, 1)
+            ),
+            (3, 4, 0)
+        );
         // edges-center, flipped right channel: the last two columns end at the origin.
         let mut dst = vec![0u8; 10 * 6 * 4];
-        draw_bar(&mut Band::over(&mut dst, 10, 6), &pic, (5, 1), 2, &spec(Direction::EdgesCenter, false, true), false);
-        assert_eq!((lit(&dst, 10, 3, 1), lit(&dst, 10, 4, 1), lit(&dst, 10, 5, 1)), (3, 4, 0));
+        draw_bar(
+            &mut Band::over(&mut dst, 10, 6),
+            &pic,
+            (5, 1),
+            2,
+            &spec(Direction::EdgesCenter, false, true),
+            false,
+        );
+        assert_eq!(
+            (
+                lit(&dst, 10, 3, 1),
+                lit(&dst, 10, 4, 1),
+                lit(&dst, 10, 5, 1)
+            ),
+            (3, 4, 0)
+        );
         // bottom-top: the bottom row only.
         let mut dst = vec![0u8; 10 * 6 * 4];
-        draw_bar(&mut Band::over(&mut dst, 10, 6), &pic, (2, 1), 1, &spec(Direction::BottomTop, false, false), true);
+        draw_bar(
+            &mut Band::over(&mut dst, 10, 6),
+            &pic,
+            (2, 1),
+            1,
+            &spec(Direction::BottomTop, false, false),
+            true,
+        );
         assert_eq!((lit(&dst, 10, 2, 1), lit(&dst, 10, 2, 2)), (0, 1));
         // single: the whole picture moved by w.
         let mut dst = vec![0u8; 10 * 6 * 4];
-        draw_bar(&mut Band::over(&mut dst, 10, 6), &pic, (2, 1), 3, &spec(Direction::LeftRight, true, false), true);
-        assert_eq!((lit(&dst, 10, 4, 1), lit(&dst, 10, 5, 1), lit(&dst, 10, 8, 1)), (0, 1, 4));
+        draw_bar(
+            &mut Band::over(&mut dst, 10, 6),
+            &pic,
+            (2, 1),
+            3,
+            &spec(Direction::LeftRight, true, false),
+            true,
+        );
+        assert_eq!(
+            (
+                lit(&dst, 10, 4, 1),
+                lit(&dst, 10, 5, 1),
+                lit(&dst, 10, 8, 1)
+            ),
+            (0, 1, 4)
+        );
         // mirrored picture.
         let flipped = flip_x(&pic);
         assert_eq!((flipped.rgba[0], flipped.rgba[12]), (4, 1));
@@ -3413,7 +4699,7 @@ mod tests {
             reflection: Some(Fill::Color([0, 0, 255, 255])),
             reflection_gap: 1,
             topping: Some((1, 1)),
-            foreground: None.unwrap_or_default(),
+            foreground: Default::default(),
         };
         let assets = SpectrumAssets::load(&spec);
         let mut motion = SpectrumMotion::default();
@@ -3422,24 +4708,77 @@ mod tests {
         let blue = |dst: &[u8], x: i32, y: i32| dst[((y as u32 * w + x as u32) * 4 + 2) as usize];
         // Half height on the first bar: 10 rows up from the baseline at y 60, at x 15.
         let mut dst = vec![0u8; (w * h * 4) as usize];
-        draw_spectrum(&mut Band::over(&mut dst, w, h), &spec, &[10, 0], &assets, &mut motion);
-        assert_eq!((red(&dst, 15, 59), red(&dst, 15, 50), red(&dst, 15, 49)), (255, 255, 0), "bar covers y 50..59");
-        assert_eq!((blue(&dst, 15, 61), blue(&dst, 15, 70), blue(&dst, 15, 71)), (255, 255, 0), "reflection hangs from the gap");
+        draw_spectrum(
+            &mut Band::over(&mut dst, w, h),
+            &spec,
+            &[10, 0],
+            &assets,
+            &mut motion,
+        );
+        assert_eq!(
+            (red(&dst, 15, 59), red(&dst, 15, 50), red(&dst, 15, 49)),
+            (255, 255, 0),
+            "bar covers y 50..59"
+        );
+        assert_eq!(
+            (blue(&dst, 15, 61), blue(&dst, 15, 70), blue(&dst, 15, 71)),
+            (255, 255, 0),
+            "reflection hangs from the gap"
+        );
         assert_eq!(red(&dst, 18, 59), 0, "the second bar is silent");
         // The bar drops: the topping stays one step above where it was and falls one step a frame.
         let mut dst = vec![0u8; (w * h * 4) as usize];
-        draw_spectrum(&mut Band::over(&mut dst, w, h), &spec, &[10, 0], &assets, &mut motion);
+        draw_spectrum(
+            &mut Band::over(&mut dst, w, h),
+            &spec,
+            &[10, 0],
+            &assets,
+            &mut motion,
+        );
         let mut dst = vec![0u8; (w * h * 4) as usize];
-        draw_spectrum(&mut Band::over(&mut dst, w, h), &spec, &[2, 0], &assets, &mut motion);
-        assert_eq!((red(&dst, 15, 49), red(&dst, 15, 55)), (255, 0), "topping drawn one step above the old top, bar gone there");
+        draw_spectrum(
+            &mut Band::over(&mut dst, w, h),
+            &spec,
+            &[2, 0],
+            &assets,
+            &mut motion,
+        );
+        assert_eq!(
+            (red(&dst, 15, 49), red(&dst, 15, 55)),
+            (255, 0),
+            "topping drawn one step above the old top, bar gone there"
+        );
         let mut dst = vec![0u8; (w * h * 4) as usize];
-        draw_spectrum(&mut Band::over(&mut dst, w, h), &spec, &[2, 0], &assets, &mut motion);
-        assert_eq!((red(&dst, 15, 49), red(&dst, 15, 50)), (0, 255), "a frame later it sits one step lower");
+        draw_spectrum(
+            &mut Band::over(&mut dst, w, h),
+            &spec,
+            &[2, 0],
+            &assets,
+            &mut motion,
+        );
+        assert_eq!(
+            (red(&dst, 15, 49), red(&dst, 15, 50)),
+            (0, 255),
+            "a frame later it sits one step lower"
+        );
         // Nothing outside the box: a bar past the right edge is clipped.
-        let wide = SpectrumSpec { origin_x: 95, ..spec.clone() };
+        let wide = SpectrumSpec {
+            origin_x: 95,
+            ..spec.clone()
+        };
         let mut dst = vec![0u8; (w * h * 4) as usize];
-        draw_spectrum(&mut Band::over(&mut dst, w, h), &wide, &[10, 10], &assets, &mut SpectrumMotion::default());
-        assert_eq!((red(&dst, 105, 59), red(&dst, 108, 59), red(&dst, 110, 59)), (255, 255, 0), "second bar starts at 108, clipped at 110");
+        draw_spectrum(
+            &mut Band::over(&mut dst, w, h),
+            &wide,
+            &[10, 10],
+            &assets,
+            &mut SpectrumMotion::default(),
+        );
+        assert_eq!(
+            (red(&dst, 105, 59), red(&dst, 108, 59), red(&dst, 110, 59)),
+            (255, 255, 0),
+            "second bar starts at 108, clipped at 110"
+        );
         // Gradient: first colour at the bottom.
         let g = gradient_frame(1, 3, &[[0, 0, 0, 255], [200, 0, 0, 255]]);
         assert_eq!((g.rgba[0], g.rgba[4], g.rgba[8]), (200, 100, 0));
@@ -3447,17 +4786,34 @@ mod tests {
 
     #[test]
     fn a_tonearm_drops_tracks_and_lifts_and_a_record_slows_to_a_halt() {
-        let spec = TonearmSpec { file: String::new(), pivot_screen: (0, 0), pivot_image: (0, 0), rest: 0.0, start: -20.0, end: -40.0, drop_s: 1.0, lift_s: 1.0 };
+        let spec = TonearmSpec {
+            file: String::new(),
+            pivot_screen: (0, 0),
+            pivot_image: (0, 0),
+            rest: 0.0,
+            start: -20.0,
+            end: -40.0,
+            drop_s: 1.0,
+            lift_s: 1.0,
+        };
         let mut arm = TonearmMotion::default();
         arm.update(&spec, false, 0.0, None, 0);
         assert_eq!((arm.angle(), arm.is_animating()), (0.0, false), "parked");
         arm.update(&spec, true, 50.0, Some(100.0), 0);
         assert!(arm.is_animating(), "dropping");
         arm.update(&spec, true, 50.0, Some(100.0), 500);
-        assert!(arm.angle() < -20.0 && arm.angle() > -30.0, "eased past the midpoint: {}", arm.angle());
+        assert!(
+            arm.angle() < -20.0 && arm.angle() > -30.0,
+            "eased past the midpoint: {}",
+            arm.angle()
+        );
         arm.update(&spec, true, 50.0, Some(100.0), 1000);
         arm.update(&spec, true, 50.0, Some(100.0), 1001);
-        assert_eq!((arm.angle(), arm.is_animating()), (-30.0, false), "tracking at half the track");
+        assert_eq!(
+            (arm.angle(), arm.is_animating()),
+            (-30.0, false),
+            "tracking at half the track"
+        );
         arm.update(&spec, true, 55.0, Some(90.0), 1002);
         assert_eq!(arm.angle(), -31.0, "follows a small move");
         arm.update(&spec, true, 5.0, Some(190.0), 1003);
@@ -3472,7 +4828,10 @@ mod tests {
         let mut record = VinylMotion::default();
         record.advance(60.0, true, true, false, false, 1.0, 0);
         let a = record.advance(60.0, true, true, false, false, 1.0, 100);
-        assert!((a - 36.0).abs() < 0.01, "60 rpm turns 36 degrees in 100 ms: {a}");
+        assert!(
+            (a - 36.0).abs() < 0.01,
+            "60 rpm turns 36 degrees in 100 ms: {a}"
+        );
         record.advance(60.0, true, false, false, false, 1.0, 100);
         let b = record.advance(60.0, true, false, false, false, 1.0, 600);
         assert!(b > 36.0 && b < 36.0 + 180.0, "slowing: {b}");
@@ -3486,22 +4845,43 @@ mod tests {
 
     #[test]
     fn a_picture_kept_turned_keeps_its_soft_alpha() {
-        let mut soft = Frame { width: 4, height: 4, rgba: vec![0; 64] };
-        for px in soft.rgba.chunks_exact_mut(4) {
+        let mut soft = Frame {
+            width: 4,
+            height: 4,
+            rgba: vec![0; 64],
+        };
+        for px in soft.rgba.as_chunks_mut::<4>().0 {
             px.copy_from_slice(&[200, 100, 50, 128]);
         }
         let turned = turn_picture(&soft, (2.0, 2.0), 0.0);
-        let inside: Vec<[u8; 4]> = turned.frame.rgba.chunks_exact(4).filter(|p| p[3] != 0).map(|p| [p[0], p[1], p[2], p[3]]).collect();
+        let inside: Vec<[u8; 4]> = turned
+            .frame
+            .rgba
+            .as_chunks::<4>()
+            .0
+            .iter()
+            .filter(|p| p[3] != 0)
+            .map(|p| [p[0], p[1], p[2], p[3]])
+            .collect();
         assert!(!inside.is_empty());
-        assert!(inside.iter().all(|p| p[3] < 255 && p[0] >= 190), "kept half transparent and undarkened: {:?}", inside[0]);
+        assert!(
+            inside.iter().all(|p| p[3] < 255 && p[0] >= 190),
+            "kept half transparent and undarkened: {:?}",
+            inside[0]
+        );
         // Blended onto a white frame, a half-transparent pixel lightens, never blackens.
         let mut white = vec![255u8; 8 * 8 * 4];
         let mut cache = Turned::default();
         let key = cache.ensure(9, &soft, (2.0, 2.0), 0.0, 1);
-        turned_op(&cache, key, (4.0, 4.0)).unwrap().paint(&mut Band::over(&mut white, 8, 8));
+        turned_op(&cache, key, (4.0, 4.0))
+            .unwrap()
+            .paint(&mut Band::over(&mut white, 8, 8));
         assert!(cache.bytes() > 0);
         let centre = &white[(4 * 8 + 4) * 4..(4 * 8 + 4) * 4 + 3];
-        assert!(centre[0] > 200 && centre[2] > 120, "blended over white: {centre:?}");
+        assert!(
+            centre[0] > 200 && centre[2] > 120,
+            "blended over white: {centre:?}"
+        );
     }
 
     #[test]
@@ -3517,24 +4897,36 @@ mod tests {
         };
         // 30 ms of painting in a 33 ms period overruns the budget: one thread is not enough.
         run(&mut painters, 100, 30_000);
-        assert_eq!(painters.active, 2, "one more once the start is over and a second of overruns is in");
+        assert_eq!(
+            painters.active, 2,
+            "one more once the start is over and a second of overruns is in"
+        );
         run(&mut painters, 40, 30_000);
         assert_eq!(painters.active, 3, "and another a second later");
         run(&mut painters, 40, 30_000);
         assert_eq!(painters.active, 4, "up to the most allowed");
         // 3 ms frames would fit one thread; a thread goes back every five seconds.
         run(&mut painters, 130, 3_000);
-        assert_eq!(painters.active, 3, "one back after five seconds of light frames");
+        assert_eq!(
+            painters.active, 3,
+            "one back after five seconds of light frames"
+        );
         run(&mut painters, 250, 3_000);
         assert_eq!(painters.active, 1, "and the rest in turn");
         // Two thirds of the period on one thread is left alone, however long it lasts.
         run(&mut painters, 400, 22_000);
-        assert_eq!(painters.active, 1, "two thirds of a period fits on one thread");
+        assert_eq!(
+            painters.active, 1,
+            "two thirds of a period fits on one thread"
+        );
         // A count that was measured too slow is not returned to on a guess.
         run(&mut painters, 40, 30_000);
         assert_eq!(painters.active, 2);
         run(&mut painters, 200, 10_000);
-        assert_eq!(painters.active, 2, "one thread was seen at 30 ms; ten on two does not argue it down");
+        assert_eq!(
+            painters.active, 2,
+            "one thread was seen at 30 ms; ten on two does not argue it down"
+        );
         let mut fixed = Painters::new(4, None);
         for i in 0..40u64 {
             fixed.settle(3_000, i * 100);
@@ -3551,8 +4943,14 @@ mod tests {
         // A disc in a square picture: its measured reach is the disc's, not the square's diagonal.
         let disc = apply_circle(&sprite(30, 30, [120, 0, 200, 255]));
         let measured = Reaches::default().reach(&disc, (15.0, 15.0));
-        assert!(measured < 17.5 && measured > 15.0, "reach of a 30 px disc is its radius and a little: {measured}");
-        assert!(reach_of(&disc, (15.0, 15.0)) > 22.0, "the diagonal reach is larger");
+        assert!(
+            measured < 17.5 && measured > 15.0,
+            "reach of a 30 px disc is its radius and a little: {measured}"
+        );
+        assert!(
+            reach_of(&disc, (15.0, 15.0)) > 22.0,
+            "the diagonal reach is larger"
+        );
         let mut stripe = empty_frame(97, 61);
         for y in 20..25u32 {
             for x in 0..97u32 {
@@ -3562,53 +4960,168 @@ mod tests {
         }
         let spans = Spans::new(stripe);
         let ops = vec![
-            Op::Blit { src: &layer, at: (10, 5), part: (0, 0, 50, 20), clip: Some((15, 0, 30, 100)), alpha: 180 },
-            Op::Turn { src: &needle, pivot_image: (1.5, 25.0), pivot_screen: (48.0, 40.0), degrees: 33.0, smooth: true, reach: reach_of(&needle, (1.5, 25.0)) },
-            Op::Turn { src: &layer, pivot_image: (25.0, 10.0), pivot_screen: (30.0, 30.0), degrees: -70.0, smooth: false, reach: reach_of(&layer, (25.0, 10.0)) },
-            Op::Turn { src: &disc, pivot_image: (15.0, 15.0), pivot_screen: (75.0, 45.0), degrees: 45.0, smooth: false, reach: Reaches::default().reach(&disc, (15.0, 15.0)) },
-            Op::Ring { cx: 60, cy: 30, r: 12, thickness: 3, color: [9, 9, 200, 255] },
-            Op::Border { rect: (2, 2, 20, 20), thickness: 2, color: [1, 2, 3, 255] },
-            Op::RoundRect { x: 70, y: 40, w: 20, h: 15, radius: 4, color: [200, 200, 0, 128] },
-            Op::Arc { x: 5, y: 35, w: 24, h: 24, start: 30.0, stop: 300.0, ring: 5, color: [0, 255, 255] },
-            Op::Column { rect: Rect { x: 90, y: 5, w: 4, h: 50 }, level: 0.6, color: METER },
-            Op::Front { spans: &spans, at: (0, 0) },
-            Op::Fade { color: [0, 0, 0], alpha: 60 },
+            Op::Blit {
+                src: &layer,
+                at: (10, 5),
+                part: (0, 0, 50, 20),
+                clip: Some((15, 0, 30, 100)),
+                alpha: 180,
+            },
+            Op::Turn {
+                src: &needle,
+                pivot_image: (1.5, 25.0),
+                pivot_screen: (48.0, 40.0),
+                degrees: 33.0,
+                smooth: true,
+                reach: reach_of(&needle, (1.5, 25.0)),
+            },
+            Op::Turn {
+                src: &layer,
+                pivot_image: (25.0, 10.0),
+                pivot_screen: (30.0, 30.0),
+                degrees: -70.0,
+                smooth: false,
+                reach: reach_of(&layer, (25.0, 10.0)),
+            },
+            Op::Turn {
+                src: &disc,
+                pivot_image: (15.0, 15.0),
+                pivot_screen: (75.0, 45.0),
+                degrees: 45.0,
+                smooth: false,
+                reach: Reaches::default().reach(&disc, (15.0, 15.0)),
+            },
+            Op::Ring {
+                cx: 60,
+                cy: 30,
+                r: 12,
+                thickness: 3,
+                color: [9, 9, 200, 255],
+            },
+            Op::Border {
+                rect: (2, 2, 20, 20),
+                thickness: 2,
+                color: [1, 2, 3, 255],
+            },
+            Op::RoundRect {
+                x: 70,
+                y: 40,
+                w: 20,
+                h: 15,
+                radius: 4,
+                color: [200, 200, 0, 128],
+            },
+            Op::Arc {
+                x: 5,
+                y: 35,
+                w: 24,
+                h: 24,
+                start: 30.0,
+                stop: 300.0,
+                ring: 5,
+                color: [0, 255, 255],
+            },
+            Op::Column {
+                rect: Rect {
+                    x: 90,
+                    y: 5,
+                    w: 4,
+                    h: 50,
+                },
+                level: 0.6,
+                color: METER,
+            },
+            Op::Front {
+                spans: &spans,
+                at: (0, 0),
+            },
+            Op::Fade {
+                color: [0, 0, 0],
+                alpha: 60,
+            },
         ];
-        let all = [Rect { x: 0, y: 0, w: 97, h: 61 }];
-        let mut one = Frame { width: 97, height: 61, rgba: vec![0; 97 * 61 * 4] };
+        let all = [Rect {
+            x: 0,
+            y: 0,
+            w: 97,
+            h: 61,
+        }];
+        let mut one = Frame {
+            width: 97,
+            height: 61,
+            rgba: vec![0; 97 * 61 * 4],
+        };
         paint(&mut one, &base, &ops, &all, 1);
         assert_ne!(one.rgba, base.rgba, "something was painted");
         for threads in [2usize, 3, 7] {
-            let mut many = Frame { width: 97, height: 61, rgba: vec![0; 97 * 61 * 4] };
+            let mut many = Frame {
+                width: 97,
+                height: 61,
+                rgba: vec![0; 97 * 61 * 4],
+            };
             paint(&mut many, &base, &ops, &all, threads);
             assert!(many == one, "{threads} threads paint the same frame");
         }
         // Every step stays inside the box it declares.
         for (i, op) in ops.iter().enumerate() {
-            let mut alone = Frame { width: 97, height: 61, rgba: vec![0; 97 * 61 * 4] };
+            let mut alone = Frame {
+                width: 97,
+                height: 61,
+                rgba: vec![0; 97 * 61 * 4],
+            };
             paint(&mut alone, &base, std::slice::from_ref(op), &all, 1);
             let bounds = op.bounds(97, 61).expect("the step paints something");
             for y in 0..61i32 {
                 for x in 0..97i32 {
                     let i4 = ((y * 97 + x) * 4) as usize;
                     if alone.rgba[i4..i4 + 4] != base.rgba[i4..i4 + 4] {
-                        assert!(x >= bounds.0 && x < bounds.2 && y >= bounds.1 && y < bounds.3, "step {i} painted ({x}, {y}) outside {bounds:?}");
+                        assert!(
+                            x >= bounds.0 && x < bounds.2 && y >= bounds.1 && y < bounds.3,
+                            "step {i} painted ({x}, {y}) outside {bounds:?}"
+                        );
                     }
                 }
             }
         }
         // Painting two boxes touches nothing outside them.
-        let mut boxed = Frame { width: 97, height: 61, rgba: vec![7; 97 * 61 * 4] };
-        let rects = [Rect { x: 10, y: 5, w: 30, h: 20 }, Rect { x: 50, y: 30, w: 40, h: 25 }];
+        let mut boxed = Frame {
+            width: 97,
+            height: 61,
+            rgba: vec![7; 97 * 61 * 4],
+        };
+        let rects = [
+            Rect {
+                x: 10,
+                y: 5,
+                w: 30,
+                h: 20,
+            },
+            Rect {
+                x: 50,
+                y: 30,
+                w: 40,
+                h: 25,
+            },
+        ];
         paint(&mut boxed, &base, &ops, &rects, 3);
         for y in 0..61u32 {
             for x in 0..97u32 {
                 let i4 = ((y * 97 + x) * 4) as usize;
-                let inside = rects.iter().any(|r| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
+                let inside = rects
+                    .iter()
+                    .any(|r| x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h);
                 if inside {
-                    assert_eq!(boxed.rgba[i4..i4 + 4], one.rgba[i4..i4 + 4], "({x}, {y}) inside a box is painted as the whole frame is");
+                    assert_eq!(
+                        boxed.rgba[i4..i4 + 4],
+                        one.rgba[i4..i4 + 4],
+                        "({x}, {y}) inside a box is painted as the whole frame is"
+                    );
                 } else {
-                    assert_eq!(boxed.rgba[i4..i4 + 4], [7, 7, 7, 7], "({x}, {y}) outside the boxes is untouched");
+                    assert_eq!(
+                        boxed.rgba[i4..i4 + 4],
+                        [7, 7, 7, 7],
+                        "({x}, {y}) outside the boxes is untouched"
+                    );
                 }
             }
         }
@@ -3620,7 +5133,20 @@ mod tests {
             left: 0.7,
             right: 0.3,
             bars: vec![0.2, 0.9, 0.5],
-            texts: vec![Text { x: 60, y: 10, style: TextStyle::Regular, size: 16, color: [255, 255, 255], max_width: 40, text: "A long bitmap line".into(), align: TextAlign::Left, speed: 50.0, direction: ScrollDirection::Bounce, loop_thirds: false, font_file: String::new() }],
+            texts: vec![Text {
+                x: 60,
+                y: 10,
+                style: TextStyle::Regular,
+                size: 16,
+                color: [255, 255, 255],
+                max_width: 40,
+                text: "A long bitmap line".into(),
+                align: TextAlign::Left,
+                speed: 50.0,
+                direction: ScrollDirection::Bounce,
+                loop_thirds: false,
+                font_file: String::new(),
+            }],
             ..Scene::default()
         };
         let mut single = Motion::new(1, None);
@@ -3628,9 +5154,62 @@ mod tests {
         for now in [0u64, 250, 700] {
             single.fade.begin_in(0, 2.0, false, 1.0);
             several.fade.begin_in(0, 2.0, false, 1.0);
-            let a = raster_over(&scene, Stack { screen: None, face: None, front: None, needle: None, needle_right: None, face_at: (0, 0), fonts: None, art: None, icon: None, spectrum: None, folder_pictures: &[], fanart: (None, None), vinyl: None, tonearm: None, reels: (None, None), indicators: None, base: None }, &mut single, now).frame.clone();
-            let b = raster_over(&scene, Stack { screen: None, face: None, front: None, needle: None, needle_right: None, face_at: (0, 0), fonts: None, art: None, icon: None, spectrum: None, folder_pictures: &[], fanart: (None, None), vinyl: None, tonearm: None, reels: (None, None), indicators: None, base: None }, &mut several, now).frame.clone();
-            assert!(a == b, "frame at {now} ms is the same on one and three threads");
+            let a = raster_over(
+                &scene,
+                Stack {
+                    screen: None,
+                    face: None,
+                    front: None,
+                    needle: None,
+                    needle_right: None,
+                    face_at: (0, 0),
+                    fonts: None,
+                    art: None,
+                    icon: None,
+                    spectrum: None,
+                    folder_pictures: &[],
+                    fanart: (None, None),
+                    vinyl: None,
+                    tonearm: None,
+                    reels: (None, None),
+                    indicators: None,
+                    base: None,
+                },
+                &mut single,
+                now,
+            )
+            .frame
+            .clone();
+            let b = raster_over(
+                &scene,
+                Stack {
+                    screen: None,
+                    face: None,
+                    front: None,
+                    needle: None,
+                    needle_right: None,
+                    face_at: (0, 0),
+                    fonts: None,
+                    art: None,
+                    icon: None,
+                    spectrum: None,
+                    folder_pictures: &[],
+                    fanart: (None, None),
+                    vinyl: None,
+                    tonearm: None,
+                    reels: (None, None),
+                    indicators: None,
+                    base: None,
+                },
+                &mut several,
+                now,
+            )
+            .frame
+            .clone();
+            assert!(
+                a == b,
+                "frame at {now} ms is the same on one and three threads"
+            );
         }
     }
 
@@ -3651,10 +5230,38 @@ mod tests {
             left_at: Some((60, 90)),
             right_at: Some((180, 90)),
             needle: Some((-40.0, 40.0, 20.0)),
-            meter: MeterSpec { visible: true, channels: 2, ..MeterSpec::default() },
-            art: Some(Art { x: 90, y: 30, w: 60, h: 60, file: String::new(), mask: String::new(), border: 2, border_color: [255, 255, 255], rotation: true, rpm: 45.0 }),
+            meter: MeterSpec {
+                visible: true,
+                channels: 2,
+                ..MeterSpec::default()
+            },
+            art: Some(Art {
+                x: 90,
+                y: 30,
+                w: 60,
+                h: 60,
+                file: String::new(),
+                mask: String::new(),
+                border: 2,
+                border_color: [255, 255, 255],
+                rotation: true,
+                rpm: 45.0,
+            }),
             playing: true,
-            texts: vec![Text { x: 10, y: 5, style: TextStyle::Regular, size: 16, color: [255, 255, 255], max_width: 60, text: "A long line of bitmap text".into(), align: TextAlign::Left, speed: 80.0, direction: ScrollDirection::Bounce, loop_thirds: false, font_file: String::new() }],
+            texts: vec![Text {
+                x: 10,
+                y: 5,
+                style: TextStyle::Regular,
+                size: 16,
+                color: [255, 255, 255],
+                max_width: 60,
+                text: "A long line of bitmap text".into(),
+                align: TextAlign::Left,
+                speed: 80.0,
+                direction: ScrollDirection::Bounce,
+                loop_thirds: false,
+                font_file: String::new(),
+            }],
             ..Scene::default()
         };
         let mut changed = Motion::new(2, None);
@@ -3673,14 +5280,46 @@ mod tests {
             if step == 20 {
                 art = &art_b;
             }
-            let stack = || Stack { screen: None, face: None, front: None, needle: Some(&needle), needle_right: None, face_at: (0, 0), fonts: None, art: Some(art), icon: None, spectrum: None, folder_pictures: &[], fanart: (None, None), vinyl: None, tonearm: None, reels: (None, None), indicators: None, base: None };
-            let a = raster_over(&scene, stack(), &mut changed, now).frame.clone();
-            let b = raster_over(&scene, stack(), &mut everything, now).frame.clone();
-            assert!(a == b, "frame at {now} ms painted by boxes equals the whole repaint");
-            painted_boxes += changed.damage().iter().map(|r| (r.w * r.h) as usize).sum::<usize>();
+            let stack = || Stack {
+                screen: None,
+                face: None,
+                front: None,
+                needle: Some(&needle),
+                needle_right: None,
+                face_at: (0, 0),
+                fonts: None,
+                art: Some(art),
+                icon: None,
+                spectrum: None,
+                folder_pictures: &[],
+                fanart: (None, None),
+                vinyl: None,
+                tonearm: None,
+                reels: (None, None),
+                indicators: None,
+                base: None,
+            };
+            let a = raster_over(&scene, stack(), &mut changed, now)
+                .frame
+                .clone();
+            let b = raster_over(&scene, stack(), &mut everything, now)
+                .frame
+                .clone();
+            assert!(
+                a == b,
+                "frame at {now} ms painted by boxes equals the whole repaint"
+            );
+            painted_boxes += changed
+                .damage()
+                .iter()
+                .map(|r| (r.w * r.h) as usize)
+                .sum::<usize>();
         }
         let whole = 240 * 120 * 30;
-        assert!(painted_boxes < whole / 2, "boxes painted {painted_boxes} of {whole} pixels");
+        assert!(
+            painted_boxes < whole / 2,
+            "boxes painted {painted_boxes} of {whole} pixels"
+        );
     }
 
     #[test]
@@ -3689,11 +5328,23 @@ mod tests {
         // covers y 40..60 at x 50. Turned 90° left, it covers x 10..30 at y 80.
         let needle = sprite(2, 20, [255, 0, 0, 255]);
         let mut rgba = vec![0u8; 100 * 100 * 4];
-        blit_rotated(&mut Band::over(&mut rgba, 100, 100), &needle, (50, 80), 0.0, 30.0);
+        blit_rotated(
+            &mut Band::over(&mut rgba, 100, 100),
+            &needle,
+            (50, 80),
+            0.0,
+            30.0,
+        );
         assert_eq!(at(&rgba, 100, 50, 45), [255, 0, 0]);
         assert_eq!(at(&rgba, 100, 25, 80), [0, 0, 0]);
         let mut rgba = vec![0u8; 100 * 100 * 4];
-        blit_rotated(&mut Band::over(&mut rgba, 100, 100), &needle, (50, 80), 90.0, 30.0);
+        blit_rotated(
+            &mut Band::over(&mut rgba, 100, 100),
+            &needle,
+            (50, 80),
+            90.0,
+            30.0,
+        );
         assert_eq!(at(&rgba, 100, 25, 80), [255, 0, 0]);
         assert_eq!(at(&rgba, 100, 50, 45), [0, 0, 0]);
     }
@@ -3701,7 +5352,11 @@ mod tests {
     /// Any TrueType file on the host will do; the test is about placement and
     /// clipping, not the face. Without one the bitmap fallback is exercised.
     fn any_font() -> Option<String> {
-        let dirs = ["/usr/share/fonts/truetype", "/usr/share/fonts/TTF", "/usr/share/fonts"];
+        let dirs = [
+            "/usr/share/fonts/truetype",
+            "/usr/share/fonts/TTF",
+            "/usr/share/fonts",
+        ];
         fn walk(dir: &Path, depth: u32) -> Option<String> {
             for entry in std::fs::read_dir(dir).ok()?.flatten() {
                 let path = entry.path();
@@ -3709,7 +5364,10 @@ mod tests {
                     if let Some(found) = walk(&path, depth - 1) {
                         return Some(found);
                     }
-                } else if path.extension().is_some_and(|e| e.eq_ignore_ascii_case("ttf")) {
+                } else if path
+                    .extension()
+                    .is_some_and(|e| e.eq_ignore_ascii_case("ttf"))
+                {
                     return Some(path.to_string_lossy().into_owned());
                 }
             }
@@ -3757,14 +5415,21 @@ mod tests {
         };
         assert!(lit(&frame, 4, 120) > 0, "glyphs were drawn");
         assert_eq!(lit(&frame, 0, 4), 0, "nothing left of x");
-        assert_eq!((0..120).filter(|&x| sample(&frame, x, 0)[0] > 0).count(), 0, "row 0 above the em box is empty");
+        assert_eq!(
+            (0..120).filter(|&x| sample(&frame, x, 0)[0] > 0).count(),
+            0,
+            "row 0 above the em box is empty"
+        );
 
         let mut clipped = Frame {
             width: 120,
             height: 40,
             rgba: vec![0u8; 120 * 40 * 4],
         };
-        let narrow = Text { max_width: 10, ..text };
+        let narrow = Text {
+            max_width: 10,
+            ..text
+        };
         draw_text_styled(&mut clipped, &narrow, Some(&fonts));
         assert!(lit(&clipped, 4, 14) > 0);
         assert_eq!(lit(&clipped, 14, 120), 0, "nothing past max_width");
@@ -3803,31 +5468,77 @@ mod tests {
         draw_text_moving(&mut frame, &text, Some(&fonts), &mut motion, 0);
         assert_eq!(motion.offset(10, 2), Some(0.0), "starts at the left end");
         draw_text_moving(&mut frame, &text, Some(&fonts), &mut motion, 100);
-        assert_eq!(motion.offset(10, 2), Some(0.0), "pauses at the end it starts from, as the player does");
+        assert_eq!(
+            motion.offset(10, 2),
+            Some(0.0),
+            "pauses at the end it starts from, as the player does"
+        );
         draw_text_moving(&mut frame, &text, Some(&fonts), &mut motion, 500);
         let after = motion.offset(10, 2).unwrap();
-        assert!(after > 39.0 && after < 41.0, "100 px/s over the 0.4 s since the last frame: {after}");
+        assert!(
+            after > 39.0 && after < 41.0,
+            "100 px/s over the 0.4 s since the last frame: {after}"
+        );
         for step in 2..200u64 {
             draw_text_moving(&mut frame, &text, Some(&fonts), &mut motion, step * 100);
         }
-        let line_w = render_text(Some(&fonts), TextStyle::Regular, 20, [255, 255, 255], &text.text, 0).unwrap().width;
+        let line_w = render_text(
+            Some(&fonts),
+            TextStyle::Regular,
+            20,
+            [255, 255, 255],
+            &text.text,
+            0,
+        )
+        .unwrap()
+        .width;
         let limit = (line_w - 30) as f32;
         let at_end = motion.offset(10, 2).unwrap();
-        assert!(at_end >= 0.0 && at_end <= limit, "bounces inside 0..limit: {at_end} of {limit}");
-        assert_eq!((0..10).filter(|&x| sample(&frame, x, 10)[3] > 0).count(), 0, "nothing left of the box");
-        assert_eq!((41..200).filter(|&x| sample(&frame, x, 10)[3] > 0).count(), 0, "nothing right of the box");
+        assert!(
+            at_end >= 0.0 && at_end <= limit,
+            "bounces inside 0..limit: {at_end} of {limit}"
+        );
+        assert_eq!(
+            (0..10).filter(|&x| sample(&frame, x, 10)[3] > 0).count(),
+            0,
+            "nothing left of the box"
+        );
+        assert_eq!(
+            (41..200).filter(|&x| sample(&frame, x, 10)[3] > 0).count(),
+            0,
+            "nothing right of the box"
+        );
 
         text.text = "loop  ".repeat(3);
         text.direction = ScrollDirection::Ltr;
         text.loop_thirds = true;
         text.max_width = 20;
         draw_text_moving(&mut frame, &text, Some(&fonts), &mut motion, 20_000);
-        let segment = render_text(Some(&fonts), TextStyle::Regular, 20, [255, 255, 255], &text.text, 0).unwrap().width / 3;
+        let segment = render_text(
+            Some(&fonts),
+            TextStyle::Regular,
+            20,
+            [255, 255, 255],
+            &text.text,
+            0,
+        )
+        .unwrap()
+        .width
+            / 3;
         for step in 1..400u64 {
-            draw_text_moving(&mut frame, &text, Some(&fonts), &mut motion, 20_000 + step * 50);
+            draw_text_moving(
+                &mut frame,
+                &text,
+                Some(&fonts),
+                &mut motion,
+                20_000 + step * 50,
+            );
         }
         let looped = motion.offset(10, 2).unwrap();
-        assert!(looped >= 0.0 && looped < segment as f32, "wraps by one segment: {looped} of {segment}");
+        assert!(
+            looped >= 0.0 && looped < segment as f32,
+            "wraps by one segment: {looped} of {segment}"
+        );
     }
 
     #[test]
@@ -3841,7 +5552,11 @@ mod tests {
         )
         .unwrap();
         let icon = read_icon(&path, 50, 50, Some([204, 176, 97])).unwrap();
-        assert_eq!((icon.width, icon.height), (50, 25), "fits the box, keeps the aspect");
+        assert_eq!(
+            (icon.width, icon.height),
+            (50, 25),
+            "fits the box, keeps the aspect"
+        );
         assert_eq!(sample(&icon, 25, 12), [204, 176, 97, 255], "tinted, opaque");
         let untinted = read_icon(&path, 50, 50, None).unwrap();
         assert_eq!(sample(&untinted, 25, 12), [0, 0, 0, 255]);
@@ -3859,11 +5574,20 @@ mod tests {
             }
         }
         apply_mask(&mut art, &mask);
-        assert_eq!(sample(&art, 0, 0)[3], 255, "black in the mask keeps the picture");
+        assert_eq!(
+            sample(&art, 0, 0)[3],
+            255,
+            "black in the mask keeps the picture"
+        );
         assert_eq!(sample(&art, 3, 3)[3], 0, "white in the mask cuts it");
 
         let mut rgba = vec![0u8; 8 * 8 * 4];
-        draw_border(&mut Band::over(&mut rgba, 8, 8), (2, 2, 4, 4), 1, [9, 9, 9, 255]);
+        draw_border(
+            &mut Band::over(&mut rgba, 8, 8),
+            (2, 2, 4, 4),
+            1,
+            [9, 9, 9, 255],
+        );
         assert_eq!(at(&rgba, 8, 2, 2), [9, 9, 9], "corner is border");
         assert_eq!(at(&rgba, 8, 5, 3), [9, 9, 9], "right edge is border");
         assert_eq!(at(&rgba, 8, 3, 3), [0, 0, 0], "inside stays");
@@ -3891,8 +5615,16 @@ mod tests {
             rgba: vec![0u8; 80 * 40 * 4],
         };
         draw_type_area(&mut frame, &area, Some(&icon), None);
-        assert_eq!(sample(&frame, 59, 17)[..3], [1, 2, 3], "right-aligned, vertically centred");
-        assert_eq!(sample(&frame, 20, 17)[3], 0, "nothing on the left of the box");
+        assert_eq!(
+            sample(&frame, 59, 17)[..3],
+            [1, 2, 3],
+            "right-aligned, vertically centred"
+        );
+        assert_eq!(
+            sample(&frame, 20, 17)[3],
+            0,
+            "nothing on the left of the box"
+        );
     }
 
     #[test]
@@ -3907,7 +5639,7 @@ mod tests {
     #[test]
     fn a_half_transparent_layer_blends_over_the_frame() {
         let mut rgba = vec![0u8; 4 * 4 * 4];
-        for px in rgba.chunks_exact_mut(4) {
+        for px in rgba.as_chunks_mut::<4>().0 {
             px.copy_from_slice(&[0, 0, 0, 255]);
         }
         let layer = sprite(1, 1, [200, 100, 0, 128]);

@@ -13,7 +13,11 @@ pub struct Meter {
 
 impl Meter {
     pub fn new(decay_ms: u32, max: u32) -> Self {
-        Self { decay_ms: decay_ms.max(1), max, held: [0; 2] }
+        Self {
+            decay_ms: decay_ms.max(1),
+            max,
+            held: [0; 2],
+        }
     }
 
     /// One update: the raw peaks, 0 through 32767, over `frames` at `rate`.
@@ -70,7 +74,15 @@ impl Spectrum {
                 edges[m] = edges[m - 1] + group;
             }
         }
-        Self { size, max, log_f, log_y, smooth: smoothing_factor.min(100) as f64, edges, held: vec![0.0; size] }
+        Self {
+            size,
+            max,
+            log_f,
+            log_y,
+            smooth: smoothing_factor.min(100) as f64,
+            edges,
+            held: vec![0.0; size],
+        }
     }
 
     pub fn size(&self) -> usize {
@@ -86,7 +98,9 @@ impl Spectrum {
         let mut out = Vec::with_capacity(self.size);
         for m in 0..self.size {
             let from = (self.edges[m] * per_old) as usize;
-            let to = ((self.edges[m + 1] * per_old) as usize).max(from + 1).min(magnitudes.len());
+            let to = ((self.edges[m + 1] * per_old) as usize)
+                .max(from + 1)
+                .min(magnitudes.len());
             let mut y = 0.0f64;
             if from < magnitudes.len() {
                 for v in &magnitudes[from..to] {
@@ -98,7 +112,11 @@ impl Spectrum {
             y = y.clamp(0.0, 65535.0);
             y = (self.smooth * self.held[m] + (100.0 - self.smooth) * y) / 100.0;
             self.held[m] = y;
-            let mut v = if self.log_y { y.log10() / 4.82 } else { y / 65535.0 };
+            let mut v = if self.log_y {
+                y.log10() / 4.82
+            } else {
+                y / 65535.0
+            };
             if !v.is_finite() || v < 0.0 {
                 v = 0.0;
             }
@@ -146,13 +164,24 @@ mod tests {
         magnitudes[600] = 1.0; // high up: the last few log bins
         let first = spectrum.update(&magnitudes);
         assert_eq!(first.len(), 20);
-        let lit: Vec<usize> = first.iter().enumerate().filter(|(_, v)| **v > 0).map(|(i, _)| i).collect();
+        let lit: Vec<usize> = first
+            .iter()
+            .enumerate()
+            .filter(|(_, v)| **v > 0)
+            .map(|(i, _)| i)
+            .collect();
         assert_eq!(lit.len(), 1, "one bin lit: {first:?}");
         assert!(lit[0] >= 15, "a high tone lands high: {}", lit[0]);
         let second = spectrum.update(&magnitudes);
-        assert!(second[lit[0]] >= first[lit[0]], "smoothing rises towards the value");
+        assert!(
+            second[lit[0]] >= first[lit[0]],
+            "smoothing rises towards the value"
+        );
         let quiet = spectrum.update(&vec![0.0; 1024]);
-        assert!(quiet[lit[0]] < second[lit[0]], "and falls when the tone stops");
+        assert!(
+            quiet[lit[0]] < second[lit[0]],
+            "and falls when the tone stops"
+        );
         assert_eq!(spectrum_record(&[1, 258]).len(), 8);
     }
 }

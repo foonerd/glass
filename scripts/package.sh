@@ -42,8 +42,12 @@ copy_alsa armv7 armhf
 copy_alsa armv8 arm64
 copy_alsa x64 amd64
 
-# Node modules, installed in a container so the host needs no node.
-docker run --rm -v "$STAGE:/plugin" -w /plugin node:20-slim sh -c "npm install --omit=dev --no-audit --no-fund --loglevel=error >/dev/null && chown -R $(id -u):$(id -g) /plugin/node_modules /plugin/package-lock.json 2>/dev/null || true"
+# Node modules: with npm on this machine, directly; otherwise in a container.
+if command -v npm >/dev/null 2>&1; then
+  ( cd "$STAGE" && npm install --omit=dev --no-audit --no-fund --loglevel=error >/dev/null )
+else
+  docker run --rm -v "$STAGE:/plugin" -w /plugin node:20-slim sh -c "npm install --omit=dev --no-audit --no-fund --loglevel=error >/dev/null && chown -R $(id -u):$(id -g) /plugin/node_modules /plugin/package-lock.json 2>/dev/null || true"
+fi
 rm -f "$STAGE/package-lock.json"
 
 ( cd "$STAGE" && rm -f "$ROOT/dist/glass-$VERSION.zip" && zip -qr "$ROOT/dist/glass-$VERSION.zip" . )

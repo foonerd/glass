@@ -2,9 +2,9 @@
 //! Pure: no files, no devices, no pixels.
 
 use lead::{
-    format_key, format_label, FanartSpec, FolderLayerSpec, Input, Metadata, MeterSpec, ScrollDirection,
-    IndicatorsSpec, ReelsSpec, SkinDesc, SpectrumSpec, StateLook, TextAlign, TextSpec, TextStyle, TonearmSpec, TypeAlign,
-    TypeMode, VinylSpec,
+    format_key, format_label, FanartSpec, FolderLayerSpec, IndicatorsSpec, Input, Metadata,
+    MeterSpec, ReelsSpec, ScrollDirection, SkinDesc, SpectrumSpec, StateLook, TextAlign, TextSpec,
+    TextStyle, TonearmSpec, TypeAlign, TypeMode, VinylSpec,
 };
 use serde::{Deserialize, Serialize};
 
@@ -288,10 +288,14 @@ pub fn ticker_line(skin: &SkinDesc, meta: &Metadata) -> Option<Text> {
     let ticker = skin.ticker.as_ref()?;
     let space = " ".repeat(ticker.space_between as usize);
     let between = format!("{space}{}{space}", ticker.separator);
-    let parts: Vec<&str> = [meta.artist.as_str(), meta.title.as_str(), meta.album.as_str()]
-        .into_iter()
-        .filter(|p| !p.is_empty())
-        .collect();
+    let parts: Vec<&str> = [
+        meta.artist.as_str(),
+        meta.title.as_str(),
+        meta.album.as_str(),
+    ]
+    .into_iter()
+    .filter(|p| !p.is_empty())
+    .collect();
     let mut content = parts.join(&between);
     if ticker.append_next {
         let next: Vec<&str> = [meta.next_artist.as_str(), meta.next_title.as_str()]
@@ -373,7 +377,11 @@ pub fn texts(skin: &SkinDesc, meta: &Metadata) -> Vec<Text> {
         // bitrate, else nothing.
         let line = format!("{} {}", meta.samplerate, meta.bitdepth);
         let line = line.trim();
-        let line = if line.is_empty() { meta.bitrate.trim() } else { line };
+        let line = if line.is_empty() {
+            meta.bitrate.trim()
+        } else {
+            line
+        };
         if !line.is_empty() {
             out.push(text(spec, line.to_string(), spec.color));
         }
@@ -431,7 +439,14 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
         bar_heights: skin
             .spectrum
             .as_ref()
-            .map(|spec| input.bins.values.iter().map(|&raw| spec.bar_height(raw)).collect())
+            .map(|spec| {
+                input
+                    .bins
+                    .values
+                    .iter()
+                    .map(|&raw| spec.bar_height(raw))
+                    .collect()
+            })
             .unwrap_or_default(),
         spectrum: skin.spectrum.clone(),
         folder_layers: skin
@@ -440,7 +455,12 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
             .enumerate()
             .map(|(i, spec)| FolderLayer {
                 spec: spec.clone(),
-                file: input.metadata.folder_files.get(i).cloned().unwrap_or_default(),
+                file: input
+                    .metadata
+                    .folder_files
+                    .get(i)
+                    .cloned()
+                    .unwrap_or_default(),
             })
             .collect(),
         fanart: skin.fanart.as_ref().map(|spec| Fanart {
@@ -457,7 +477,11 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
         time_remaining: progress(&input.metadata).1,
         vinyl: skin.vinyl.as_ref().map(|spec| Vinyl {
             spec: spec.clone(),
-            file: if input.metadata.vinyl_file.is_empty() { spec.theme_file.clone() } else { input.metadata.vinyl_file.clone() },
+            file: if input.metadata.vinyl_file.is_empty() {
+                spec.theme_file.clone()
+            } else {
+                input.metadata.vinyl_file.clone()
+            },
         }),
         tonearm: skin.tonearm.clone(),
         reels: skin.reels.as_ref().map(|spec| Reels {
@@ -473,7 +497,10 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
                 (None, _) => String::new(),
             },
         }),
-        indicators: skin.indicators.as_ref().map(|spec| indicators(spec, &input.metadata, progress(&input.metadata).0)),
+        indicators: skin
+            .indicators
+            .as_ref()
+            .map(|spec| indicators(spec, &input.metadata, progress(&input.metadata).0)),
     }
 }
 
@@ -488,9 +515,29 @@ fn indicators(spec: &IndicatorsSpec, meta: &Metadata, progress_pct: f32) -> Indi
     Indicators {
         spec: spec.clone(),
         volume: meta.volume.min(100),
-        mute_state: if meta.mute { 1 } else if meta.volume == 0 { 2 } else { 0 },
-        shuffle_state: if infinity && !repeat_has_infinity { 2 } else if meta.random { 1 } else { 0 },
-        repeat_state: if repeat_has_infinity && infinity { 3 } else if meta.repeat_single { 2 } else if meta.repeat { 1 } else { 0 },
+        mute_state: if meta.mute {
+            1
+        } else if meta.volume == 0 {
+            2
+        } else {
+            0
+        },
+        shuffle_state: if infinity && !repeat_has_infinity {
+            2
+        } else if meta.random {
+            1
+        } else {
+            0
+        },
+        repeat_state: if repeat_has_infinity && infinity {
+            3
+        } else if meta.repeat_single {
+            2
+        } else if meta.repeat {
+            1
+        } else {
+            0
+        },
         play_state: match meta.status.as_str() {
             "play" => 2,
             "pause" => 1,
@@ -507,10 +554,16 @@ fn progress(meta: &Metadata) -> (f32, Option<f32>) {
     let seek = meta.seek.max(0.0);
     if meta.queue_total_s > 0.0 && meta.duration > 0.0 && meta.volatile != Some(true) {
         let played = meta.queue_before_s + seek;
-        return (((played / meta.queue_total_s) * 100.0).min(100.0), Some((meta.queue_total_s - played).max(0.0)));
+        return (
+            ((played / meta.queue_total_s) * 100.0).min(100.0),
+            Some((meta.queue_total_s - played).max(0.0)),
+        );
     }
     if meta.duration > 0.0 {
-        ((seek / meta.duration * 100.0).clamp(0.0, 100.0), Some(meta.duration - seek))
+        (
+            (seek / meta.duration * 100.0).clamp(0.0, 100.0),
+            Some(meta.duration - seek),
+        )
     } else {
         (0.0, None)
     }
@@ -533,7 +586,7 @@ mod tests {
             bins: Bins {
                 values: vec![100.0, 0.0],
             },
-            metadata: lead::Metadata::default(),
+            metadata: Metadata::default(),
         };
         let scene = step(&skin, &input);
         assert_eq!(scene.left, 0.5);
@@ -562,14 +615,35 @@ mod tests {
         skin.time = Some(spec(TextStyle::Digi, [180, 180, 180]));
         skin.time_elapsed = Some(spec(TextStyle::Regular, [1, 1, 1]));
         skin.time_total = Some(spec(TextStyle::Digi, [2, 2, 2]));
-        let playing = Metadata { status: "play".into(), duration: 218.0, seek: 65.4, ..Metadata::default() };
+        let playing = Metadata {
+            status: "play".into(),
+            duration: 218.0,
+            seek: 65.4,
+            ..Metadata::default()
+        };
         let lines: Vec<String> = texts(&skin, &playing).into_iter().map(|t| t.text).collect();
-        assert_eq!(lines, ["02:33", "01:05", "03:38"], "remaining counts whole seconds played");
-        let persisting = Metadata { status: "pause".into(), persist_mode: "countdown".into(), persist_left: 9, ..playing.clone() };
+        assert_eq!(
+            lines,
+            ["02:33", "01:05", "03:38"],
+            "remaining counts whole seconds played"
+        );
+        let persisting = Metadata {
+            status: "pause".into(),
+            persist_mode: "countdown".into(),
+            persist_left: 9,
+            ..playing.clone()
+        };
         let first = texts(&skin, &persisting).remove(0);
         assert_eq!((first.text.as_str(), first.color), ("00:09", PERSIST_COLOR));
-        let frozen = Metadata { persist_mode: "freeze".into(), ..persisting };
-        assert_eq!(texts(&skin, &frozen)[0].text, "02:33", "freeze keeps the track time");
+        let frozen = Metadata {
+            persist_mode: "freeze".into(),
+            ..persisting
+        };
+        assert_eq!(
+            texts(&skin, &frozen)[0].text,
+            "02:33",
+            "freeze keeps the track time"
+        );
     }
 
     #[test]
@@ -578,7 +652,10 @@ mod tests {
         skin.title = Some(spec(TextStyle::Bold, [1, 1, 1]));
         skin.next_title = Some(spec(TextStyle::Regular, [2, 2, 2]));
         skin.ticker = Some(lead::TickerSpec {
-            text: TextSpec { max_width: 720, ..spec(TextStyle::Regular, [9, 9, 9]) },
+            text: TextSpec {
+                max_width: 720,
+                ..spec(TextStyle::Regular, [9, 9, 9])
+            },
             direction: ScrollDirection::Ltr,
             separator: "-".into(),
             space_between: 1,
@@ -599,12 +676,19 @@ mod tests {
         let segment = "Courtney - Wonder - Next: Someone - Next Song  ";
         assert_eq!(ticker.text, segment.repeat(3));
         assert!(ticker.loop_thirds && ticker.direction == ScrollDirection::Ltr);
-        assert_eq!(lines.iter().map(|t| t.text.as_str()).collect::<Vec<_>>()[..2], ["Wonder", "Next Song"]);
+        assert_eq!(
+            lines.iter().map(|t| t.text.as_str()).collect::<Vec<_>>()[..2],
+            ["Wonder", "Next Song"]
+        );
 
         skin.ticker.as_mut().unwrap().replace = true;
         let lines = texts(&skin, &meta);
         assert_eq!(lines.len(), 1, "replace hides the separate lines");
-        assert_eq!(ticker_line(&skin, &Metadata::default()), None, "nothing to say, no ticker");
+        assert_eq!(
+            ticker_line(&skin, &Metadata::default()),
+            None,
+            "nothing to say, no ticker"
+        );
     }
 
     #[test]
@@ -626,25 +710,44 @@ mod tests {
             ..Metadata::default()
         };
         let lines: Vec<String> = texts(&skin, &meta).into_iter().map(|t| t.text).collect();
-        assert_eq!(lines, ["Wonder", "Courtney Barnett - Creature of Habit", "44.1 kHz 16-bit", "03:37"]);
+        assert_eq!(
+            lines,
+            [
+                "Wonder",
+                "Courtney Barnett - Creature of Habit",
+                "44.1 kHz 16-bit",
+                "03:37"
+            ]
+        );
 
         skin.album = Some(spec(TextStyle::Light, [0, 0, 0]));
         let lines: Vec<String> = texts(&skin, &meta).into_iter().map(|t| t.text).collect();
         assert_eq!(lines[1], "Courtney Barnett");
         assert_eq!(lines[2], "Creature of Habit");
 
-        let ending = Metadata { seek: 210.0, ..meta.clone() };
+        let ending = Metadata {
+            seek: 210.0,
+            ..meta.clone()
+        };
         let clock = texts(&skin, &ending).pop().unwrap();
         assert_eq!((clock.text.as_str(), clock.color), ("00:08", LAST_SECONDS));
 
-        let stream = Metadata { duration: 0.0, ..meta };
-        assert!(texts(&skin, &stream).iter().all(|t| t.style != TextStyle::Digi));
+        let stream = Metadata {
+            duration: 0.0,
+            ..meta
+        };
+        assert!(texts(&skin, &stream)
+            .iter()
+            .all(|t| t.style != TextStyle::Digi));
     }
 
     #[test]
     fn art_shows_once_its_file_exists() {
         let mut skin = SkinDesc::basic();
-        let waiting = Metadata { albumart: "https://x/c.jpg".into(), ..Metadata::default() };
+        let waiting = Metadata {
+            albumart: "https://x/c.jpg".into(),
+            ..Metadata::default()
+        };
         assert_eq!(art(&skin, &waiting), None);
         skin.art = Some(lead::ArtSpec {
             x: 36,
@@ -658,11 +761,17 @@ mod tests {
             rpm: 0.0,
         });
         assert_eq!(art(&skin, &waiting), None);
-        let ready = Metadata { art_file: "/tmp/glass-art/1.img".into(), ..waiting };
+        let ready = Metadata {
+            art_file: "/tmp/glass-art/1.img".into(),
+            ..waiting
+        };
         let placed = art(&skin, &ready).unwrap();
         assert_eq!((placed.x, placed.y, placed.w, placed.h), (36, 25, 201, 201));
         assert_eq!(placed.file, "/tmp/glass-art/1.img");
-        assert_eq!((placed.mask.as_str(), placed.border, placed.border_color), ("/t/mask.png", 2, [1, 2, 3]));
+        assert_eq!(
+            (placed.mask.as_str(), placed.border, placed.border_color),
+            ("/t/mask.png", 2, [1, 2, 3])
+        );
     }
 
     #[test]
@@ -686,8 +795,14 @@ mod tests {
             ..Metadata::default()
         };
         let area = type_area(&skin, &meta).unwrap();
-        assert_eq!((area.label.as_str(), area.icon.as_str()), ("Webradio", "/icons/radio.svg"));
-        assert_eq!((area.mode, area.align, area.font_size), (TypeMode::Icon, TypeAlign::Center, 20));
+        assert_eq!(
+            (area.label.as_str(), area.icon.as_str()),
+            ("Webradio", "/icons/radio.svg")
+        );
+        assert_eq!(
+            (area.mode, area.align, area.font_size),
+            (TypeMode::Icon, TypeAlign::Center, 20)
+        );
         assert_eq!(texts(&skin, &meta)[0].text, "192 Kbps");
         assert_eq!(type_area(&skin, &Metadata::default()), None);
     }

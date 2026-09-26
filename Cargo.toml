@@ -13,7 +13,15 @@ members = [
 ]
 
 [workspace.package]
-version = "0.5.1"
+version = "0.5.2"
 edition = "2021"
 license = "MIT"
 publish = false
+
+# One set of lints for every crate; CI denies warnings.
+[workspace.lints.rust]
+unused_qualifications = "warn"
+
+[workspace.lints.clippy]
+type_complexity = "allow"
+too_many_arguments = "allow"

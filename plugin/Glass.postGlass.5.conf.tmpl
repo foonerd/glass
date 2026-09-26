@@ -104,6 +104,7 @@ pcm_scope_type.peppyalsa {
     lib /data/plugins/user_interface/glass/lib/libpeppyalsa.so
 }
 
+# null output
 # glasstap: the tap of this plugin, with the same records the scope above writes
 pcm_scope.glasstap {
   type glasstap
@@ -123,7 +124,6 @@ pcm_scope_type.glasstap {
     lib /data/plugins/user_interface/glass/lib/libglasstap.so
 }
 
-# null output
 pcm.dummy {
   type hw
 	card Dummy

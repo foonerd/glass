@@ -60,21 +60,35 @@ mod ffi {
         pub fn snd_pcm_meter_get_now(pcm: *mut snd_pcm_t) -> c_ulong;
         pub fn snd_pcm_meter_get_boundary(pcm: *mut snd_pcm_t) -> c_ulong;
         pub fn snd_pcm_meter_add_scope(pcm: *mut snd_pcm_t, scope: *mut snd_pcm_scope_t) -> c_int;
-        pub fn snd_pcm_meter_search_scope(pcm: *mut snd_pcm_t, name: *const c_char) -> *mut snd_pcm_scope_t;
+        pub fn snd_pcm_meter_search_scope(
+            pcm: *mut snd_pcm_t,
+            name: *const c_char,
+        ) -> *mut snd_pcm_scope_t;
         pub fn snd_pcm_scope_malloc(ptr: *mut *mut snd_pcm_scope_t) -> c_int;
         pub fn snd_pcm_scope_set_ops(scope: *mut snd_pcm_scope_t, ops: *const snd_pcm_scope_ops_t);
         pub fn snd_pcm_scope_set_name(scope: *mut snd_pcm_scope_t, name: *const c_char);
         pub fn snd_pcm_scope_get_callback_private(scope: *mut snd_pcm_scope_t) -> *mut c_void;
-        pub fn snd_pcm_scope_set_callback_private(scope: *mut snd_pcm_scope_t, private: *mut c_void);
-        pub fn snd_pcm_scope_s16_open(pcm: *mut snd_pcm_t, name: *const c_char, scope: *mut *mut snd_pcm_scope_t) -> c_int;
-        pub fn snd_pcm_scope_s16_get_channel_buffer(scope: *mut snd_pcm_scope_t, channel: c_uint) -> *mut i16;
+        pub fn snd_pcm_scope_set_callback_private(
+            scope: *mut snd_pcm_scope_t,
+            private: *mut c_void,
+        );
+        pub fn snd_pcm_scope_s16_open(
+            pcm: *mut snd_pcm_t,
+            name: *const c_char,
+            scope: *mut *mut snd_pcm_scope_t,
+        ) -> c_int;
+        pub fn snd_pcm_scope_s16_get_channel_buffer(
+            scope: *mut snd_pcm_scope_t,
+            channel: c_uint,
+        ) -> *mut i16;
         pub fn snd_config_iterator_first(node: *const snd_config_t) -> snd_config_iterator_t;
         pub fn snd_config_iterator_next(it: snd_config_iterator_t) -> snd_config_iterator_t;
         pub fn snd_config_iterator_end(node: *const snd_config_t) -> snd_config_iterator_t;
         pub fn snd_config_iterator_entry(it: snd_config_iterator_t) -> *mut snd_config_t;
         pub fn snd_config_get_id(node: *const snd_config_t, id: *mut *const c_char) -> c_int;
         pub fn snd_config_get_integer(node: *const snd_config_t, value: *mut c_long) -> c_int;
-        pub fn snd_config_get_string(node: *const snd_config_t, value: *mut *const c_char) -> c_int;
+        pub fn snd_config_get_string(node: *const snd_config_t, value: *mut *const c_char)
+            -> c_int;
     }
 }
 
@@ -197,7 +211,15 @@ unsafe fn settings_from(conf: *const snd_config_t) -> Settings {
             "fft_size" => s.fft_size = integer(node).unwrap_or(2048).clamp(64, 32_768) as usize,
             "hop" => s.hop = integer(node).unwrap_or(0).clamp(0, 32_768) as usize,
             "slots" => s.slots = integer(node).unwrap_or(64).clamp(2, 4096) as usize,
-            "ring" => s.ring = string(node).filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')).unwrap_or_else(|| "glasstap".to_string()),
+            "ring" => {
+                s.ring = string(node)
+                    .filter(|t| {
+                        !t.is_empty()
+                            && t.chars()
+                                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+                    })
+                    .unwrap_or_else(|| "glasstap".to_string())
+            }
             other => note(&format!("unknown key {other} ignored")),
         }
     }
@@ -208,15 +230,30 @@ unsafe fn settings_from(conf: *const snd_config_t) -> Settings {
 }
 
 unsafe extern "C" fn enable(scope: *mut snd_pcm_scope_t) -> c_int {
-    let Some(st) = state(scope) else { return -libc::EINVAL };
+    let Some(st) = state(scope) else {
+        return -libc::EINVAL;
+    };
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         st.channels = (snd_pcm_meter_get_channels(st.pcm) as usize).clamp(1, tap::MAX_CHANNELS);
         st.rate = snd_pcm_meter_get_rate(st.pcm);
         st.bufsize = snd_pcm_meter_get_bufsize(st.pcm) as usize;
         st.dop_group = tap::dop::group_frames(st.rate);
         st.staging = [vec![0; st.bufsize], vec![0; st.bufsize]];
-        st.analyser = Some(Analyser::new(st.rate, st.channels as u32, st.settings.fft_size, st.settings.hop));
-        match Writer::create(Path::new(tap::ring::DIR), &st.settings.ring, st.rate, st.channels as u32, st.settings.fft_size as u32, st.settings.hop as u32, st.settings.slots) {
+        st.analyser = Some(Analyser::new(
+            st.rate,
+            st.channels as u32,
+            st.settings.fft_size,
+            st.settings.hop,
+        ));
+        match Writer::create(
+            Path::new(tap::ring::DIR),
+            &st.settings.ring,
+            st.rate,
+            st.channels as u32,
+            st.settings.fft_size as u32,
+            st.settings.hop as u32,
+            st.settings.slots,
+        ) {
             Ok(w) => st.writer = Some(w),
             Err(e) => note(&format!("no ring: {e}")),
         }
@@ -304,14 +341,27 @@ unsafe fn measure(st: &mut State) {
     let channels = st.channels;
     let (left, right) = st.staging.split_at_mut(1);
     let left = &left[0][..size];
-    let right = if channels > 1 { &right[0][..size] } else { left };
+    let right = if channels > 1 {
+        &right[0][..size]
+    } else {
+        left
+    };
 
     // Raw peaks on the 16-bit scale for the old meter record; DoP by density.
     let dop = tap::dop::is_stream(left);
     let raw = if dop {
-        [tap::dop::level(left, st.dop_group), tap::dop::level(right, st.dop_group)]
+        [
+            tap::dop::level(left, st.dop_group),
+            tap::dop::level(right, st.dop_group),
+        ]
     } else {
-        let peak = |s: &[i16]| s.iter().map(|v| (*v as i32).abs()).max().unwrap_or(0).min(32767);
+        let peak = |s: &[i16]| {
+            s.iter()
+                .map(|v| (*v as i32).abs())
+                .max()
+                .unwrap_or(0)
+                .min(32767)
+        };
         [peak(left), peak(right)]
     };
     if let Some(fifo) = st.meter.as_mut() {
@@ -319,10 +369,15 @@ unsafe fn measure(st: &mut State) {
         fifo.write(&legacy::meter_record(l, r));
     }
 
-    let Some(analyser) = st.analyser.as_mut() else { return };
+    let Some(analyser) = st.analyser.as_mut() else {
+        return;
+    };
     if dop {
         // The bit stream has no spectrum to show; the level stands in.
-        let mut frame = Frame { frames: 0, ..Frame::default() };
+        let mut frame = Frame {
+            frames: 0,
+            ..Frame::default()
+        };
         frame.peak = [raw[0] as f32 / 32767.0, raw[1] as f32 / 32767.0];
         frame.rms = frame.peak;
         frame.spectrum = [vec![0.0; analyser.bins()], vec![0.0; analyser.bins()]];
@@ -373,7 +428,12 @@ static OPS: snd_pcm_scope_ops_t = snd_pcm_scope_ops_t {
 /// # Safety
 /// Called by libasound with a live PCM and configuration nodes.
 #[no_mangle]
-pub unsafe extern "C" fn _snd_pcm_scope_glasstap_open(pcm: *mut snd_pcm_t, name: *const c_char, _root: *mut snd_config_t, conf: *mut snd_config_t) -> c_int {
+pub unsafe extern "C" fn _snd_pcm_scope_glasstap_open(
+    pcm: *mut snd_pcm_t,
+    name: *const c_char,
+    _root: *mut snd_config_t,
+    conf: *mut snd_config_t,
+) -> c_int {
     let outcome = catch_unwind(AssertUnwindSafe(|| {
         let settings = settings_from(conf);
         ignore_sigpipe();
@@ -397,7 +457,13 @@ pub unsafe extern "C" fn _snd_pcm_scope_glasstap_open(pcm: *mut snd_pcm_t, name:
             pcm,
             s16,
             legacy_meter: legacy::Meter::new(settings.decay_ms, settings.meter_max),
-            legacy_spectrum: legacy::Spectrum::new(settings.spectrum_size, settings.spectrum_max, settings.log_f, settings.log_y, settings.smoothing),
+            legacy_spectrum: legacy::Spectrum::new(
+                settings.spectrum_size,
+                settings.spectrum_max,
+                settings.log_f,
+                settings.log_y,
+                settings.smoothing,
+            ),
             settings,
             old: 0,
             channels: 2,

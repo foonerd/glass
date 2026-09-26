@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.2] - 2026-09-26
+
+The workshop. The toolchain is pinned in `rust-toolchain.toml`, the workspace shares one set of lints, the code is formatted by rustfmt and clean under clippy with warnings denied, and `scripts/check.sh` runs formatting, lints, tests and documentation the way CI does. GitHub Actions runs that check and the cross builds on every push, and publishes the plugin zip and per-architecture archives of the display and the tap on every version tag, with the changelog section as the notes. `scripts/package.sh` uses npm when the machine has it and a container otherwise.
+
 ## [0.5.1] - 2026-09-26
 
 The audio tap. `glasstap` is an ALSA scope of Glass's own: loaded by the audio player's ALSA chain in place of peppyalsa, it measures the stream a hop at a time, the peak and RMS of each channel and the magnitude spectrum of each channel through a 2048-point window by default, and publishes them into a shared ring under `/dev/shm`, one file per writing process, which the display reads at its own frame rate without anything blocking the player. DSD over PCM is measured by bit density as before. When the configuration names them, the tap also writes the two FIFOs peppyalsa wrote, so both can run side by side; in this release the chain still names peppyalsa and the tap ships beside it. `tapdump` prints what the live ring says. The `tap` crate holds the ring contract, the measurements and their tests.

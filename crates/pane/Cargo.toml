@@ -10,3 +10,6 @@ description = "Put a frame on the glass, or publish a Scene"
 expose = { path = "../expose" }
 plot = { path = "../plot" }
 sdl2 = { version = "0.37", features = ["unsafe_textures"] }
+
+[lints]
+workspace = true

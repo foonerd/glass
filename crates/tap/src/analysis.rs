@@ -37,7 +37,9 @@ impl Analyser {
         let fft_size = fft_size.clamp(64, 1 << 15).next_power_of_two();
         let hop = hop.clamp(1, fft_size);
         let channels = (channels as usize).clamp(1, MAX_CHANNELS);
-        let window: Vec<f32> = (0..fft_size).map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / fft_size as f32).cos()).collect();
+        let window: Vec<f32> = (0..fft_size)
+            .map(|i| 0.5 - 0.5 * (2.0 * std::f32::consts::PI * i as f32 / fft_size as f32).cos())
+            .collect();
         let scale = window.iter().sum::<f32>() / 2.0;
         let fft = FftPlanner::<f32>::new().plan_fft_forward(fft_size);
         let scratch = vec![Complex::default(); fft.get_inplace_scratch_len()];
@@ -58,7 +60,10 @@ impl Analyser {
             frames: 0,
             peak: [0.0; MAX_CHANNELS],
             square_sum: [0.0; MAX_CHANNELS],
-            out: Frame { spectrum: [vec![0.0; bins], vec![0.0; bins]], ..Frame::default() },
+            out: Frame {
+                spectrum: [vec![0.0; bins], vec![0.0; bins]],
+                ..Frame::default()
+            },
         }
     }
 
@@ -97,7 +102,11 @@ impl Analyser {
         for i in 0..n {
             for ch in 0..MAX_CHANNELS {
                 let source = if ch < used { ch } else { 0 };
-                let sample = chans.get(source).and_then(|c| c.get(i)).copied().unwrap_or(0);
+                let sample = chans
+                    .get(source)
+                    .and_then(|c| c.get(i))
+                    .copied()
+                    .unwrap_or(0);
                 let s = sample as f32 / 32768.0;
                 self.history[ch][self.pos] = s;
                 let a = s.abs();
@@ -129,9 +138,13 @@ impl Analyser {
             // The last `n` samples, oldest first, through the window.
             for k in 0..n {
                 let s = self.history[ch][(self.pos + k) % n];
-                self.work[k] = Complex { re: s * self.window[k], im: 0.0 };
+                self.work[k] = Complex {
+                    re: s * self.window[k],
+                    im: 0.0,
+                };
             }
-            self.fft.process_with_scratch(&mut self.work, &mut self.scratch);
+            self.fft
+                .process_with_scratch(&mut self.work, &mut self.scratch);
             let out = &mut self.out.spectrum[ch];
             for (k, v) in out.iter_mut().enumerate() {
                 *v = (self.work[k].norm() / self.scale).min(1.0);
@@ -145,7 +158,13 @@ mod tests {
     use super::*;
 
     fn sine(rate: u32, hz: f32, amplitude: f32, n: usize) -> Vec<i16> {
-        (0..n).map(|i| (amplitude * (2.0 * std::f32::consts::PI * hz * i as f32 / rate as f32).sin() * 32767.0) as i16).collect()
+        (0..n)
+            .map(|i| {
+                (amplitude
+                    * (2.0 * std::f32::consts::PI * hz * i as f32 / rate as f32).sin()
+                    * 32767.0) as i16
+            })
+            .collect()
     }
 
     #[test]
@@ -160,12 +179,36 @@ mod tests {
         analyser.feed(&[&left, &right], 4096, &mut |f| frames.push(f.clone()));
         assert_eq!(frames.len(), 8, "one hop every 512 frames");
         let last = frames.last().unwrap();
-        assert!(last.peak[0] > 0.99 && last.peak[0] <= 1.0, "left peak {}", last.peak[0]);
-        assert!((last.peak[1] - 0.5).abs() < 0.01, "right peak {}", last.peak[1]);
-        assert!((last.rms[0] - 0.707).abs() < 0.01, "left rms {}", last.rms[0]);
-        assert!((last.spectrum[0][40] - 1.0).abs() < 0.02, "bin 40 reads {}", last.spectrum[0][40]);
-        assert!((last.spectrum[1][40] - 0.5).abs() < 0.02, "right bin 40 reads {}", last.spectrum[1][40]);
-        assert!(last.spectrum[0][200] < 0.001, "far bins are quiet: {}", last.spectrum[0][200]);
+        assert!(
+            last.peak[0] > 0.99 && last.peak[0] <= 1.0,
+            "left peak {}",
+            last.peak[0]
+        );
+        assert!(
+            (last.peak[1] - 0.5).abs() < 0.01,
+            "right peak {}",
+            last.peak[1]
+        );
+        assert!(
+            (last.rms[0] - 0.707).abs() < 0.01,
+            "left rms {}",
+            last.rms[0]
+        );
+        assert!(
+            (last.spectrum[0][40] - 1.0).abs() < 0.02,
+            "bin 40 reads {}",
+            last.spectrum[0][40]
+        );
+        assert!(
+            (last.spectrum[1][40] - 0.5).abs() < 0.02,
+            "right bin 40 reads {}",
+            last.spectrum[1][40]
+        );
+        assert!(
+            last.spectrum[0][200] < 0.001,
+            "far bins are quiet: {}",
+            last.spectrum[0][200]
+        );
         assert_eq!(last.frames, 4096);
         // Mono is measured as both channels.
         let mut mono = Analyser::new(rate, 1, fft, 512);
