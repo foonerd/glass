@@ -140,7 +140,7 @@ dependencies = [
 
 [[package]]
 name = "expose"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "ab_glyph",
  "font8x8",
@@ -243,7 +243,7 @@ dependencies = [
 
 [[package]]
 name = "glass"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "expose",
  "intake",
@@ -256,13 +256,21 @@ dependencies = [
 
 [[package]]
 name = "glass-remote"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "expose",
  "intake",
  "lead",
  "pane",
  "plot",
+]
+
+[[package]]
+name = "glasstap"
+version = "0.5.1"
+dependencies = [
+ "libc",
+ "tap",
 ]
 
 [[package]]
@@ -329,7 +337,7 @@ checksum = "65b27460c2c92b037f3f94c538ed9a3342f3fdf923606781629ccb35f82d042a"
 
 [[package]]
 name = "intake"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "lead",
  "serde",
@@ -363,7 +371,7 @@ checksum = "bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe"
 
 [[package]]
 name = "lead"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "serde",
 ]
@@ -426,6 +434,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "num-complex"
+version = "0.4.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73f88a1307638156682bada9d7604135552957b7818057dcef22705b4d509495"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
+name = "num-integer"
+version = "0.1.47"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ce2d95d4b3734dc35aa2f45e1aa22cd416814592a4f9d9205e11affd5b8e10b"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -451,7 +477,7 @@ dependencies = [
 
 [[package]]
 name = "pane"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "expose",
  "plot",
@@ -472,7 +498,7 @@ checksum = "5be167a7af36ee22fe3115051bc51f6e6c7054c9348e28deb4f49bd6f705a315"
 
 [[package]]
 name = "plot"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "lead",
  "serde",
@@ -499,6 +525,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "50596ddc09eb5ad5f75cacd40209568e66df71baf86e1499a0e99c4cff12a5a6"
 dependencies = [
  "arrayvec",
+]
+
+[[package]]
+name = "primal-check"
+version = "0.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dc0d895b311e3af9902528fbb8f928688abbd95872819320517cc24ca6b2bd08"
+dependencies = [
+ "num-integer",
 ]
 
 [[package]]
@@ -596,6 +631,20 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb"
 dependencies = [
  "memchr",
+]
+
+[[package]]
+name = "rustfft"
+version = "6.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21db5f9893e91f41798c88680037dba611ca6674703c1a18601b01a72c8adb89"
+dependencies = [
+ "num-complex",
+ "num-integer",
+ "num-traits",
+ "primal-check",
+ "strength_reduce",
+ "transpose",
 ]
 
 [[package]]
@@ -752,6 +801,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9395f0f0eee849a9b707b2f06bb92a6a422090e2123bb2ef8e87a0e61892a8e"
 
 [[package]]
+name = "strength_reduce"
+version = "0.2.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fe895eb47f22e2ddd4dabc02bce419d2e643c8e3b585c78158b349195bc24d82"
+
+[[package]]
 name = "strict-num"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -788,6 +843,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "tap"
+version = "0.5.1"
+dependencies = [
+ "libc",
+ "rustfft",
+]
+
+[[package]]
 name = "tiny-skia"
 version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -818,6 +881,16 @@ name = "tinyvec"
 version = "1.13.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fd3ca314f692efd6c868f8408f53fe444634a845f96c028b97d35f6a1f79f0ee"
+
+[[package]]
+name = "transpose"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1ad61aed86bc3faea4300c7aee358b4c6d0c8d6ccc36524c96e4c92ccf26e77e"
+dependencies = [
+ "num-integer",
+ "strength_reduce",
+]
 
 [[package]]
 name = "ttf-parser"

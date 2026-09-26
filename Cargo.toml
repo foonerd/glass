@@ -6,12 +6,14 @@ members = [
     "crates/plot",
     "crates/expose",
     "crates/pane",
+    "crates/tap",
     "bins/glass",
+    "bins/glasstap",
     "bins/glass-remote",
 ]
 
 [workspace.package]
-version = "0.5.0"
+version = "0.5.1"
 edition = "2021"
 license = "MIT"
 publish = false

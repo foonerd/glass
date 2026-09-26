@@ -104,6 +104,25 @@ pcm_scope_type.peppyalsa {
     lib /data/plugins/user_interface/glass/lib/libpeppyalsa.so
 }
 
+# glasstap: the tap of this plugin, with the same records the scope above writes
+pcm_scope.glasstap {
+  type glasstap
+  decay_ms 500
+  meter "/tmp/myfifo"
+  meter_max 100
+  spectrum "/tmp/myfifosa"
+  spectrum_max 100
+  spectrum_size 20
+  logarithmic_frequency 1
+  logarithmic_amplitude 1
+  smoothing_factor 60
+  fft_size 2048
+}
+
+pcm_scope_type.glasstap {
+    lib /data/plugins/user_interface/glass/lib/libglasstap.so
+}
+
 # null output
 pcm.dummy {
   type hw

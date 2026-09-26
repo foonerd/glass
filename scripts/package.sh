@@ -15,11 +15,14 @@ rm -f "$STAGE/README.md"
 # The plugin version follows the workspace version.
 sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$STAGE/package.json"
 
-# Display binaries, one per Volumio architecture name.
+# Display binaries, the tap's dump tool and the tap library, one set per
+# Volumio architecture name.
 for arch in arm armv7 armv8 x64; do
   if [ -x "$ROOT/bin/$arch/glass" ]; then
-    mkdir -p "$STAGE/bin/$arch"
+    mkdir -p "$STAGE/bin/$arch" "$STAGE/lib/$arch"
     cp "$ROOT/bin/$arch/glass" "$STAGE/bin/$arch/glass"
+    [ -x "$ROOT/bin/$arch/tapdump" ] && cp "$ROOT/bin/$arch/tapdump" "$STAGE/bin/$arch/tapdump"
+    [ -f "$ROOT/lib/$arch/libglasstap.so" ] && cp "$ROOT/lib/$arch/libglasstap.so" "$STAGE/lib/$arch/libglasstap.so"
   fi
 done
 

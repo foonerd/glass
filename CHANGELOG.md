@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.1] - 2026-09-26
+
+The audio tap. `glasstap` is an ALSA scope of Glass's own: loaded by the audio player's ALSA chain in place of peppyalsa, it measures the stream a hop at a time, the peak and RMS of each channel and the magnitude spectrum of each channel through a 2048-point window by default, and publishes them into a shared ring under `/dev/shm`, one file per writing process, which the display reads at its own frame rate without anything blocking the player. DSD over PCM is measured by bit density as before. When the configuration names them, the tap also writes the two FIFOs peppyalsa wrote, so both can run side by side; in this release the chain still names peppyalsa and the tap ships beside it. `tapdump` prints what the live ring says. The `tap` crate holds the ring contract, the measurements and their tests.
+
+The display binaries, the tap library and `tapdump` are no longer committed; `scripts/ship.sh` builds them and the plugin zip carries them.
+
 ## [0.5.0] - 2026-09-26
 
 Glass is a Volumio plugin. The `plugin` directory holds it and `scripts/package.sh` builds the zip Volumio installs, with the display binaries, the ALSA scope and the node modules. The plugin keeps the audio path up, starts the display after the screensaver timeout while music plays, keeps it up through a pause for the persist time, and serves the settings page, the artist fanart cascade and the settings backups. Glass replaces PeppyMeter Screensaver: the installer refuses while that plugin is enabled, the plugin refuses to start while it is enabled and offers to disable it, and themes and settings are taken over from an installed or a preserved PeppyMeter Screensaver. The bundled themes are the PeppyMeter and PeppySpectrum defaults.
