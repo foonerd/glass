@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.8] - 2026-09-26
+
+Soloist Connect meters again after a backend start. Soloist chooses its ALSA device when its daemon starts, from the ALSA file as it stands; at a backend start that file is written in stages, and a device read too early (`softvolume`) sits below the tap, so Soloist's stream was heard but never measured until its plugin was restarted. With its metering flag on and a `pcm.spotify` in the file, Soloist opens `plug:spotify`, which is the tap. Glass now says metering is on after every rewrite of the ALSA file, and off when it is uninstalled; 0.5.10 had said off when it retired the old side outputs, which the tap made wrong. Soloist restarts its daemon only when the device it runs with differs.
+
 ## [0.6.7] - 2026-09-26
 
 The settings backups an upgrade or rollback writes on its own are kept to the newest five, pruned after each one is written and when the manager starts; they are marked in their manifest, and the ones earlier releases named `before-<version>` count too. Named backups are never touched.
