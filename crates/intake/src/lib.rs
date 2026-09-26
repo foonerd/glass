@@ -1,10 +1,8 @@
 //! Poll the outside world and return the latest [`lead::Input`].
 //! This station does not parse skin geometry or draw.
 
-use std::fs::{File, OpenOptions};
-use std::io::{self, Read, Write};
+use std::io::{Read, Write};
 use std::net::TcpStream;
-use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
@@ -21,8 +19,8 @@ use lead::{
     random_interval_from_config, rotation_settings, run_settings, screen_from_config,
     scroll_speeds_from_config, selection_from_config, spectrum_from_theme, spectrum_settings,
     transition_settings, Bins, DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec,
-    DEFAULT_FRAME_RATE, DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_CONFIG, METER_FIFO,
-    SPECTRUM_CONFIG, SPECTRUM_FIFO, STOCK_ICONS,
+    DEFAULT_FRAME_RATE, DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_CONFIG, SPECTRUM_CONFIG,
+    STOCK_ICONS,
 };
 
 /// The theme's meter rotation as the player configures it: which names, in
@@ -986,9 +984,6 @@ impl ArtFetcher {
     }
 }
 
-/// Linux `O_NONBLOCK`. A blocking open on a FIFO waits for the writer.
-const O_NONBLOCK: i32 = 0x800;
-
 /// A source of snapshots. The player polls FIFOs. The remote will poll UDP.
 pub trait Source {
     fn poll(&mut self) -> Input;
@@ -1004,43 +999,18 @@ impl Source for IdleSource {
     }
 }
 
-/// Bytes already pulled off a pipe. Keeps only the latest complete record.
-#[derive(Debug, Default)]
-struct RecordBuf {
-    pending: Vec<u8>,
-    record: usize,
-    latest: Option<Vec<u8>>,
-}
-
-impl RecordBuf {
-    fn new(record: usize) -> Self {
-        Self {
-            pending: Vec::new(),
-            record,
-            latest: None,
-        }
-    }
-
-    fn push(&mut self, chunk: &[u8]) {
-        if self.record == 0 {
-            return;
-        }
-        self.pending.extend_from_slice(chunk);
-        while self.pending.len() >= self.record {
-            let rec: Vec<u8> = self.pending.drain(..self.record).collect();
-            self.latest = Some(rec);
-        }
-    }
-}
-
-/// Installed meter and spectrum FIFOs.
-pub struct PipeSource {
-    meter_path: String,
-    spectrum_path: String,
-    meter: Option<File>,
-    spectrum: Option<File>,
-    meter_buf: RecordBuf,
-    spectrum_buf: RecordBuf,
+/// The tap's ring and the player's state: what the display shows.
+pub struct TapSource {
+    /// The live ring, found under `/dev/shm` and looked for again when it goes.
+    ring: Option<tap::Reader>,
+    ring_looked_at: Option<Instant>,
+    last_seq: u64,
+    last_frames: u64,
+    /// The meter's fall, as the old scope shaped it, on the pipe scale.
+    decay: tap::legacy::Meter,
+    /// The theme's bins from the raw spectrum, on the old logarithmic mapping.
+    bins_mapper: tap::legacy::Spectrum,
+    spectrum_max: u32,
     spectrum_bins: usize,
     spectrum_held: Vec<f32>,
     levels_held: Levels,
@@ -1080,32 +1050,36 @@ pub struct PipeSource {
     queue_read_at: Option<Instant>,
 }
 
-impl PipeSource {
-    /// Open the Volumio pipes. Missing files stay closed and are retried on poll.
-    /// Now-playing text is asked of the player once a second, not once a frame.
-    pub fn installed() -> Self {
-        Self::new(
-            METER_FIFO,
-            SPECTRUM_FIFO,
-            DEFAULT_SPECTRUM_BINS,
-            DEFAULT_METER_MAX,
-        )
-    }
+/// The meter falls no faster than this from full scale, as the old scope had it.
+const METER_DECAY_MS: u32 = 500;
+/// The old scope's smoothing of the spectrum bins.
+const SPECTRUM_SMOOTHING: u32 = 60;
+/// A ring not written for this long is silence: the player has stopped.
+const RING_QUIET_NS: u64 = 500_000_000;
 
-    pub fn new(
-        meter_path: impl Into<String>,
-        spectrum_path: impl Into<String>,
-        spectrum_bins: usize,
-        meter_max: f32,
-    ) -> Self {
+impl TapSource {
+    /// Read the tap's ring. Without a live ring the levels sit at zero and
+    /// the ring is looked for again once a second. Now-playing text is
+    /// asked of the player once a second, not once a frame.
+    pub fn installed() -> Self {
+        Self::new(DEFAULT_SPECTRUM_BINS, DEFAULT_METER_MAX)
+    }
+    pub fn new(spectrum_bins: usize, meter_max: f32) -> Self {
         let bins = spectrum_bins.max(1);
         Self {
-            meter_path: meter_path.into(),
-            spectrum_path: spectrum_path.into(),
-            meter: None,
-            spectrum: None,
-            meter_buf: RecordBuf::new(4),
-            spectrum_buf: RecordBuf::new(bins * 4),
+            ring: None,
+            ring_looked_at: None,
+            last_seq: 0,
+            last_frames: 0,
+            decay: tap::legacy::Meter::new(METER_DECAY_MS, meter_max.max(1.0) as u32),
+            bins_mapper: tap::legacy::Spectrum::new(
+                bins,
+                lead::DEFAULT_SPECTRUM_MAX as u32,
+                true,
+                true,
+                SPECTRUM_SMOOTHING,
+            ),
+            spectrum_max: lead::DEFAULT_SPECTRUM_MAX as u32,
             spectrum_bins: bins,
             spectrum_held: Vec::new(),
             levels_held: Levels::default(),
@@ -1289,62 +1263,87 @@ impl PipeSource {
                 .unwrap_or(1),
             ..Slideshow::default()
         });
+        let spectrum_max = skin.spectrum_max.max(1.0) as u32;
         if let Some(bins) = skin.spectrum.as_ref().map(|s| s.bins.max(1)) {
-            if bins != self.spectrum_bins {
+            if bins != self.spectrum_bins || spectrum_max != self.spectrum_max {
                 self.spectrum_bins = bins;
-                self.spectrum_buf = RecordBuf::new(bins * 4);
+                self.spectrum_max = spectrum_max;
+                self.bins_mapper =
+                    tap::legacy::Spectrum::new(bins, spectrum_max, true, true, SPECTRUM_SMOOTHING);
                 self.spectrum_held.clear();
             }
         }
     }
 
-    fn try_open(slot: &mut Option<File>, path: &str) {
-        if slot.is_some() || !Path::new(path).exists() {
-            return;
+    /// The live ring, looked for at most once a second while there is none.
+    fn ring(&mut self) -> Option<&tap::Reader> {
+        if self.ring.as_ref().is_some_and(|r| r.is_live()) {
+            return self.ring.as_ref();
         }
-        if let Ok(file) = OpenOptions::new()
-            .read(true)
-            .custom_flags(O_NONBLOCK)
-            .open(path)
-        {
-            *slot = Some(file);
+        let due = self
+            .ring_looked_at
+            .is_none_or(|at| at.elapsed() >= Duration::from_secs(1));
+        if due {
+            self.ring_looked_at = Some(Instant::now());
+            self.ring = tap::Reader::open_live(Path::new(tap::ring::DIR));
+            self.last_seq = 0;
+            self.last_frames = 0;
         }
-    }
-
-    fn drain(file: &mut File, buf: &mut RecordBuf) {
-        let mut chunk = [0u8; 4096];
-        loop {
-            match file.read(&mut chunk) {
-                Ok(0) => break,
-                Ok(n) => buf.push(&chunk[..n]),
-                Err(err) if err.kind() == io::ErrorKind::WouldBlock => break,
-                Err(err) if err.kind() == io::ErrorKind::Interrupted => continue,
-                Err(_) => break,
-            }
-        }
+        self.ring.as_ref().filter(|r| r.is_live())
     }
 }
 
-impl Source for PipeSource {
+impl Source for TapSource {
     fn poll(&mut self) -> Input {
-        Self::try_open(&mut self.meter, &self.meter_path);
-        Self::try_open(&mut self.spectrum, &self.spectrum_path);
-
-        if let Some(file) = self.meter.as_mut() {
-            Self::drain(file, &mut self.meter_buf);
-        }
-        if let Some(file) = self.spectrum.as_mut() {
-            Self::drain(file, &mut self.spectrum_buf);
-        }
-
-        if let Some(record) = self.meter_buf.latest.take() {
-            if let Some((left, right)) = decode_meter(&record) {
-                self.levels_held = self.conditioner.condition(left, right);
+        // The latest hop, or silence when the ring is gone or has gone quiet.
+        let mut hop: Option<(tap::Frame, u32, u64)> = None;
+        let mut quiet = true;
+        let last_seq = self.last_seq;
+        if let Some(reader) = self.ring() {
+            let info = reader.info();
+            let stale = tap::ring::now_ns().saturating_sub(info.written_ns) > RING_QUIET_NS;
+            if !stale {
+                quiet = false;
+                if info.seq != last_seq {
+                    if let Some(frame) = reader.latest() {
+                        let elapsed = frame.frames.saturating_sub(self.last_frames).max(1);
+                        hop = Some((frame, info.rate.max(1), elapsed));
+                    }
+                }
             }
         }
-        if let Some(record) = self.spectrum_buf.latest.take() {
-            if let Some(values) = decode_spectrum(&record, self.spectrum_bins) {
-                self.spectrum_held = values;
+        if let Some((frame, rate, elapsed)) = hop {
+            self.last_seq = frame.seq;
+            self.last_frames = frame.frames;
+            let raw = [
+                (frame.peak[0] * 32767.0) as i32,
+                (frame.peak[1] * 32767.0) as i32,
+            ];
+            let (left, right) = self.decay.update(raw, elapsed, rate);
+            self.levels_held = self.conditioner.condition(left, right);
+            // The old scope measured the two channels' average; so do the bins.
+            let mixed: Vec<f32> = frame.spectrum[0]
+                .iter()
+                .zip(frame.spectrum[1].iter())
+                .map(|(l, r)| (l + r) / 2.0)
+                .collect();
+            self.spectrum_held = self
+                .bins_mapper
+                .update(&mixed)
+                .into_iter()
+                .map(|v| v as f32)
+                .collect();
+        } else if quiet {
+            let (left, right) = self.decay.update([0, 0], 1024, 48_000);
+            self.levels_held = self.conditioner.condition(left, right);
+            if self.spectrum_held.iter().any(|v| *v > 0.0) {
+                let zeros = vec![0.0f32; 1024];
+                self.spectrum_held = self
+                    .bins_mapper
+                    .update(&zeros)
+                    .into_iter()
+                    .map(|v| v as f32)
+                    .collect();
             }
         }
 
@@ -1618,7 +1617,7 @@ pub struct NowPlaying {
 }
 
 /// Current track from Volumio. Empty strings when the player does not answer.
-/// One HTTP request; [`PipeSource`] calls this once a second.
+/// One HTTP request; [`TapSource`] calls this once a second.
 pub fn now_playing() -> NowPlaying {
     let mut playing = NowPlaying::default();
     let address = std::net::SocketAddr::from(([127, 0, 0, 1], 3000));
@@ -1899,13 +1898,5 @@ mod tests {
         );
         assert_ne!(fnv1a("a"), fnv1a("b"));
         assert_eq!(fnv1a("cover"), fnv1a("cover"));
-    }
-
-    #[test]
-    fn partial_chunks_keep_the_latest_record() {
-        let mut buf = RecordBuf::new(4);
-        buf.push(&[1, 0]);
-        buf.push(&[0, 0, 9, 0, 0, 0]);
-        assert_eq!(buf.latest.unwrap(), vec![9, 0, 0, 0]);
     }
 }

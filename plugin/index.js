@@ -251,11 +251,7 @@ Glass.prototype.onStart = function () {
         return libQ.reject(new Error('PeppyMeter Screensaver is enabled'));
     }
 
-    // The FIFOs the ALSA scope writes, held open so the scope can open them
-    // before the display does, and the dummy card the side outputs play to.
-    self.install_mkfifo('/tmp/myfifo');
-    self.install_mkfifo('/tmp/myfifosa');
-    self.holdMeterFifos();
+    // The dummy card the side outputs play to.
     self.install_dummy();
 
     if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
@@ -273,7 +269,10 @@ Glass.prototype.onStart = function () {
 
     // The MPD side output feeds the meters on x64 and in the DSD path; the
     // modular ALSA path on the Pi meters inline and keeps output 1 disabled.
-    if (!fs.existsSync(MPD_include)) { self.copy_MPD_include(MPD_include_tmpl, MPD_include); }
+    // The side output is ours now; an include from an earlier release is replaced.
+    var includeIsOurs = false;
+    try { includeIsOurs = fs.existsSync(MPD_include) && fs.readFileSync(MPD_include, 'utf8').indexOf('output glass') !== -1; } catch (e) {}
+    if (!includeIsOurs) { self.copy_MPD_include(MPD_include_tmpl, MPD_include); }
     var isX64 = self.volumioArch() === 'x64';
     var enableDSD = parseInt(self.config.get('alsaSelection'), 10) == 1;
     var enableMPDOutput = isX64 ? true : enableDSD;
@@ -543,8 +542,6 @@ Glass.prototype.checkAlsaChain = function () {
 
 Glass.prototype.onStop = function () {
     var self = this;
-
-    self.releaseMeterFifos();
 
     self.commandRouter.stateMachine.stop().then(function () {
         if (fs.existsSync(MPD)) {
@@ -2710,52 +2707,6 @@ Glass.prototype.install_dummy = function () {
   }
 };
 
-Glass.prototype.install_mkfifo = function (fifoName) {
-  const self = this;
-  let defer = libQ.defer();
-  
-  try {
-    exec('/usr/bin/mkfifo -m 646 ' + fifoName, { uid: 1000, gid: 1000 });
-    self.commandRouter.pushConsoleMessage(fifoName + ' created');
-    defer.resolve();
-  } catch (err) {
-    self.logger.info('failed to create ' + fifoName + ' ' + err);
-  }    
-};
-
-// peppyalsa opens these write-only and non-blocking, so its writer only exists
-// while some process holds the read end. Holding a read-write descriptor here
-// keeps a reader present at all times: the writer in the audio client opens
-// once and stays open across screensaver starts and stops, and the Python
-// readers see an empty pipe rather than end of file. Never read from it, the
-// meter must get every byte. Do not depend on install_mkfifo (async exec).
-Glass.prototype.holdMeterFifos = function () {
-  var self = this;
-  self.releaseMeterFifos();
-  self._meterFifoFds = [];
-  ['/tmp/myfifo', '/tmp/myfifosa'].forEach(function (fifoName) {
-    try {
-      if (!fs.existsSync(fifoName)) {
-        execSync('/usr/bin/mkfifo -m 646 ' + fifoName, { uid: 1000, gid: 1000 });
-      }
-      var fd = fs.openSync(fifoName, fs.constants.O_RDWR | fs.constants.O_NONBLOCK);
-      self._meterFifoFds.push(fd);
-    } catch (err) {
-      self.logger.info(id + 'cannot hold ' + fifoName + ': ' + err);
-    }
-  });
-};
-
-Glass.prototype.releaseMeterFifos = function () {
-  var fds = this._meterFifoFds;
-  this._meterFifoFds = [];
-  if (!fds) return;
-  fds.forEach(function (fd) {
-    try { fs.closeSync(fd); } catch (e) { /* already closed */ }
-  });
-};
-
-// switch alsa config
 
 Glass.prototype.switch_alsaConfig = function (alsaConf) {
     const self = this;
@@ -2944,7 +2895,7 @@ Glass.prototype.get_output_enabled = function (data) {
        
     lineReader.eachLine(data, function(line) {
   
-        if (line.includes('---> output peppymeter')) {
+        if (line.includes('---> output glass')) {
             found = true;
         }
         if (found) {count += 1;}
@@ -2966,7 +2917,7 @@ Glass.prototype.get_output_enabled = function (data) {
 Glass.prototype.MPD_setOutput = function (data, enableDSD) {
   const self = this;
   let defer = libQ.defer();
-  var sedStr = enableDSD ? "sed -i '/---> output peppymeter/,+2{/---> output peppymeter/,+1{b};s/no/yes/}' " : "sed -i '/---> output peppymeter/,+2{/---> output peppymeter/,+1{b};s/yes/no/}' ";
+  var sedStr = enableDSD ? "sed -i '/---> output glass/,+2{/---> output glass/,+1{b};s/no/yes/}' " : "sed -i '/---> output glass/,+2{/---> output glass/,+1{b};s/yes/no/}' ";
 
   exec(sedStr +  data, { uid: 1000, gid: 1000 }, function (error, stdout, stderr) {
     if (error) {
@@ -3137,28 +3088,28 @@ Glass.prototype.writeAsoundConfigModular = function (alsaConf) {
 
   if (fs.existsSync(asoundTmpl)) {
     var asounddata = fs.readFileSync(asoundTmpl, 'utf8');
-    var peppyalsaMode;
+    var tapMode;
     
     if (alsaConf == 1) { // DSD native
         if (!useDSP) {
             conf = asounddata.replace('${alsaDirect}', 'Glass');
-            peppyalsaMode = 'DSD-passthrough';
+            tapMode = 'DSD-passthrough';
         } else {
-            peppyalsaMode = 'DSD-with-bridge (no Peppyalsa assignment)';
+            tapMode = 'DSD-with-bridge (no tap in the chain)';
         }
 
     } else {  // modular alsa
         if (useDSP) {
             // Fusion bridge on: inline meter (no multi, no dummy, no rate constraint)
             conf = asounddata.replace('${alsaInlineMeter}', 'Glass');
-            peppyalsaMode = 'inline-meter (bridge on)';
+            tapMode = 'inline-meter (bridge on)';
         } else {
             // Use inline meter to capture ALL audio sources (MPD, DAB/FM, airplay, etc.)
             conf = asounddata.replace('${alsaMeter}', 'Glass');
-            peppyalsaMode = 'multi-duplicate (bridge off)';
+            tapMode = 'multi-duplicate (bridge off)';
         }
     }
-    alsaLog(self.logger, 'basic', 'Peppyalsa mode: ' + peppyalsaMode);
+    alsaLog(self.logger, 'basic', 'tap mode: ' + tapMode);
 
     conf = conf.replace('${alsaInlineMeter}', 'peppy3_off');
     conf = conf.replace('${alsaMeter}', 'peppy1_off');
@@ -3193,7 +3144,7 @@ Glass.prototype.writeAsoundConfigModular = function (alsaConf) {
     //    outputdevice = self.getAlsaConfigParam ('softvolumenumber');
     //}
 
-//    var slave_b = softmixer ? 'mpd_peppyalsa' : 'reformat'; 
+//    var slave_b = softmixer ? 'mpd_glass' : 'reformat'; 
 //    conf = conf.replace('${slave_b}', slave_b);            
 //    var rate = parseInt(outputdevice,10) > 1 ? 16000 : 44100;
 //    conf = conf.replace('${rate}', rate);    

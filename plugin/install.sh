@@ -42,7 +42,7 @@ fi
 # =============================================================================
 # CHECK: the display binary for this machine. The unzip does not keep modes.
 # =============================================================================
-chmod +x "$PLUGIN_DIR"/bin/*/glass "$PLUGIN_DIR"/bin/*/peppyalsa-client "$PLUGIN_DIR/run_glass.sh" 2>/dev/null || true
+chmod +x "$PLUGIN_DIR"/bin/*/glass "$PLUGIN_DIR"/bin/*/tapdump "$PLUGIN_DIR/run_glass.sh" 2>/dev/null || true
 if [ ! -x "$PLUGIN_DIR/bin/$ARCH/glass" ]; then
   refuse "ERROR: no display binary for architecture $ARCH (available: $(ls "$PLUGIN_DIR/bin" 2>/dev/null | tr '\n' ' '))"
 fi
@@ -64,18 +64,13 @@ if [ -n "$NEEDED_PKGS" ]; then
 fi
 
 # =============================================================================
-# INSTALL: the ALSA scope that writes the meter and spectrum pipes
+# INSTALL: the tap, the ALSA scope that measures what plays
 # =============================================================================
-LIB_SOURCE="$PLUGIN_DIR/lib/$ARCH"
-BIN_SOURCE="$PLUGIN_DIR/bin/$ARCH"
-if [ ! -f "$LIB_SOURCE/libpeppyalsa.so" ]; then
-  refuse "ERROR: libpeppyalsa.so not found in $LIB_SOURCE"
+if [ ! -f "$PLUGIN_DIR/lib/$ARCH/libglasstap.so" ]; then
+  refuse "ERROR: no tap library for architecture $ARCH"
 fi
-ln -sf "$LIB_SOURCE/libpeppyalsa.so" "$PLUGIN_DIR/lib/libpeppyalsa.so"
-if [ -f "$BIN_SOURCE/peppyalsa-client" ]; then
-  chmod +x "$BIN_SOURCE/peppyalsa-client"
-fi
-echo "ALSA scope: $LIB_SOURCE/libpeppyalsa.so"
+ln -sf "$PLUGIN_DIR/lib/$ARCH/libglasstap.so" "$PLUGIN_DIR/lib/libglasstap.so"
+echo "Tap: $PLUGIN_DIR/lib/$ARCH/libglasstap.so"
 
 # =============================================================================
 # SETUP: configuration files, kept across upgrades

@@ -21,15 +21,8 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu libc6-dev-armhf-cross libc6-dev-arm64-cross libsdl2-dev libasound2-dev
       - uses: Swatinem/rust-cache@v2
       - run: scripts/check.sh
-      - name: The peppyalsa builds the plugin still carries
-        uses: actions/checkout@v7
-        with:
-          repository: foonerd/peppy_builds
-          path: peppy_builds
       - run: scripts/ship.sh
       - run: scripts/package.sh
-        env:
-          PEPPYALSA: ${{ github.workspace }}/peppy_builds/peppyalsa-builds/out
       - name: Notes from the changelog
         run: scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > dist/notes.md
       - name: Per-architecture archives of the display and the tap

@@ -1,10 +1,9 @@
 #!/bin/bash
 # Assemble the Volumio plugin zip: the plugin directory, the display binaries
-# from bin/<arch>, the ALSA scope from the peppyalsa builds, and the node
+# from bin/<arch>, the tap from lib/<arch>, and the node
 # modules installed through docker. Output: dist/glass-<version>.zip.
 set -e
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
-PEPPYALSA=${PEPPYALSA:-$ROOT/../peppy_builds/peppyalsa-builds/out}
 VERSION=$(sed -n 's/^version = "\(.*\)"/\1/p' "$ROOT/Cargo.toml" | head -n1)
 STAGE=$ROOT/dist/stage/glass
 rm -rf "$ROOT/dist/stage"
@@ -25,23 +24,6 @@ for arch in arm armv7 armv8 x64; do
     [ -f "$ROOT/lib/$arch/libglasstap.so" ] && cp "$ROOT/lib/$arch/libglasstap.so" "$STAGE/lib/$arch/libglasstap.so"
   fi
 done
-
-# The ALSA scope and its client, by the Debian architecture names the builds use.
-copy_alsa() {
-  local arch=$1 deb=$2
-  if [ -f "$PEPPYALSA/$deb/libpeppyalsa.so" ]; then
-    mkdir -p "$STAGE/lib/$arch" "$STAGE/bin/$arch"
-    cp "$PEPPYALSA/$deb/libpeppyalsa.so" "$STAGE/lib/$arch/libpeppyalsa.so"
-    [ -f "$PEPPYALSA/$deb/peppyalsa-client" ] && cp "$PEPPYALSA/$deb/peppyalsa-client" "$STAGE/bin/$arch/peppyalsa-client"
-  else
-    echo "package: no peppyalsa build for $arch ($deb) under $PEPPYALSA" >&2
-    exit 1
-  fi
-}
-copy_alsa arm armhf
-copy_alsa armv7 armhf
-copy_alsa armv8 arm64
-copy_alsa x64 amd64
 
 # Node modules: with npm on this machine, directly; otherwise in a container.
 if command -v npm >/dev/null 2>&1; then

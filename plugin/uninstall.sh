@@ -17,9 +17,7 @@ if [ -f "$RENDER_MARKER" ]; then
   rm -f "$RENDER_MARKER"
 fi
 
-if [ -L "$PLUGIN_DIR/lib/libpeppyalsa.so" ]; then
-  rm -f "$PLUGIN_DIR/lib/libpeppyalsa.so"
-fi
+rm -f "$PLUGIN_DIR/lib/libglasstap.so" /dev/shm/glasstap.*
 rm -rf "$PLUGIN_DIR/fanart-cache"
 
 if [ -d "$DATA_DIR" ]; then
