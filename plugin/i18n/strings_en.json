@@ -472,6 +472,14 @@
     "MANAGER_BK_DOWNLOAD": "Download",
     "MANAGER_BK_UPLOAD": "Upload a backup zip",
     "MANAGER_BK_UPLOADED": "Backup added:",
-    "MANAGER_ERR_BAD_BACKUP": "The zip is not a Glass settings backup."
+    "MANAGER_ERR_BAD_BACKUP": "The zip is not a Glass settings backup.",
+    "MANAGER_PORT": "Manager port",
+    "MANAGER_PORT_DOC": "The port the manager listens on, 5582 unless another service on this player uses it. A change applies at once: the manager moves to the new port and the buttons follow.",
+    "MANAGER_HOST": "Manager address",
+    "MANAGER_HOST_DOC": "How browsers reach this player. Empty uses the player's name with .local, which mDNS resolves on most networks. Enter the player's IP address or a host name when .local names do not resolve on yours.",
+    "MANAGER_PORT_INVALID": "The manager port must be a number from 1024 to 65535.",
+    "MANAGER_PORT_IN_USE": "That port is in use by something else on this player. The manager stays on port",
+    "MANAGER_HOST_INVALID": "The manager address must be a host name or an IP address, without http:// or a port.",
+    "MANAGER_MOVED": "The manager now listens on port"
   }
 }

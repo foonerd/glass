@@ -283,7 +283,8 @@ Glass.prototype.onVolumioStart = function () {
         themeTagRules: ['string', ''],
         legacyImported: ['boolean', false],
         displayOutput: ['string', '0'],
-        managerPort: ['number', MANAGER_DEFAULT_PORT]
+        managerPort: ['number', MANAGER_DEFAULT_PORT],
+        managerHost: ['string', '']
     };
     Object.keys(defaults).forEach(function (key) {
         if (self.config.get(key) === undefined) {
@@ -409,7 +410,10 @@ Glass.prototype.onStart = function () {
         });
 
     // The manager: the web application on its own port.
-    self.startManager();
+    self.startManager().catch(function () {
+        self.commandRouter.pushToastMessage('error', self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
+            self.commandRouter.getI18nString('GLASS.MANAGER_PORT_IN_USE') + ' ' + (parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT));
+    });
 
     // The player state drives the display: it opens after the timeout while
     // music plays, stays through a pause for the persist time, and leaves
@@ -893,6 +897,9 @@ Glass.prototype.getUIConfig = function () {
 
             // The manager: where themes, artwork and backups are managed.
             var managerUrl = self.managerUrl();
+            C('managerPort').value = parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT;
+            C('managerHost').value = String(self.config.get('managerHost') || '');
+            C('managerHost').attributes[0].placeholder = self.managerDefaultHost();
             C('managerOpen').onClick.url = '/iframe-page/' + managerUrl.replace(/\//g, '~2F');
             C('managerOpenTab').onClick.url = managerUrl;
             C('managerOpenTab').doc = self.commandRouter.getI18nString('GLASS.MANAGER_OPEN_TAB_DOC') + ' ' + managerUrl;
@@ -2872,14 +2879,20 @@ Glass.prototype.backupDelete = function (name) {
 // return plain results and show no toasts: the manager's page speaks for
 // itself, and an error is the code of one of the plugin's strings.
 
-Glass.prototype.startManager = function () {
+// Start the manager on the configured port, or on `port`. Resolves once
+// it listens; rejects, with no manager kept, when the port is taken.
+Glass.prototype.startManager = function (port) {
     var self = this;
-    if (self.manager) { return; }
+    if (self.manager) { return Promise.resolve(self.manager); }
     var manager = new Manager(self);
     self.manager = manager;
-    manager.start(self.config.get('managerPort') || MANAGER_DEFAULT_PORT).catch(function (e) {
-        self.logger.error(id + 'manager: ' + (e && e.message ? e.message : e));
+    var wanted = parseInt(port, 10) || parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT;
+    return manager.start(wanted).then(function () {
+        return manager;
+    }, function (e) {
+        self.logger.error(id + 'manager: port ' + wanted + ': ' + (e && e.message ? e.message : e));
         if (self.manager === manager) { self.manager = null; }
+        throw e;
     });
 };
 
@@ -2887,15 +2900,62 @@ Glass.prototype.stopManager = function () {
     var self = this;
     var manager = self.manager;
     self.manager = null;
-    if (!manager) { return; }
-    manager.stop().catch(function (e) {
+    if (!manager) { return Promise.resolve(); }
+    return manager.stop().catch(function (e) {
         self.logger.warn(id + 'manager stop: ' + (e && e.message ? e.message : e));
     });
 };
 
-// Where a browser on the network reaches the manager: the player's host
-// name as mDNS announces it, and the manager's port.
-Glass.prototype.managerHost = function () {
+// The manager's port and address from the settings page. A new port is
+// taken at once; when it is in use the old one stays and the page says so.
+Glass.prototype.saveManagerConf = function (data) {
+    var self = this;
+    var defer = libQ.defer();
+    var pluginName = self.commandRouter.getI18nString('GLASS.PLUGIN_NAME');
+    var port = parseInt(data && data.managerPort, 10);
+    if (isNaN(port) || port < 1024 || port > 65535) {
+        self.commandRouter.pushToastMessage('error', pluginName, self.commandRouter.getI18nString('GLASS.MANAGER_PORT_INVALID'));
+        self.updateUIConfig();
+        defer.resolve();
+        return defer.promise;
+    }
+    var host = String((data && data.managerHost) || '').trim().toLowerCase().replace(/^[a-z]+:\/\//, '').replace(/[/].*$/, '');
+    if (host && !/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(host)) {
+        self.commandRouter.pushToastMessage('error', pluginName, self.commandRouter.getI18nString('GLASS.MANAGER_HOST_INVALID'));
+        self.updateUIConfig();
+        defer.resolve();
+        return defer.promise;
+    }
+    var changed = false;
+    if (host !== String(self.config.get('managerHost') || '')) {
+        self.config.set('managerHost', host);
+        changed = true;
+    }
+    var oldPort = parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT;
+    if (port === oldPort) {
+        self.commandRouter.pushToastMessage(changed ? 'success' : 'info', pluginName, self.commandRouter.getI18nString(changed ? 'COMMON.SETTINGS_SAVED_SUCCESSFULLY' : 'GLASS.NO_CHANGES'));
+        self.updateUIConfig();
+        defer.resolve();
+        return defer.promise;
+    }
+    self.stopManager().then(function () {
+        return self.startManager(port);
+    }).then(function () {
+        self.config.set('managerPort', port);
+        self.commandRouter.pushToastMessage('success', pluginName, self.commandRouter.getI18nString('GLASS.MANAGER_MOVED') + ' ' + port);
+        self.updateUIConfig();
+        defer.resolve();
+    }, function () {
+        self.commandRouter.pushToastMessage('error', pluginName, self.commandRouter.getI18nString('GLASS.MANAGER_PORT_IN_USE') + ' ' + oldPort);
+        self.startManager(oldPort).catch(function () {});
+        self.updateUIConfig();
+        defer.resolve();
+    });
+    return defer.promise;
+};
+
+// The player's host name as mDNS announces it.
+Glass.prototype.managerDefaultHost = function () {
     var host = '';
     try { host = os.hostname(); } catch (e) {}
     host = String(host || '').trim().toLowerCase();
@@ -2903,6 +2963,13 @@ Glass.prototype.managerHost = function () {
         try { host = String(this.commandRouter.sharedVars.get('system.name') || '').trim().toLowerCase().replace(/[^a-z0-9-]+/g, '-'); } catch (e) {}
     }
     return (host || 'volumio') + '.local';
+};
+
+// Where a browser on the network reaches the manager: the address set in
+// the settings when there is one, else the mDNS name.
+Glass.prototype.managerHost = function () {
+    var override = String(this.config.get('managerHost') || '').trim();
+    return override || this.managerDefaultHost();
 };
 
 Glass.prototype.managerUrl = function () {
@@ -3119,7 +3186,8 @@ Glass.prototype.managerSettings = function () {
     return {
         themeTagRules: String(self.config.get('themeTagRules') || ''),
         doNotDeleteThemes: self.config.get('doNotDeleteThemes') === true,
-        managerPort: parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT
+        managerPort: parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT,
+        managerHost: String(self.config.get('managerHost') || '')
     };
 };
 

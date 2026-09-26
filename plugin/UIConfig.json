@@ -30,6 +30,44 @@
       "hidden": false,
       "content": [
         {
+          "id": "managerPort",
+          "element": "input",
+          "type": "number",
+          "doc": "TRANSLATE.GLASS.MANAGER_PORT_DOC",
+          "label": "TRANSLATE.GLASS.MANAGER_PORT",
+          "attributes": [
+            {
+              "placeholder": 5582
+            },
+            {
+              "maxlength": 5
+            },
+            {
+              "min": 1024
+            },
+            {
+              "max": 65535
+            }
+          ],
+          "value": 5582
+        },
+        {
+          "id": "managerHost",
+          "element": "input",
+          "type": "text",
+          "doc": "TRANSLATE.GLASS.MANAGER_HOST_DOC",
+          "label": "TRANSLATE.GLASS.MANAGER_HOST",
+          "attributes": [
+            {
+              "placeholder": "volumio.local"
+            },
+            {
+              "maxlength": 128
+            }
+          ],
+          "value": ""
+        },
+        {
           "id": "managerOpen",
           "element": "button",
           "label": "TRANSLATE.GLASS.MANAGER_OPEN",
@@ -49,7 +87,19 @@
             "url": ""
           }
         }
-      ]
+      ],
+      "onSave": {
+        "type": "controller",
+        "endpoint": "user_interface/glass",
+        "method": "saveManagerConf"
+      },
+      "saveButton": {
+        "label": "TRANSLATE.GLASS.APPLY",
+        "data": [
+          "managerPort",
+          "managerHost"
+        ]
+      }
     },
     {
       "id": "display_conf",

@@ -472,6 +472,14 @@
     "MANAGER_BK_DOWNLOAD": "Herunterladen",
     "MANAGER_BK_UPLOAD": "Sicherungs-Zip hochladen",
     "MANAGER_BK_UPLOADED": "Sicherung hinzugefügt:",
-    "MANAGER_ERR_BAD_BACKUP": "Das Zip ist keine Glass-Einstellungssicherung."
+    "MANAGER_ERR_BAD_BACKUP": "Das Zip ist keine Glass-Einstellungssicherung.",
+    "MANAGER_PORT": "Manager-Port",
+    "MANAGER_PORT_DOC": "Der Port, auf dem der Manager lauscht, 5582, sofern kein anderer Dienst auf diesem Player ihn belegt. Eine Änderung gilt sofort: der Manager wechselt auf den neuen Port und die Schaltflächen folgen.",
+    "MANAGER_HOST": "Manager-Adresse",
+    "MANAGER_HOST_DOC": "Wie Browser diesen Player erreichen. Leer verwendet den Namen des Players mit .local, den mDNS in den meisten Netzwerken auflöst. Geben Sie die IP-Adresse oder einen Hostnamen des Players ein, wenn .local-Namen in Ihrem Netzwerk nicht aufgelöst werden.",
+    "MANAGER_PORT_INVALID": "Der Manager-Port muss eine Zahl von 1024 bis 65535 sein.",
+    "MANAGER_PORT_IN_USE": "Dieser Port wird auf diesem Player bereits von etwas anderem benutzt. Der Manager bleibt auf Port",
+    "MANAGER_HOST_INVALID": "Die Manager-Adresse muss ein Hostname oder eine IP-Adresse sein, ohne http:// und ohne Port.",
+    "MANAGER_MOVED": "Der Manager lauscht jetzt auf Port"
   }
 }
