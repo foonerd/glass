@@ -34,7 +34,9 @@ pub const SPECTRUM_CONFIG: &str = "config/spectrum.txt";
 
 /// The plugin's home directory: `GLASS_HOME`, or the default.
 pub fn home() -> std::path::PathBuf {
-    std::env::var_os(HOME_VAR).map(std::path::PathBuf::from).unwrap_or_else(|| std::path::PathBuf::from(DEFAULT_HOME))
+    std::env::var_os(HOME_VAR)
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| std::path::PathBuf::from(DEFAULT_HOME))
 }
 
 use serde::{Deserialize, Serialize};
@@ -203,7 +205,10 @@ pub fn scroll_speeds_from_config(text: &str) -> ScrollSpeeds {
             .unwrap_or(40.0)
     };
     ScrollSpeeds {
-        mode: current_value(text, "scrolling.mode").unwrap_or_default().trim().to_ascii_lowercase(),
+        mode: current_value(text, "scrolling.mode")
+            .unwrap_or_default()
+            .trim()
+            .to_ascii_lowercase(),
         title: number("scrolling.speed.title"),
         artist: number("scrolling.speed.artist"),
         album: number("scrolling.speed.album"),
@@ -330,7 +335,10 @@ pub fn format_label(key: &str) -> String {
 pub fn type_font_size(sample_size: u32, box_height: Option<u32>) -> u32 {
     let sample = sample_size.max(1);
     match box_height {
-        Some(h) if h > 1 => sample.min(((h as f32) * 0.45) as u32).max(10).min(sample.max(10)),
+        Some(h) if h > 1 => sample
+            .min(((h as f32) * 0.45) as u32)
+            .max(10)
+            .min(sample.max(10)),
         _ => sample,
     }
 }
@@ -480,11 +488,18 @@ pub fn random_change_title_from_config(text: &str) -> bool {
 /// `meter.visible` of a meter under `config.extend`. False hides the needles.
 pub fn meter_visible(meters_txt: &str, meter: &str) -> bool {
     let values = section_values(meters_txt, meter);
-    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+    let get = |key: &str| {
+        values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
     if !truthy(get("config.extend")) {
         return true;
     }
-    get("meter.visible").map(|v| truthy(Some(v))).unwrap_or(true)
+    get("meter.visible")
+        .map(|v| truthy(Some(v)))
+        .unwrap_or(true)
 }
 
 /// How a meter shows its level: a needle turning about an origin, or a bar
@@ -584,12 +599,20 @@ impl Default for MeterSpec {
 /// The meter's kind, channels, per-channel angles, flips and bar steps.
 pub fn meter_spec(meters_txt: &str, meter: &str) -> MeterSpec {
     let values = section_values(meters_txt, meter);
-    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+    let get = |key: &str| {
+        values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
     let number = |key: &str| get(key).and_then(|v| v.trim().parse::<u32>().ok());
     let signed = |key: &str| get(key).and_then(|v| v.trim().parse::<i32>().ok());
     let angle = |key: &str| get(key).and_then(|v| v.trim().parse::<f32>().ok());
     let flag = |key: &str| truthy(get(key));
-    let kind = match get("meter.type").map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+    let kind = match get("meter.type")
+        .map(|v| v.trim().to_ascii_lowercase())
+        .as_deref()
+    {
         Some("linear") => MeterKind::Linear,
         _ => MeterKind::Circular,
     };
@@ -613,7 +636,10 @@ pub fn meter_spec(meters_txt: &str, meter: &str) -> MeterSpec {
         overload: number("position.overload").unwrap_or(0),
         step_regular: number("step.width.regular").unwrap_or(0),
         step_overload: number("step.width.overload").unwrap_or(0),
-        direction: match get("direction").map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        direction: match get("direction")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref()
+        {
             Some("right-left") => Direction::RightLeft,
             Some("bottom-top") => Direction::BottomTop,
             Some("top-bottom") => Direction::TopBottom,
@@ -697,7 +723,11 @@ impl SpectrumSpec {
             return 0;
         }
         let step = self.step() as f32;
-        let n = if v % step == 0.0 { (v / step) as u32 } else { (v / step) as u32 + 1 };
+        let n = if v % step == 0.0 {
+            (v / step) as u32
+        } else {
+            (v / step) as u32 + 1
+        };
         n * self.step()
     }
 }
@@ -730,7 +760,12 @@ pub fn spectrum_settings(text: &str) -> SpectrumSettings {
 /// `config.extend` and `spectrum.visible` both true.
 pub fn meter_spectrum(meters_txt: &str, meter: &str) -> Option<(String, u32, u32)> {
     let values = section_values(meters_txt, meter);
-    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+    let get = |key: &str| {
+        values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
     if !truthy(get("config.extend")) || !truthy(get("spectrum.visible")) {
         return None;
     }
@@ -780,7 +815,13 @@ pub fn spectrum_from_theme(
     if values.is_empty() {
         return None;
     }
-    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str()).filter(|v| !v.is_empty());
+    let get = |key: &str| {
+        values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+            .filter(|v| !v.is_empty())
+    };
     let int = |key: &str| get(key).and_then(|v| v.parse::<i32>().ok());
     let uint = |key: &str| get(key).and_then(|v| v.parse::<u32>().ok());
     let path = |file: &str| {
@@ -814,7 +855,12 @@ pub fn spectrum_from_theme(
         max_value: settings.max_value,
         background: fill("bgr.type", "bgr.color", "bgr.gradient", "bgr.filename"),
         bar: fill("bar.type", "bar.color", "bar.gradient", "bar.filename"),
-        reflection: fill("reflection.type", "reflection.color", "reflection.gradient", "reflection.filename"),
+        reflection: fill(
+            "reflection.type",
+            "reflection.color",
+            "reflection.gradient",
+            "reflection.filename",
+        ),
         reflection_gap: int("reflection.gap").unwrap_or(0),
         topping: match (uint("topping.height"), uint("topping.step")) {
             (Some(height), Some(step)) if height > 0 => Some((height, step)),
@@ -859,15 +905,24 @@ pub struct FolderLayerSpec {
 }
 
 /// The default candidates when a layer names no files.
-pub const FOLDER_LAYER_FILES: [&str; 6] = ["back.png", "Back.png", "back.jpg", "Back.jpg", "logo.png", "Logo.png"];
+pub const FOLDER_LAYER_FILES: [&str; 6] = [
+    "back.png", "Back.png", "back.jpg", "Back.jpg", "logo.png", "Logo.png",
+];
 
 /// The folder layers a meter declares: the legacy `folderlayer.*` when
 /// `folderlayer.enabled` is true, then `folderlayer.1.*` to `folderlayer.5.*`,
 /// each needing a position and a dimension.
 pub fn meter_folder_layers(meters_txt: &str, meter: &str) -> Vec<FolderLayerSpec> {
     let values = section_values(meters_txt, meter);
-    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
-    let font_color = get("font.color").and_then(color_triplet).unwrap_or([255, 255, 255]);
+    let get = |key: &str| {
+        values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
+    let font_color = get("font.color")
+        .and_then(color_triplet)
+        .unwrap_or([255, 255, 255]);
     let pair = |key: &str| -> Option<(u32, u32)> {
         let mut parts = get(key)?.split(',');
         let a = parts.next()?.trim().parse().ok()?;
@@ -885,7 +940,12 @@ pub fn meter_folder_layers(meters_txt: &str, meter: &str) -> Vec<FolderLayerSpec
             let (x, y) = pair(&format!("{prefix}.pos"))?;
             let (w, h) = pair(&format!("{prefix}.dimension"))?;
             let files: Vec<String> = get(&format!("{prefix}.files"))
-                .map(|list| list.split(',').map(|f| f.trim().to_string()).filter(|f| !f.is_empty()).collect())
+                .map(|list| {
+                    list.split(',')
+                        .map(|f| f.trim().to_string())
+                        .filter(|f| !f.is_empty())
+                        .collect()
+                })
                 .filter(|files: &Vec<String>| !files.is_empty())
                 .unwrap_or_else(|| FOLDER_LAYER_FILES.iter().map(|f| f.to_string()).collect());
             Some(FolderLayerSpec {
@@ -894,15 +954,23 @@ pub fn meter_folder_layers(meters_txt: &str, meter: &str) -> Vec<FolderLayerSpec
                 y,
                 w,
                 h,
-                scale: match get(&format!("{prefix}.scale")).map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+                scale: match get(&format!("{prefix}.scale"))
+                    .map(|v| v.trim().to_ascii_lowercase())
+                    .as_deref()
+                {
                     Some("stretch") => Scale::Stretch,
                     _ => Scale::Fit,
                 },
-                zorder: match get(&format!("{prefix}.zorder")).map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+                zorder: match get(&format!("{prefix}.zorder"))
+                    .map(|v| v.trim().to_ascii_lowercase())
+                    .as_deref()
+                {
                     Some("background") => ZOrder::Background,
                     _ => ZOrder::Overlay,
                 },
-                border: get(&format!("{prefix}.border")).and_then(|v| v.trim().parse().ok()).unwrap_or(0),
+                border: get(&format!("{prefix}.border"))
+                    .and_then(|v| v.trim().parse().ok())
+                    .unwrap_or(0),
                 border_color: font_color,
             })
         })
@@ -945,7 +1013,9 @@ pub fn folder_candidates(uri: &str, files: &[String]) -> Vec<String> {
         .filter(|f| !f.is_empty() && !f.contains('/') && !f.contains(".."))
         .filter(|f| {
             let lower = f.to_ascii_lowercase();
-            [".png", ".jpg", ".jpeg", ".gif", ".webp"].iter().any(|ext| lower.ends_with(ext))
+            [".png", ".jpg", ".jpeg", ".gif", ".webp"]
+                .iter()
+                .any(|ext| lower.ends_with(ext))
         })
         .map(|f| format!("{folder}/{f}"))
         .collect()
@@ -965,7 +1035,12 @@ pub struct FanartSpec {
 
 pub fn meter_fanart(meters_txt: &str, meter: &str) -> Option<FanartSpec> {
     let values = section_values(meters_txt, meter);
-    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+    let get = |key: &str| {
+        values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
     let pair = |key: &str| -> Option<(u32, u32)> {
         let mut parts = get(key)?.split(',');
         let a = parts.next()?.trim().parse().ok()?;
@@ -979,11 +1054,17 @@ pub fn meter_fanart(meters_txt: &str, meter: &str) -> Option<FanartSpec> {
         y,
         w,
         h,
-        scale: match get("fanart.scale").map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        scale: match get("fanart.scale")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref()
+        {
             Some("stretch") => Scale::Stretch,
             _ => Scale::Fit,
         },
-        zorder: match get("fanart.zorder").map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+        zorder: match get("fanart.zorder")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref()
+        {
             Some("overlay") => ZOrder::Overlay,
             _ => ZOrder::Background,
         },
@@ -1104,76 +1185,149 @@ pub struct IndicatorsSpec {
 
 impl IndicatorsSpec {
     pub fn is_empty(&self) -> bool {
-        self.volume.is_none() && self.mute.is_none() && self.shuffle.is_none() && self.repeat.is_none() && self.playstate.is_none() && self.progress.is_none()
+        self.volume.is_none()
+            && self.mute.is_none()
+            && self.shuffle.is_none()
+            && self.repeat.is_none()
+            && self.playstate.is_none()
+            && self.progress.is_none()
     }
 }
 
 fn color_list(value: &str) -> Vec<[u8; 3]> {
-    let numbers: Vec<u8> = value.split(',').filter_map(|p| p.trim().parse::<u8>().ok()).collect();
-    numbers.chunks_exact(3).map(|c| [c[0], c[1], c[2]]).collect()
+    let numbers: Vec<u8> = value
+        .split(',')
+        .filter_map(|p| p.trim().parse::<u8>().ok())
+        .collect();
+    numbers
+        .as_chunks::<3>()
+        .0
+        .iter()
+        .map(|c| [c[0], c[1], c[2]])
+        .collect()
 }
 
 /// The indicators of a meter: `volume.*`, `mute.*`, `shuffle.*`, `repeat.*`,
 /// `playstate.*` and `progress.*`, as the player's parser reads them.
 pub fn meter_indicators(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<IndicatorsSpec> {
     let values = section_values(meters_txt, meter);
-    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str()).map(str::trim).filter(|v| !v.is_empty());
+    let get = |key: &str| {
+        values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+    };
     if !truthy(get("config.extend")) {
         return None;
     }
     let ipair = |key: &str| -> Option<(i32, i32)> {
         let mut parts = get(key)?.split(',');
-        Some((parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
+        Some((
+            parts.next()?.trim().parse().ok()?,
+            parts.next()?.trim().parse().ok()?,
+        ))
     };
     let upair = |key: &str| -> Option<(u32, u32)> {
         let mut parts = get(key)?.split(',');
-        Some((parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
+        Some((
+            parts.next()?.trim().parse().ok()?,
+            parts.next()?.trim().parse().ok()?,
+        ))
     };
-    let number = |key: &str, default: f32| get(key).and_then(|v| v.parse::<f32>().ok()).unwrap_or(default);
-    let path = |file: &str| if theme_dir.is_empty() { file.to_string() } else { format!("{}/{}", theme_dir.trim_end_matches('/'), file) };
+    let number = |key: &str, default: f32| {
+        get(key)
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(default)
+    };
+    let path = |file: &str| {
+        if theme_dir.is_empty() {
+            file.to_string()
+        } else {
+            format!("{}/{}", theme_dir.trim_end_matches('/'), file)
+        }
+    };
     // LED colour lists as the player reads them: mute and play state take
     // the listed triples; shuffle takes nine values as off, shuffle, infinity
     // and six legacy values as on, off (so off comes second); repeat takes
     // three or four triples.
-    let state = |name: &str, default_colors: Vec<[u8; 3]>, legacy_swap: bool| -> Option<StateIndicator> {
-        let (x, y) = ipair(&format!("{name}.pos"))?;
-        let (look, glow, glow_intensity, glow_colors) = if let Some((w, h)) = upair(&format!("{name}.led")) {
-            let mut colors = get(&format!("{name}.led.color")).map(color_list).unwrap_or_default();
-            if legacy_swap && colors.len() == 2 {
-                colors = vec![colors[1], colors[0], colors[0]];
-            }
-            if colors.len() < 2 {
-                colors = default_colors.clone();
-            }
-            let mut glow_colors = get(&format!("{name}.led.glow.color")).map(color_list).unwrap_or_default();
-            if legacy_swap && glow_colors.len() == 2 {
-                glow_colors = vec![glow_colors[1], glow_colors[0], glow_colors[0]];
-            }
-            (
-                StateLook::Led { w, h, circle: get(&format!("{name}.led.shape")).map_or(true, |s| !s.eq_ignore_ascii_case("rect")), colors },
-                number(&format!("{name}.led.glow"), 0.0).max(0.0) as u32,
-                number(&format!("{name}.led.glow.intensity"), 0.5).clamp(0.0, 1.0),
+    let state =
+        |name: &str, default_colors: Vec<[u8; 3]>, legacy_swap: bool| -> Option<StateIndicator> {
+            let (x, y) = ipair(&format!("{name}.pos"))?;
+            let (look, glow, glow_intensity, glow_colors) =
+                if let Some((w, h)) = upair(&format!("{name}.led")) {
+                    let mut colors = get(&format!("{name}.led.color"))
+                        .map(color_list)
+                        .unwrap_or_default();
+                    if legacy_swap && colors.len() == 2 {
+                        colors = vec![colors[1], colors[0], colors[0]];
+                    }
+                    if colors.len() < 2 {
+                        colors = default_colors.clone();
+                    }
+                    let mut glow_colors = get(&format!("{name}.led.glow.color"))
+                        .map(color_list)
+                        .unwrap_or_default();
+                    if legacy_swap && glow_colors.len() == 2 {
+                        glow_colors = vec![glow_colors[1], glow_colors[0], glow_colors[0]];
+                    }
+                    (
+                        StateLook::Led {
+                            w,
+                            h,
+                            circle: get(&format!("{name}.led.shape"))
+                                .is_none_or(|s| !s.eq_ignore_ascii_case("rect")),
+                            colors,
+                        },
+                        number(&format!("{name}.led.glow"), 0.0).max(0.0) as u32,
+                        number(&format!("{name}.led.glow.intensity"), 0.5).clamp(0.0, 1.0),
+                        glow_colors,
+                    )
+                } else {
+                    let files: Vec<String> = get(&format!("{name}.icon"))?
+                        .split(',')
+                        .map(|f| f.trim())
+                        .map(|f| if f.is_empty() { String::new() } else { path(f) })
+                        .collect();
+                    let mut glow_colors = get(&format!("{name}.icon.glow.color"))
+                        .map(color_list)
+                        .unwrap_or_default();
+                    if legacy_swap && glow_colors.len() == 2 {
+                        glow_colors = vec![glow_colors[1], glow_colors[0], glow_colors[0]];
+                    }
+                    (
+                        StateLook::Icons { files },
+                        number(&format!("{name}.icon.glow"), 0.0).max(0.0) as u32,
+                        number(&format!("{name}.icon.glow.intensity"), 0.5).clamp(0.0, 1.0),
+                        glow_colors,
+                    )
+                };
+            Some(StateIndicator {
+                x,
+                y,
+                look,
+                glow,
+                glow_intensity,
                 glow_colors,
-            )
-        } else {
-            let files: Vec<String> = get(&format!("{name}.icon"))?.split(',').map(|f| f.trim()).map(|f| if f.is_empty() { String::new() } else { path(f) }).collect();
-            let mut glow_colors = get(&format!("{name}.icon.glow.color")).map(color_list).unwrap_or_default();
-            if legacy_swap && glow_colors.len() == 2 {
-                glow_colors = vec![glow_colors[1], glow_colors[0], glow_colors[0]];
-            }
-            (
-                StateLook::Icons { files },
-                number(&format!("{name}.icon.glow"), 0.0).max(0.0) as u32,
-                number(&format!("{name}.icon.glow.intensity"), 0.5).clamp(0.0, 1.0),
-                glow_colors,
-            )
+            })
         };
-        Some(StateIndicator { x, y, look, glow, glow_intensity, glow_colors })
-    };
-    let gauge = |name: &str, default_style: GaugeStyle, default_orientation: &str, default_bg: Option<[u8; 3]>, default_color: [u8; 3]| -> Option<GaugeSpec> {
+    let gauge = |name: &str,
+                 default_style: GaugeStyle,
+                 default_orientation: &str,
+                 default_bg: Option<[u8; 3]>,
+                 default_color: [u8; 3]|
+     -> Option<GaugeSpec> {
         let (x, y) = ipair(&format!("{name}.pos"))?;
-        let (w, h) = upair(&format!("{name}.dim")).or(if name == "volume" { Some((100, 20)) } else { None })?;
-        let style = match get(&format!("{name}.style")).map(|s| s.to_ascii_lowercase()).as_deref() {
+        let (w, h) = upair(&format!("{name}.dim")).or(if name == "volume" {
+            Some((100, 20))
+        } else {
+            None
+        })?;
+        let style = match get(&format!("{name}.style"))
+            .map(|s| s.to_ascii_lowercase())
+            .as_deref()
+        {
             Some("slider") => GaugeStyle::Slider,
             Some("knob") => GaugeStyle::Knob,
             Some("arc") => GaugeStyle::Arc,
@@ -1182,13 +1336,26 @@ pub fn meter_indicators(meters_txt: &str, meter: &str, theme_dir: &str) -> Optio
         };
         let mut markers = Vec::new();
         for n in 1..=10 {
-            let Some(pos) = get(&format!("{name}.marker.{n}.pos")).and_then(|v| v.parse::<f32>().ok()) else { break };
-            let image = get(&format!("{name}.marker.{n}.image")).map(path).unwrap_or_default();
-            let label = get(&format!("{name}.marker.{n}.label")).unwrap_or("").to_string();
+            let Some(pos) =
+                get(&format!("{name}.marker.{n}.pos")).and_then(|v| v.parse::<f32>().ok())
+            else {
+                break;
+            };
+            let image = get(&format!("{name}.marker.{n}.image"))
+                .map(path)
+                .unwrap_or_default();
+            let label = get(&format!("{name}.marker.{n}.label"))
+                .unwrap_or("")
+                .to_string();
             if image.is_empty() && label.is_empty() {
                 continue;
             }
-            markers.push(Marker { pos: pos.clamp(0.0, 100.0), image, label, font_size: get(&format!("{name}.marker.{n}.fontsize")).and_then(|v| v.parse().ok()) });
+            markers.push(Marker {
+                pos: pos.clamp(0.0, 100.0),
+                image,
+                label,
+                font_size: get(&format!("{name}.marker.{n}.fontsize")).and_then(|v| v.parse().ok()),
+            });
         }
         Some(GaugeSpec {
             x,
@@ -1196,38 +1363,82 @@ pub fn meter_indicators(meters_txt: &str, meter: &str, theme_dir: &str) -> Optio
             w,
             h,
             style,
-            color: get(&format!("{name}.color")).and_then(color_triplet).unwrap_or(default_color),
-            bg_color: get(&format!("{name}.bg.color")).and_then(color_triplet).or(default_bg),
+            color: get(&format!("{name}.color"))
+                .and_then(color_triplet)
+                .unwrap_or(default_color),
+            bg_color: get(&format!("{name}.bg.color"))
+                .and_then(color_triplet)
+                .or(default_bg),
             font_size: number(&format!("{name}.font.size"), 24.0).max(1.0) as u32,
-            knob_image: get(&format!("{name}.knob.image")).map(path).unwrap_or_else(|| path("volume_knob.png")),
+            knob_image: get(&format!("{name}.knob.image"))
+                .map(path)
+                .unwrap_or_else(|| path("volume_knob.png")),
             knob_start: number(&format!("{name}.knob.angle.start"), 225.0),
             knob_end: number(&format!("{name}.knob.angle.end"), -45.0),
             arc_width: number(&format!("{name}.arc.width"), 6.0).max(1.0) as u32,
             arc_start: number(&format!("{name}.arc.angle.start"), 225.0),
             arc_end: number(&format!("{name}.arc.angle.end"), -45.0),
-            track: get(&format!("{name}.slider.track")).map(path).unwrap_or_default(),
-            tip: get(&format!("{name}.slider.tip")).map(path).unwrap_or_default(),
-            orientation: get(&format!("{name}.slider.orientation")).map(|s| s.to_ascii_lowercase()).unwrap_or_else(|| default_orientation.to_string()),
+            track: get(&format!("{name}.slider.track"))
+                .map(path)
+                .unwrap_or_default(),
+            tip: get(&format!("{name}.slider.tip"))
+                .map(path)
+                .unwrap_or_default(),
+            orientation: get(&format!("{name}.slider.orientation"))
+                .map(|s| s.to_ascii_lowercase())
+                .unwrap_or_else(|| default_orientation.to_string()),
             travel: ipair(&format!("{name}.slider.travel")),
             tip_offset: ipair(&format!("{name}.slider.tip.offset")).unwrap_or((0, 0)),
             fill_color: get(&format!("{name}.fill.color")).and_then(color_triplet),
             fill_width: get(&format!("{name}.fill.width")).and_then(|v| v.parse().ok()),
             fill_offset: ipair(&format!("{name}.fill.offset")).unwrap_or((0, 0)),
             fill_radius: number(&format!("{name}.fill.radius"), 0.0).max(0.0) as u32,
-            border: if name == "progress" { number("progress.border", 0.0).max(0.0) as u32 } else { 0 },
-            border_color: get("progress.border.color").and_then(color_triplet).unwrap_or([100, 100, 100]),
+            border: if name == "progress" {
+                number("progress.border", 0.0).max(0.0) as u32
+            } else {
+                0
+            },
+            border_color: get("progress.border.color")
+                .and_then(color_triplet)
+                .unwrap_or([100, 100, 100]),
             markers,
-            head_image: get(&format!("{name}.head.image")).map(path).unwrap_or_default(),
+            head_image: get(&format!("{name}.head.image"))
+                .map(path)
+                .unwrap_or_default(),
             head_offset: ipair(&format!("{name}.head.offset")).unwrap_or((0, 0)),
         })
     };
     let spec = IndicatorsSpec {
-        volume: gauge("volume", GaugeStyle::Numeric, "vertical", None, [255, 255, 255]),
+        volume: gauge(
+            "volume",
+            GaugeStyle::Numeric,
+            "vertical",
+            None,
+            [255, 255, 255],
+        ),
         mute: state("mute", vec![[255, 0, 0], [64, 64, 64]], false),
-        shuffle: state("shuffle", vec![[64, 64, 64], [0, 200, 255], [200, 0, 200]], true),
-        repeat: state("repeat", vec![[64, 64, 64], [0, 255, 0], [255, 200, 0]], false),
-        playstate: state("playstate", vec![[64, 64, 64], [255, 200, 0], [0, 255, 0]], false),
-        progress: gauge("progress", GaugeStyle::Slider, "horizontal", Some([40, 40, 40]), [0, 200, 255]),
+        shuffle: state(
+            "shuffle",
+            vec![[64, 64, 64], [0, 200, 255], [200, 0, 200]],
+            true,
+        ),
+        repeat: state(
+            "repeat",
+            vec![[64, 64, 64], [0, 255, 0], [255, 200, 0]],
+            false,
+        ),
+        playstate: state(
+            "playstate",
+            vec![[64, 64, 64], [255, 200, 0], [0, 255, 0]],
+            false,
+        ),
+        progress: gauge(
+            "progress",
+            GaugeStyle::Slider,
+            "horizontal",
+            Some([40, 40, 40]),
+            [0, 200, 255],
+        ),
     };
     (!spec.is_empty()).then_some(spec)
 }
@@ -1247,17 +1458,32 @@ pub struct TransitionSettings {
 
 impl Default for TransitionSettings {
     fn default() -> Self {
-        Self { at_start: false, fade: true, duration_s: 0.5, white: false, opacity: 1.0 }
+        Self {
+            at_start: false,
+            fade: true,
+            duration_s: 0.5,
+            white: false,
+            opacity: 1.0,
+        }
     }
 }
 
 pub fn transition_settings(text: &str) -> TransitionSettings {
     TransitionSettings {
         at_start: truthy(current_value(text, "start.animation").as_deref()),
-        fade: current_value(text, "transition.type").map_or(true, |v| !v.eq_ignore_ascii_case("none")),
-        duration_s: current_value(text, "transition.duration").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.5).max(0.0),
-        white: current_value(text, "transition.color").is_some_and(|v| v.eq_ignore_ascii_case("white")),
-        opacity: current_value(text, "transition.opacity").and_then(|v| v.parse::<f32>().ok()).unwrap_or(100.0).clamp(0.0, 100.0) / 100.0,
+        fade: current_value(text, "transition.type")
+            .is_none_or(|v| !v.eq_ignore_ascii_case("none")),
+        duration_s: current_value(text, "transition.duration")
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(0.5)
+            .max(0.0),
+        white: current_value(text, "transition.color")
+            .is_some_and(|v| v.eq_ignore_ascii_case("white")),
+        opacity: current_value(text, "transition.opacity")
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(100.0)
+            .clamp(0.0, 100.0)
+            / 100.0,
     }
 }
 
@@ -1276,16 +1502,27 @@ pub struct RunSettings {
 
 impl Default for RunSettings {
     fn default() -> Self {
-        Self { exit_on_touch: false, centered: true, x: 0, y: 0 }
+        Self {
+            exit_on_touch: false,
+            centered: true,
+            x: 0,
+            y: 0,
+        }
     }
 }
 
 pub fn run_settings(text: &str) -> RunSettings {
     RunSettings {
-        exit_on_touch: truthy(current_value(text, "exit.on.touch").as_deref()) || truthy(current_value(text, "stop.display.on.touch").as_deref()),
-        centered: current_value(text, "position.type").map_or(true, |v| v.eq_ignore_ascii_case("center")),
-        x: current_value(text, "position.x").and_then(|v| v.parse().ok()).unwrap_or(0),
-        y: current_value(text, "position.y").and_then(|v| v.parse().ok()).unwrap_or(0),
+        exit_on_touch: truthy(current_value(text, "exit.on.touch").as_deref())
+            || truthy(current_value(text, "stop.display.on.touch").as_deref()),
+        centered: current_value(text, "position.type")
+            .is_none_or(|v| v.eq_ignore_ascii_case("center")),
+        x: current_value(text, "position.x")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
+        y: current_value(text, "position.y")
+            .and_then(|v| v.parse().ok())
+            .unwrap_or(0),
     }
 }
 
@@ -1299,7 +1536,11 @@ pub const DISMISS_FILE_VAR: &str = "GLASS_DISMISS_FILE";
 
 /// Whether a touch should leave the dismiss marker: only when the launcher
 /// asked for one, the stop is not the plugin's, and the run flag still stands.
-pub fn should_mark_dismiss(marker_path: Option<&str>, external_stop: bool, run_flag_exists: bool) -> bool {
+pub fn should_mark_dismiss(
+    marker_path: Option<&str>,
+    external_stop: bool,
+    run_flag_exists: bool,
+) -> bool {
     if external_stop || !run_flag_exists {
         return false;
     }
@@ -1323,7 +1564,8 @@ pub fn data_source_from_config(text: &str) -> DataSourceSpec {
         max_ui: number("volume.max", DEFAULT_METER_MAX).max(1.0),
         max_pipe: number("volume.max.in.pipe", DEFAULT_METER_MAX).max(1.0),
         gain_db: number("volume.gain.db", 0.0),
-        gain_source: section_value(text, "data.source", "volume.gain.db.source").unwrap_or_default(),
+        gain_source: section_value(text, "data.source", "volume.gain.db.source")
+            .unwrap_or_default(),
         smooth: number("smooth.buffer.size", 0.0).max(0.0) as usize,
         stereo: word("stereo.algorithm", "new"),
         mono: word("mono.algorithm", "average"),
@@ -1528,7 +1770,7 @@ pub fn decode_spectrum(record: &[u8], bin_count: usize) -> Option<Vec<f32>> {
         return None;
     }
     let mut values = Vec::with_capacity(bin_count);
-    for chunk in record.chunks_exact(4) {
+    for chunk in record.as_chunks::<4>().0 {
         let raw = i32::from_le_bytes([chunk[0], chunk[1], chunk[2], chunk[3]]);
         values.push(raw.max(0) as f32);
     }
@@ -1651,16 +1893,30 @@ pub fn meter_background(meters_txt: &str, meter: &str) -> Option<String> {
     let mut bgr = String::new();
     let mut screen = String::new();
     let mut in_section = false;
-    let flush = |sections: &mut Vec<(String, String, String)>, name: &mut String, bgr: &mut String, screen: &mut String, in_section: &mut bool| {
+    let flush = |sections: &mut Vec<(String, String, String)>,
+                 name: &mut String,
+                 bgr: &mut String,
+                 screen: &mut String,
+                 in_section: &mut bool| {
         if *in_section && !name.is_empty() {
-            sections.push((std::mem::take(name), std::mem::take(bgr), std::mem::take(screen)));
+            sections.push((
+                std::mem::take(name),
+                std::mem::take(bgr),
+                std::mem::take(screen),
+            ));
         }
         *in_section = false;
     };
     for line in meters_txt.lines() {
         let line = line.trim();
         if let Some(title) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            flush(&mut sections, &mut name, &mut bgr, &mut screen, &mut in_section);
+            flush(
+                &mut sections,
+                &mut name,
+                &mut bgr,
+                &mut screen,
+                &mut in_section,
+            );
             name = title.trim().to_string();
             in_section = true;
             continue;
@@ -1677,7 +1933,13 @@ pub fn meter_background(meters_txt: &str, meter: &str) -> Option<String> {
             _ => {}
         }
     }
-    flush(&mut sections, &mut name, &mut bgr, &mut screen, &mut in_section);
+    flush(
+        &mut sections,
+        &mut name,
+        &mut bgr,
+        &mut screen,
+        &mut in_section,
+    );
     let named = meter != "random" && meter != "list" && !meter.is_empty();
     let section = if named {
         sections.iter().find(|(n, _, _)| n == meter)
@@ -1886,7 +2148,9 @@ pub fn meter_needle(meters_txt: &str, meter: &str) -> Option<(f32, f32, f32)> {
     for line in meters_txt.lines() {
         let line = line.trim();
         if let Some(title) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            if let (true, Some(a), Some(b)) = (take, found_start.or(left_start), found_stop.or(left_stop)) {
+            if let (true, Some(a), Some(b)) =
+                (take, found_start.or(left_start), found_stop.or(left_stop))
+            {
                 return Some((a, b, found_distance));
             }
             take = !named || title.trim() == meter;
@@ -2069,13 +2333,28 @@ fn truthy(value: Option<&str>) -> bool {
 /// `speeds.mode`: `default` is 40 everywhere, `custom` takes the player's
 /// values, anything else the meter's `playinfo.scrolling.speed.*`, then its
 /// `playinfo.scrolling.speed`, then 40.
-pub fn meter_texts(meters_txt: &str, meter: &str, screen_w: u32, speeds: &ScrollSpeeds) -> MeterTexts {
+pub fn meter_texts(
+    meters_txt: &str,
+    meter: &str,
+    screen_w: u32,
+    speeds: &ScrollSpeeds,
+) -> MeterTexts {
     let values = section_values(meters_txt, meter);
-    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+    let get = |key: &str| {
+        values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
     let number = |key: &str, default: u32| get(key).and_then(|v| v.parse().ok()).unwrap_or(default);
-    let font_color = get("font.color").and_then(color_triplet).unwrap_or([255, 255, 255]);
+    let font_color = get("font.color")
+        .and_then(color_triplet)
+        .unwrap_or([255, 255, 255]);
     let global_max = number("playinfo.maxwidth", 0);
-    let align = match get("playinfo.align").map(|w| w.trim().to_ascii_lowercase()).as_deref() {
+    let align = match get("playinfo.align")
+        .map(|w| w.trim().to_ascii_lowercase())
+        .as_deref()
+    {
         Some("center") => TextAlign::Center,
         Some("right") => TextAlign::Right,
         Some("left") => TextAlign::Left,
@@ -2123,28 +2402,29 @@ pub fn meter_texts(meters_txt: &str, meter: &str, screen_w: u32, speeds: &Scroll
             screen_w.saturating_sub(x).saturating_sub(20)
         }
     };
-    let spec = |pos_key: &str, color_key: &str, default_style: TextStyle, boxed: Option<(&str, &str)>| {
-        let pos = get(pos_key)?;
-        let mut parts = pos.split(',');
-        let x = parts.next()?.trim().parse().ok()?;
-        let y = parts.next()?.trim().parse().ok()?;
-        let style = parts.next().and_then(style_word).unwrap_or(default_style);
-        let (max_width, speed, align) = match boxed {
-            Some((max_key, field)) => (box_for(x, number(max_key, 0)), speed_for(field), align),
-            None => (0, 0.0, TextAlign::Left),
+    let spec =
+        |pos_key: &str, color_key: &str, default_style: TextStyle, boxed: Option<(&str, &str)>| {
+            let pos = get(pos_key)?;
+            let mut parts = pos.split(',');
+            let x = parts.next()?.trim().parse().ok()?;
+            let y = parts.next()?.trim().parse().ok()?;
+            let style = parts.next().and_then(style_word).unwrap_or(default_style);
+            let (max_width, speed, align) = match boxed {
+                Some((max_key, field)) => (box_for(x, number(max_key, 0)), speed_for(field), align),
+                None => (0, 0.0, TextAlign::Left),
+            };
+            Some(TextSpec {
+                x,
+                y,
+                style,
+                size: size_of(style),
+                color: get(color_key).and_then(color_triplet).unwrap_or(font_color),
+                max_width,
+                align,
+                speed,
+                font_file: String::new(),
+            })
         };
-        Some(TextSpec {
-            x,
-            y,
-            style,
-            size: size_of(style),
-            color: get(color_key).and_then(color_triplet).unwrap_or(font_color),
-            max_width,
-            align,
-            speed,
-            font_file: String::new(),
-        })
-    };
     // Time fields: none or `digi` picks the clock font, which `time.*.font`
     // and `time.*.fontsize` may replace per field; `light` and `bold` pick
     // those text fonts, any other word the regular one.
@@ -2163,7 +2443,10 @@ pub fn meter_texts(meters_txt: &str, meter: &str, screen_w: u32, speeds: &Scroll
         let (size, font_file) = if style == TextStyle::Digi {
             (
                 number(&format!("time.{field}.fontsize"), size_of(TextStyle::Digi)),
-                get(&format!("time.{field}.font")).unwrap_or("").trim().to_string(),
+                get(&format!("time.{field}.font"))
+                    .unwrap_or("")
+                    .trim()
+                    .to_string(),
             )
         } else {
             (size_of(style), String::new())
@@ -2173,7 +2456,9 @@ pub fn meter_texts(meters_txt: &str, meter: &str, screen_w: u32, speeds: &Scroll
             y,
             style,
             size,
-            color: get(&format!("time.{field}.color")).and_then(color_triplet).unwrap_or(fallback_color),
+            color: get(&format!("time.{field}.color"))
+                .and_then(color_triplet)
+                .unwrap_or(fallback_color),
             max_width: 0,
             align: TextAlign::Left,
             speed: 0.0,
@@ -2185,18 +2470,42 @@ pub fn meter_texts(meters_txt: &str, meter: &str, screen_w: u32, speeds: &Scroll
     let time_elapsed = time_field("elapsed", time_color);
     let time_total = time_field("total", time_color);
     // The samplerate line takes the type colour before the font colour.
-    let type_color = get("playinfo.type.color").and_then(color_triplet).unwrap_or(font_color);
-    let mut sample = spec("playinfo.samplerate.pos", "playinfo.samplerate.color", TextStyle::Light, None);
+    let type_color = get("playinfo.type.color")
+        .and_then(color_triplet)
+        .unwrap_or(font_color);
+    let mut sample = spec(
+        "playinfo.samplerate.pos",
+        "playinfo.samplerate.color",
+        TextStyle::Light,
+        None,
+    );
     if let Some(s) = sample.as_mut() {
-        if get("playinfo.samplerate.color").and_then(color_triplet).is_none() {
+        if get("playinfo.samplerate.color")
+            .and_then(color_triplet)
+            .is_none()
+        {
             s.color = type_color;
         }
         s.max_width = number("playinfo.samplerate.maxwidth", 0);
     }
-    let title = spec("playinfo.title.pos", "playinfo.title.color", TextStyle::Bold, Some(("playinfo.title.maxwidth", "title")));
+    let title = spec(
+        "playinfo.title.pos",
+        "playinfo.title.color",
+        TextStyle::Bold,
+        Some(("playinfo.title.maxwidth", "title")),
+    );
     let ticker = if truthy(get("playinfo.ticker")) {
-        spec("playinfo.ticker.pos", "playinfo.ticker.color", TextStyle::Regular, Some(("playinfo.ticker.maxwidth", "ticker"))).map(|mut text| {
-            if get("playinfo.ticker.color").and_then(color_triplet).is_none() {
+        spec(
+            "playinfo.ticker.pos",
+            "playinfo.ticker.color",
+            TextStyle::Regular,
+            Some(("playinfo.ticker.maxwidth", "ticker")),
+        )
+        .map(|mut text| {
+            if get("playinfo.ticker.color")
+                .and_then(color_triplet)
+                .is_none()
+            {
                 text.color = title.as_ref().map(|t| t.color).unwrap_or(font_color);
             }
             // Always inside the visible width, whatever the box says.
@@ -2213,11 +2522,17 @@ pub fn meter_texts(meters_txt: &str, meter: &str, screen_w: u32, speeds: &Scroll
             text.align = TextAlign::Left;
             TickerSpec {
                 text,
-                direction: match get("playinfo.ticker.direction").map(|w| w.trim().to_ascii_lowercase()).as_deref() {
+                direction: match get("playinfo.ticker.direction")
+                    .map(|w| w.trim().to_ascii_lowercase())
+                    .as_deref()
+                {
                     Some("ltr") => ScrollDirection::Ltr,
                     _ => ScrollDirection::Rtl,
                 },
-                separator: get("playinfo.ticker.separator").map(|s| s.to_string()).filter(|s| !s.is_empty()).unwrap_or_else(|| " · ".to_string()),
+                separator: get("playinfo.ticker.separator")
+                    .map(|s| s.to_string())
+                    .filter(|s| !s.is_empty())
+                    .unwrap_or_else(|| " · ".to_string()),
                 space_between: number("playinfo.ticker.space_between", 0),
                 end_spaces: number("playinfo.ticker.end_spaces", 8),
                 append_next: truthy(get("playinfo.ticker.append_next")),
@@ -2229,15 +2544,40 @@ pub fn meter_texts(meters_txt: &str, meter: &str, screen_w: u32, speeds: &Scroll
     };
     MeterTexts {
         title,
-        artist: spec("playinfo.artist.pos", "playinfo.artist.color", TextStyle::Light, Some(("playinfo.artist.maxwidth", "artist"))),
-        album: spec("playinfo.album.pos", "playinfo.album.color", TextStyle::Light, Some(("playinfo.album.maxwidth", "album"))),
+        artist: spec(
+            "playinfo.artist.pos",
+            "playinfo.artist.color",
+            TextStyle::Light,
+            Some(("playinfo.artist.maxwidth", "artist")),
+        ),
+        album: spec(
+            "playinfo.album.pos",
+            "playinfo.album.color",
+            TextStyle::Light,
+            Some(("playinfo.album.maxwidth", "album")),
+        ),
         sample,
         time,
         time_elapsed,
         time_total,
-        next_title: spec("playinfo.next.title.pos", "playinfo.next.title.color", TextStyle::Regular, Some(("playinfo.next.title.maxwidth", "title"))),
-        next_artist: spec("playinfo.next.artist.pos", "playinfo.next.artist.color", TextStyle::Regular, Some(("playinfo.next.artist.maxwidth", "artist"))),
-        next_album: spec("playinfo.next.album.pos", "playinfo.next.album.color", TextStyle::Regular, Some(("playinfo.next.album.maxwidth", "album"))),
+        next_title: spec(
+            "playinfo.next.title.pos",
+            "playinfo.next.title.color",
+            TextStyle::Regular,
+            Some(("playinfo.next.title.maxwidth", "title")),
+        ),
+        next_artist: spec(
+            "playinfo.next.artist.pos",
+            "playinfo.next.artist.color",
+            TextStyle::Regular,
+            Some(("playinfo.next.artist.maxwidth", "artist")),
+        ),
+        next_album: spec(
+            "playinfo.next.album.pos",
+            "playinfo.next.album.color",
+            TextStyle::Regular,
+            Some(("playinfo.next.album.maxwidth", "album")),
+        ),
         ticker,
     }
 }
@@ -2247,14 +2587,20 @@ pub fn meter_texts(meters_txt: &str, meter: &str, screen_w: u32, speeds: &Scroll
 /// `theme_dir` resolves `albumart.mask` and the skin icons.
 pub fn meter_type(meters_txt: &str, meter: &str, default_mode: Option<&str>) -> Option<TypeSpec> {
     let values = section_values(meters_txt, meter);
-    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
-    let (x, y) = pair_pos(get("playinfo.type.pos")?)?;
-    let mode_word = |word: Option<&str>| match word.map(|w| w.trim().to_ascii_lowercase()).as_deref() {
-        Some("icon") => Some(TypeMode::Icon),
-        Some("text") => Some(TypeMode::Text),
-        Some("both") => Some(TypeMode::Both),
-        _ => None,
+    let get = |key: &str| {
+        values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
     };
+    let (x, y) = pair_pos(get("playinfo.type.pos")?)?;
+    let mode_word =
+        |word: Option<&str>| match word.map(|w| w.trim().to_ascii_lowercase()).as_deref() {
+            Some("icon") => Some(TypeMode::Icon),
+            Some("text") => Some(TypeMode::Text),
+            Some("both") => Some(TypeMode::Both),
+            _ => None,
+        };
     let mode = mode_word(get("playinfo.type.mode"))
         .or_else(|| mode_word(default_mode))
         .unwrap_or(TypeMode::Icon);
@@ -2264,13 +2610,20 @@ pub fn meter_type(meters_txt: &str, meter: &str, default_mode: Option<&str>) -> 
     if box_size.is_none() && mode != TypeMode::Text {
         return None;
     }
-    let align = match get("playinfo.type.align").map(|w| w.trim().to_ascii_lowercase()).as_deref() {
+    let align = match get("playinfo.type.align")
+        .map(|w| w.trim().to_ascii_lowercase())
+        .as_deref()
+    {
         Some("left") => TypeAlign::Left,
         Some("right") => TypeAlign::Right,
         _ => TypeAlign::Center,
     };
-    let font_color = get("font.color").and_then(color_triplet).unwrap_or([255, 255, 255]);
-    let color = get("playinfo.type.color").and_then(color_triplet).unwrap_or(font_color);
+    let font_color = get("font.color")
+        .and_then(color_triplet)
+        .unwrap_or([255, 255, 255]);
+    let color = get("playinfo.type.color")
+        .and_then(color_triplet)
+        .unwrap_or(font_color);
     let sample_style = get("playinfo.samplerate.pos")
         .and_then(|pos| pos.split(',').nth(2))
         .and_then(style_word)
@@ -2305,7 +2658,12 @@ pub fn meter_type(meters_txt: &str, meter: &str, default_mode: Option<&str>) -> 
 /// `font.color`.
 pub fn meter_art(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<ArtSpec> {
     let values = section_values(meters_txt, meter);
-    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str());
+    let get = |key: &str| {
+        values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
     let (x, y) = pair_pos(get("albumart.pos")?)?;
     let (w, h) = pair_pos(get("albumart.dimension")?)?;
     if w == 0 || h == 0 {
@@ -2318,8 +2676,12 @@ pub fn meter_art(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<ArtSp
         Some(file) if !file.is_empty() => file.to_string(),
         _ => String::new(),
     };
-    let border = get("albumart.border").and_then(|v| v.trim().parse().ok()).unwrap_or(0);
-    let border_color = get("font.color").and_then(color_triplet).unwrap_or([255, 255, 255]);
+    let border = get("albumart.border")
+        .and_then(|v| v.trim().parse().ok())
+        .unwrap_or(0);
+    let border_color = get("font.color")
+        .and_then(color_triplet)
+        .unwrap_or([255, 255, 255]);
     Some(ArtSpec {
         x,
         y,
@@ -2329,7 +2691,9 @@ pub fn meter_art(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<ArtSp
         border,
         border_color,
         rotation: truthy(get("albumart.rotation")),
-        rpm: get("albumart.rotation.speed").and_then(|v| v.trim().parse::<f32>().ok()).unwrap_or(0.0),
+        rpm: get("albumart.rotation.speed")
+            .and_then(|v| v.trim().parse::<f32>().ok())
+            .unwrap_or(0.0),
     })
 }
 
@@ -2363,34 +2727,63 @@ fn one() -> f32 {
 
 impl Default for RotationSettings {
     fn default() -> Self {
-        Self { fps: 8, step: 6, speed: 1.0, direction: "ccw".into(), spool_left: 1.0, spool_right: 1.0, spool_adaptive: false, queue_mode: false }
+        Self {
+            fps: 8,
+            step: 6,
+            speed: 1.0,
+            direction: "ccw".into(),
+            spool_left: 1.0,
+            spool_right: 1.0,
+            spool_adaptive: false,
+            queue_mode: false,
+        }
     }
 }
 
 pub fn rotation_settings(text: &str) -> RotationSettings {
-    let quality = current_value(text, "rotation.quality").map(|v| v.to_ascii_lowercase()).unwrap_or_else(|| "medium".into());
-    let custom_fps = current_value(text, "rotation.fps").and_then(|v| v.parse::<u32>().ok()).unwrap_or(8).max(1);
+    let quality = current_value(text, "rotation.quality")
+        .map(|v| v.to_ascii_lowercase())
+        .unwrap_or_else(|| "medium".into());
+    let custom_fps = current_value(text, "rotation.fps")
+        .and_then(|v| v.parse::<u32>().ok())
+        .unwrap_or(8)
+        .max(1);
     let (fps, step, speed) = match quality.as_str() {
         "low" => (4, 12, 1.0),
         "high" => (15, 3, 1.0),
         "custom" => (
             custom_fps,
             (45 / custom_fps).clamp(1, 12),
-            current_value(text, "rotation.speed").and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0),
+            current_value(text, "rotation.speed")
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(1.0),
         ),
         _ => (8, 6, 1.0),
     };
     let custom = quality == "custom";
-    let spool = |key: &str| if custom { current_value(text, key).and_then(|v| v.parse::<f32>().ok()).unwrap_or(1.0) } else { 1.0 };
+    let spool = |key: &str| {
+        if custom {
+            current_value(text, key)
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(1.0)
+        } else {
+            1.0
+        }
+    };
     RotationSettings {
         fps,
         step,
         speed,
-        direction: current_value(text, "reel.direction").map(|v| v.to_ascii_lowercase()).filter(|v| v == "cw").unwrap_or_else(|| "ccw".into()),
+        direction: current_value(text, "reel.direction")
+            .map(|v| v.to_ascii_lowercase())
+            .filter(|v| v == "cw")
+            .unwrap_or_else(|| "ccw".into()),
         spool_left: spool("spool.left.speed"),
         spool_right: spool("spool.right.speed"),
         spool_adaptive: truthy(current_value(text, "spool.adaptive").as_deref()),
-        queue_mode: current_value(text, "queue.mode").map(|v| v.eq_ignore_ascii_case("queue")).unwrap_or(false),
+        queue_mode: current_value(text, "queue.mode")
+            .map(|v| v.eq_ignore_ascii_case("queue"))
+            .unwrap_or(false),
     }
 }
 
@@ -2419,38 +2812,80 @@ pub struct ReelsSpec {
 
 /// `reel.*` of a meter, when it has a reel with a centre. A meter with a
 /// tonearm keeps its reels for the record instead.
-pub fn meter_reels(meters_txt: &str, meter: &str, theme_dir: &str, settings: &RotationSettings) -> Option<ReelsSpec> {
+pub fn meter_reels(
+    meters_txt: &str,
+    meter: &str,
+    theme_dir: &str,
+    settings: &RotationSettings,
+) -> Option<ReelsSpec> {
     let values = section_values(meters_txt, meter);
-    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str()).map(str::trim).filter(|v| !v.is_empty());
+    let get = |key: &str| {
+        values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+    };
     let ipair = |key: &str| -> Option<(i32, i32)> {
         let mut parts = get(key)?.split(',');
-        Some((parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
+        Some((
+            parts.next()?.trim().parse().ok()?,
+            parts.next()?.trim().parse().ok()?,
+        ))
     };
-    let has_tonearm = get("tonearm.filename").is_some() && get("tonearm.pivot.screen").is_some() && get("tonearm.pivot.image").is_some();
+    let has_tonearm = get("tonearm.filename").is_some()
+        && get("tonearm.pivot.screen").is_some()
+        && get("tonearm.pivot.image").is_some();
     if has_tonearm || get("vinyl.center").is_some() {
         return None;
     }
-    let rpm = get("reel.rotation.speed").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0).abs();
-    let path = |file: &str| if theme_dir.is_empty() { file.to_string() } else { format!("{}/{}", theme_dir.trim_end_matches('/'), file) };
+    let rpm = get("reel.rotation.speed")
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(0.0)
+        .abs();
+    let path = |file: &str| {
+        if theme_dir.is_empty() {
+            file.to_string()
+        } else {
+            format!("{}/{}", theme_dir.trim_end_matches('/'), file)
+        }
+    };
     let reel = |side: &str| -> Option<ReelSpec> {
         let file = get(&format!("reel.{side}.filename"))?;
         let center = ipair(&format!("reel.{side}.center"))?;
         let (album_file, theme_file) = match file.split_once(',') {
-            Some((album, theme)) => (album.trim().to_string(), if theme.trim().is_empty() { album.trim().to_string() } else { theme.trim().to_string() }),
+            Some((album, theme)) => (
+                album.trim().to_string(),
+                if theme.trim().is_empty() {
+                    album.trim().to_string()
+                } else {
+                    theme.trim().to_string()
+                },
+            ),
             None => (String::new(), file.to_string()),
         };
-        Some(ReelSpec { theme_file: path(&theme_file), album_file, center, rpm })
+        Some(ReelSpec {
+            theme_file: path(&theme_file),
+            album_file,
+            center,
+            rpm,
+        })
     };
     let (left, right) = (reel("left"), reel("right"));
     if left.is_none() && right.is_none() {
         return None;
     }
-    let direction = get("reel.direction").map(|v| v.to_ascii_lowercase()).unwrap_or_else(|| settings.direction.clone());
+    let direction = get("reel.direction")
+        .map(|v| v.to_ascii_lowercase())
+        .unwrap_or_else(|| settings.direction.clone());
     Some(ReelsSpec {
         left,
         right,
         clockwise: direction == "cw",
-        adaptive: get("spool.adaptive").map(|v| truthy(Some(v))).unwrap_or(settings.spool_adaptive),
+        adaptive: get("spool.adaptive")
+            .map(|v| truthy(Some(v)))
+            .unwrap_or(settings.spool_adaptive),
         spool_left: settings.spool_left,
         spool_right: settings.spool_right,
     })
@@ -2477,35 +2912,67 @@ pub struct VinylSpec {
 
 /// `vinyl.*` of a meter. With a tonearm but no vinyl, a single reel stands
 /// in for the record, as the player's handler does.
-pub fn meter_vinyl(meters_txt: &str, meter: &str, theme_dir: &str, settings: &RotationSettings) -> Option<VinylSpec> {
+pub fn meter_vinyl(
+    meters_txt: &str,
+    meter: &str,
+    theme_dir: &str,
+    settings: &RotationSettings,
+) -> Option<VinylSpec> {
     let values = section_values(meters_txt, meter);
-    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str()).map(str::trim).filter(|v| !v.is_empty());
+    let get = |key: &str| {
+        values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+    };
     let ipair = |key: &str| -> Option<(i32, i32)> {
         let mut parts = get(key)?.split(',');
-        Some((parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
+        Some((
+            parts.next()?.trim().parse().ok()?,
+            parts.next()?.trim().parse().ok()?,
+        ))
     };
     let upair = |key: &str| -> Option<(u32, u32)> {
         let mut parts = get(key)?.split(',');
-        Some((parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
+        Some((
+            parts.next()?.trim().parse().ok()?,
+            parts.next()?.trim().parse().ok()?,
+        ))
     };
-    let path = |file: &str| if theme_dir.is_empty() { file.to_string() } else { format!("{}/{}", theme_dir.trim_end_matches('/'), file) };
-    let has_tonearm = get("tonearm.filename").is_some() && get("tonearm.pivot.screen").is_some() && get("tonearm.pivot.image").is_some();
+    let path = |file: &str| {
+        if theme_dir.is_empty() {
+            file.to_string()
+        } else {
+            format!("{}/{}", theme_dir.trim_end_matches('/'), file)
+        }
+    };
+    let has_tonearm = get("tonearm.filename").is_some()
+        && get("tonearm.pivot.screen").is_some()
+        && get("tonearm.pivot.image").is_some();
     let mut file = get("vinyl.filename").map(str::to_string);
     let mut pos = ipair("vinyl.pos");
     let mut center = ipair("vinyl.center");
-    let mut rpm = get("albumart.rotation.speed").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+    let mut rpm = get("albumart.rotation.speed")
+        .and_then(|v| v.parse::<f32>().ok())
+        .unwrap_or(0.0);
     if file.is_none() && has_tonearm {
         if let (Some(reel), Some(c)) = (get("reel.left.filename"), ipair("reel.left.center")) {
             file = Some(reel.to_string());
             pos = ipair("reel.left.pos");
             center = Some(c);
-        } else if let (Some(reel), Some(c)) = (get("reel.right.filename"), ipair("reel.right.center")) {
+        } else if let (Some(reel), Some(c)) =
+            (get("reel.right.filename"), ipair("reel.right.center"))
+        {
             file = Some(reel.to_string());
             pos = ipair("reel.right.pos");
             center = Some(c);
         }
         if rpm <= 0.0 {
-            rpm = get("reel.rotation.speed").and_then(|v| v.parse::<f32>().ok()).unwrap_or(0.0);
+            rpm = get("reel.rotation.speed")
+                .and_then(|v| v.parse::<f32>().ok())
+                .unwrap_or(0.0);
         }
     }
     let file = file?;
@@ -2513,11 +2980,20 @@ pub fn meter_vinyl(meters_txt: &str, meter: &str, theme_dir: &str, settings: &Ro
     // `a,b` prefers `a` from the track's folder with `b` from the theme;
     // `,b` and `b` are the theme's picture alone.
     let (album_file, theme_file) = match file.split_once(',') {
-        Some((album, theme)) => (album.trim().to_string(), if theme.trim().is_empty() { file.clone() } else { theme.trim().to_string() }),
+        Some((album, theme)) => (
+            album.trim().to_string(),
+            if theme.trim().is_empty() {
+                file.clone()
+            } else {
+                theme.trim().to_string()
+            },
+        ),
         None => (String::new(), file.clone()),
     };
     let (x, y) = pos.unwrap_or((0, 0));
-    let direction = get("vinyl.direction").map(|v| v.to_ascii_lowercase()).unwrap_or_else(|| settings.direction.clone());
+    let direction = get("vinyl.direction")
+        .map(|v| v.to_ascii_lowercase())
+        .unwrap_or_else(|| settings.direction.clone());
     Some(VinylSpec {
         theme_file: path(&theme_file),
         album_file,
@@ -2548,17 +3024,35 @@ pub struct TonearmSpec {
 
 pub fn meter_tonearm(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<TonearmSpec> {
     let values = section_values(meters_txt, meter);
-    let get = |key: &str| values.iter().find(|(k, _)| k == key).map(|(_, v)| v.as_str()).map(str::trim).filter(|v| !v.is_empty());
+    let get = |key: &str| {
+        values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+    };
     let ipair = |key: &str| -> Option<(i32, i32)> {
         let mut parts = get(key)?.split(',');
-        Some((parts.next()?.trim().parse().ok()?, parts.next()?.trim().parse().ok()?))
+        Some((
+            parts.next()?.trim().parse().ok()?,
+            parts.next()?.trim().parse().ok()?,
+        ))
     };
-    let number = |key: &str, default: f32| get(key).and_then(|v| v.parse::<f32>().ok()).unwrap_or(default);
+    let number = |key: &str, default: f32| {
+        get(key)
+            .and_then(|v| v.parse::<f32>().ok())
+            .unwrap_or(default)
+    };
     let file = get("tonearm.filename")?;
     let pivot_screen = ipair("tonearm.pivot.screen")?;
     let pivot_image = ipair("tonearm.pivot.image")?;
     Some(TonearmSpec {
-        file: if theme_dir.is_empty() { file.to_string() } else { format!("{}/{}", theme_dir.trim_end_matches('/'), file) },
+        file: if theme_dir.is_empty() {
+            file.to_string()
+        } else {
+            format!("{}/{}", theme_dir.trim_end_matches('/'), file)
+        },
         pivot_screen,
         pivot_image,
         rest: number("tonearm.angle.rest", -30.0),
@@ -2609,7 +3103,8 @@ mod tests {
     fn screen_size_follows_the_folder_then_the_override() {
         let folder = "[current]\nmeter.folder = 480x320-wide\nscreen.width =\nscreen.height =\n";
         assert_eq!(screen_from_config(folder), (480, 320));
-        let override_size = "[current]\nmeter.folder = 480x320\nscreen.width = 1920\nscreen.height = 1080\n";
+        let override_size =
+            "[current]\nmeter.folder = 480x320\nscreen.width = 1920\nscreen.height = 1080\n";
         assert_eq!(screen_from_config(override_size), (1920, 1080));
         assert_eq!(screen_from_config(""), (800, 480));
     }
@@ -2617,16 +3112,26 @@ mod tests {
     #[test]
     fn a_named_meter_uses_its_background() {
         let text = "[bar]\nbgr.filename = bar-bgr.png\nscreen.bgr =\n\n[blue]\nbgr.filename = blue-bgr.png\nscreen.bgr = blue-screen.png\n";
-        assert_eq!(meter_background(text, "bar").as_deref(), Some("bar-bgr.png"));
-        assert_eq!(meter_background(text, "blue").as_deref(), Some("blue-screen.png"));
-        assert_eq!(meter_background(text, "random").as_deref(), Some("bar-bgr.png"));
+        assert_eq!(
+            meter_background(text, "bar").as_deref(),
+            Some("bar-bgr.png")
+        );
+        assert_eq!(
+            meter_background(text, "blue").as_deref(),
+            Some("blue-screen.png")
+        );
+        assert_eq!(
+            meter_background(text, "random").as_deref(),
+            Some("bar-bgr.png")
+        );
     }
 
     #[test]
     fn meter_positions_come_from_the_named_section() {
         let text = "[bar]\nleft.x = 130\nleft.y = 113\nright.x = 130\nright.y = 178\n";
         assert_eq!(meter_at(text, "bar"), (Some((130, 113)), Some((130, 178))));
-        let needle = "[gold]\nleft.origin.x = 333\nleft.origin.y = 305\nmeter.x = 0\nmeter.y = 124\n";
+        let needle =
+            "[gold]\nleft.origin.x = 333\nleft.origin.y = 305\nmeter.x = 0\nmeter.y = 124\n";
         assert_eq!(meter_at(needle, "gold").0, Some((333, 429)));
         assert_eq!(
             meter_indicator("[bar]\nindicator.filename = bar-indicator.png\n", "bar").as_deref(),
@@ -2642,18 +3147,38 @@ mod tests {
             time.remaining.pos = 1100,160\ntime.remaining.color = 180,180,180\n\
             playinfo.maxwidth = 535\nfont.size.light = 25\nfont.size.regular = 20\n\
             font.size.bold = 28\nfont.color = 255,255,255\n";
-        let speeds = ScrollSpeeds { mode: "custom".into(), title: 8.0, artist: 10.0, album: 8.0 };
+        let speeds = ScrollSpeeds {
+            mode: "custom".into(),
+            title: 8.0,
+            artist: 10.0,
+            album: 8.0,
+        };
         let texts = meter_texts(text, "black-white", 1280, &speeds);
         let title = texts.title.unwrap();
-        assert_eq!((title.x, title.y, title.style, title.size), (283, 138, TextStyle::Bold, 28));
-        assert_eq!((title.color, title.max_width, title.speed, title.align), ([255, 237, 76], 535, 8.0, TextAlign::Left));
+        assert_eq!(
+            (title.x, title.y, title.style, title.size),
+            (283, 138, TextStyle::Bold, 28)
+        );
+        assert_eq!(
+            (title.color, title.max_width, title.speed, title.align),
+            ([255, 237, 76], 535, 8.0, TextAlign::Left)
+        );
         let artist = texts.artist.unwrap();
-        assert_eq!((artist.style, artist.size, artist.color, artist.speed), (TextStyle::Light, 25, [255, 255, 255], 10.0));
+        assert_eq!(
+            (artist.style, artist.size, artist.color, artist.speed),
+            (TextStyle::Light, 25, [255, 255, 255], 10.0)
+        );
         assert_eq!(texts.sample.unwrap().style, TextStyle::Regular);
         let time = texts.time.unwrap();
-        assert_eq!((time.style, time.size, time.color, time.max_width), (TextStyle::Digi, 40, [180, 180, 180], 0));
+        assert_eq!(
+            (time.style, time.size, time.color, time.max_width),
+            (TextStyle::Digi, 40, [180, 180, 180], 0)
+        );
         assert!(texts.album.is_none() && texts.ticker.is_none());
-        assert_eq!(meter_texts(text, "random", 1280, &speeds).title.unwrap().x, 10);
+        assert_eq!(
+            meter_texts(text, "random", 1280, &speeds).title.unwrap().x,
+            10
+        );
     }
 
     #[test]
@@ -2663,26 +3188,61 @@ mod tests {
             time.total.color = 1,2,3\nfont.size.digi = 40\nfont.size.regular = 22\n";
         let texts = meter_texts(text, "m", 1280, &ScrollSpeeds::default());
         let remaining = texts.time.unwrap();
-        assert_eq!((remaining.style, remaining.size, remaining.font_file.as_str()), (TextStyle::Digi, 32, "fonts/MyDigi.ttf"));
+        assert_eq!(
+            (
+                remaining.style,
+                remaining.size,
+                remaining.font_file.as_str()
+            ),
+            (TextStyle::Digi, 32, "fonts/MyDigi.ttf")
+        );
         let elapsed = texts.time_elapsed.unwrap();
-        assert_eq!((elapsed.style, elapsed.size, elapsed.color, elapsed.font_file.as_str()), (TextStyle::Regular, 22, [180, 180, 180], ""), "an unknown style word is the regular font");
+        assert_eq!(
+            (
+                elapsed.style,
+                elapsed.size,
+                elapsed.color,
+                elapsed.font_file.as_str()
+            ),
+            (TextStyle::Regular, 22, [180, 180, 180], ""),
+            "an unknown style word is the regular font"
+        );
         let total = texts.time_total.unwrap();
-        assert_eq!((total.style, total.size, total.color), (TextStyle::Digi, 40, [1, 2, 3]));
+        assert_eq!(
+            (total.style, total.size, total.color),
+            (TextStyle::Digi, 40, [1, 2, 3])
+        );
     }
 
     #[test]
     fn the_selection_names_random_or_a_list_and_visibility_needs_the_extension() {
-        assert_eq!(selection_from_config("[current]\nmeter = gold\n"), Selection::Named("gold".into()));
-        assert_eq!(selection_from_config("[current]\nmeter = Random\n"), Selection::Random);
+        assert_eq!(
+            selection_from_config("[current]\nmeter = gold\n"),
+            Selection::Named("gold".into())
+        );
+        assert_eq!(
+            selection_from_config("[current]\nmeter = Random\n"),
+            Selection::Random
+        );
         assert_eq!(
             selection_from_config("[current]\nmeter = gold, red ,dash\n"),
             Selection::List(vec!["gold".into(), "red".into(), "dash".into()])
         );
-        assert_eq!(random_interval_from_config("[current]\nrandom.meter.interval = 15\n"), 15);
+        assert_eq!(
+            random_interval_from_config("[current]\nrandom.meter.interval = 15\n"),
+            15
+        );
         assert_eq!(random_interval_from_config(""), 60);
-        assert!(random_change_title_from_config("[current]\nrandom.change.title = True\n"));
-        assert!(!random_change_title_from_config("[current]\nrandom.change.title = False\n"));
-        assert_eq!(meter_sections("[gold]\nx=1\n[ red ]\n\n[dash]\n"), ["gold", "red", "dash"]);
+        assert!(random_change_title_from_config(
+            "[current]\nrandom.change.title = True\n"
+        ));
+        assert!(!random_change_title_from_config(
+            "[current]\nrandom.change.title = False\n"
+        ));
+        assert_eq!(
+            meter_sections("[gold]\nx=1\n[ red ]\n\n[dash]\n"),
+            ["gold", "red", "dash"]
+        );
         let m = "[a]\nconfig.extend = True\nmeter.visible = False\n[b]\nmeter.visible = False\n[c]\nconfig.extend = True\n";
         assert!(!meter_visible(m, "a"));
         assert!(meter_visible(m, "b"), "meter.visible needs config.extend");
@@ -2696,18 +3256,50 @@ mod tests {
             [mono]\nmeter.type = circular\nchannels = 1\nmono.origin.x = 397\nmono.origin.y = 605\nmeter.x = 10\nmeter.y = 5\nleft.needle.flip = true\n\
             [pair]\nmeter.type = circular\nchannels = 2\nleft.start.angle = 40\nleft.stop.angle = -40\nright.start.angle = -40\nright.stop.angle = 40\nright.needle.flip = True\n";
         let bar = meter_spec(m, "bar");
-        assert_eq!((bar.kind, bar.channels, bar.mono_at), (MeterKind::Linear, 2, None));
+        assert_eq!(
+            (bar.kind, bar.channels, bar.mono_at),
+            (MeterKind::Linear, 2, None)
+        );
         let linear = bar.linear.unwrap();
-        assert_eq!((linear.direction, linear.single, linear.flip_left, linear.flip_right), (Direction::BottomTop, true, false, true));
-        assert_eq!(linear.masks(), [0, 34, 68, 102, 136, 170, 204, 238, 272, 306, 326, 346, 366, 386]);
-        assert_eq!((linear.bar_width(0.0), linear.bar_width(0.5), linear.bar_width(1.0)), (1, 238, 386), "14 steps; 0.5 reaches step 7; full is the last mask");
+        assert_eq!(
+            (
+                linear.direction,
+                linear.single,
+                linear.flip_left,
+                linear.flip_right
+            ),
+            (Direction::BottomTop, true, false, true)
+        );
+        assert_eq!(
+            linear.masks(),
+            [0, 34, 68, 102, 136, 170, 204, 238, 272, 306, 326, 346, 366, 386]
+        );
+        assert_eq!(
+            (
+                linear.bar_width(0.0),
+                linear.bar_width(0.5),
+                linear.bar_width(1.0)
+            ),
+            (1, 238, 386),
+            "14 steps; 0.5 reaches step 7; full is the last mask"
+        );
         let mono = meter_spec(m, "mono");
-        assert_eq!((mono.kind, mono.channels, mono.mono_at, mono.flip_left), (MeterKind::Circular, 1, Some((407, 610)), true));
+        assert_eq!(
+            (mono.kind, mono.channels, mono.mono_at, mono.flip_left),
+            (MeterKind::Circular, 1, Some((407, 610)), true)
+        );
         assert_eq!(mono.left_angles, None);
         let pair = meter_spec(m, "pair");
-        assert_eq!((pair.left_angles, pair.right_angles, pair.flip_right), (Some((40.0, -40.0)), Some((-40.0, 40.0)), true));
+        assert_eq!(
+            (pair.left_angles, pair.right_angles, pair.flip_right),
+            (Some((40.0, -40.0)), Some((-40.0, 40.0)), true)
+        );
         assert!(pair.visible);
-        assert_eq!(meter_needle(m, "pair"), Some((40.0, -40.0, 0.0)), "the left pair stands in for missing shared angles");
+        assert_eq!(
+            meter_needle(m, "pair"),
+            Some((40.0, -40.0, 0.0)),
+            "the left pair stands in for missing shared angles"
+        );
     }
 
     #[test]
@@ -2716,19 +3308,51 @@ mod tests {
         assert_eq!(meter_spectrum(meters, "m"), Some(("s.2".into(), 1260, 307)));
         assert_eq!(meter_spectrum(meters, "n"), None, "needs config.extend");
         let settings = spectrum_settings("[current]\nspectrum = s.7\nbase.folder = /t\nspectrum.folder = 1280x720\nmax.value = 100\nsize = 20\n");
-        assert_eq!(settings, SpectrumSettings { base_folder: "/t".into(), folder: "1280x720".into(), bins: 20, max_value: 100.0 });
+        assert_eq!(
+            settings,
+            SpectrumSettings {
+                base_folder: "/t".into(),
+                folder: "1280x720".into(),
+                bins: 20,
+                max_value: 100.0
+            }
+        );
         let theme = "[s.2]\norigin.x = 123\norigin.y = 196\nspectrum.x = 10\nspectrum.y = 224\nbgr.type = image\nbgr.filename = bgr-2.png\n\
             bar.type = image\nbar.filename = bar-2.png\nbar.width = 27\nbar.height = 210\nbar.gap = 25\nreflection.type = gradient\n\
             reflection.gradient = (0, 0, 0, 0), (0, 0, 0, 80)\nreflection.gap = 0\ntopping.height = 3\ntopping.step = 2\nfgr.filename =\nsteps = 30\n";
-        let spec = spectrum_from_theme(theme, "s.2", (1260, 307), &settings, "/t/1280x720").unwrap();
-        assert_eq!((spec.x, spec.y, spec.w, spec.h, spec.origin_x, spec.origin_y), (10, 224, 1260, 307, 123, 196));
-        assert_eq!(spec.background, Some(Fill::Image("/t/1280x720/bgr-2.png".into())));
+        let spec =
+            spectrum_from_theme(theme, "s.2", (1260, 307), &settings, "/t/1280x720").unwrap();
+        assert_eq!(
+            (spec.x, spec.y, spec.w, spec.h, spec.origin_x, spec.origin_y),
+            (10, 224, 1260, 307, 123, 196)
+        );
+        assert_eq!(
+            spec.background,
+            Some(Fill::Image("/t/1280x720/bgr-2.png".into()))
+        );
         assert_eq!(spec.bar, Some(Fill::Image("/t/1280x720/bar-2.png".into())));
-        assert_eq!(spec.reflection, Some(Fill::Gradient(vec![[0, 0, 0, 0], [0, 0, 0, 80]])));
-        assert_eq!((spec.topping, spec.foreground.as_str(), spec.step()), (Some((3, 2)), "", 7));
+        assert_eq!(
+            spec.reflection,
+            Some(Fill::Gradient(vec![[0, 0, 0, 0], [0, 0, 0, 80]]))
+        );
+        assert_eq!(
+            (spec.topping, spec.foreground.as_str(), spec.step()),
+            (Some((3, 2)), "", 7)
+        );
         // 210 / 30 = 7 px steps; a raw 50 is 105 px, exactly 15 steps; 51 rounds up to 16.
-        assert_eq!((spec.bar_height(0.0), spec.bar_height(50.0), spec.bar_height(51.0), spec.bar_height(100.0)), (0, 105, 112, 210));
-        assert_eq!(spectrum_from_theme(theme, "s.9", (1, 1), &settings, ""), None);
+        assert_eq!(
+            (
+                spec.bar_height(0.0),
+                spec.bar_height(50.0),
+                spec.bar_height(51.0),
+                spec.bar_height(100.0)
+            ),
+            (0, 105, 112, 210)
+        );
+        assert_eq!(
+            spectrum_from_theme(theme, "s.9", (1, 1), &settings, ""),
+            None
+        );
     }
 
     #[test]
@@ -2738,48 +3362,177 @@ mod tests {
             folderlayer.3.pos = 1,1\n";
         let layers = meter_folder_layers(m, "m");
         assert_eq!(layers.len(), 2, "the third has no dimension");
-        assert_eq!((layers[0].x, layers[0].y, layers[0].w, layers[0].h, layers[0].zorder, layers[0].scale, layers[0].border), (40, 40, 300, 300, ZOrder::Background, Scale::Fit, 0));
-        assert_eq!(layers[0].files, FOLDER_LAYER_FILES.map(String::from).to_vec());
-        assert_eq!((layers[1].files.clone(), layers[1].scale, layers[1].zorder, layers[1].border, layers[1].border_color), (vec!["logo.png".to_string(), "Logo.png".to_string()], Scale::Stretch, ZOrder::Overlay, 2, [1, 2, 3]));
-        let files = ["back.png".to_string(), "../x.png".to_string(), "a/b.png".to_string(), "logo.txt".to_string(), "Logo.JPG".to_string()];
-        assert_eq!(folder_candidates("mnt/INTERNAL/U2/War (1983)/02. Seconds.flac", &files), ["/mnt/INTERNAL/U2/War (1983)/back.png", "/mnt/INTERNAL/U2/War (1983)/Logo.JPG"]);
-        assert_eq!(folder_candidates("music-library/NAS/a/b.flac", &files)[0], "/mnt/NAS/a/back.png");
+        assert_eq!(
+            (
+                layers[0].x,
+                layers[0].y,
+                layers[0].w,
+                layers[0].h,
+                layers[0].zorder,
+                layers[0].scale,
+                layers[0].border
+            ),
+            (40, 40, 300, 300, ZOrder::Background, Scale::Fit, 0)
+        );
+        assert_eq!(
+            layers[0].files,
+            FOLDER_LAYER_FILES.map(String::from).to_vec()
+        );
+        assert_eq!(
+            (
+                layers[1].files.clone(),
+                layers[1].scale,
+                layers[1].zorder,
+                layers[1].border,
+                layers[1].border_color
+            ),
+            (
+                vec!["logo.png".to_string(), "Logo.png".to_string()],
+                Scale::Stretch,
+                ZOrder::Overlay,
+                2,
+                [1, 2, 3]
+            )
+        );
+        let files = [
+            "back.png".to_string(),
+            "../x.png".to_string(),
+            "a/b.png".to_string(),
+            "logo.txt".to_string(),
+            "Logo.JPG".to_string(),
+        ];
+        assert_eq!(
+            folder_candidates("mnt/INTERNAL/U2/War (1983)/02. Seconds.flac", &files),
+            [
+                "/mnt/INTERNAL/U2/War (1983)/back.png",
+                "/mnt/INTERNAL/U2/War (1983)/Logo.JPG"
+            ]
+        );
+        assert_eq!(
+            folder_candidates("music-library/NAS/a/b.flac", &files)[0],
+            "/mnt/NAS/a/back.png"
+        );
         assert!(folder_candidates("", &files).is_empty());
-        assert_eq!(folder_candidates("rp2/channel@id=0", &files), ["/mnt/rp2/back.png", "/mnt/rp2/Logo.JPG"], "a stream maps under /mnt too and simply is not found");
+        assert_eq!(
+            folder_candidates("rp2/channel@id=0", &files),
+            ["/mnt/rp2/back.png", "/mnt/rp2/Logo.JPG"],
+            "a stream maps under /mnt too and simply is not found"
+        );
     }
 
     #[test]
     fn a_fanart_slot_needs_position_and_dimension() {
         let m = "[m]\nfanart.pos = 0,0\nfanart.dimension = 1280,720\nfanart.scale = stretch\n[n]\nfanart.pos = 1,1\n";
         let slot = meter_fanart(m, "m").unwrap();
-        assert_eq!((slot.x, slot.y, slot.w, slot.h, slot.scale, slot.zorder), (0, 0, 1280, 720, Scale::Stretch, ZOrder::Background));
+        assert_eq!(
+            (slot.x, slot.y, slot.w, slot.h, slot.scale, slot.zorder),
+            (0, 0, 1280, 720, Scale::Stretch, ZOrder::Background)
+        );
         assert_eq!(meter_fanart(m, "n"), None);
     }
 
     #[test]
     fn a_turntable_meter_has_a_record_and_a_tonearm() {
         let settings = rotation_settings("[current]\nrotation.quality = custom\nrotation.fps = 25\nrotation.speed = 2\nreel.direction = ccw\nspool.left.speed = 1.5\nspool.adaptive = true\nqueue.mode = queue\n");
-        assert_eq!(settings, RotationSettings { fps: 25, step: 1, speed: 2.0, direction: "ccw".into(), spool_left: 1.5, spool_right: 1.0, spool_adaptive: true, queue_mode: true });
+        assert_eq!(
+            settings,
+            RotationSettings {
+                fps: 25,
+                step: 1,
+                speed: 2.0,
+                direction: "ccw".into(),
+                spool_left: 1.5,
+                spool_right: 1.0,
+                spool_adaptive: true,
+                queue_mode: true
+            }
+        );
         assert_eq!(rotation_settings("[current]\nrotation.quality = high\nrotation.speed = 3\nspool.left.speed = 4\nreel.direction = cw\n"), RotationSettings { fps: 15, step: 3, speed: 1.0, direction: "cw".into(), ..RotationSettings::default() });
         let m = "[t]\nalbumart.pos = 195,235\nalbumart.dimension = 198,198\nalbumart.rotation = True\nalbumart.rotation.speed = 30\n\
             tonearm.filename = arm.png\ntonearm.pivot.screen = 629,166\ntonearm.pivot.image = 57,129\ntonearm.angle.rest = 0\ntonearm.angle.start = -27\n\
             tonearm.angle.end = -47\ntonearm.drop.duration = 1.8\nvinyl.filename = vinyl.jpg,disc.png\nvinyl.pos = 50,92\nvinyl.center = 293,334\nvinyl.direction = cw\n\
             [r]\ntonearm.filename = arm.png\ntonearm.pivot.screen = 1,1\ntonearm.pivot.image = 1,1\nreel.left.filename = reel.png\nreel.left.pos = 5,5\nreel.left.center = 40,40\nreel.rotation.speed = 3\n";
         let vinyl = meter_vinyl(m, "t", "/th", &settings).unwrap();
-        assert_eq!((vinyl.theme_file.as_str(), vinyl.album_file.as_str(), vinyl.x, vinyl.y, vinyl.center, vinyl.clockwise, vinyl.rpm), ("/th/disc.png", "vinyl.jpg", 50, 92, (293, 334), true, 60.0));
+        assert_eq!(
+            (
+                vinyl.theme_file.as_str(),
+                vinyl.album_file.as_str(),
+                vinyl.x,
+                vinyl.y,
+                vinyl.center,
+                vinyl.clockwise,
+                vinyl.rpm
+            ),
+            ("/th/disc.png", "vinyl.jpg", 50, 92, (293, 334), true, 60.0)
+        );
         let arm = meter_tonearm(m, "t", "/th").unwrap();
-        assert_eq!((arm.file.as_str(), arm.pivot_screen, arm.pivot_image, arm.rest, arm.start, arm.end, arm.drop_s, arm.lift_s), ("/th/arm.png", (629, 166), (57, 129), 0.0, -27.0, -47.0, 1.8, 1.0));
+        assert_eq!(
+            (
+                arm.file.as_str(),
+                arm.pivot_screen,
+                arm.pivot_image,
+                arm.rest,
+                arm.start,
+                arm.end,
+                arm.drop_s,
+                arm.lift_s
+            ),
+            (
+                "/th/arm.png",
+                (629, 166),
+                (57, 129),
+                0.0,
+                -27.0,
+                -47.0,
+                1.8,
+                1.0
+            )
+        );
         let art = meter_art(m, "t", "/th").unwrap();
         assert!((art.rotation, art.rpm) == (true, 30.0));
         let reel = meter_vinyl(m, "r", "", &settings).unwrap();
-        assert_eq!((reel.theme_file.as_str(), reel.center, reel.rpm, reel.clockwise), ("reel.png", (40, 40), 6.0, false), "a single reel stands in, turning the default way");
+        assert_eq!(
+            (
+                reel.theme_file.as_str(),
+                reel.center,
+                reel.rpm,
+                reel.clockwise
+            ),
+            ("reel.png", (40, 40), 6.0, false),
+            "a single reel stands in, turning the default way"
+        );
         let c = "[c]\nreel.left.filename = cdart.png,left.png\nreel.left.center = 360,321\nreel.right.filename = right.png\nreel.right.center = 957,321\nreel.rotation.speed = 25\nspool.adaptive = false\n";
         let reels = meter_reels(c, "c", "/th", &settings).unwrap();
         let left = reels.left.unwrap();
-        assert_eq!((left.theme_file.as_str(), left.album_file.as_str(), left.center, left.rpm), ("/th/left.png", "cdart.png", (360, 321), 25.0));
-        assert_eq!((reels.right.unwrap().theme_file.as_str(), reels.clockwise, reels.adaptive, reels.spool_left), ("/th/right.png", false, false, 1.5), "the meter's spool.adaptive overrides the player's");
-        assert_eq!(meter_reels(m, "r", "", &settings), None, "a reel with a tonearm is the record, not a reel");
-        assert_eq!(meter_vinyl("[x]\nvinyl.filename = a.png\n", "x", "", &settings), None, "no centre, no record");
+        assert_eq!(
+            (
+                left.theme_file.as_str(),
+                left.album_file.as_str(),
+                left.center,
+                left.rpm
+            ),
+            ("/th/left.png", "cdart.png", (360, 321), 25.0)
+        );
+        assert_eq!(
+            (
+                reels.right.unwrap().theme_file.as_str(),
+                reels.clockwise,
+                reels.adaptive,
+                reels.spool_left
+            ),
+            ("/th/right.png", false, false, 1.5),
+            "the meter's spool.adaptive overrides the player's"
+        );
+        assert_eq!(
+            meter_reels(m, "r", "", &settings),
+            None,
+            "a reel with a tonearm is the record, not a reel"
+        );
+        assert_eq!(
+            meter_vinyl("[x]\nvinyl.filename = a.png\n", "x", "", &settings),
+            None,
+            "no centre, no record"
+        );
     }
 
     #[test]
@@ -2792,48 +3545,181 @@ mod tests {
             [n]\nmute.pos = 1,1\nmute.icon = a.png\n";
         let spec = meter_indicators(m, "i", "/th").unwrap();
         let mute = spec.mute.unwrap();
-        assert_eq!((mute.x, mute.y, mute.glow, mute.glow_intensity, mute.states()), (50, 680, 8, 0.7, 3));
-        assert_eq!(mute.look, StateLook::Led { w: 16, h: 16, circle: false, colors: vec![[64, 64, 64], [255, 0, 0], [255, 128, 0]] });
+        assert_eq!(
+            (
+                mute.x,
+                mute.y,
+                mute.glow,
+                mute.glow_intensity,
+                mute.states()
+            ),
+            (50, 680, 8, 0.7, 3)
+        );
+        assert_eq!(
+            mute.look,
+            StateLook::Led {
+                w: 16,
+                h: 16,
+                circle: false,
+                colors: vec![[64, 64, 64], [255, 0, 0], [255, 128, 0]]
+            }
+        );
         let shuffle = spec.shuffle.unwrap();
-        assert_eq!(shuffle.look, StateLook::Led { w: 10, h: 10, circle: true, colors: vec![[64, 64, 64], [0, 200, 255], [0, 200, 255]] }, "six legacy values are on then off");
+        assert_eq!(
+            shuffle.look,
+            StateLook::Led {
+                w: 10,
+                h: 10,
+                circle: true,
+                colors: vec![[64, 64, 64], [0, 200, 255], [0, 200, 255]]
+            },
+            "six legacy values are on then off"
+        );
         let repeat = spec.repeat.unwrap();
-        assert_eq!((repeat.states(), repeat.glow, repeat.glow_intensity), (4, 6, 0.5));
-        assert_eq!(repeat.look, StateLook::Icons { files: ["/th/r_off.png", "/th/r_all.png", "/th/r_single.png", "/th/r_inf.png"].map(String::from).to_vec() });
-        assert_eq!(spec.playstate.unwrap().look, StateLook::Icons { files: vec!["/th/stop.png".into(), String::new(), "/th/play.png".into()] });
+        assert_eq!(
+            (repeat.states(), repeat.glow, repeat.glow_intensity),
+            (4, 6, 0.5)
+        );
+        assert_eq!(
+            repeat.look,
+            StateLook::Icons {
+                files: [
+                    "/th/r_off.png",
+                    "/th/r_all.png",
+                    "/th/r_single.png",
+                    "/th/r_inf.png"
+                ]
+                .map(String::from)
+                .to_vec()
+            }
+        );
+        assert_eq!(
+            spec.playstate.unwrap().look,
+            StateLook::Icons {
+                files: vec!["/th/stop.png".into(), String::new(), "/th/play.png".into()]
+            }
+        );
         let volume = spec.volume.unwrap();
-        assert_eq!((volume.style, volume.tip.as_str(), volume.travel, volume.tip_offset, volume.vertical(), volume.bg_color), (GaugeStyle::Slider, "/th/tip.png", Some((3, 202)), (-7, 0), true, None));
+        assert_eq!(
+            (
+                volume.style,
+                volume.tip.as_str(),
+                volume.travel,
+                volume.tip_offset,
+                volume.vertical(),
+                volume.bg_color
+            ),
+            (
+                GaugeStyle::Slider,
+                "/th/tip.png",
+                Some((3, 202)),
+                (-7, 0),
+                true,
+                None
+            )
+        );
         let progress = spec.progress.unwrap();
-        assert_eq!((progress.style, progress.color, progress.bg_color, progress.border, progress.border_color, progress.vertical()), (GaugeStyle::Slider, [22, 22, 22], Some([173, 143, 99]), 1, [173, 143, 99], false));
+        assert_eq!(
+            (
+                progress.style,
+                progress.color,
+                progress.bg_color,
+                progress.border,
+                progress.border_color,
+                progress.vertical()
+            ),
+            (
+                GaugeStyle::Slider,
+                [22, 22, 22],
+                Some([173, 143, 99]),
+                1,
+                [173, 143, 99],
+                false
+            )
+        );
         assert_eq!(progress.markers.len(), 3, "the third marker has neither picture nor label and is skipped; the fourth still counts");
-        assert_eq!((progress.markers[1].pos, progress.markers[1].image.as_str(), progress.markers[1].font_size), (50.0, "/th/m.png", Some(12)));
+        assert_eq!(
+            (
+                progress.markers[1].pos,
+                progress.markers[1].image.as_str(),
+                progress.markers[1].font_size
+            ),
+            (50.0, "/th/m.png", Some(12))
+        );
         assert_eq!(progress.head_image.as_str(), "/th/head.png");
-        assert_eq!(meter_indicators(m, "n", ""), None, "indicators need config.extend");
+        assert_eq!(
+            meter_indicators(m, "n", ""),
+            None,
+            "indicators need config.extend"
+        );
     }
 
     #[test]
     fn the_transition_settings_follow_the_player() {
         let s = transition_settings("[current]\nstart.animation = True\ntransition.type = fade\ntransition.duration = 1.5\ntransition.color = white\ntransition.opacity = 60\n");
-        assert_eq!(s, TransitionSettings { at_start: true, fade: true, duration_s: 1.5, white: true, opacity: 0.6 });
-        assert_eq!(transition_settings("[current]\ntransition.type = none\n"), TransitionSettings { fade: false, ..TransitionSettings::default() });
+        assert_eq!(
+            s,
+            TransitionSettings {
+                at_start: true,
+                fade: true,
+                duration_s: 1.5,
+                white: true,
+                opacity: 0.6
+            }
+        );
+        assert_eq!(
+            transition_settings("[current]\ntransition.type = none\n"),
+            TransitionSettings {
+                fade: false,
+                ..TransitionSettings::default()
+            }
+        );
         assert_eq!(transition_settings(""), TransitionSettings::default());
     }
 
     #[test]
     fn the_run_settings_and_the_dismiss_rule_follow_the_player() {
         let s = run_settings("[current]\nexit.on.touch = False\nstop.display.on.touch = True\nposition.type = custom\nposition.x = 10\nposition.y = 20\n");
-        assert_eq!(s, RunSettings { exit_on_touch: true, centered: false, x: 10, y: 20 });
+        assert_eq!(
+            s,
+            RunSettings {
+                exit_on_touch: true,
+                centered: false,
+                x: 10,
+                y: 20
+            }
+        );
         assert_eq!(run_settings(""), RunSettings::default());
         assert!(should_mark_dismiss(Some("/tmp/glass_dismiss"), false, true));
-        assert!(!should_mark_dismiss(Some("/tmp/glass_dismiss"), true, true), "the plugin's own stop is not a dismiss");
-        assert!(!should_mark_dismiss(Some("/tmp/glass_dismiss"), false, false), "no run flag, no plugin to re-arm");
-        assert!(!should_mark_dismiss(None, false, true), "a remote launcher sets no marker");
+        assert!(
+            !should_mark_dismiss(Some("/tmp/glass_dismiss"), true, true),
+            "the plugin's own stop is not a dismiss"
+        );
+        assert!(
+            !should_mark_dismiss(Some("/tmp/glass_dismiss"), false, false),
+            "no run flag, no plugin to re-arm"
+        );
+        assert!(
+            !should_mark_dismiss(None, false, true),
+            "a remote launcher sets no marker"
+        );
     }
 
     #[test]
     fn the_data_source_section_has_the_engine_defaults() {
         let spec = data_source_from_config("[current]\nmeter = x\n\n[data.source]\nvolume.max = 100.0\nvolume.gain.db = -6\nsmooth.buffer.size = 2\nstereo.algorithm = average\n");
-        assert_eq!((spec.max_ui, spec.max_pipe, spec.gain_db, spec.smooth), (100.0, 100.0, -6.0, 2));
-        assert_eq!((spec.stereo.as_str(), spec.mono.as_str(), spec.gain_source.as_str()), ("average", "average", ""));
+        assert_eq!(
+            (spec.max_ui, spec.max_pipe, spec.gain_db, spec.smooth),
+            (100.0, 100.0, -6.0, 2)
+        );
+        assert_eq!(
+            (
+                spec.stereo.as_str(),
+                spec.mono.as_str(),
+                spec.gain_source.as_str()
+            ),
+            ("average", "average", "")
+        );
         assert_eq!(data_source_from_config(""), DataSourceSpec::default());
     }
 
@@ -2845,22 +3731,53 @@ mod tests {
             playinfo.ticker.direction = ltr\nplayinfo.ticker.separator =  - \nplayinfo.ticker.space_between = 1\n\
             playinfo.ticker.end_spaces = 10\nplayinfo.ticker.append_next = True\nplayinfo.ticker.replace = True\n\
             playinfo.next.title.pos = 830,300\n";
-        let skin = ScrollSpeeds { mode: "skin".into(), ..ScrollSpeeds::default() };
+        let skin = ScrollSpeeds {
+            mode: "skin".into(),
+            ..ScrollSpeeds::default()
+        };
         let texts = meter_texts(text, "m", 1280, &skin);
         let title = texts.title.unwrap();
-        assert_eq!((title.style, title.size, title.align), (TextStyle::Italic, 22, TextAlign::Center));
-        assert_eq!((title.max_width, title.speed), (768, 15.0), "centred: six tenths of the screen; per-field speed");
+        assert_eq!(
+            (title.style, title.size, title.align),
+            (TextStyle::Italic, 22, TextAlign::Center)
+        );
+        assert_eq!(
+            (title.max_width, title.speed),
+            (768, 15.0),
+            "centred: six tenths of the screen; per-field speed"
+        );
         let artist = texts.artist.unwrap();
-        assert_eq!((artist.max_width, artist.speed), (441, 25.0), "own maxwidth; meter's global speed");
+        assert_eq!(
+            (artist.max_width, artist.speed),
+            (441, 25.0),
+            "own maxwidth; meter's global speed"
+        );
         assert_eq!(texts.next_title.unwrap().max_width, 768);
         let ticker = texts.ticker.unwrap();
-        assert_eq!((ticker.text.x, ticker.text.max_width, ticker.text.speed), (40, 1240, 25.0), "capped to the visible width");
+        assert_eq!(
+            (ticker.text.x, ticker.text.max_width, ticker.text.speed),
+            (40, 1240, 25.0),
+            "capped to the visible width"
+        );
         assert_eq!((ticker.direction, ticker.separator.as_str(), ticker.space_between, ticker.end_spaces), (ScrollDirection::Ltr, "-", 1, 10), "values are trimmed as the player's parser trims them; spacing comes from space_between");
         assert!(ticker.append_next && ticker.replace);
-        let default_mode = ScrollSpeeds { mode: "default".into(), ..ScrollSpeeds::default() };
-        assert_eq!(meter_texts(text, "m", 1280, &default_mode).title.unwrap().speed, 40.0);
+        let default_mode = ScrollSpeeds {
+            mode: "default".into(),
+            ..ScrollSpeeds::default()
+        };
+        assert_eq!(
+            meter_texts(text, "m", 1280, &default_mode)
+                .title
+                .unwrap()
+                .speed,
+            40.0
+        );
         let plain = meter_texts("[m]\nplayinfo.title.pos = 100,5\n", "m", 800, &default_mode);
-        assert_eq!(plain.title.unwrap().max_width, 680, "auto box: screen minus x minus margin");
+        assert_eq!(
+            plain.title.unwrap().max_width,
+            680,
+            "auto box: screen minus x minus margin"
+        );
     }
 
     #[test]
@@ -2868,11 +3785,17 @@ mod tests {
         let text = "[black-white]\nalbumart.pos = 36,25\nalbumart.dimension = 201,201\n";
         let art = meter_art(text, "black-white", "/themes/t").unwrap();
         assert_eq!((art.x, art.y, art.w, art.h), (36, 25, 201, 201));
-        assert_eq!((art.mask.as_str(), art.border, art.border_color), ("", 0, [255, 255, 255]));
+        assert_eq!(
+            (art.mask.as_str(), art.border, art.border_color),
+            ("", 0, [255, 255, 255])
+        );
         assert_eq!(meter_art("[bar]\nalbumart.pos = 1,2\n", "bar", ""), None);
         let masked = "[v]\nalbumart.pos = 27,28\nalbumart.dimension = 432,432\nalbumart.mask = mask.png\nalbumart.border = 2\nfont.color = 10,20,30\n";
         let art = meter_art(masked, "v", "/themes/v").unwrap();
-        assert_eq!((art.mask.as_str(), art.border, art.border_color), ("/themes/v/mask.png", 2, [10, 20, 30]));
+        assert_eq!(
+            (art.mask.as_str(), art.border, art.border_color),
+            ("/themes/v/mask.png", 2, [10, 20, 30])
+        );
     }
 
     #[test]
@@ -2894,13 +3817,31 @@ mod tests {
             playinfo.type.color = 204,176,97\nplayinfo.samplerate.pos = 902,160,regular\nfont.size.regular = 20\n";
         let spec = meter_type(text, "m", Some("icon")).unwrap();
         assert_eq!((spec.x, spec.y, spec.box_size), (847, 149, Some((45, 45))));
-        assert_eq!((spec.mode, spec.align, spec.color), (TypeMode::Icon, TypeAlign::Center, [204, 176, 97]));
+        assert_eq!(
+            (spec.mode, spec.align, spec.color),
+            (TypeMode::Icon, TypeAlign::Center, [204, 176, 97])
+        );
         assert_eq!((spec.font_size, spec.font_style), (20, TextStyle::Regular));
         let meter_wins = "[m]\nplayinfo.type.pos = 1,1\nplayinfo.type.dimension = 53,53\nplayinfo.type.mode = both\nplayinfo.type.align = right\nplayinfo.type.fontsize = 18\n";
         let spec = meter_type(meter_wins, "m", Some("text")).unwrap();
-        assert_eq!((spec.mode, spec.align, spec.font_size), (TypeMode::Both, TypeAlign::Right, 18));
-        assert_eq!(meter_type("[m]\nplayinfo.type.pos = 1,1\nplayinfo.type.dimension = 1,1\n", "m", None), None);
-        let text_only = meter_type("[m]\nplayinfo.type.pos = 5,6\nplayinfo.type.mode = text\n", "m", None).unwrap();
+        assert_eq!(
+            (spec.mode, spec.align, spec.font_size),
+            (TypeMode::Both, TypeAlign::Right, 18)
+        );
+        assert_eq!(
+            meter_type(
+                "[m]\nplayinfo.type.pos = 1,1\nplayinfo.type.dimension = 1,1\n",
+                "m",
+                None
+            ),
+            None
+        );
+        let text_only = meter_type(
+            "[m]\nplayinfo.type.pos = 5,6\nplayinfo.type.mode = text\n",
+            "m",
+            None,
+        )
+        .unwrap();
         assert_eq!((text_only.box_size, text_only.font_size), (None, 30));
         assert_eq!(type_font_size(20, Some(45)), 20);
         assert_eq!(type_font_size(40, Some(45)), 20);
@@ -2910,15 +3851,31 @@ mod tests {
     #[test]
     fn font_files_join_the_path_and_default_the_clock_font() {
         let text = "[current]\nfont.path = /fonts\nfont.light = /Lato-Light.ttf\nfont.bold = Lato-Bold.ttf\n";
-        let fonts = fonts_from_config(text, "/plugin/fonts/DSEG7.ttf", "/plugin/fonts/PeppyFont-Italic.ttf");
+        let fonts = fonts_from_config(
+            text,
+            "/plugin/fonts/DSEG7.ttf",
+            "/plugin/fonts/PeppyFont-Italic.ttf",
+        );
         assert_eq!(fonts.light, "/fonts/Lato-Light.ttf");
         assert_eq!(fonts.bold, "/fonts/Lato-Bold.ttf");
         assert_eq!(fonts.regular, "");
         assert_eq!(fonts.digi, "/plugin/fonts/DSEG7.ttf");
         assert_eq!(fonts.italic, "/plugin/fonts/PeppyFont-Italic.ttf");
-        let own = fonts_from_config("[current]\nfont.path = /f\nfont.italic = /I.ttf\n", "", "/d/i.ttf");
+        let own = fonts_from_config(
+            "[current]\nfont.path = /f\nfont.italic = /I.ttf\n",
+            "",
+            "/d/i.ttf",
+        );
         assert_eq!(own.italic, "/f/I.ttf");
         let speeds = scroll_speeds_from_config("[current]\nscrolling.mode = custom\nscrolling.speed.title = 8\nscrolling.speed.artist = 10\n");
-        assert_eq!((speeds.mode.as_str(), speeds.title, speeds.artist, speeds.album), ("custom", 8.0, 10.0, 40.0));
+        assert_eq!(
+            (
+                speeds.mode.as_str(),
+                speeds.title,
+                speeds.artist,
+                speeds.album
+            ),
+            ("custom", 8.0, 10.0, 40.0)
+        );
     }
 }

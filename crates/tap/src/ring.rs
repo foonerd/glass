@@ -80,12 +80,15 @@ const S_SPECTRUM: usize = 40;
 
 fn slot_bytes(bins: usize) -> usize {
     let raw = S_SPECTRUM + bins * MAX_CHANNELS * 4 + 8;
-    (raw + 63) / 64 * 64
+    raw.div_ceil(64) * 64
 }
 
 /// Nanoseconds of the monotonic clock.
 pub fn now_ns() -> u64 {
-    let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    let mut ts = libc::timespec {
+        tv_sec: 0,
+        tv_nsec: 0,
+    };
     // A valid clock id and a valid pointer: this cannot fail.
     unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
     ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
@@ -98,14 +101,21 @@ struct Map {
 }
 
 impl Map {
-    fn map(fd: i32, len: usize, write: bool) -> io::Result<Self> {
-        let prot = if write { libc::PROT_READ | libc::PROT_WRITE } else { libc::PROT_READ };
+    fn open(fd: i32, len: usize, write: bool) -> io::Result<Self> {
+        let prot = if write {
+            libc::PROT_READ | libc::PROT_WRITE
+        } else {
+            libc::PROT_READ
+        };
         // A shared mapping of `len` bytes of an open file.
         let ptr = unsafe { libc::mmap(std::ptr::null_mut(), len, prot, libc::MAP_SHARED, fd, 0) };
         if ptr == libc::MAP_FAILED {
             return Err(io::Error::last_os_error());
         }
-        Ok(Self { ptr: ptr as *mut u8, len })
+        Ok(Self {
+            ptr: ptr as *mut u8,
+            len,
+        })
     }
 
     fn bytes(&self) -> &[u8] {
@@ -167,14 +177,29 @@ pub struct Writer {
 impl Writer {
     /// Create the ring for a stream. `slots` is how many hops are kept; the
     /// reader takes the latest, a history view can take more.
-    pub fn create(dir: &Path, tag: &str, rate: u32, channels: u32, fft_size: u32, hop: u32, slots: usize) -> io::Result<Self> {
+    pub fn create(
+        dir: &Path,
+        tag: &str,
+        rate: u32,
+        channels: u32,
+        fft_size: u32,
+        hop: u32,
+        slots: usize,
+    ) -> io::Result<Self> {
         let bins = (fft_size / 2) as usize;
         let slots = slots.max(2);
         let slot_bytes = slot_bytes(bins);
         let len = HEADER_BYTES + slots * slot_bytes;
         let path = dir.join(format!("{PREFIX}{tag}.{}", std::process::id()));
-        let cpath = CString::new(path.to_string_lossy().as_bytes()).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-        let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_RDWR | libc::O_CREAT | libc::O_CLOEXEC, 0o644) };
+        let cpath = CString::new(path.to_string_lossy().as_bytes())
+            .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+        let fd = unsafe {
+            libc::open(
+                cpath.as_ptr(),
+                libc::O_RDWR | libc::O_CREAT | libc::O_CLOEXEC,
+                0o644,
+            )
+        };
         if fd < 0 {
             return Err(io::Error::last_os_error());
         }
@@ -184,7 +209,7 @@ impl Writer {
             unsafe { libc::close(fd) };
             return Err(err);
         }
-        let map = Map::map(fd, len, true);
+        let map = Map::open(fd, len, true);
         unsafe { libc::close(fd) };
         let mut map = map?;
         {
@@ -202,7 +227,14 @@ impl Writer {
             put_u32(bytes, H_PID, std::process::id());
             put_u32(bytes, H_HOP, hop);
         }
-        Ok(Self { map, path, bins, slots, slot_bytes, seq: 0 })
+        Ok(Self {
+            map,
+            path,
+            bins,
+            slots,
+            slot_bytes,
+            seq: 0,
+        })
     }
 
     pub fn path(&self) -> &Path {
@@ -235,7 +267,9 @@ impl Writer {
             put_u64(slot, tail, seq);
             put_u64(slot, S_SEQ, seq);
         }
-        self.map.atomic_u64(H_WRITTEN).store(time, Ordering::Release);
+        self.map
+            .atomic_u64(H_WRITTEN)
+            .store(time, Ordering::Release);
         self.map.atomic_u64(H_SEQ).store(seq, Ordering::Release);
     }
 }
@@ -261,17 +295,21 @@ impl Reader {
         if len < HEADER_BYTES {
             return Err(io::Error::new(io::ErrorKind::InvalidData, "ring too short"));
         }
-        let cpath = CString::new(path.to_string_lossy().as_bytes()).map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
+        let cpath = CString::new(path.to_string_lossy().as_bytes())
+            .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
         let fd = unsafe { libc::open(cpath.as_ptr(), libc::O_RDONLY | libc::O_CLOEXEC) };
         if fd < 0 {
             return Err(io::Error::last_os_error());
         }
-        let map = Map::map(fd, len, false);
+        let map = Map::open(fd, len, false);
         unsafe { libc::close(fd) };
         let map = map?;
         let bytes = map.bytes();
         if &bytes[H_MAGIC..H_MAGIC + 8] != MAGIC || get_u32(bytes, H_VERSION) != VERSION {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "not a glasstap ring"));
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "not a glasstap ring",
+            ));
         }
         let info = Info {
             rate: get_u32(bytes, H_RATE),
@@ -286,10 +324,20 @@ impl Reader {
             written_ns: 0,
         };
         let needed = HEADER_BYTES + info.slots as usize * info.slot_bytes as usize;
-        if info.slots == 0 || info.slot_bytes as usize != slot_bytes(info.bins as usize) || len < needed {
-            return Err(io::Error::new(io::ErrorKind::InvalidData, "ring header disagrees with its size"));
+        if info.slots == 0
+            || info.slot_bytes as usize != slot_bytes(info.bins as usize)
+            || len < needed
+        {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "ring header disagrees with its size",
+            ));
         }
-        Ok(Self { map, path: path.to_path_buf(), info })
+        Ok(Self {
+            map,
+            path: path.to_path_buf(),
+            info,
+        })
     }
 
     /// Every ring under `dir`, the most recently written first.
@@ -305,13 +353,15 @@ impl Reader {
                 Some((reader.info().written_ns, path))
             })
             .collect();
-        found.sort_by(|a, b| b.0.cmp(&a.0));
+        found.sort_by_key(|a| std::cmp::Reverse(a.0));
         found.into_iter().map(|(_, p)| p).collect()
     }
 
     /// The ring being written right now, if any.
     pub fn open_live(dir: &Path) -> Option<Self> {
-        Self::find(dir).into_iter().find_map(|path| Reader::open(&path).ok().filter(Reader::is_live))
+        Self::find(dir)
+            .into_iter()
+            .find_map(|path| Reader::open(&path).ok().filter(Reader::is_live))
     }
 
     pub fn path(&self) -> &Path {
@@ -350,7 +400,8 @@ impl Reader {
             return None;
         }
         let bins = self.info.bins as usize;
-        let at = HEADER_BYTES + ((seq as usize) % self.info.slots as usize) * self.info.slot_bytes as usize;
+        let at = HEADER_BYTES
+            + ((seq as usize) % self.info.slots as usize) * self.info.slot_bytes as usize;
         for _ in 0..3 {
             let bytes = self.map.bytes();
             let slot = &bytes[at..at + self.info.slot_bytes as usize];
@@ -360,7 +411,12 @@ impl Reader {
                 std::hint::spin_loop();
                 continue;
             }
-            let mut frame = Frame { seq, time_ns: get_u64(slot, S_TIME), frames: get_u64(slot, S_FRAMES), ..Frame::default() };
+            let mut frame = Frame {
+                seq,
+                time_ns: get_u64(slot, S_TIME),
+                frames: get_u64(slot, S_FRAMES),
+                ..Frame::default()
+            };
             for ch in 0..MAX_CHANNELS {
                 frame.peak[ch] = get_f32(slot, S_PEAK + ch * 4);
                 frame.rms[ch] = get_f32(slot, S_RMS + ch * 4);
@@ -396,7 +452,10 @@ mod tests {
             frames: 4096,
             peak: [0.5, 0.25],
             rms: [0.3, 0.2],
-            spectrum: [(0..32).map(|k| k as f32 / 32.0).collect(), (0..32).map(|k| 1.0 - k as f32 / 32.0).collect()],
+            spectrum: [
+                (0..32).map(|k| k as f32 / 32.0).collect(),
+                (0..32).map(|k| 1.0 - k as f32 / 32.0).collect(),
+            ],
             ..Frame::default()
         };
         writer.publish(&frame);
@@ -408,7 +467,17 @@ mod tests {
         assert_eq!(read.spectrum, frame.spectrum);
         assert!(read.time_ns > 0);
         let info = reader.info();
-        assert_eq!((info.rate, info.channels, info.fft_size, info.bins, info.hop, info.slots), (48_000, 2, 64, 32, 32, 4));
+        assert_eq!(
+            (
+                info.rate,
+                info.channels,
+                info.fft_size,
+                info.bins,
+                info.hop,
+                info.slots
+            ),
+            (48_000, 2, 64, 32, 32, 4)
+        );
         assert!(reader.is_live());
         // The ring keeps the last `slots` hops and no more.
         for _ in 0..5 {

@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  check:
+    name: format, lints, tests, docs
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Toolchain from rust-toolchain.toml
+        run: rustup toolchain install && rustup show active-toolchain
+      - name: System libraries the display and the tap link against
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libsdl2-dev libasound2-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: scripts/check.sh
+
+  ship:
+    name: cross builds
+    runs-on: ubuntu-24.04
+    needs: check
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install && rustup show active-toolchain
+      - name: Cross compilers and the libraries the host build links against
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu libsdl2-dev libasound2-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: scripts/ship.sh
+      - name: Plugin zip
+        run: scripts/package.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: glass-plugin
+          path: dist/glass-*.zip
+          if-no-files-found: error

@@ -16,3 +16,6 @@ intake = { path = "../../crates/intake" }
 lead = { path = "../../crates/lead" }
 pane = { path = "../../crates/pane" }
 plot = { path = "../../crates/plot" }
+
+[lints]
+workspace = true

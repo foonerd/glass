@@ -1,0 +1,38 @@
+name: release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  release:
+    name: build, package, publish
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup toolchain install && rustup show active-toolchain
+      - name: Cross compilers and the libraries the host build links against
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu libsdl2-dev libasound2-dev
+      - uses: Swatinem/rust-cache@v2
+      - run: scripts/check.sh
+      - run: scripts/ship.sh
+      - run: scripts/package.sh
+      - name: Notes from the changelog
+        run: scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > dist/notes.md
+      - name: Per-architecture archives of the display and the tap
+        run: |
+          for arch in arm armv7 armv8 x64; do
+            tar -C . -czf "dist/glass-${GITHUB_REF_NAME#v}-$arch.tar.gz" "bin/$arch" "lib/$arch"
+          done
+      - uses: softprops/action-gh-release@v2
+        with:
+          body_path: dist/notes.md
+          files: |
+            dist/glass-*.zip
+            dist/glass-*.tar.gz

@@ -10,9 +10,15 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
 
-use expose::{apply_circle, compose_base, fit_art, flip_x, raster_over, read_art, read_icon, read_png, write_png, FolderPicture, Fonts, IndicatorAssets, Motion, Spans, SpectrumAssets, Stack};
+use expose::{
+    apply_circle, compose_base, fit_art, flip_x, raster_over, read_art, read_icon, read_png,
+    write_png, FolderPicture, Fonts, IndicatorAssets, Motion, Spans, SpectrumAssets, Stack,
+};
 use intake::{Overrides, PipeSource, Selector, Source};
-use lead::{frame_period, should_mark_dismiss, FolderLayerSpec, Input, MeterKind, SkinDesc, TypeMode, DISMISS_FILE_VAR, RUN_FLAG};
+use lead::{
+    frame_period, should_mark_dismiss, FolderLayerSpec, Input, MeterKind, SkinDesc, TypeMode,
+    DISMISS_FILE_VAR, RUN_FLAG,
+};
 use pane::{publish, write_ppm, Shown, Surface};
 use plot::{step, Scene};
 
@@ -51,19 +57,31 @@ impl Assets {
         vec![
             ("base", self.base.bytes()),
             ("front", self.front.as_ref().map_or(0, Spans::bytes)),
-            ("needles", expose::bytes_of([&self.indicator, &self.indicator_right])),
+            (
+                "needles",
+                expose::bytes_of([&self.indicator, &self.indicator_right]),
+            ),
             ("tonearm", expose::bytes_of([&self.tonearm])),
             ("reels", expose::bytes_of([&self.reels.0, &self.reels.1])),
             ("mask", expose::bytes_of([&self.art_mask])),
-            ("spectrum", self.spectrum.as_ref().map_or(0, SpectrumAssets::bytes)),
-            ("indicators", self.indicators.as_ref().map_or(0, IndicatorAssets::bytes)),
+            (
+                "spectrum",
+                self.spectrum.as_ref().map_or(0, SpectrumAssets::bytes),
+            ),
+            (
+                "indicators",
+                self.indicators.as_ref().map_or(0, IndicatorAssets::bytes),
+            ),
             ("fonts", self.fonts.bytes()),
         ]
     }
 
     fn load(skin: &SkinDesc) -> Self {
         let mut fonts = Fonts::load(&skin.fonts);
-        for field in [&skin.time, &skin.time_elapsed, &skin.time_total].into_iter().flatten() {
+        for field in [&skin.time, &skin.time_elapsed, &skin.time_total]
+            .into_iter()
+            .flatten()
+        {
             fonts.add_file(&field.font_file);
         }
         let picture = load_theme(&skin.theme_dir, &skin.indicator);
@@ -82,7 +100,13 @@ impl Assets {
         };
         let background = load_theme(&skin.theme_dir, &skin.background);
         let face = load_theme(&skin.theme_dir, &skin.face);
-        let base = compose_base(skin.width.max(1), skin.height.max(1), background.as_ref(), face.as_ref(), skin.face_at);
+        let base = compose_base(
+            skin.width.max(1),
+            skin.height.max(1),
+            background.as_ref(),
+            face.as_ref(),
+            skin.face_at,
+        );
         Self {
             base,
             front: load_theme(&skin.theme_dir, &skin.front).map(Spans::new),
@@ -95,10 +119,19 @@ impl Assets {
                 .filter(|art| !art.mask.is_empty())
                 .and_then(|art| read_png(std::path::Path::new(&art.mask))),
             spectrum: skin.spectrum.as_ref().map(SpectrumAssets::load),
-            tonearm: skin.tonearm.as_ref().and_then(|arm| read_png(std::path::Path::new(&arm.file))),
+            tonearm: skin
+                .tonearm
+                .as_ref()
+                .and_then(|arm| read_png(std::path::Path::new(&arm.file))),
             reels: (
-                skin.reels.as_ref().and_then(|r| r.left.as_ref()).and_then(|r| read_png(std::path::Path::new(&r.theme_file))),
-                skin.reels.as_ref().and_then(|r| r.right.as_ref()).and_then(|r| read_png(std::path::Path::new(&r.theme_file))),
+                skin.reels
+                    .as_ref()
+                    .and_then(|r| r.left.as_ref())
+                    .and_then(|r| read_png(std::path::Path::new(&r.theme_file))),
+                skin.reels
+                    .as_ref()
+                    .and_then(|r| r.right.as_ref())
+                    .and_then(|r| read_png(std::path::Path::new(&r.theme_file))),
             ),
             indicators: skin.indicators.as_ref().map(IndicatorAssets::load),
         }
@@ -129,7 +162,12 @@ impl PictureSlot {
                 Err(mpsc::TryRecvError::Disconnected) => self.pending = None,
             }
         }
-        if file == self.file || self.pending.as_ref().is_some_and(|(wanted, _)| wanted == file) {
+        if file == self.file
+            || self
+                .pending
+                .as_ref()
+                .is_some_and(|(wanted, _)| wanted == file)
+        {
             return;
         }
         if file.is_empty() {
@@ -159,7 +197,10 @@ impl PictureSlot {
 struct PlainSlot {
     key: (String, Option<(u32, u32)>),
     frame: Option<expose::Frame>,
-    pending: Option<((String, Option<(u32, u32)>), mpsc::Receiver<Option<expose::Frame>>)>,
+    pending: Option<(
+        (String, Option<(u32, u32)>),
+        mpsc::Receiver<Option<expose::Frame>>,
+    )>,
 }
 
 impl PlainSlot {
@@ -176,7 +217,12 @@ impl PlainSlot {
             }
         }
         let key = (file.to_string(), size);
-        if key == self.key || self.pending.as_ref().is_some_and(|(wanted, _)| *wanted == key) {
+        if key == self.key
+            || self
+                .pending
+                .as_ref()
+                .is_some_and(|(wanted, _)| *wanted == key)
+        {
             return;
         }
         if file.is_empty() {
@@ -201,7 +247,7 @@ impl PlainSlot {
 /// Whether a fade may start now: the engine's lock file is older than the
 /// fade plus a second, or absent. Touching it claims the fade.
 fn fade_lock_free(duration_s: f32) -> bool {
-    let lock = std::env::temp_dir().join("glass_fade_lock");
+    let lock = env::temp_dir().join("glass_fade_lock");
     let cooldown = std::time::Duration::from_secs_f32(duration_s.max(0.0) + 1.0);
     let free = match std::fs::metadata(&lock).and_then(|m| m.modified()) {
         Ok(modified) => modified.elapsed().map_or(true, |age| age > cooldown),
@@ -349,13 +395,20 @@ fn main() -> ExitCode {
     // A snapshot walks the meters in turn; the first stands in for the
     // configuration's meter so the rotation below stays still.
     let snapshot_names: Vec<String> = match (&snapshot, &overrides.meter) {
-        (Some(_), Some(meter)) if meter != "random" => meter.split(',').map(|m| m.trim().to_string()).filter(|m| !m.is_empty()).collect(),
+        (Some(_), Some(meter)) if meter != "random" => meter
+            .split(',')
+            .map(|m| m.trim().to_string())
+            .filter(|m| !m.is_empty())
+            .collect(),
         (Some(_), _) => intake::installed_meter_names(),
         (None, _) => Vec::new(),
     };
     if snapshot.is_some() {
         match snapshot_names.first() {
-            Some(first) => intake::set_overrides(Overrides { meter: Some(first.clone()), ..overrides.clone() }),
+            Some(first) => intake::set_overrides(Overrides {
+                meter: Some(first.clone()),
+                ..overrides.clone()
+            }),
             None => {
                 eprintln!("glass: --snapshot found no meters in the theme");
                 return ExitCode::from(2);
@@ -381,7 +434,13 @@ fn main() -> ExitCode {
     // from one thread up to one per core, at most eight. --threads fixes the count.
     let (threads, adaptive) = match threads {
         Some(fixed) => (fixed, None),
-        None => (std::thread::available_parallelism().map(|n| n.get()).unwrap_or(1).min(8), Some(frame_rate)),
+        None => (
+            thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(1)
+                .min(8),
+            Some(frame_rate),
+        ),
     };
     let mut motion = Motion::new(threads, adaptive);
     let period = frame_period(frame_rate);
@@ -400,15 +459,26 @@ fn main() -> ExitCode {
     let mut assets = Assets::load(&skin);
     println!("glass: fonts loaded {} of 5", assets.fonts.loaded());
     if profiling {
-        println!("glass: memory kept for the meter: {}", memory_line(&assets.memory()));
+        println!(
+            "glass: memory kept for the meter: {}",
+            memory_line(&assets.memory())
+        );
     }
     // The engine fades the first frame in when the player asks for a start
     // animation, and every later meter in; a lock file shared with the
     // player's own engine keeps two starts within the fade's time from fading twice.
     let mut did_fade_in = false;
     let loaded_ms = started.elapsed().as_millis() as u64;
-    if skin.transition.at_start && skin.transition.fade && fade_lock_free(skin.transition.duration_s) {
-        motion.fade.begin_in(loaded_ms, skin.transition.duration_s, skin.transition.white, skin.transition.opacity);
+    if skin.transition.at_start
+        && skin.transition.fade
+        && fade_lock_free(skin.transition.duration_s)
+    {
+        motion.fade.begin_in(
+            loaded_ms,
+            skin.transition.duration_s,
+            skin.transition.white,
+            skin.transition.opacity,
+        );
         did_fade_in = true;
     }
     motion.ramp.begin(loaded_ms);
@@ -458,7 +528,10 @@ fn main() -> ExitCode {
     let running_for_plugin = !once && show_window;
     if running_for_plugin {
         let _ = std::fs::write(RUN_FLAG, b"");
-        let _ = std::fs::set_permissions(RUN_FLAG, std::os::unix::fs::PermissionsExt::from_mode(0o777));
+        let _ = std::fs::set_permissions(
+            RUN_FLAG,
+            std::os::unix::fs::PermissionsExt::from_mode(0o777),
+        );
     }
     let mut run_flag_checked = Instant::now();
     let mut leave: Option<&'static str> = None;
@@ -478,7 +551,12 @@ fn main() -> ExitCode {
             motion = Motion::new(threads, adaptive);
             let now = started.elapsed().as_millis() as u64;
             if skin.transition.fade && fade_lock_free(skin.transition.duration_s) {
-                motion.fade.begin_in(now, skin.transition.duration_s, skin.transition.white, skin.transition.opacity);
+                motion.fade.begin_in(
+                    now,
+                    skin.transition.duration_s,
+                    skin.transition.white,
+                    skin.transition.opacity,
+                );
                 did_fade_in = true;
             }
             motion.ramp.begin(now);
@@ -495,7 +573,10 @@ fn main() -> ExitCode {
         if let Some(dir) = &snapshot {
             if switched_at.elapsed() >= settle {
                 if let Some(frame) = &snapshot_last {
-                    let theme = std::path::Path::new(&skin.theme_dir).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| "theme".into());
+                    let theme = std::path::Path::new(&skin.theme_dir)
+                        .file_name()
+                        .map(|n| n.to_string_lossy().into_owned())
+                        .unwrap_or_else(|| "theme".into());
                     let folder = std::path::Path::new(dir).join(theme);
                     let _ = std::fs::create_dir_all(&folder);
                     let file = folder.join(format!("{}.png", skin.name.replace('/', "_")));
@@ -560,11 +641,22 @@ fn main() -> ExitCode {
         if surface.is_some() || write_file {
             match &scene.art {
                 Some(art) => {
-                    let stale = art_cache.as_ref().map_or(true, |(known, _)| known != art);
+                    let stale = art_cache.as_ref().is_none_or(|(known, _)| known != art);
                     if stale {
-                        art_cache = read_art(std::path::Path::new(&art.file), art.w, art.h, assets.art_mask.as_ref())
-                            .map(|frame| if art.rotation && art.mask.is_empty() { apply_circle(&frame) } else { frame })
-                            .map(|frame| (art.clone(), frame));
+                        art_cache = read_art(
+                            std::path::Path::new(&art.file),
+                            art.w,
+                            art.h,
+                            assets.art_mask.as_ref(),
+                        )
+                        .map(|frame| {
+                            if art.rotation && art.mask.is_empty() {
+                                apply_circle(&frame)
+                            } else {
+                                frame
+                            }
+                        })
+                        .map(|frame| (art.clone(), frame));
                     }
                 }
                 None => art_cache = None,
@@ -584,7 +676,7 @@ fn main() -> ExitCode {
                         None
                     };
                     let key = (area.icon.clone(), fw, fh, tint);
-                    let stale = icon_cache.as_ref().map_or(true, |(known, _)| *known != key);
+                    let stale = icon_cache.as_ref().is_none_or(|(known, _)| *known != key);
                     if stale {
                         icon_cache = read_icon(std::path::Path::new(&area.icon), fw, fh, tint)
                             .map(|frame| (key, frame));
@@ -593,7 +685,11 @@ fn main() -> ExitCode {
                 None => icon_cache = None,
             }
             if folder_slots.len() != scene.folder_layers.len() {
-                folder_slots = scene.folder_layers.iter().map(|_| PictureSlot::default()).collect();
+                folder_slots = scene
+                    .folder_layers
+                    .iter()
+                    .map(|_| PictureSlot::default())
+                    .collect();
             }
             for (slot, layer) in folder_slots.iter_mut().zip(scene.folder_layers.iter()) {
                 slot.want(&layer.file, &layer.spec, None);
@@ -612,8 +708,14 @@ fn main() -> ExitCode {
                     border_color: [0, 0, 0],
                 };
                 // The picture being replaced is the one the current slot held.
-                let handed_over = if fanart_slots.0.file == fanart.prev_file { fanart_slots.0.picture.clone() } else { None };
-                fanart_slots.1.want(&fanart.prev_file, &spec, handed_over.as_ref());
+                let handed_over = if fanart_slots.0.file == fanart.prev_file {
+                    fanart_slots.0.picture.clone()
+                } else {
+                    None
+                };
+                fanart_slots
+                    .1
+                    .want(&fanart.prev_file, &spec, handed_over.as_ref());
                 fanart_slots.0.want(&fanart.file, &spec, None);
             } else {
                 fanart_slots = Default::default();
@@ -625,7 +727,11 @@ fn main() -> ExitCode {
             // A reel from the album is scaled to the theme reel's size; the theme reel itself needs no slot.
             reel_pictures = match &scene.reels {
                 Some(reels) => {
-                    let side = |slot: &mut PlainSlot, file: &str, spec: Option<&lead::ReelSpec>, theme: Option<&expose::Frame>| -> Option<expose::Frame> {
+                    let side = |slot: &mut PlainSlot,
+                                file: &str,
+                                spec: Option<&lead::ReelSpec>,
+                                theme: Option<&expose::Frame>|
+                     -> Option<expose::Frame> {
                         let spec = spec?;
                         if file.is_empty() || file == spec.theme_file {
                             slot.want("", None);
@@ -635,8 +741,18 @@ fn main() -> ExitCode {
                         slot.frame.clone().or_else(|| theme.cloned())
                     };
                     (
-                        side(&mut reel_slots.0, &reels.left_file, reels.spec.left.as_ref(), assets.reels.0.as_ref()),
-                        side(&mut reel_slots.1, &reels.right_file, reels.spec.right.as_ref(), assets.reels.1.as_ref()),
+                        side(
+                            &mut reel_slots.0,
+                            &reels.left_file,
+                            reels.spec.left.as_ref(),
+                            assets.reels.0.as_ref(),
+                        ),
+                        side(
+                            &mut reel_slots.1,
+                            &reels.right_file,
+                            reels.spec.right.as_ref(),
+                            assets.reels.1.as_ref(),
+                        ),
                     )
                 }
                 None => (None, None),
@@ -658,7 +774,10 @@ fn main() -> ExitCode {
                     icon: icon_cache.as_ref().map(|(_, frame)| frame),
                     spectrum: assets.spectrum.as_ref(),
                     folder_pictures: &folder_pictures,
-                    fanart: (fanart_slots.0.picture.as_ref(), fanart_slots.1.picture.as_ref()),
+                    fanart: (
+                        fanart_slots.0.picture.as_ref(),
+                        fanart_slots.1.picture.as_ref(),
+                    ),
                     vinyl: vinyl_slot.frame.as_ref(),
                     tonearm: assets.tonearm.as_ref(),
                     reels: (reel_pictures.0.as_ref(), reel_pictures.1.as_ref()),
@@ -677,7 +796,11 @@ fn main() -> ExitCode {
                     Ok(Shown::Touched) => {
                         if skin.run.exit_on_touch {
                             let marker = env::var(DISMISS_FILE_VAR).ok();
-                            if should_mark_dismiss(marker.as_deref(), false, std::path::Path::new(RUN_FLAG).exists()) {
+                            if should_mark_dismiss(
+                                marker.as_deref(),
+                                false,
+                                std::path::Path::new(RUN_FLAG).exists(),
+                            ) {
                                 let _ = std::fs::write(marker.as_deref().unwrap_or_default(), b"1");
                             }
                             leave = Some("touched");
@@ -707,7 +830,10 @@ fn main() -> ExitCode {
         if serving_remote {
             publish(&scene);
         }
-        if running_for_plugin && leave.is_none() && run_flag_checked.elapsed() >= std::time::Duration::from_millis(500) {
+        if running_for_plugin
+            && leave.is_none()
+            && run_flag_checked.elapsed() >= std::time::Duration::from_millis(500)
+        {
             run_flag_checked = Instant::now();
             if !std::path::Path::new(RUN_FLAG).exists() {
                 leave = Some("run flag removed");
@@ -718,9 +844,40 @@ fn main() -> ExitCode {
             // Leave the way the engine leaves: fade out when a fade in was shown.
             if let (Some(window), true) = (surface.as_mut(), did_fade_in && skin.transition.fade) {
                 let now = started.elapsed().as_millis() as u64;
-                motion.fade.begin_out(now, skin.transition.duration_s, skin.transition.white, skin.transition.opacity);
+                motion.fade.begin_out(
+                    now,
+                    skin.transition.duration_s,
+                    skin.transition.white,
+                    skin.transition.opacity,
+                );
                 while motion.fade.running(started.elapsed().as_millis() as u64) {
-                    let painted = raster_over(&scene, Stack { screen: None, face: None, front: assets.front.as_ref(), needle: assets.indicator.as_ref(), needle_right: assets.indicator_right.as_ref(), face_at: skin.face_at, fonts: Some(&assets.fonts), art: art_cache.as_ref().map(|(_, frame)| frame), icon: icon_cache.as_ref().map(|(_, frame)| frame), spectrum: assets.spectrum.as_ref(), folder_pictures: &folder_pictures, fanart: (fanart_slots.0.picture.as_ref(), fanart_slots.1.picture.as_ref()), vinyl: vinyl_slot.frame.as_ref(), tonearm: assets.tonearm.as_ref(), reels: (reel_pictures.0.as_ref(), reel_pictures.1.as_ref()), indicators: assets.indicators.as_ref(), base: Some(&assets.base) }, &mut motion, started.elapsed().as_millis() as u64);
+                    let painted = raster_over(
+                        &scene,
+                        Stack {
+                            screen: None,
+                            face: None,
+                            front: assets.front.as_ref(),
+                            needle: assets.indicator.as_ref(),
+                            needle_right: assets.indicator_right.as_ref(),
+                            face_at: skin.face_at,
+                            fonts: Some(&assets.fonts),
+                            art: art_cache.as_ref().map(|(_, frame)| frame),
+                            icon: icon_cache.as_ref().map(|(_, frame)| frame),
+                            spectrum: assets.spectrum.as_ref(),
+                            folder_pictures: &folder_pictures,
+                            fanart: (
+                                fanart_slots.0.picture.as_ref(),
+                                fanart_slots.1.picture.as_ref(),
+                            ),
+                            vinyl: vinyl_slot.frame.as_ref(),
+                            tonearm: assets.tonearm.as_ref(),
+                            reels: (reel_pictures.0.as_ref(), reel_pictures.1.as_ref()),
+                            indicators: assets.indicators.as_ref(),
+                            base: Some(&assets.base),
+                        },
+                        &mut motion,
+                        started.elapsed().as_millis() as u64,
+                    );
                     if window.show(painted.frame, painted.damage).is_err() {
                         break;
                     }
@@ -739,7 +896,11 @@ fn main() -> ExitCode {
                 }
             }
             let shown_at = Instant::now();
-            profile_painted += motion.damage().iter().map(|r| u64::from(r.w) * u64::from(r.h)).sum::<u64>();
+            profile_painted += motion
+                .damage()
+                .iter()
+                .map(|r| u64::from(r.w) * u64::from(r.h))
+                .sum::<u64>();
             profile_boxes += motion.damage().len() as u64;
             profile_loop[0] += polled_at.duration_since(frame_started).as_micros() as u64;
             profile_loop[1] += stepped_at.duration_since(polled_at).as_micros() as u64;
@@ -748,7 +909,10 @@ fn main() -> ExitCode {
             profile_frames += 1;
             if profile_frames == 60 {
                 let n = u64::from(profile_frames);
-                let stages: Vec<String> = profile_sum.iter().map(|(name, sum)| format!("{name} {}us", sum / n)).collect();
+                let stages: Vec<String> = profile_sum
+                    .iter()
+                    .map(|(name, sum)| format!("{name} {}us", sum / n))
+                    .collect();
                 let achieved = n as f64 / profile_window.elapsed().as_secs_f64();
                 profile_window = Instant::now();
                 println!(
@@ -761,10 +925,30 @@ fn main() -> ExitCode {
                     .chain([
                         ("art", art_cache.as_ref().map_or(0, |(_, f)| f.bytes())),
                         ("icon", icon_cache.as_ref().map_or(0, |(_, f)| f.bytes())),
-                        ("layers", folder_pictures.iter().flatten().map(|p| p.frame.bytes()).sum()),
-                        ("fanart", [&fanart_slots.0, &fanart_slots.1].into_iter().filter_map(|s| s.picture.as_ref()).map(|p| p.frame.bytes()).sum()),
-                        ("vinyl", vinyl_slot.frame.as_ref().map_or(0, expose::Frame::bytes)),
-                        ("reels", expose::bytes_of([&reel_pictures.0, &reel_pictures.1])),
+                        (
+                            "layers",
+                            folder_pictures
+                                .iter()
+                                .flatten()
+                                .map(|p| p.frame.bytes())
+                                .sum(),
+                        ),
+                        (
+                            "fanart",
+                            [&fanart_slots.0, &fanart_slots.1]
+                                .into_iter()
+                                .filter_map(|s| s.picture.as_ref())
+                                .map(|p| p.frame.bytes())
+                                .sum(),
+                        ),
+                        (
+                            "vinyl",
+                            vinyl_slot.frame.as_ref().map_or(0, expose::Frame::bytes),
+                        ),
+                        (
+                            "reels",
+                            expose::bytes_of([&reel_pictures.0, &reel_pictures.1]),
+                        ),
                     ])
                     .collect();
                 println!("glass: memory moving: {}", memory_line(&moving));
@@ -793,6 +977,10 @@ fn main() -> ExitCode {
 /// Stores and their sizes in kB, with the total first.
 fn memory_line(stores: &[(&'static str, usize)]) -> String {
     let total: usize = stores.iter().map(|(_, b)| b).sum();
-    let parts: Vec<String> = stores.iter().filter(|(_, b)| *b > 0).map(|(name, b)| format!("{name} {}", b / 1024)).collect();
+    let parts: Vec<String> = stores
+        .iter()
+        .filter(|(_, b)| *b > 0)
+        .map(|(name, b)| format!("{name} {}", b / 1024))
+        .collect();
     format!("{} kB ({})", total / 1024, parts.join(", "))
 }

@@ -15,7 +15,10 @@ impl Fifo {
         let cpath = CString::new(path).ok()?;
         // EEXIST is fine: the FIFO is there already.
         unsafe { libc::mkfifo(cpath.as_ptr(), 0o666) };
-        let mut fifo = Self { path: cpath, fd: -1 };
+        let mut fifo = Self {
+            path: cpath,
+            fd: -1,
+        };
         fifo.open();
         Some(fifo)
     }
@@ -25,7 +28,12 @@ impl Fifo {
             return;
         }
         // Without a reader the open fails at once instead of waiting.
-        self.fd = unsafe { libc::open(self.path.as_ptr(), libc::O_WRONLY | libc::O_NONBLOCK | libc::O_CLOEXEC) };
+        self.fd = unsafe {
+            libc::open(
+                self.path.as_ptr(),
+                libc::O_WRONLY | libc::O_NONBLOCK | libc::O_CLOEXEC,
+            )
+        };
     }
 
     fn close(&mut self) {

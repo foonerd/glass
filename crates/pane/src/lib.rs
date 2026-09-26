@@ -47,16 +47,29 @@ impl Surface {
             .borderless()
             .build()
             .map_err(|err| err.to_string())?;
-        let canvas = window.into_canvas().build().map_err(|err| err.to_string())?;
+        let canvas = window
+            .into_canvas()
+            .build()
+            .map_err(|err| err.to_string())?;
         // Say what draws the frames, so a report from a player tells whether
         // the upload goes through hardware.
         let info = canvas.info();
-        println!("glass: renderer {} on {}", info.name, video.current_video_driver());
+        println!(
+            "glass: renderer {} on {}",
+            info.name,
+            video.current_video_driver()
+        );
         let creator = canvas.texture_creator();
         let pump = sdl.event_pump()?;
         // A player's glass shows no pointer.
         sdl.mouse().show_cursor(false);
-        Ok(Self { canvas, creator, texture: None, pump, placement: None })
+        Ok(Self {
+            canvas,
+            creator,
+            texture: None,
+            pump,
+            placement: None,
+        })
     }
 
     /// Put the frame's top left at a fixed point instead of centring it.
@@ -92,9 +105,14 @@ impl Surface {
         }
         let texture = self.texture.as_mut().expect("texture was just made");
         let pitch = frame.width as usize * 4;
-        let whole = !fits || changed.iter().any(|r| r.x == 0 && r.y == 0 && r.w >= frame.width && r.h >= frame.height);
+        let whole = !fits
+            || changed
+                .iter()
+                .any(|r| r.x == 0 && r.y == 0 && r.w >= frame.width && r.h >= frame.height);
         if whole {
-            texture.update(None, &frame.rgba, pitch).map_err(|err| err.to_string())?;
+            texture
+                .update(None, &frame.rgba, pitch)
+                .map_err(|err| err.to_string())?;
         } else {
             if changed.is_empty() {
                 // The window shows this frame already.
@@ -103,15 +121,26 @@ impl Surface {
             for r in changed {
                 let from = (r.y as usize * frame.width as usize + r.x as usize) * 4;
                 let rect = sdl2::rect::Rect::new(r.x as i32, r.y as i32, r.w.max(1), r.h.max(1));
-                texture.update(Some(rect), &frame.rgba[from..], pitch).map_err(|err| err.to_string())?;
+                texture
+                    .update(Some(rect), &frame.rgba[from..], pitch)
+                    .map_err(|err| err.to_string())?;
             }
         }
-        self.canvas.set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
+        self.canvas
+            .set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
         self.canvas.clear();
-        let (window_w, window_h) = self.canvas.output_size().unwrap_or((frame.width, frame.height));
-        let (x, y) = self.placement.unwrap_or(((window_w as i32 - frame.width as i32) / 2, (window_h as i32 - frame.height as i32) / 2));
+        let (window_w, window_h) = self
+            .canvas
+            .output_size()
+            .unwrap_or((frame.width, frame.height));
+        let (x, y) = self.placement.unwrap_or((
+            (window_w as i32 - frame.width as i32) / 2,
+            (window_h as i32 - frame.height as i32) / 2,
+        ));
         let dest = sdl2::rect::Rect::new(x, y, frame.width, frame.height);
-        self.canvas.copy(texture, None, dest).map_err(|err| err.to_string())?;
+        self.canvas
+            .copy(texture, None, dest)
+            .map_err(|err| err.to_string())?;
         self.canvas.present();
         Ok(if touched { Shown::Touched } else { Shown::Kept })
     }
@@ -131,7 +160,7 @@ pub fn write_ppm(path: impl AsRef<Path>, frame: &Frame) -> io::Result<()> {
     let mut file = File::create(&part)?;
     write!(file, "P6\n{} {}\n255\n", frame.width, frame.height)?;
     let mut rgb = Vec::with_capacity((frame.width * frame.height * 3) as usize);
-    for px in frame.rgba.chunks_exact(4) {
+    for px in frame.rgba.as_chunks::<4>().0 {
         rgb.extend_from_slice(&px[..3]);
     }
     file.write_all(&rgb)?;

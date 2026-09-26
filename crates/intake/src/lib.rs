@@ -4,24 +4,25 @@
 use std::fs::{File, OpenOptions};
 use std::io::{self, Read, Write};
 use std::net::TcpStream;
+use std::os::unix::fs::OpenOptionsExt;
+use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
-use std::os::unix::fs::OpenOptionsExt;
-use std::path::{Path, PathBuf};
 
 use std::collections::{HashMap, VecDeque};
 
 use lead::{
-    data_source_from_config, decode_meter, decode_spectrum, fonts_from_config, format_key,
-    frame_rate_from_config, meter_art, meter_at, meter_background, meter_indicator,
-    folder_candidates, meter_fanart, meter_folder_layers, meter_layers, meter_needle, meter_sections, meter_spec, meter_spectrum, meter_text_at,
-    meter_indicators, meter_reels, meter_tonearm, meter_vinyl, rotation_settings, run_settings, transition_settings,
-    meter_texts, meter_type, random_change_title_from_config, random_interval_from_config,
-    screen_from_config, scroll_speeds_from_config, selection_from_config, spectrum_from_theme,
-    spectrum_settings, Bins, DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec, METER_CONFIG, SPECTRUM_CONFIG,
-    DEFAULT_FRAME_RATE, DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_FIFO, SPECTRUM_FIFO,
-    STOCK_ICONS, current_value,
+    current_value, data_source_from_config, decode_meter, decode_spectrum, folder_candidates,
+    fonts_from_config, format_key, frame_rate_from_config, meter_art, meter_at, meter_background,
+    meter_fanart, meter_folder_layers, meter_indicator, meter_indicators, meter_layers,
+    meter_needle, meter_reels, meter_sections, meter_spec, meter_spectrum, meter_text_at,
+    meter_texts, meter_tonearm, meter_type, meter_vinyl, random_change_title_from_config,
+    random_interval_from_config, rotation_settings, run_settings, screen_from_config,
+    scroll_speeds_from_config, selection_from_config, spectrum_from_theme, spectrum_settings,
+    transition_settings, Bins, DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec,
+    DEFAULT_FRAME_RATE, DEFAULT_METER_MAX, DEFAULT_SPECTRUM_BINS, METER_CONFIG, METER_FIFO,
+    SPECTRUM_CONFIG, SPECTRUM_FIFO, STOCK_ICONS,
 };
 
 /// The theme's meter rotation as the player configures it: which names, in
@@ -85,6 +86,8 @@ impl Selector {
     }
 
     /// The next meter name, or `None` for a fixed meter.
+    // The name is the player's word for it; the selector is no iterator.
+    #[allow(clippy::should_implement_trait)]
     pub fn next(&mut self) -> Option<String> {
         if self.rotation.names.is_empty() {
             return None;
@@ -129,7 +132,12 @@ fn theme_dir_from(text: &str, config_path: &str) -> Option<PathBuf> {
 /// are found from it: `spectrum.txt` beside it, `fonts` and `format-icons`
 /// one level up.
 fn config_path() -> String {
-    std::env::var("GLASS_CONFIG").unwrap_or_else(|_| lead::home().join(METER_CONFIG).to_string_lossy().into_owned())
+    std::env::var("GLASS_CONFIG").unwrap_or_else(|_| {
+        lead::home()
+            .join(METER_CONFIG)
+            .to_string_lossy()
+            .into_owned()
+    })
 }
 
 /// The spectrum configuration beside the meter configuration.
@@ -180,7 +188,11 @@ fn with_current(text: &str, key: &str, value: &str) -> String {
             out.push('\n');
             continue;
         }
-        if in_current && trimmed.split_once('=').is_some_and(|(k, _)| k.trim() == key) {
+        if in_current
+            && trimmed
+                .split_once('=')
+                .is_some_and(|(k, _)| k.trim() == key)
+        {
             if !written {
                 out.push_str(&format!("{key} = {value}\n"));
                 written = true;
@@ -241,7 +253,9 @@ pub fn installed_themes() -> Vec<(String, Vec<String>)> {
         .flatten()
         .filter(|e| e.path().join("meters.txt").is_file())
         .map(|e| {
-            let sections = std::fs::read_to_string(e.path().join("meters.txt")).map(|m| meter_sections(&m)).unwrap_or_default();
+            let sections = std::fs::read_to_string(e.path().join("meters.txt"))
+                .map(|m| meter_sections(&m))
+                .unwrap_or_default();
             (e.file_name().to_string_lossy().into_owned(), sections)
         })
         .collect();
@@ -333,8 +347,13 @@ fn fanart_list(artist: &str, uri: &str) -> FanartAnswer {
         return FanartAnswer::default();
     };
     match serde_json::from_str::<Outer>(&text) {
-        Ok(Outer { success: true, data: Some(answer) }) if answer.success => answer,
-        Ok(Outer { data: Some(answer), .. }) => FanartAnswer {
+        Ok(Outer {
+            success: true,
+            data: Some(answer),
+        }) if answer.success => answer,
+        Ok(Outer {
+            data: Some(answer), ..
+        }) => FanartAnswer {
             images: Vec::new(),
             ..answer
         },
@@ -349,9 +368,11 @@ fn fanart_file(reference: &str) -> String {
     if local.is_file() {
         return local.to_string_lossy().into_owned();
     }
-    fetch_art(&format!("http://localhost:3000/albumart?sectionimage={reference}"))
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_default()
+    fetch_art(&format!(
+        "http://localhost:3000/albumart?sectionimage={reference}"
+    ))
+    .map(|p| p.to_string_lossy().into_owned())
+    .unwrap_or_default()
 }
 
 fn xorshift(seed: &mut u64) -> u64 {
@@ -477,7 +498,9 @@ impl Slideshow {
 
     fn interval_elapsed(&self) -> bool {
         self.interval_ms > 0
-            && self.last_advance.map_or(true, |at| at.elapsed().as_millis() as u64 >= self.interval_ms)
+            && self
+                .last_advance
+                .is_none_or(|at| at.elapsed().as_millis() as u64 >= self.interval_ms)
     }
 
     fn take_answer(&mut self) {
@@ -492,9 +515,17 @@ impl Slideshow {
         let why = *why;
         self.pending = None;
         self.interval_ms = answer.interval_ms;
-        self.transition = if matches!(answer.transition.as_str(), "fade" | "merge") { answer.transition.clone() } else { "none".into() };
+        self.transition = if matches!(answer.transition.as_str(), "fade" | "merge") {
+            answer.transition.clone()
+        } else {
+            "none".into()
+        };
         self.transition_ms = answer.transition_ms.max(50);
-        self.order = if answer.order == "random" { "random".into() } else { "sequential".into() };
+        self.order = if answer.order == "random" {
+            "random".into()
+        } else {
+            "sequential".into()
+        };
         match why {
             Why::Artist => {
                 self.refs = answer.images;
@@ -505,7 +536,8 @@ impl Slideshow {
                 let remembered = self.memory.get(&self.memory_key()).map(|(_, at)| *at);
                 self.last_advance = remembered.unwrap_or(Some(Instant::now()));
                 self.prev_file.clear();
-                self.transition_started = matches!(self.transition.as_str(), "fade" | "merge").then(Instant::now);
+                self.transition_started =
+                    matches!(self.transition.as_str(), "fade" | "merge").then(Instant::now);
                 let start = self.start_index();
                 self.show(start);
                 if self.refs.len() > 1 && self.interval_elapsed() {
@@ -576,7 +608,13 @@ impl Slideshow {
             self.transition_started = None;
             self.prev_file.clear();
         }
-        (self.file.clone(), self.prev_file.clone(), self.transition.clone(), duration, elapsed.min(duration))
+        (
+            self.file.clone(),
+            self.prev_file.clone(),
+            self.transition.clone(),
+            duration,
+            elapsed.min(duration),
+        )
     }
 }
 
@@ -593,7 +631,8 @@ pub fn persist_state(path: &str, now_epoch_ms: u64) -> (String, u32) {
     let (Some(duration), Some(start)) = (parts.next(), parts.next()) else {
         return (String::new(), 0);
     };
-    let (Ok(duration), Ok(start)) = (duration.trim().parse::<u64>(), start.trim().parse::<u64>()) else {
+    let (Ok(duration), Ok(start)) = (duration.trim().parse::<u64>(), start.trim().parse::<u64>())
+    else {
         return (String::new(), 0);
     };
     let mode = parts.next().unwrap_or("freeze").trim().to_ascii_lowercase();
@@ -619,7 +658,7 @@ impl Conditioner {
         let gain_mult = 10f32.powf(spec.gain_db / 20.0);
         // The engine's buffer starts full of silence, so the first readings
         // rise over `smooth` snapshots.
-        let window = std::iter::repeat(Levels::default()).take(spec.smooth).collect();
+        let window = std::iter::repeat_n(Levels::default(), spec.smooth).collect();
         Self {
             spec,
             gain_mult,
@@ -634,7 +673,10 @@ impl Conditioner {
         if self.spec.gain_source.is_empty() {
             return;
         }
-        if self.source_at.is_some_and(|at| at.elapsed() < Duration::from_secs(1)) {
+        if self
+            .source_at
+            .is_some_and(|at| at.elapsed() < Duration::from_secs(1))
+        {
             return;
         }
         self.source_at = Some(Instant::now());
@@ -664,7 +706,8 @@ impl Conditioner {
     pub fn condition(&mut self, raw_left: u16, raw_right: u16) -> Levels {
         self.refresh_source();
         let gain = self.gain_mult * self.source_mult;
-        let scale = |raw: u16| (self.spec.max_ui * (f32::from(raw) / self.spec.max_pipe) * gain).floor();
+        let scale =
+            |raw: u16| (self.spec.max_ui * (f32::from(raw) / self.spec.max_pipe) * gain).floor();
         let new_left = scale(raw_left);
         let new_right = scale(raw_right);
         let new_mono = match self.spec.mono.as_str() {
@@ -705,7 +748,8 @@ pub fn resolve_time_font(spec: &mut TextSpec, theme_dir: &str, font_path: &str) 
     }
     for base in [theme_dir, font_path] {
         if !base.is_empty() {
-            candidates.push(Path::new(base.trim_end_matches('/')).join(value.trim_start_matches('/')));
+            candidates
+                .push(Path::new(base.trim_end_matches('/')).join(value.trim_start_matches('/')));
         }
     }
     spec.font_file = candidates
@@ -721,11 +765,18 @@ fn player_get(path: &str) -> Option<String> {
     let mut stream = TcpStream::connect_timeout(&address, Duration::from_millis(200)).ok()?;
     let _ = stream.set_read_timeout(Some(Duration::from_millis(500)));
     stream
-        .write_all(format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n").as_bytes())
+        .write_all(
+            format!("GET {path} HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n")
+                .as_bytes(),
+        )
         .ok()?;
     let mut buf = String::new();
     stream.read_to_string(&mut buf).ok()?;
-    Some(buf.split_once("\r\n\r\n").map(|(_, body)| body.to_string()).unwrap_or(buf))
+    Some(
+        buf.split_once("\r\n\r\n")
+            .map(|(_, body)| body.to_string())
+            .unwrap_or(buf),
+    )
 }
 
 /// The track after `position` in the player's queue: title (or name),
@@ -744,14 +795,26 @@ pub fn queue_next(position: i64) -> (String, String, String) {
     let Some(items) = items else {
         return Default::default();
     };
-    let next = usize::try_from(position + 1).ok().and_then(|i| items.get(i));
+    let next = usize::try_from(position + 1)
+        .ok()
+        .and_then(|i| items.get(i));
     let Some(next) = next else {
         return Default::default();
     };
-    let text = |key: &str| next.get(key).and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let text = |key: &str| {
+        next.get(key)
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
     let title = {
         let t = text("title");
-        if t.is_empty() { text("name") } else { t }
+        if t.is_empty() {
+            text("name")
+        } else {
+            t
+        }
     };
     (title, text("artist"), text("album"))
 }
@@ -764,9 +827,21 @@ pub fn queue_lengths() -> Vec<f32> {
     let Ok(value) = serde_json::from_str::<serde_json::Value>(&body) else {
         return Vec::new();
     };
-    let items = value.as_array().or_else(|| value.get("queue").and_then(|q| q.as_array()));
+    let items = value
+        .as_array()
+        .or_else(|| value.get("queue").and_then(|q| q.as_array()));
     items
-        .map(|items| items.iter().map(|item| item.get("duration").and_then(|d| d.as_f64()).unwrap_or(0.0).max(0.0) as f32).collect())
+        .map(|items| {
+            items
+                .iter()
+                .map(|item| {
+                    item.get("duration")
+                        .and_then(|d| d.as_f64())
+                        .unwrap_or(0.0)
+                        .max(0.0) as f32
+                })
+                .collect()
+        })
         .unwrap_or_default()
 }
 
@@ -1118,7 +1193,10 @@ impl PipeSource {
                     .find(|candidate| Path::new(candidate).is_file())
                     .unwrap_or_default()
             };
-            self.reel_files = (find(&self.reel_album_files.0), find(&self.reel_album_files.1));
+            self.reel_files = (
+                find(&self.reel_album_files.0),
+                find(&self.reel_album_files.1),
+            );
         }
         self.reel_files.clone()
     }
@@ -1129,7 +1207,10 @@ impl PipeSource {
         if !self.queue_mode {
             return (0.0, 0.0);
         }
-        if self.queue_read_at.map_or(true, |at| at.elapsed() >= Duration::from_secs(10)) {
+        if self
+            .queue_read_at
+            .is_none_or(|at| at.elapsed() >= Duration::from_secs(10))
+        {
             self.queue_lengths = queue_lengths();
             self.queue_read_at = Some(Instant::now());
         }
@@ -1137,7 +1218,11 @@ impl PipeSource {
         if self.queue_lengths.is_empty() || total <= 0.0 {
             return (0.0, 0.0);
         }
-        let before: f32 = self.queue_lengths.iter().take(position.max(0) as usize).sum();
+        let before: f32 = self
+            .queue_lengths
+            .iter()
+            .take(position.max(0) as usize)
+            .sum();
         (before, total)
     }
 
@@ -1173,12 +1258,24 @@ impl PipeSource {
         self.folder_layers = skin.folder_layers.iter().map(|l| l.files.clone()).collect();
         self.folder_key = String::new();
         self.folder_files = Vec::new();
-        self.vinyl_album_file = skin.vinyl.as_ref().map(|v| v.album_file.clone()).unwrap_or_default();
+        self.vinyl_album_file = skin
+            .vinyl
+            .as_ref()
+            .map(|v| v.album_file.clone())
+            .unwrap_or_default();
         self.vinyl_key = String::new();
         self.vinyl_file = String::new();
         self.reel_album_files = (
-            skin.reels.as_ref().and_then(|r| r.left.as_ref()).map(|r| r.album_file.clone()).unwrap_or_default(),
-            skin.reels.as_ref().and_then(|r| r.right.as_ref()).map(|r| r.album_file.clone()).unwrap_or_default(),
+            skin.reels
+                .as_ref()
+                .and_then(|r| r.left.as_ref())
+                .map(|r| r.album_file.clone())
+                .unwrap_or_default(),
+            skin.reels
+                .as_ref()
+                .and_then(|r| r.right.as_ref())
+                .map(|r| r.album_file.clone())
+                .unwrap_or_default(),
         );
         self.reel_key = String::new();
         self.reel_files = (String::new(), String::new());
@@ -1186,7 +1283,10 @@ impl PipeSource {
         self.queue_lengths.clear();
         self.queue_read_at = None;
         self.fanart = skin.fanart.as_ref().map(|_| Slideshow {
-            seed: std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos() as u64).unwrap_or(1),
+            seed: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos() as u64)
+                .unwrap_or(1),
             ..Slideshow::default()
         });
         if let Some(bins) = skin.spectrum.as_ref().map(|s| s.bins.max(1)) {
@@ -1249,7 +1349,7 @@ impl Source for PipeSource {
         }
 
         if let Some(every) = self.metadata_every {
-            let due = self.metadata_at.map_or(true, |at| at.elapsed() >= every);
+            let due = self.metadata_at.is_none_or(|at| at.elapsed() >= every);
             if due {
                 let playing = now_playing();
                 self.seek_polled = playing.seek;
@@ -1422,7 +1522,10 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         let mut time = texts.time;
         let mut time_elapsed = texts.time_elapsed;
         let mut time_total = texts.time_total;
-        for field in [&mut time, &mut time_elapsed, &mut time_total].into_iter().flatten() {
+        for field in [&mut time, &mut time_elapsed, &mut time_total]
+            .into_iter()
+            .flatten()
+        {
             resolve_time_font(field, &skin.theme_dir, &font_path);
         }
         skin.time = time;
@@ -1467,10 +1570,19 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
             // the theme's own name wins when the two disagree, as after a
             // theme override or before the player has caught up.
             let base = Path::new(&settings.base_folder);
-            let by_theme = theme.file_name().map(|name| base.join(name)).filter(|dir| dir.join("spectrum.txt").is_file());
+            let by_theme = theme
+                .file_name()
+                .map(|name| base.join(name))
+                .filter(|dir| dir.join("spectrum.txt").is_file());
             let folder = by_theme.unwrap_or_else(|| base.join(&settings.folder));
             if let Ok(spectra) = std::fs::read_to_string(folder.join("spectrum.txt")) {
-                skin.spectrum = spectrum_from_theme(&spectra, &name, (w, h), &settings, &folder.to_string_lossy());
+                skin.spectrum = spectrum_from_theme(
+                    &spectra,
+                    &name,
+                    (w, h),
+                    &settings,
+                    &folder.to_string_lossy(),
+                );
                 skin.spectrum_max = settings.max_value;
             }
         }
@@ -1521,7 +1633,10 @@ pub fn now_playing() -> NowPlaying {
     if stream.read_to_string(&mut buf).is_err() {
         return playing;
     }
-    let body = buf.split_once("\r\n\r\n").map(|(_, body)| body).unwrap_or(&buf);
+    let body = buf
+        .split_once("\r\n\r\n")
+        .map(|(_, body)| body)
+        .unwrap_or(&buf);
     playing.title = json_string(body, "title");
     playing.artist = json_string(body, "artist");
     playing.album = json_string(body, "album");
@@ -1627,12 +1742,7 @@ mod tests {
 
     #[test]
     fn records_become_ui_levels_and_bins() {
-        let input = input_from_records(
-            &[50, 0, 25, 0],
-            &[100, 0, 0, 0, 0, 0, 0, 0],
-            2,
-            100.0,
-        );
+        let input = input_from_records(&[50, 0, 25, 0], &[100, 0, 0, 0, 0, 0, 0, 0], 2, 100.0);
         assert_eq!(input.levels.left, 50.0);
         assert_eq!(input.levels.right, 25.0);
         assert_eq!(input.levels.mono, 37.5);
@@ -1652,27 +1762,69 @@ mod tests {
     #[test]
     fn levels_are_conditioned_as_the_engine_conditions_them() {
         let mut plain = Conditioner::new(DataSourceSpec::default());
-        assert_eq!(plain.condition(80, 40), Levels { left: 80.0, right: 40.0, mono: 60.0 });
-        let mut quiet = Conditioner::new(DataSourceSpec { gain_db: -6.0, ..DataSourceSpec::default() });
+        assert_eq!(
+            plain.condition(80, 40),
+            Levels {
+                left: 80.0,
+                right: 40.0,
+                mono: 60.0
+            }
+        );
+        let mut quiet = Conditioner::new(DataSourceSpec {
+            gain_db: -6.0,
+            ..DataSourceSpec::default()
+        });
         let l = quiet.condition(80, 40);
-        assert_eq!((l.left, l.right), (40.0, 20.0), "-6 dB halves, floored as the engine floors");
-        let mut smooth = Conditioner::new(DataSourceSpec { smooth: 2, mono: "maximum".into(), ..DataSourceSpec::default() });
+        assert_eq!(
+            (l.left, l.right),
+            (40.0, 20.0),
+            "-6 dB halves, floored as the engine floors"
+        );
+        let mut smooth = Conditioner::new(DataSourceSpec {
+            smooth: 2,
+            mono: "maximum".into(),
+            ..DataSourceSpec::default()
+        });
         smooth.condition(0, 0);
         let l = smooth.condition(80, 40);
-        assert_eq!((l.left, l.right, l.mono), (40.0, 20.0, 40.0), "mean of the last two; mono is the maximum");
-        let mut averaged = Conditioner::new(DataSourceSpec { stereo: "average".into(), ..DataSourceSpec::default() });
+        assert_eq!(
+            (l.left, l.right, l.mono),
+            (40.0, 20.0, 40.0),
+            "mean of the last two; mono is the maximum"
+        );
+        let mut averaged = Conditioner::new(DataSourceSpec {
+            stereo: "average".into(),
+            ..DataSourceSpec::default()
+        });
         averaged.condition(80, 80);
-        assert_eq!(averaged.condition(0, 0).left, 20.0, "average with the previous averaged value");
+        assert_eq!(
+            averaged.condition(0, 0).left,
+            20.0,
+            "average with the previous averaged value"
+        );
     }
 
     #[test]
     fn an_override_replaces_or_adds_a_current_value() {
         let text = "[current]\nmeter = gold\nmeter.folder = a\n[data.source]\nmeter = x\n";
         let out = with_current(text, "meter", "random");
-        assert!(out.contains("[current]\nmeter = random\nmeter.folder = a\n"), "{out}");
-        assert!(out.contains("[data.source]\nmeter = x\n"), "other sections keep theirs: {out}");
-        let added = with_current("[current]\nmeter = gold\n[x]\n", "random.meter.interval", "5");
-        assert!(added.contains("meter = gold\nrandom.meter.interval = 5\n[x]"), "{added}");
+        assert!(
+            out.contains("[current]\nmeter = random\nmeter.folder = a\n"),
+            "{out}"
+        );
+        assert!(
+            out.contains("[data.source]\nmeter = x\n"),
+            "other sections keep theirs: {out}"
+        );
+        let added = with_current(
+            "[current]\nmeter = gold\n[x]\n",
+            "random.meter.interval",
+            "5",
+        );
+        assert!(
+            added.contains("meter = gold\nrandom.meter.interval = 5\n[x]"),
+            "{added}"
+        );
         assert_eq!(with_current("", "meter", "a"), "[current]\nmeter = a\n");
     }
 
@@ -1710,7 +1862,10 @@ mod tests {
         assert_eq!(persist_state(&path, 1_020_000), ("countdown".into(), 0));
         std::fs::write(&file, "30:1000000").unwrap();
         assert_eq!(persist_state(&path, 1_000_000), ("freeze".into(), 30));
-        assert_eq!(persist_state(&dir.join("none").to_string_lossy(), 1), (String::new(), 0));
+        assert_eq!(
+            persist_state(&dir.join("none").to_string_lossy(), 1),
+            (String::new(), 0)
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -1734,8 +1889,14 @@ mod tests {
 
     #[test]
     fn art_on_the_player_is_fetched_from_the_player() {
-        assert_eq!(art_url("/albumart?web=a/b/large"), "http://127.0.0.1:3000/albumart?web=a/b/large");
-        assert_eq!(art_url("https://img.example/cover.jpg"), "https://img.example/cover.jpg");
+        assert_eq!(
+            art_url("/albumart?web=a/b/large"),
+            "http://127.0.0.1:3000/albumart?web=a/b/large"
+        );
+        assert_eq!(
+            art_url("https://img.example/cover.jpg"),
+            "https://img.example/cover.jpg"
+        );
         assert_ne!(fnv1a("a"), fnv1a("b"));
         assert_eq!(fnv1a("cover"), fnv1a("cover"));
     }

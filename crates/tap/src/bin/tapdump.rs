@@ -5,7 +5,10 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 fn main() {
-    let seconds: f64 = std::env::args().nth(1).and_then(|s| s.parse().ok()).unwrap_or(5.0);
+    let seconds: f64 = std::env::args()
+        .nth(1)
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(5.0);
     let dir = Path::new(tap::ring::DIR);
     let Some(reader) = tap::Reader::open_live(dir) else {
         eprintln!("tapdump: no live ring under {}", dir.display());
@@ -31,7 +34,10 @@ fn main() {
                 last_seq = frame.seq;
                 let bins = frame.spectrum[0].len();
                 let loud = |from: usize, to: usize| -> f32 {
-                    frame.spectrum[0][from.min(bins)..to.min(bins)].iter().cloned().fold(0.0, f32::max)
+                    frame.spectrum[0][from.min(bins)..to.min(bins)]
+                        .iter()
+                        .cloned()
+                        .fold(0.0, f32::max)
                 };
                 println!(
                     "seq {:6} frames {:9} peak {:.3} {:.3} rms {:.3} {:.3} low {:.3} mid {:.3} high {:.3}",

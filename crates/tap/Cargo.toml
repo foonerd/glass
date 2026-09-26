@@ -9,3 +9,6 @@ description = "What the audio tap measures and the ring it shares them through"
 [dependencies]
 rustfft = "6.2"
 libc = "0.2"
+
+[lints]
+workspace = true

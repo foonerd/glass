@@ -47,7 +47,10 @@ pub fn level(samples: &[i16], group: usize) -> i32 {
     let mut running = 0.0;
     let mut best = 0.0;
     for g in 0..groups {
-        let ones: u32 = samples[g * group..(g + 1) * group].iter().map(|s| (*s as u8).count_ones()).sum();
+        let ones: u32 = samples[g * group..(g + 1) * group]
+            .iter()
+            .map(|s| (*s as u8).count_ones())
+            .sum();
         let d = (ones as f64 - bits / 2.0) / (bits / 2.0);
         running += d * d - ring[g % WINDOW];
         ring[g % WINDOW] = d * d;
@@ -55,7 +58,11 @@ pub fn level(samples: &[i16], group: usize) -> i32 {
             best = running;
         }
     }
-    let lev = if groups < WINDOW { (running / groups as f64).sqrt() } else { (best / WINDOW as f64).sqrt() };
+    let lev = if groups < WINDOW {
+        (running / groups as f64).sqrt()
+    } else {
+        (best / WINDOW as f64).sqrt()
+    };
     let lev = lev * FULL_SCALE * 32767.0;
     if lev > 32767.0 {
         32767
@@ -70,7 +77,9 @@ mod tests {
 
     #[test]
     fn markers_tell_dop_from_pcm_and_density_gives_the_level() {
-        let dop: Vec<i16> = (0..64).map(|i| (((if i % 2 == 0 { 0x05 } else { 0xFA }) << 8) | 0x55) as i16).collect();
+        let dop: Vec<i16> = (0..64)
+            .map(|i| (((if i % 2 == 0 { 0x05 } else { 0xFA }) << 8) | 0x55) as i16)
+            .collect();
         assert!(is_stream(&dop));
         let pcm: Vec<i16> = (0..64).map(|i| (i * 100) as i16).collect();
         assert!(!is_stream(&pcm));
