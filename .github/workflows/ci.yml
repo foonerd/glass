@@ -13,7 +13,7 @@ jobs:
     name: format, lints, tests, docs
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Toolchain from rust-toolchain.toml
         run: rustup toolchain install && rustup show active-toolchain
       - name: System libraries the display and the tap link against
@@ -26,15 +26,22 @@ jobs:
     runs-on: ubuntu-24.04
     needs: check
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: rustup toolchain install && rustup show active-toolchain
       - name: Cross compilers and the libraries the host build links against
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu libc6-dev-armhf-cross libc6-dev-arm64-cross libsdl2-dev libasound2-dev
       - uses: Swatinem/rust-cache@v2
+      - name: The peppyalsa builds the plugin still carries
+        uses: actions/checkout@v7
+        with:
+          repository: foonerd/peppy_builds
+          path: peppy_builds
       - run: scripts/ship.sh
       - name: Plugin zip
         run: scripts/package.sh
-      - uses: actions/upload-artifact@v4
+        env:
+          PEPPYALSA: ${{ github.workspace }}/peppy_builds/peppyalsa-builds/out
+      - uses: actions/upload-artifact@v7
         with:
           name: glass-plugin
           path: dist/glass-*.zip

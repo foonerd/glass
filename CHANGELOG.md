@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4] - 2026-09-26
+
+The release and CI workflows check out the peppyalsa builds the plugin still carries, run the scripts as executables, and use the actions' Node 24 releases; the packaging refuses to make a zip without the ALSA scope for an architecture.
+
 ## [0.5.3] - 2026-09-26
 
 The cross builds in CI get the C library headers of each target, which the TLS dependency's C sources need.

@@ -34,7 +34,8 @@ copy_alsa() {
     cp "$PEPPYALSA/$deb/libpeppyalsa.so" "$STAGE/lib/$arch/libpeppyalsa.so"
     [ -f "$PEPPYALSA/$deb/peppyalsa-client" ] && cp "$PEPPYALSA/$deb/peppyalsa-client" "$STAGE/bin/$arch/peppyalsa-client"
   else
-    echo "package: no peppyalsa build for $arch ($deb)" >&2
+    echo "package: no peppyalsa build for $arch ($deb) under $PEPPYALSA" >&2
+    exit 1
   fi
 }
 copy_alsa arm armhf
