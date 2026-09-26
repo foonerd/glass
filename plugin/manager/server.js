@@ -463,11 +463,10 @@ class Manager {
       const stat = await fsp.statfs(this.paths.dataDir);
       free = stat.bavail * stat.bsize;
     } catch (e) { /* unknown */ }
-    let rings = [];
-    try {
-      rings = (await fsp.readdir('/dev/shm')).filter(function (n) { return n.startsWith('glasstap.'); });
-    } catch (e) { /* none */ }
+    const rings = await readRings();
+    const playing = !!(info.channel && info.channel.status === 'play');
     return Object.assign(info, {
+      measured: playing && rings.some(function (r) { return r.live; }),
       manager: { port: this.port, url: this.url(), uptimeS: Math.round(process.uptime()) },
       catalog: {
         fetchedAt: this.catalog.fetchedAt,
@@ -737,6 +736,49 @@ class Manager {
       req.pipe(out);
     });
   }
+}
+
+// The tap's rings under /dev/shm, from their headers: the stream, the
+// sequence, and whether the writer wrote within the last seconds (the
+// display's own notion of a live ring). Times are the monotonic clock.
+const RING_DIR = '/dev/shm';
+const RING_PREFIX = 'glasstap.';
+const RING_LIVE_NS = 3000000000n;
+async function readRings() {
+  let names = [];
+  try {
+    names = (await fsp.readdir(RING_DIR)).filter(function (n) { return n.startsWith(RING_PREFIX); });
+  } catch (e) {
+    return [];
+  }
+  const now = process.hrtime.bigint();
+  const rings = [];
+  for (const name of names) {
+    let fd = null;
+    try {
+      fd = await fsp.open(path.join(RING_DIR, name), 'r');
+      const header = Buffer.alloc(64);
+      const { bytesRead } = await fd.read(header, 0, 64, 0);
+      if (bytesRead < 64 || header.toString('latin1', 0, 8) !== 'GLASSTAP') continue;
+      const written = header.readBigUInt64LE(56);
+      const ago = written === 0n ? null : now - written;
+      const parts = name.slice(RING_PREFIX.length).split('.');
+      rings.push({
+        name: name,
+        tag: parts[0],
+        pid: header.readUInt32LE(40),
+        rate: header.readUInt32LE(16),
+        channels: header.readUInt32LE(20),
+        seq: Number(header.readBigUInt64LE(48)),
+        writtenAgoMs: ago === null ? null : Number(ago / 1000000n),
+        live: ago !== null && ago >= 0n && ago < RING_LIVE_NS
+      });
+    } catch (e) { /* a ring going away */ } finally {
+      if (fd) await fd.close().catch(function () {});
+    }
+  }
+  rings.sort(function (a, b) { return (a.writtenAgoMs === null ? Infinity : a.writtenAgoMs) - (b.writtenAgoMs === null ? Infinity : b.writtenAgoMs); });
+  return rings;
 }
 
 // Give a tree to a user, when this process may. Nothing to do otherwise.

@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.10] - 2026-09-26
+
+The status tab says whether what plays is measured: while the player reports play, a live ring under `/dev/shm` means the source's stream passes through the tap, and none means it plays below the tap and is heard but not measured. Each ring is listed with its stream and whether it is live or how long it has been quiet.
+
 ## [0.6.9] - 2026-09-26
 
 Soloist Connect plays again with Glass running. 0.6.8 sent Soloist to `plug:spotify`, a `plug` put straight on the tap, and libasound's parameter negotiation there ends with an empty interval and aborts Soloist's daemon the moment it plays. Soloist stays on the player's own device, `plug:volumio`, where the tap sits and measures it. What 0.6.8 set out to fix stays fixed another way: Glass nudges Soloist after its own rewrite of the ALSA file and after every later rewrite the player makes as plugins start, and Soloist restarts its daemon only when the device it runs with differs from what the file now says, so a device sampled while the file was half written is corrected within seconds.

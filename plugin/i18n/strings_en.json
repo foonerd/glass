@@ -480,6 +480,10 @@
     "MANAGER_PORT_INVALID": "The manager port must be a number from 1024 to 65535.",
     "MANAGER_PORT_IN_USE": "That port is in use by something else on this player. The manager stays on port",
     "MANAGER_HOST_INVALID": "The manager address must be a host name or an IP address, without http:// or a port.",
-    "MANAGER_MOVED": "The manager now listens on port"
+    "MANAGER_MOVED": "The manager now listens on port",
+    "MANAGER_ST_MEASURED": "measured",
+    "MANAGER_ST_NOT_MEASURED": "not measured: the source plays below the tap",
+    "MANAGER_ST_RING_LIVE": "live",
+    "MANAGER_ST_RING_QUIET": "quiet for"
   }
 }
