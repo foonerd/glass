@@ -358,6 +358,12 @@ fn run(shared: Arc<Shared>, settings: Settings) {
     let mut buf: Vec<i16> = Vec::with_capacity(shared.relay.capacity());
     let mut chunks: Vec<Chunk> = Vec::with_capacity(256);
     let mut pending: VecDeque<(u64, Frame)> = VecDeque::with_capacity(PENDING_MAX);
+    // Frames the player has written since the stream began, and when the
+    // last hop fell due: a stream starts with an empty buffer, so its first
+    // frames are heard at once, and hops keep their cadence when the
+    // player writes ahead of the sound.
+    let mut written = 0u64;
+    let mut last_due = 0u64;
     while !shared.stop.load(Ordering::Acquire) {
         let now = now_ns();
         let timeout = match pending.front() {
@@ -375,6 +381,8 @@ fn run(shared: Arc<Shared>, settings: Settings) {
             chunks.clear();
             shared.relay.drain(&mut buf, &mut chunks);
             pending.clear();
+            written = 0;
+            last_due = 0;
             let shape = shared.shape.lock().ok().and_then(|s| *s);
             if let Err(e) = measure.set_shape(shape) {
                 note(&e);
@@ -389,14 +397,27 @@ fn run(shared: Arc<Shared>, settings: Settings) {
             if let Some(shape) = measure.shape() {
                 let rate = shape.rate.max(1) as u64;
                 let lead = shared.lead.load(Ordering::Acquire) as u64;
+                let per_frame = (shape.channels as u64).max(1)
+                    * if shape.layout.is_dsd() {
+                        shape.layout.bytes() as u64
+                    } else {
+                        1
+                    };
+                let hop_ns = measure.hop() as u64 * 1_000_000_000 / rate;
                 let mut offset = 0usize;
                 for chunk in &chunks {
                     let n = chunk.samples as usize;
                     let samples = &buf[offset..offset + n];
                     offset += n;
-                    let heard_from = chunk.time_ns + lead * 1_000_000_000 / rate;
+                    // Heard after whatever the buffer holds ahead of it: the
+                    // lead once the player has filled the buffer, less before.
+                    let ahead = written.min(lead);
+                    let heard_from = chunk.time_ns + ahead * 1_000_000_000 / rate;
+                    written += n as u64 / per_frame;
                     measure.take(samples, &mut |frame, frames_in| {
-                        let due = heard_from + frames_in as u64 * 1_000_000_000 / rate;
+                        let due = (heard_from + frames_in as u64 * 1_000_000_000 / rate)
+                            .max(last_due + hop_ns);
+                        last_due = due;
                         if pending.len() >= PENDING_MAX {
                             pending.pop_front();
                         }

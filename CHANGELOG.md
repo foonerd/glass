@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.12] - 2026-09-26
+
+Hops keep their cadence. When a player writes ahead of the sound, as one does while it fills its buffer or reads from a pipe, each hop now falls due no sooner than one hop after the last, so the ring fills evenly instead of in pairs; and a stream's first frames are timed from an empty buffer, so the meters start with the sound instead of a buffer's length behind it.
+
 ## [0.5.11] - 2026-09-26
 
 The meters move as the audio does again. A player that writes a whole period at a time (MPD for local files, NAS and DLNA, the radio's aplay) handed the tap five or six hops in a burst every eighth of a second, and the display, reading the latest hop each frame, saw only one of them; with a half-second buffer the hops also ran ahead of what was heard. The tap's measuring thread now places every hop in time, from when its transfer arrived and the buffer and period the player asked for, and puts it into the ring when its audio plays. One-bit audio is measured a hop at a time too. The relay holds two thirds of a second of stereo at 384 kHz.
