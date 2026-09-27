@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.28] - 2026-09-27
+
+Text sits where the Python engine set it. A font size is the em in pixels, as FreeType sizes a face for pygame, and the baseline sits the face's ascent below the line's top, rounded up to a whole pixel; the line is ascent to descent high. The raster had taken the size as the face's ascent-to-descent height, which is the em for Lato and DSEG7 but 1.227 em for PeppyFont, so text set in the built-in faces was drawn smaller and higher than the same theme under PeppyMeter. A character taken from the fallback face is set at the same em as the text.
+
 ## [0.7.27] - 2026-09-27
 
 Fonts of your own. The Manager's Appearance tab takes a font file, TrueType or OpenType, and keeps it on the player, and each text style, light, regular, bold, italic and the clock, is set in a face of your choice: one of the built-in multi-script faces, one of the player's own fonts (Volumio's Lato), or one you uploaded. A remote brings uploaded fonts from its player with the other fonts and sets its text the same way. In the meter configuration a style's `font.<style>` value is now `builtin`, a file name under `font.path`, or the path of an uploaded font; an older configuration's `use.system.fonts` is read once and folded into those values. The one switch of 0.7.25 became the per-style choice.
