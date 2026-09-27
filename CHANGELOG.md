@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.12] - 2026-09-27
+
+`glass --dev`, with or without `--remote`, opens a window at the theme's exact size, unfitted, with a title bar that names the theme and the meter on show and follows the meter as it changes, the pointer visible and Escape to close: a window to move about a desktop while a theme or a remote is reviewed. Nothing is written to the configuration; the remote's page keeps saying what the display would be without the switch.
+
 ## [0.7.11] - 2026-09-27
 
 The manager has a System tab, before Remotes, for what acts on the player: Glass releases (upgrade and rollback), the performance profile and the logging settings with the log viewer. The Status tab is a picture of the player and nothing else. The header's release badge opens the System tab.

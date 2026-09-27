@@ -19,7 +19,7 @@ use lead::{
     frame_period, should_mark_dismiss, FolderLayerSpec, Input, MeterKind, SkinDesc, TypeMode,
     DISMISS_FILE_VAR, RUN_FLAG,
 };
-use pane::{publish, write_ppm, Shown, Surface, WindowOptions};
+use pane::{publish, write_ppm, Shown, Surface, WindowMode, WindowOptions};
 use plot::{step, Scene};
 use std::time::Duration;
 
@@ -42,6 +42,13 @@ struct Run {
     /// Where a remote keeps what it brought from players.
     cache: Option<String>,
     manager_port: u16,
+    /// A window at the theme's exact size, movable, for development.
+    dev: bool,
+}
+
+/// The title of a development window: the theme, the meter and the size.
+fn dev_title(theme: &str, meter: &str, width: u32, height: u32) -> String {
+    format!("Glass dev: {theme} / {meter} {width}x{height}")
 }
 
 /// How a session ended: the program leaves, or a session starts again.
@@ -313,6 +320,7 @@ fn main() -> ExitCode {
     let mut cache: Option<String> = None;
     let mut config_file: Option<String> = None;
     let mut open_settings = false;
+    let mut dev = false;
     let mut manager_port: u16 = intake::remote::DEFAULT_MANAGER_PORT;
     let mut args = env::args().skip(1).peekable();
     while let Some(arg) = args.next() {
@@ -404,6 +412,7 @@ fn main() -> ExitCode {
                 }
             },
             "--settings" => open_settings = true,
+            "--dev" => dev = true,
             "--name" => match args.next() {
                 Some(name) => remote_name = Some(name),
                 None => {
@@ -431,7 +440,7 @@ fn main() -> ExitCode {
                     "glass [--once] [--headless] [--print] [--output frame.png|frame.ppm] [--record step.json]\n      \
                      [--theme FOLDER] [--meter NAME|random|a,b,c] [--interval SECONDS] [--fps N] [--threads N]\n      \
                      [--list] [--snapshot DIR [--settle SECONDS] [--thumb WIDTH]]\n      \
-                     [--remote [HOST|discover] [--name NAME] [--cache DIR] [--config FILE] [--manager-port N] [--settings]]\n\
+                     [--remote [HOST|discover] [--name NAME] [--cache DIR] [--config FILE] [--manager-port N] [--settings]] [--dev]\n\
                      Reads the tap's ring under /dev/shm and the player's state.\n\
                      A window opens when DISPLAY is set. --headless skips it.\n\
                      --output writes every frame as a PNG or PPM and still rasters.\n\
@@ -448,7 +457,9 @@ fn main() -> ExitCode {
                      discover listens for players, and nothing after --remote runs as the remote's\n\
                      configuration says. The remote's settings page is served on its own port; --config\n\
                      names the configuration file, and --settings opens the page in a browser (of a remote\n\
-                     already running, or of the one this starts)."
+                     already running, or of the one this starts).\n\
+                     --dev opens a window at the theme's exact size, with a title bar naming the theme and the\n\
+                     meter on show, to move about a desktop while a theme is reviewed; nothing is saved."
                 );
                 return ExitCode::SUCCESS;
             }
@@ -472,6 +483,7 @@ fn main() -> ExitCode {
         threads,
         cache,
         manager_port,
+        dev,
     };
     if let Some(target) = remote {
         return remote::run::remote_main(
@@ -678,10 +690,17 @@ fn session(
     // remote's is as its settings say, and stays up between sessions when
     // those settings hold, following the theme's size.
     if show_window {
-        let options = match remote.as_deref() {
+        let mut options = match remote.as_deref() {
             Some(remote) => remote.window_options(),
             None => WindowOptions::default(),
         };
+        if run.dev {
+            options.mode = WindowMode::Windowed;
+            options.fit = false;
+            options.pointer = true;
+            options.keys = true;
+            options.title = dev_title(&theme_folder, &skin.name, skin.width, skin.height);
+        }
         // The same window serves when only its title differs.
         let kept = matches!(
             window.as_ref(),
@@ -759,6 +778,16 @@ fn session(
             logline::say!(Info, "display", "meter={name}");
             if reports {
                 source.report_showing(&theme_folder, &skin.name);
+            }
+            if run.dev {
+                if let Some(s) = surface.as_mut() {
+                    s.set_title(&dev_title(
+                        &theme_folder,
+                        &skin.name,
+                        skin.width,
+                        skin.height,
+                    ));
+                }
             }
         }};
     }

@@ -4,7 +4,7 @@ VU meters, spectrum analysers, turntables and cassette decks on a Volumio player
 
 <p align="center"><img src="https://raw.githubusercontent.com/wiki/foonerd/glass/images/display-turntable.png" width="720" alt="Glass on a player's screen"></p>
 
-The workspace version is **0.7.11**.
+The workspace version is **0.7.12**.
 
 ## Get it
 
@@ -55,7 +55,7 @@ flowchart LR
 
 ## The display from the command line
 
-`glass` runs without the plugin to review themes: `--list` names the installed themes and their meters; `--theme`, `--meter`, `--interval` and `--fps` stand in for the configuration's values; `--once --headless --output frame.png` writes one frame; `--snapshot DIR` writes every meter of a theme, and `--thumb` a thumbnail of each; `--record` writes the skin, input and scene of a frame as JSON; `--print` prints the levels. `GLASS_PROFILE` in the environment prints where each frame's time goes. `glass --remote` runs as a remote display; the wiki's Remotes page has its switches and settings.
+`glass` runs without the plugin to review themes: `--list` names the installed themes and their meters; `--theme`, `--meter`, `--interval` and `--fps` stand in for the configuration's values; `--once --headless --output frame.png` writes one frame; `--snapshot DIR` writes every meter of a theme, and `--thumb` a thumbnail of each; `--record` writes the skin, input and scene of a frame as JSON; `--print` prints the levels. `GLASS_PROFILE` in the environment prints where each frame's time goes. `glass --remote` runs as a remote display; the wiki's Remotes page has its switches and settings. `--dev`, with or without `--remote`, opens a window at the theme's exact size with a title bar naming the theme and the meter on show, to move about a desktop while a theme is reviewed; nothing is saved.
 
 ## Building
 
