@@ -4,11 +4,17 @@ VU meters, spectrum analysers, turntables and cassette decks on a Volumio player
 
 <p align="center"><img src="https://raw.githubusercontent.com/wiki/foonerd/glass/images/display-turntable.png" width="720" alt="Glass on a player's screen"></p>
 
-The workspace version is **0.7.7**.
+The workspace version is **0.7.8**.
 
 ## Get it
 
-The [Quick Start](https://github.com/foonerd/glass/wiki/Quick-Start) on the wiki installs the plugin from the [releases](https://github.com/foonerd/glass/releases) and takes it from there. The wiki is the documentation: [Settings](https://github.com/foonerd/glass/wiki/Settings), the [Manager](https://github.com/foonerd/glass/wiki/Manager), [Themes](https://github.com/foonerd/glass/wiki/Themes) and the [meters.txt reference](https://github.com/foonerd/glass/wiki/Meters-Reference), the [Catalog](https://github.com/foonerd/glass/wiki/Catalog), [Backups](https://github.com/foonerd/glass/wiki/Backups), [Remotes](https://github.com/foonerd/glass/wiki/Remotes), [Troubleshooting](https://github.com/foonerd/glass/wiki/Troubleshooting).
+One line on the player installs the latest release, as the `volumio` user:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/foonerd/glass/main/get-glass.sh | sh
+```
+
+The [Quick Start](https://github.com/foonerd/glass/wiki/Quick-Start) on the wiki takes it from there, and has the way by hand from the [releases](https://github.com/foonerd/glass/releases). The wiki is the documentation: [Settings](https://github.com/foonerd/glass/wiki/Settings), the [Manager](https://github.com/foonerd/glass/wiki/Manager), [Themes](https://github.com/foonerd/glass/wiki/Themes) and the [meters.txt reference](https://github.com/foonerd/glass/wiki/Meters-Reference), the [Catalog](https://github.com/foonerd/glass/wiki/Catalog), [Backups](https://github.com/foonerd/glass/wiki/Backups), [Remotes](https://github.com/foonerd/glass/wiki/Remotes), [Troubleshooting](https://github.com/foonerd/glass/wiki/Troubleshooting).
 
 | Player | Volumio 4 on a Raspberry Pi 3, 4, 5 or Zero 2 W, or a PC. |
 | --- | --- |

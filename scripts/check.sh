@@ -20,6 +20,11 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 echo "check: ALSA templates"
 scripts/asound_check.sh
 
+echo "check: shell scripts"
+for script in get-glass.sh scripts/*.sh remote/linux/*.sh plugin/*.sh; do
+  sh -n "$script" || { echo "check: $script does not parse" >&2; exit 1; }
+done
+
 echo "check: plugin files"
 # Volumio's core reads every plugin's strings at its start: one bad file
 # takes the whole backend down, so every JSON the plugin ships must parse.
