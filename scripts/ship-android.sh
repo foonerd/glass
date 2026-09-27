@@ -28,8 +28,10 @@ APP=$ROOT/remote/android/app
 
 SDL_VERSION=2.32.10
 SDL_SHA256=5f5993c530f084535c65a6879e9b26ad441169b3e25d789d83287040a9ca5165
-# The SDL source lives beside the other sysroots, whatever CARGO_TARGET_DIR is.
-SDL_SRC=$ROOT/target/sysroot/android/SDL2-$SDL_VERSION
+# The SDL source lives beside the app, not under target/: the CI cache walks
+# target/ and trips over folders in the source named target and trybuild.
+SDL_HOME=$ROOT/remote/android/.sdl
+SDL_SRC=$SDL_HOME/SDL2-$SDL_VERSION
 ABIS="arm64-v8a armeabi-v7a x86_64"
 PLATFORM=24
 
@@ -54,11 +56,11 @@ export GLASS_VERSION_CODE=$((major * 100000 + minor * 1000 + patch))
 # SDL's source: the Android build of libSDL2.so and the Java side of the
 # activity both come from it.
 if [ ! -f "$SDL_SRC/Android.mk" ]; then
-  mkdir -p "$ROOT/target/sysroot/android"
-  tarball=$ROOT/target/sysroot/android/SDL2-$SDL_VERSION.tar.gz
+  mkdir -p "$SDL_HOME"
+  tarball=$SDL_HOME/SDL2-$SDL_VERSION.tar.gz
   curl -fsSL -o "$tarball" "https://github.com/libsdl-org/SDL/releases/download/release-$SDL_VERSION/SDL2-$SDL_VERSION.tar.gz"
   echo "$SDL_SHA256  $tarball" | sha256sum -c - >/dev/null
-  tar -C "$ROOT/target/sysroot/android" -xzf "$tarball"
+  tar -C "$SDL_HOME" -xzf "$tarball"
 fi
 rm -rf "$APP/jni/SDL" && ln -s "$SDL_SRC" "$APP/jni/SDL"
 rm -rf "$APP/src/main/java/org" && mkdir -p "$APP/src/main/java/org/libsdl/app"
