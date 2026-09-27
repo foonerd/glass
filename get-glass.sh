@@ -9,7 +9,7 @@
 # GitHub into the place the player's plugin manager takes dropped files,
 # handed to that manager over the player's own socket, and enabled; the
 # player's backend is then restarted so the audio tap joins the sound path.
-# An installed Glass upgrades itself from its manager's Status tab instead.
+# An installed Glass upgrades itself from its manager's System tab instead.
 set -eu
 
 REPO=foonerd/glass
@@ -25,7 +25,7 @@ fail() { printf 'get-glass: %s\n' "$*" >&2; exit 1; }
 [ -d /volumio ] && [ -x "$NODE" ] && [ -d "$SOCKET_CLIENT" ] || fail "this is not a Volumio player"
 command -v curl >/dev/null 2>&1 || fail "curl is needed"
 if [ -d /data/plugins/user_interface/glass ]; then
-  fail "Glass is installed already: upgrade it from its manager's Status tab, or uninstall it first"
+  fail "Glass is installed already: upgrade it from its manager's System tab, or uninstall it first"
 fi
 if [ -f /data/configuration/plugins.json ] && "$NODE" -e '
   const p = JSON.parse(require("fs").readFileSync("/data/configuration/plugins.json", "utf8"));
