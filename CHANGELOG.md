@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.24] - 2026-09-27
+
+Artist fanart shows on remotes. A remote asked the player for the artist's pictures and fetched them, but kept them under hashed names with no telling extension, and the loader the fanart slot uses chose its decoder by the file's name, so the pictures never appeared; album art took another loader and did. The loader now reads the format from the bytes, on every platform.
+
 ## [0.7.23] - 2026-09-27
 
 The first signed release. 0.7.22 signed its binary and then refused its own signature: the check ran on a Linux runner without Microsoft's root certificates, so the chain could not be walked there, and the release was not published. The check now looks for what the runner can see, a signature issued by Microsoft's public code signing authority and a timestamp, and leaves the chain to Windows.
