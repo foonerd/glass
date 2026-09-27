@@ -4475,7 +4475,15 @@ pub fn write_png(path: &Path, frame: &Frame) -> Result<(), String> {
 
 /// Load a theme PNG. The alpha channel is kept.
 pub fn read_png(path: &Path) -> Option<Frame> {
-    let image = image::open(path).ok()?.into_rgba8();
+    // The format is read from the bytes, not the name: a remote keeps the
+    // pictures it fetches under hashed names with no telling extension.
+    let image = image::ImageReader::open(path)
+        .ok()?
+        .with_guessed_format()
+        .ok()?
+        .decode()
+        .ok()?
+        .into_rgba8();
     let width = image.width();
     let height = image.height();
     Some(Frame {
@@ -4523,6 +4531,27 @@ pub fn draw_text(frame: &mut Frame, x: u32, y: u32, text: &str) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_picture_is_read_by_its_bytes_whatever_its_name() {
+        // A remote saves what it fetches as <hash>.img; the loader must not
+        // trust the name.
+        let dir = std::env::temp_dir().join(format!("glass-read-png-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("0123456789abcdef.img");
+        let picture = image::RgbImage::from_pixel(6, 4, image::Rgb([10, 20, 30]));
+        let mut bytes = Vec::new();
+        picture
+            .write_to(
+                &mut std::io::Cursor::new(&mut bytes),
+                image::ImageFormat::Jpeg,
+            )
+            .unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        let frame = read_png(&path).expect("a jpeg under an .img name is read");
+        assert_eq!((frame.width, frame.height), (6, 4));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     use super::*;
     use plot::Scene;
 
