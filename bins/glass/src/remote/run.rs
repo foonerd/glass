@@ -190,8 +190,15 @@ fn status_screen(
         w: frame.width,
         h: frame.height,
     };
-    // The window as the settings say, so the session that follows keeps it.
-    let options = window_options_of(&app.config().display, "Glass Remote".to_string());
+    // The window as the settings say, so the session that follows keeps it;
+    // a development window is a movable one at the frame's size.
+    let mut options = window_options_of(&app.config().display, "Glass Remote".to_string());
+    if run.dev {
+        options.mode = WindowMode::Windowed;
+        options.fit = false;
+        options.pointer = true;
+        options.title = "Glass dev".to_string();
+    }
     let same = matches!(window.as_ref(), Some((known, _)) if *known == options);
     if show_window && !same {
         *window = None;
