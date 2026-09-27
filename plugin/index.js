@@ -668,6 +668,7 @@ Glass.prototype.onStart = function () {
     }
 
     // The manager: the web application on its own port.
+    if (self.config.get('smbShareAccess') === true) { self.normalizeTemplatePermissions(true); }
     self.startManager().catch(function () {
         self.commandRouter.pushToastMessage('error', self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
             self.commandRouter.getI18nString('GLASS.MANAGER_PORT_IN_USE') + ' ' + (parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT));
@@ -1461,10 +1462,49 @@ Glass.prototype.saveDisplayConf = function (confData) {
   }, 500);
 }; // end saveDisplayConf ----------------------------
 
-// Template File Sharing (SMB) save handler.
-// Only toggles config.json + filesystem permissions used for sharing templates over
-// the network share; it has no effect on the running meter, so no reload is needed.
-// ---------------------------------------------------------------
+// Themes over the network: Volumio shares its Internal Storage folder, where
+// the theme folders live. With smbShareAccess on, the theme trees are made
+// writable for the share's guest (directories 777, files 666), now and after
+// every install; off, they go back to the player's own permissions.
+Glass.prototype.sharingInfo = function () {
+    var self = this;
+    return {
+        shared: self.config.get('smbShareAccess') === true,
+        roots: [String(base_folder_P || (DATA_DIR + '/templates/')).replace(/\/$/, ''), String(base_folder_S || (DATA_DIR + '/templates_spectrum/')).replace(/\/$/, '')]
+    };
+};
+
+Glass.prototype.setSharing = function (on) {
+    var self = this;
+    var wanted = on === true || on === 'true';
+    if ((self.config.get('smbShareAccess') === true) === wanted) { return { changed: false }; }
+    self.config.set('smbShareAccess', wanted);
+    self.normalizeTemplatePermissions(wanted);
+    self.logger.info(id + 'sharing: themes ' + (wanted ? 'writable' : 'read only') + ' over the network share');
+    return { changed: true };
+};
+
+// After the manager wrote theme folders: keep them writable over the share
+// when that is wanted.
+Glass.prototype.themesWritten = function () {
+    var self = this;
+    if (self.config.get('smbShareAccess') === true) { self.normalizeTemplatePermissions(true); }
+};
+
+Glass.prototype.normalizeTemplatePermissions = function (enable) {
+    var self = this;
+    var dirMode = enable ? '777' : '755';
+    var fileMode = enable ? '666' : '644';
+    self.sharingInfo().roots.forEach(function (dir) {
+        if (!fs.existsSync(dir)) { return; }
+        // chmod is on the player's sudo list without a password; directories first, then files.
+        var cmd = '/usr/bin/sudo -n /bin/chmod -R ' + dirMode + ' ' + JSON.stringify(dir)
+            + ' && /usr/bin/find ' + JSON.stringify(dir) + ' -type f -exec /usr/bin/sudo -n /bin/chmod ' + fileMode + ' {} +';
+        exec(cmd, function (error) {
+            if (error) { self.logger.error(id + 'sharing: ' + dir + ': ' + error); }
+        });
+    });
+};
 
 Glass.prototype.savePlaybackConf = function(data) {
     var self = this;
@@ -2656,11 +2696,6 @@ Glass.prototype.updateUIConfig = function () {
   uiNeedsUpdate = false;
   return defer.promise;
 };
-
-// Normalize template folder permissions for SMB share access
-// When enabled: dirs 777, files 666 (writable by SMB nobody:nogroup)
-// When disabled: dirs 755, files 644 (standard permissions)
-
 
 Glass.prototype.checkMetersFile = function (){
     const self = this;
