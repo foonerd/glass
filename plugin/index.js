@@ -122,7 +122,8 @@ Channel.prototype.attach = function (conn) {
             } else if (message && message.kind === 'showing' && !conn.remote) {
                 // The player's own display says which meter it shows; the
                 // remotes that follow the player hear of it.
-                self.showing = { theme: String(message.theme || '').slice(0, 128), meter: String(message.meter || '').slice(0, 128) };
+                var rate = parseInt(message.rate, 10);
+                self.showing = { theme: String(message.theme || '').slice(0, 128), meter: String(message.meter || '').slice(0, 128), rate: (rate >= 1 && rate <= 240) ? rate : null };
                 self.clients.slice().forEach(function (c) {
                     if (c.remote) { self.tell(c, { kind: 'showing', theme: self.showing.theme, meter: self.showing.meter }); }
                 });
@@ -408,13 +409,29 @@ Glass.prototype.performanceInfo = function () {
         rotationFps: parseInt(current['rotation.fps'], 10) || 8,
         transitions: String(current['transition.type'] || 'fade') !== 'none'
     };
+    var governor = String(current['frame.rate.governor'] || 'True').toLowerCase() !== 'false';
     var board = self.boardInfo();
     var height = parseInt(current['screen.height'], 10) || 720;
     var auto = performance.autoProfile(board.class, height);
     // Until a profile is chosen, the values say which one they are.
     var chosen = String(self.config.get('perfProfile') || '');
     if (performance.NAMES.indexOf(chosen) === -1) { chosen = performance.nameOf(values); }
-    return { profile: chosen, auto: auto, values: values, valuesProfile: performance.nameOf(values), board: board, profiles: performance.PROFILES };
+    return { profile: chosen, auto: auto, values: values, valuesProfile: performance.nameOf(values), board: board, profiles: performance.PROFILES, governor: governor, showing: self.channel && self.channel.showing ? self.channel.showing : null };
+};
+
+// Whether the display may lower its frame rate when it cannot keep up.
+Glass.prototype.setGovernor = function (on) {
+    var self = this;
+    self.loadConfigs();
+    if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return { error: 'GLASS.NO_PEPPYCONFIG' }; }
+    var wanted = on ? 'True' : 'False';
+    if (String(meterConfig.current['frame.rate.governor'] || 'True') === wanted) { return { changed: false }; }
+    meterConfig.current['frame.rate.governor'] = wanted;
+    fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+    try { self.updateConfigVersion(); } catch (e) {}
+    if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+    self.logger.info(id + 'performance: governor ' + (on ? 'on' : 'off'));
+    return { changed: true };
 };
 
 // Apply a profile: its values into the meter configuration and the

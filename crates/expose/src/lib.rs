@@ -391,6 +391,7 @@ pub fn raster_over<'m>(
         labels,
         canvas,
         painters,
+        bench_delay,
         profile,
         last_steps,
         last_base,
@@ -758,6 +759,9 @@ pub fn raster_over<'m>(
     canvas.rgba.resize((width * height * 4) as usize, 0);
     let painting = std::time::Instant::now();
     paint(canvas, base, &ops, &rects, painters.active);
+    if let Some(delay) = bench_delay {
+        std::thread::sleep(*delay);
+    }
     painters.settle(painting.elapsed().as_micros() as u64, now_ms);
     *damage = rects;
     stages.mark("paint");
@@ -2793,6 +2797,10 @@ pub struct Motion {
     labels: Labels,
     /// How many threads paint a frame.
     painters: Painters,
+    /// Added to every frame's painting, for a bench: the painters grow to
+    /// their most and the governor steps down on a machine that would
+    /// never overrun by itself.
+    pub bench_delay: Option<std::time::Duration>,
     /// The frame buffer, kept between frames so no frame allocates one.
     canvas: Frame,
     /// The last frame's steps by key and box, and the base they went over,

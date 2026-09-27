@@ -554,6 +554,9 @@
     "MANAGER_LOG_APPLIED": "Angewendet.",
     "MANAGER_LOG_SHOW": "Die letzten 300 Zeilen zeigen",
     "MANAGER_LOG_DOWNLOAD": "Die letzten 1000 Zeilen herunterladen",
-    "MANAGER_LOG_EMPTY": "Keine Zeilen von Glass im Journal."
+    "MANAGER_LOG_EMPTY": "Keine Zeilen von Glass im Journal.",
+    "MANAGER_ST_GOVERNED": "gesenkt auf",
+    "MANAGER_PERF_GOVERNOR": "Bildrate senken, wenn die Anzeige nicht mitkommt",
+    "MANAGER_PERF_GOVERNOR_DOC": "Wenn Frames trotz aller Kerne die Zeit überschreiten, senkt die Anzeige ihre Rate stufenweise (60, 45, 30, 20, 15) und zeigt es hier; nach einer Weile versucht sie eine Stufe zurück und beginnt mit jedem Meter bei der eingestellten Rate. Aus: die eingestellte Rate gilt genau."
   }
 }

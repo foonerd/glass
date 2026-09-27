@@ -554,6 +554,9 @@
     "MANAGER_LOG_APPLIED": "Applied.",
     "MANAGER_LOG_SHOW": "Show the last 300 lines",
     "MANAGER_LOG_DOWNLOAD": "Download the last 1000 lines",
-    "MANAGER_LOG_EMPTY": "No lines from Glass in the journal."
+    "MANAGER_LOG_EMPTY": "No lines from Glass in the journal.",
+    "MANAGER_ST_GOVERNED": "lowered to",
+    "MANAGER_PERF_GOVERNOR": "Lower the frame rate when the display cannot keep up",
+    "MANAGER_PERF_GOVERNOR_DOC": "When frames keep overrunning with every core painting, the display steps its rate down (60, 45, 30, 20, 15) and says so here; it tries a step back up after a while, and starts over at the set rate with every meter. Off, the set rate is exact."
   }
 }

@@ -554,6 +554,9 @@
     "MANAGER_LOG_APPLIED": "Appliqué.",
     "MANAGER_LOG_SHOW": "Voir les 300 dernières lignes",
     "MANAGER_LOG_DOWNLOAD": "Télécharger les 1000 dernières lignes",
-    "MANAGER_LOG_EMPTY": "Aucune ligne de Glass dans le journal."
+    "MANAGER_LOG_EMPTY": "Aucune ligne de Glass dans le journal.",
+    "MANAGER_ST_GOVERNED": "abaissée à",
+    "MANAGER_PERF_GOVERNOR": "Abaisser la cadence quand l'affichage ne suit pas",
+    "MANAGER_PERF_GOVERNOR_DOC": "Quand les images dépassent leur temps avec tous les cœurs au travail, l'affichage descend sa cadence par paliers (60, 45, 30, 20, 15) et le dit ici ; il remonte d'un palier après un moment et repart à la cadence réglée à chaque vumètre. Désactivé, la cadence réglée est exacte."
   }
 }

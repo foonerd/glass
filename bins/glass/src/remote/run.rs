@@ -106,7 +106,7 @@ impl RemoteSession {
     }
 
     /// Once a second, what the page shows about the session.
-    pub fn note(&mut self, source: &TapSource, skin: &SkinDesc) {
+    pub fn note(&mut self, source: &TapSource, skin: &SkinDesc, rate: u32) {
         if self.status_at.elapsed() < STATUS_EVERY {
             return;
         }
@@ -140,6 +140,7 @@ impl RemoteSession {
             s.theme = theme;
             s.meter = meter;
             s.screen = screen;
+            s.rate = rate;
         });
     }
 

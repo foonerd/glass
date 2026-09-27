@@ -469,7 +469,21 @@ class Manager {
     });
 
     app.post('/api/performance', wrap(async function (req, res) {
-      const result = await self.exclusive(function () { return self.plugin.applyPerformanceProfile(req.body && req.body.profile); });
+      const body = req.body || {};
+      const result = await self.exclusive(function () {
+        let changed = false;
+        if (typeof body.governor === 'boolean') {
+          const g = self.plugin.setGovernor(body.governor);
+          if (g.error) return g;
+          changed = changed || !!g.changed;
+        }
+        if (body.profile !== undefined) {
+          const p = self.plugin.applyPerformanceProfile(body.profile);
+          if (p.error) return p;
+          return Object.assign(p, { changed: changed || !!p.changed });
+        }
+        return Object.assign({ changed: changed }, self.plugin.performanceInfo());
+      });
       if (result.error) return res.status(400).json(result);
       res.json(Object.assign({ ok: true }, result));
     }));

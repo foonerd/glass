@@ -314,9 +314,10 @@ impl Channel {
 
     /// Tell the plugin which meter this display shows, so remotes that
     /// follow the player can show the same one.
-    pub fn report_showing(&mut self, theme: &str, meter: &str) -> bool {
+    pub fn report_showing(&mut self, theme: &str, meter: &str, rate: u32) -> bool {
         let mut line =
-            serde_json::json!({ "kind": "showing", "theme": theme, "meter": meter }).to_string();
+            serde_json::json!({ "kind": "showing", "theme": theme, "meter": meter, "rate": rate })
+                .to_string();
         line.push('\n');
         self.send_line(&line)
     }

@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.13] - 2026-09-27
+
+The display governs its own frame rate. When frames keep overrunning their period with every painter at work, the rate steps down a ladder, 60, 45, 30, 20, 15, so a theme too heavy for the player runs smoothly at a lower rate instead of stuttering at the set one; the display says so in the journal and tells the plugin with the meter on show, the Status tab and the Performance panel say "lowered to", and a remote's page shows the rate it draws at. A step back up is tried after two minutes, and the wait doubles each time the theme proves too heavy again; every meter starts over at the set rate. A switch on the Performance panel turns it off, for a rate that must be exact; a rate asked for on the command line is exact too. `GLASS_BENCH_DELAY_MS` in the display's environment adds that many milliseconds to every frame's painting, to watch the painters grow and the governor step down on any machine.
+
 ## [0.7.12] - 2026-09-27
 
 `glass --dev`, with or without `--remote`, opens a window at the theme's exact size, unfitted, with a title bar that names the theme and the meter on show and follows the meter as it changes, the pointer visible and Escape to close: a window to move about a desktop while a theme or a remote is reviewed. Nothing is written to the configuration; the remote's page keeps saying what the display would be without the switch.
