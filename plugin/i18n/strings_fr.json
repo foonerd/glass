@@ -549,7 +549,7 @@
     "MANAGER_SHARE_TITLE": "Thèmes sur le réseau",
     "MANAGER_SHARE_HELP": "Volumio partage son dossier Internal Storage sur le réseau, et les dossiers des thèmes s'y trouvent. Activé, ils sont modifiables depuis tout ordinateur sur le partage, pour retoucher un thème sur place ; désactivé, ils se lisent sur le partage sans pouvoir être changés.",
     "MANAGER_SHARE_ON": "Laisser les ordinateurs du réseau modifier les thèmes",
-    "MANAGER_SHARE_ON_DOC": "S'applique à chaque dossier de thème maintenant et à ceux installés ensuite. Le partage est \\\\<lecteur>\\Internal Storage ; les thèmes sont sous glass\\templates, ou peppy_screensaver\\templates sur un lecteur qui les a repris.",
+    "MANAGER_SHARE_ON_DOC": "S'applique à chaque dossier de thème maintenant et à ceux installés ensuite. Le partage est \\\\<lecteur>\\Internal Storage ; les thèmes sont sous glass\\templates, avec glass\\templates_spectrum à côté.",
     "MANAGER_PERF_HELP": "Un profil règle ensemble la cadence, la qualité de rotation et les transitions. Auto en choisit un pour cette carte ; Personnalisé garde ce que dit la page des réglages.",
     "MANAGER_PERF_PROFILE": "Profil",
     "MANAGER_PERF_AUTO": "Auto",

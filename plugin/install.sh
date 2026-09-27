@@ -87,25 +87,20 @@ done
 # =============================================================================
 mkdir -p "$DATA_DIR"
 if [ -d "$LEGACY_DATA/templates" ]; then
-  if [ ! -d "$LEGACY_DIR" ] && [ ! -d "$DATA_DIR/templates" ]; then
-    # PeppyMeter Screensaver was uninstalled with its themes preserved: the directory is ours.
-    echo "Adopting the preserved PeppyMeter Screensaver themes in place..."
-    rm -rf "$DATA_DIR"
-    mv "$LEGACY_DATA" "$DATA_DIR"
+  # PeppyMeter Screensaver's themes, still installed (disabled) or uninstalled
+  # with its themes preserved: copied into Glass's own folder, what is missing
+  # here; its folder is left as it was, for a return to that plugin.
+  echo "Copying PeppyMeter Screensaver themes..."
+  FREE_KB=$(df -Pk "$DATA_DIR" | awk 'NR==2 {print $4}')
+  NEED_KB=$(du -sk "$LEGACY_DATA" | awk '{print $1}')
+  if [ "$FREE_KB" -gt $((NEED_KB + 51200)) ]; then
+    mkdir -p "$DATA_DIR/templates" "$DATA_DIR/templates_spectrum" "$DATA_DIR/backups"
+    cp -rn "$LEGACY_DATA/templates/." "$DATA_DIR/templates/" 2>/dev/null || true
+    [ -d "$LEGACY_DATA/templates_spectrum" ] && cp -rn "$LEGACY_DATA/templates_spectrum/." "$DATA_DIR/templates_spectrum/" 2>/dev/null || true
+    [ -d "$LEGACY_DATA/backups" ] && cp -rn "$LEGACY_DATA/backups/." "$DATA_DIR/backups/" 2>/dev/null || true
+    [ -f "$LEGACY_DATA/.preserve" ] && touch "$DATA_DIR/.preserve"
   else
-    # Still installed (disabled), or Glass already has themes: copy what is missing.
-    echo "Copying PeppyMeter Screensaver themes..."
-    FREE_KB=$(df -Pk "$DATA_DIR" | awk 'NR==2 {print $4}')
-    NEED_KB=$(du -sk "$LEGACY_DATA" | awk '{print $1}')
-    if [ "$FREE_KB" -gt $((NEED_KB + 51200)) ]; then
-      mkdir -p "$DATA_DIR/templates" "$DATA_DIR/templates_spectrum" "$DATA_DIR/backups"
-      cp -rn "$LEGACY_DATA/templates/." "$DATA_DIR/templates/" 2>/dev/null || true
-      [ -d "$LEGACY_DATA/templates_spectrum" ] && cp -rn "$LEGACY_DATA/templates_spectrum/." "$DATA_DIR/templates_spectrum/" 2>/dev/null || true
-      [ -d "$LEGACY_DATA/backups" ] && cp -rn "$LEGACY_DATA/backups/." "$DATA_DIR/backups/" 2>/dev/null || true
-      [ -f "$LEGACY_DATA/.preserve" ] && touch "$DATA_DIR/.preserve"
-    else
-      echo "Not enough free space to copy the themes ($NEED_KB kB needed, $FREE_KB kB free); install them from the catalog later."
-    fi
+    echo "Not enough free space to copy the themes ($NEED_KB kB needed, $FREE_KB kB free); install them from the catalog later."
   fi
 fi
 mkdir -p "$DATA_DIR/templates" "$DATA_DIR/templates_spectrum"
