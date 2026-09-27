@@ -183,7 +183,7 @@ fn status_screen(
     }
     let generation = app.generation();
     let started = Instant::now();
-    let show_window = std::env::var_os("DISPLAY").is_some() && !run.headless;
+    let show_window = crate::screen_available() && !run.headless;
     let frame = status_frame(lines);
     let whole = expose::Rect {
         x: 0,
