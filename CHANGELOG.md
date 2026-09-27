@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.14] - 2026-09-27
+
+Text on a remote is set in the player's fonts again, and the format icon is drawn. The player's web fonts, the ones its configuration's `font.path` names, are served by the manager as assets with checksums (`/api/remote/asset/webfont/<name>`), and a remote brings them into its `webfonts` folder. Since 0.7.0 the remote had asked the player's web server for them by path and been given the web application's page instead, so the three files it kept were not fonts and its text fell back to the plugin's font. Volumio's own format icons (`mp3`, `flac`, `wav` and the rest, beside its web application) are listed with the plugin's own and served the same way, so a remote has every icon the player has; before, only the plugin's few were brought.
+
 ## [0.7.13] - 2026-09-27
 
 The display governs its own frame rate. When frames keep overrunning their period with every painter at work, the rate steps down a ladder, 60, 45, 30, 20, 15, so a theme too heavy for the player runs smoothly at a lower rate instead of stuttering at the set one; the display says so in the journal and tells the plugin with the meter on show, the Status tab and the Performance panel say "lowered to", and a remote's page shows the rate it draws at. A step back up is tried after two minutes, and the wait doubles each time the theme proves too heavy again; every meter starts over at the set rate. A switch on the Performance panel turns it off, for a rate that must be exact; a rate asked for on the command line is exact too. `GLASS_BENCH_DELAY_MS` in the display's environment adds that many milliseconds to every frame's painting, to watch the painters grow and the governor step down on any machine.
