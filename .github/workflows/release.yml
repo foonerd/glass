@@ -15,6 +15,10 @@ jobs:
   release:
     name: build, package, publish
     runs-on: ubuntu-24.04
+    # The environment names this job to Azure: the federated credential
+    # for Trusted Signing matches repo:foonerd/glass:environment:release,
+    # the same for every tag.
+    environment: release
     steps:
       - uses: actions/checkout@v7
       - run: rustup toolchain install && rustup show active-toolchain && rustup target add x86_64-pc-windows-gnu
