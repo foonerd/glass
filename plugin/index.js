@@ -4322,12 +4322,41 @@ Glass.prototype.restartBackend = function () {
 };
 
 // What the status page shows about the plugin and the display.
+// The fonts as the Status tab says them: each style's kind and name, and
+// how many fonts were uploaded; no checksums, this is read often.
+Glass.prototype.fontsSummary = function () {
+    var current = (meterConfig && meterConfig.current) || {};
+    var styles = {};
+    FONT_STYLES.forEach(function (style) { styles[style] = fontChoice(current['font.' + style]); });
+    var uploaded = 0;
+    try { uploaded = fs.readdirSync(CustomFontsPath).filter(function (n) { return n.indexOf('.') !== 0 && isFontFile(n); }).length; } catch (e) {}
+    return { styles: styles, uploaded: uploaded };
+};
+
+// Theme folders under a root: the ones with the file that makes a theme.
+function themeCount(root, file) {
+    try {
+        return fs.readdirSync(root).filter(function (n) {
+            return n.indexOf('.') !== 0 && fs.existsSync(root + '/' + n + '/' + file);
+        }).length;
+    } catch (e) { return 0; }
+}
+
 Glass.prototype.statusInfo = function () {
     var self = this;
     var arch = self.volumioArch();
     var state = self.lastState || {};
     self.loadConfigs();
+    var meterBase = String(base_folder_P || (DATA_DIR + '/templates/')).replace(/\/$/, '');
+    var spectrumBase = String(base_folder_S || (DATA_DIR + '/templates_spectrum/')).replace(/\/$/, '');
+    var artwork = self.artworkSettings();
+    var cachedArtists = 0;
+    try { cachedArtists = fs.readdirSync(FanartCacheDir).filter(function (n) { return n.indexOf('.') !== 0 && fs.statSync(FanartCacheDir + '/' + n).isDirectory(); }).length; } catch (e) {}
     return {
+        fonts: self.fontsSummary(),
+        themes: { meterBase: meterBase, meters: themeCount(meterBase, 'meters.txt'), spectrumBase: spectrumBase, spectrum: themeCount(spectrumBase, 'spectrum.txt') },
+        sharing: self.sharingInfo(),
+        artwork: { enabled: artwork.enabled, keyMode: artwork.keyMode, interval: artwork.interval, order: artwork.order, cachedArtists: cachedArtists },
         version: pluginVersion,
         arch: arch,
         binary: fs.existsSync(PluginPath + '/bin/' + arch + '/glass'),
