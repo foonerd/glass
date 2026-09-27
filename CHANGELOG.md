@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.30] - 2026-09-27
+
+A fuller Status tab: the theme folders with how many themes and spectrum twins each holds, the face each text style is set in and how many fonts were uploaded, whether the themes are editable over the network share, the artist fanart settings with the artists cached, and the performance profile with its frame rate, the governor and the board.
+
 ## [0.7.29] - 2026-09-27
 
 Glass keeps its themes in its own folder. A player that took its themes over from PeppyMeter Screensaver in place, and still read them from that plugin's folder under Internal Storage, has them copied into Glass's folder at the plugin's start, once, and its configuration pointed there; the old folder is left exactly as it was, for a return to that plugin. The installer copies too and no longer moves a preserved folder. The share panel and the guide name Glass's folders only.
