@@ -84,6 +84,7 @@ Channel.prototype.attach = function (conn) {
     self.logger.info(id + 'channel: a display connected');
     self.tell(conn, { kind: 'hello', protocol: CHANNEL_PROTOCOL, plugin: pluginVersion });
     if (self.state) { self.tell(conn, { kind: 'state', state: self.state }); }
+    if (self.showing) { self.tell(conn, { kind: 'showing', theme: self.showing.theme, meter: self.showing.meter }); }
     if (self.infinity !== null) { self.tell(conn, { kind: 'infinity', on: self.infinity }); }
     conn.on('data', function (chunk) {
         pending += chunk;
@@ -115,6 +116,13 @@ Channel.prototype.attach = function (conn) {
                     since: new Date().toISOString()
                 };
                 self.logger.info(id + 'channel: remote ' + conn.remote.name + ' (' + conn.remote.address + ', ' + conn.remote.release + ')');
+            } else if (message && message.kind === 'showing' && !conn.remote) {
+                // The player's own display says which meter it shows; the
+                // remotes that follow the player hear of it.
+                self.showing = { theme: String(message.theme || '').slice(0, 128), meter: String(message.meter || '').slice(0, 128) };
+                self.clients.slice().forEach(function (c) {
+                    if (c.remote) { self.tell(c, { kind: 'showing', theme: self.showing.theme, meter: self.showing.meter }); }
+                });
             } else {
                 self.logger.warn(id + 'channel: not a command: ' + line.slice(0, 80));
             }
@@ -3839,6 +3847,7 @@ Glass.prototype.statusInfo = function () {
             title: state.title || null,
             artist: state.artist || null
         },
+        showing: self.channel && self.channel.showing ? self.channel.showing : null,
         legacy: self.legacyEnabled(),
         language: self.managerLanguage()
     };

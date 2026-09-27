@@ -33,11 +33,15 @@ fn default_manager_port() -> u16 {
 
 /// Follow the player's theme and meter, or keep one of the player's
 /// themes as this remote's own, with its own meter choice.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, Default)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "mode", rename_all = "lowercase")]
 pub enum ThemeChoice {
-    #[default]
-    Follow,
+    Follow {
+        /// Show the meter the player shows, rather than rolling one of
+        /// this remote's own under a random or list selection.
+        #[serde(default = "default_true")]
+        same_meter: bool,
+    },
     Own {
         folder: String,
         #[serde(default)]
@@ -69,6 +73,12 @@ pub enum MeterChoice {
 
 fn default_interval() -> u32 {
     60
+}
+
+impl Default for ThemeChoice {
+    fn default() -> Self {
+        ThemeChoice::Follow { same_meter: true }
+    }
 }
 
 impl Default for MeterChoice {
@@ -365,6 +375,19 @@ mod tests {
     use super::*;
 
     #[test]
+    fn following_shows_the_same_meter_unless_told_otherwise() {
+        let follow: ThemeChoice = serde_json::from_str(r#"{"mode":"follow"}"#).unwrap();
+        assert_eq!(follow, ThemeChoice::Follow { same_meter: true });
+        let own_meter: ThemeChoice =
+            serde_json::from_str(r#"{"mode":"follow","same_meter":false}"#).unwrap();
+        assert_eq!(own_meter, ThemeChoice::Follow { same_meter: false });
+        assert_eq!(
+            ThemeChoice::default(),
+            ThemeChoice::Follow { same_meter: true }
+        );
+    }
+
+    #[test]
     fn the_defaults_hold_no_player_and_the_file_round_trips() {
         let dir = std::env::temp_dir().join(format!("glass-remote-config-{}", std::process::id()));
         let path = dir.join("config.json");
@@ -423,7 +446,7 @@ mod tests {
                 host: "  10.0.0.5 ".into(),
                 manager_port: 0,
                 name: String::new(),
-                theme: ThemeChoice::Follow,
+                theme: ThemeChoice::Follow { same_meter: true },
             },
         );
         config.active = Some("gone".into());
@@ -469,14 +492,14 @@ mod tests {
             host: "kitchen.local".into(),
             manager_port: 5582,
             name: String::new(),
-            theme: ThemeChoice::Follow,
+            theme: ThemeChoice::Follow { same_meter: true },
         });
         assert_eq!(a, "kitchen-local");
         let b = config.put_player(Player {
             host: "KITCHEN.local".into(),
             manager_port: 5590,
             name: "Kitchen".into(),
-            theme: ThemeChoice::Follow,
+            theme: ThemeChoice::Follow { same_meter: true },
         });
         assert_eq!(b, a, "the same host keeps its id");
         assert_eq!(config.players.len(), 1);

@@ -1142,6 +1142,7 @@ pub struct TapSource {
     hops: Box<dyn Hops>,
     /// The configuration change the channel last announced, until taken.
     config_seen: Option<(String, String, String)>,
+    showing_seen: Option<(String, String)>,
     /// The meter's fall, as the old scope shaped it, on the pipe scale.
     decay: tap::legacy::Meter,
     /// The theme's bins from the raw spectrum, on the old logarithmic mapping.
@@ -1243,6 +1244,19 @@ impl TapSource {
         self.config_seen.take()
     }
 
+    /// The meter the player's display announced since the last call: its
+    /// theme folder and its name.
+    pub fn take_showing(&mut self) -> Option<(String, String)> {
+        self.showing_seen.take()
+    }
+
+    /// Say which meter this display shows. False without a channel.
+    pub fn report_showing(&mut self, theme: &str, meter: &str) -> bool {
+        self.channel
+            .as_mut()
+            .is_some_and(|c| c.report_showing(theme, meter))
+    }
+
     /// Whether the channel to the player is up.
     pub fn channel_connected(&self) -> bool {
         self.channel.as_ref().is_some_and(Channel::connected)
@@ -1263,6 +1277,7 @@ impl TapSource {
         Self {
             hops: Box::new(IdleHops),
             config_seen: None,
+            showing_seen: None,
             decay: tap::legacy::Meter::new(METER_DECAY_MS, meter_max.max(1.0) as u32),
             bins_mapper: tap::legacy::Spectrum::new(
                 bins,
@@ -1536,6 +1551,7 @@ impl Source for TapSource {
                         theme,
                         meter,
                     } => self.config_seen = Some((version, theme, meter)),
+                    Event::Showing { theme, meter } => self.showing_seen = Some((theme, meter)),
                     Event::Hello { .. } => {}
                 }
             }

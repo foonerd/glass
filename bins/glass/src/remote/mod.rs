@@ -272,7 +272,7 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
                     host: host.clone(),
                     manager_port,
                     name: name.clone(),
-                    theme: ThemeChoice::Follow,
+                    theme: ThemeChoice::Follow { same_meter: true },
                 });
             });
             match result {
@@ -436,7 +436,7 @@ mod tests {
                     host: "x".into(),
                     manager_port: 5582,
                     name: String::new(),
-                    theme: ThemeChoice::Follow,
+                    theme: ThemeChoice::Follow { same_meter: true },
                 },
             );
         });

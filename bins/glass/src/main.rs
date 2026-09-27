@@ -572,6 +572,18 @@ fn session(
             }
         },
     };
+    // The player's own display says which meter it shows, so remotes that
+    // follow the player can show the same one; a remote says nothing.
+    let reports = remote.is_none();
+    let theme_folder = std::path::Path::new(&skin.theme_dir)
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if reports {
+        source.report_showing(&theme_folder, &skin.name);
+    }
+    // A remote showing the player's meter does not rotate on its own.
+    let mirroring = remote.as_deref().is_some_and(|r| r.follow && r.same_meter);
     // Why a session starts again, when it does.
     let mut reload: Option<&'static str> = None;
     let frame_rate = intake::installed_frame_rate();
@@ -737,6 +749,9 @@ fn session(
             motion.ramp.begin(now);
             switched_at = Instant::now();
             println!("glass: meter={name}");
+            if reports {
+                source.report_showing(&theme_folder, &skin.name);
+            }
         }};
     }
 
@@ -767,6 +782,17 @@ fn session(
                 leave = Some("settings changed");
             }
             remote.note(&source, &skin);
+            // The player moved to another meter of the theme: show it too.
+            if mirroring {
+                if let Some((theme, meter)) = source.take_showing() {
+                    if theme == remote.theme
+                        && meter != skin.name
+                        && intake::installed_meter_names().contains(&meter)
+                    {
+                        switch_meter!(meter);
+                    }
+                }
+            }
         }
         // A snapshot saves the settled frame of the meter on show and moves on.
         if let Some(dir) = snapshot {
@@ -805,7 +831,7 @@ fn session(
                     None => leave = Some("snapshots done"),
                 }
             }
-        } else if selector.rotates() {
+        } else if selector.rotates() && !mirroring {
             let due = if selector.on_title() {
                 let title = &input.metadata.title;
                 let changed = last_title.as_ref().is_some_and(|known| known != title);
