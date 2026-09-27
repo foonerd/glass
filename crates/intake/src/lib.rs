@@ -35,6 +35,20 @@ use std::sync::RwLock;
 /// The player's HTTP address: the player itself on the player, the
 /// player's host for a remote display.
 static PLAYER: RwLock<Option<(String, u16)>> = RwLock::new(None);
+/// The player's manager, for a remote display that brings pictures from
+/// the playing track's folder through it. None on the player itself.
+static MANAGER: RwLock<Option<String>> = RwLock::new(None);
+
+/// A remote says where the player's manager is, `http://host:port`.
+pub fn set_manager(url: &str) {
+    if let Ok(mut manager) = MANAGER.write() {
+        *manager = Some(url.trim_end_matches('/').to_string());
+    }
+}
+
+fn manager_url() -> Option<String> {
+    MANAGER.read().ok().and_then(|m| m.clone())
+}
 
 /// Name the player a remote display talks to. Without this, the player is
 /// this machine.
@@ -983,6 +997,95 @@ fn fetch_art(reported: &str) -> Option<PathBuf> {
     Some(path)
 }
 
+/// On a remote, the pictures of the playing track's folder are brought
+/// from the player's manager into the cache home, one look per track
+/// folder, off the frame loop: for each group of candidate names the
+/// first the player has, or empty. `None` while the look is under way.
+#[derive(Default)]
+struct RemoteFolder {
+    key: String,
+    files: Option<Vec<String>>,
+    pending: Option<mpsc::Receiver<Vec<String>>>,
+}
+
+impl RemoteFolder {
+    /// The files for the track at `uri`, or `None` while they are fetched.
+    fn want(&mut self, uri: &str, groups: &[Vec<String>], manager: &str) -> Option<Vec<String>> {
+        let key = uri.rfind('/').map(|i| &uri[..i]).unwrap_or(uri).to_string();
+        if key != self.key {
+            self.key = key.clone();
+            self.files = None;
+            let (tx, rx) = mpsc::channel();
+            let uri = uri.to_string();
+            let groups = groups.to_vec();
+            let manager = manager.to_string();
+            let home = std::env::var(lead::HOME_VAR).unwrap_or_else(|_| ".".to_string());
+            thread::spawn(move || {
+                let _ = tx.send(fetch_folder_files(&manager, &home, &uri, &groups));
+            });
+            self.pending = Some(rx);
+        }
+        if let Some(rx) = &self.pending {
+            match rx.try_recv() {
+                Ok(files) => {
+                    self.files = Some(files);
+                    self.pending = None;
+                }
+                Err(mpsc::TryRecvError::Empty) => {}
+                Err(mpsc::TryRecvError::Disconnected) => {
+                    self.files = Some(vec![String::new(); groups.len()]);
+                    self.pending = None;
+                }
+            }
+        }
+        self.files.clone()
+    }
+}
+
+/// For each group, the first candidate the player serves from the track's
+/// folder, landed under `<home>/track/<folder hash>/`, else empty.
+fn fetch_folder_files(manager: &str, home: &str, uri: &str, groups: &[Vec<String>]) -> Vec<String> {
+    use sha2::{Digest, Sha256};
+    let folder = uri.rfind('/').map(|i| &uri[..i]).unwrap_or(uri);
+    let hash = format!("{:x}", Sha256::digest(folder.as_bytes()));
+    let dir = Path::new(home).join("track").join(&hash[..16]);
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(8)))
+        .build()
+        .new_agent();
+    groups
+        .iter()
+        .map(|names| {
+            names
+                .iter()
+                .map(|n| n.trim())
+                .filter(|n| !n.is_empty() && !n.contains('/') && !n.contains(".."))
+                .find_map(|name| {
+                    let url = format!(
+                        "{manager}/api/remote/track-file?uri={}&name={}",
+                        remote::encode(uri),
+                        remote::encode(name)
+                    );
+                    let mut response = agent.get(&url).call().ok()?;
+                    if response.status() != 200 {
+                        return None;
+                    }
+                    let bytes = response.body_mut().read_to_vec().ok()?;
+                    if bytes.is_empty() {
+                        return None;
+                    }
+                    std::fs::create_dir_all(&dir).ok()?;
+                    let file = dir.join(name);
+                    let part = dir.join(format!("{name}.part"));
+                    std::fs::write(&part, bytes).ok()?;
+                    std::fs::rename(&part, &file).ok()?;
+                    Some(file.to_string_lossy().into_owned())
+                })
+                .unwrap_or_default()
+        })
+        .collect()
+}
+
 /// Fetches the picture for the current album art location in the background
 /// and remembers the file it landed in. One fetch runs at a time; a location
 /// that changes meanwhile is fetched once the running one returns.
@@ -1177,6 +1280,10 @@ pub struct TapSource {
     vinyl_album_file: String,
     vinyl_key: String,
     vinyl_file: String,
+    /// On a remote: the track folder's pictures, fetched from the manager.
+    remote_layers: RemoteFolder,
+    remote_reels: RemoteFolder,
+    remote_vinyl: RemoteFolder,
     /// The reels' album file names and the files found.
     reel_album_files: (String, String),
     reel_key: String,
@@ -1306,6 +1413,9 @@ impl TapSource {
             vinyl_album_file: String::new(),
             vinyl_key: String::new(),
             vinyl_file: String::new(),
+            remote_layers: RemoteFolder::default(),
+            remote_reels: RemoteFolder::default(),
+            remote_vinyl: RemoteFolder::default(),
             reel_album_files: (String::new(), String::new()),
             reel_key: String::new(),
             reel_files: (String::new(), String::new()),
@@ -1346,6 +1456,16 @@ impl TapSource {
         if self.folder_layers.is_empty() {
             return Vec::new();
         }
+        if let Some(manager) = manager_url() {
+            if folder_candidates(uri, &["x.png".to_string()]).is_empty() {
+                return vec![String::new(); self.folder_layers.len()];
+            }
+            let groups: Vec<Vec<String>> = self.folder_layers.clone();
+            return self
+                .remote_layers
+                .want(uri, &groups, &manager)
+                .unwrap_or_else(|| vec![String::new(); self.folder_layers.len()]);
+        }
         let key = uri.rfind('/').map(|i| &uri[..i]).unwrap_or(uri).to_string();
         if key != self.folder_key || self.folder_files.len() != self.folder_layers.len() {
             self.folder_key = key;
@@ -1367,6 +1487,23 @@ impl TapSource {
     fn reel_files_for(&mut self, uri: &str) -> (String, String) {
         if self.reel_album_files.0.is_empty() && self.reel_album_files.1.is_empty() {
             return (String::new(), String::new());
+        }
+        if let Some(manager) = manager_url() {
+            if folder_candidates(uri, &["x.png".to_string()]).is_empty() {
+                return (String::new(), String::new());
+            }
+            let groups = vec![
+                vec![self.reel_album_files.0.clone()],
+                vec![self.reel_album_files.1.clone()],
+            ];
+            let files = self
+                .remote_reels
+                .want(uri, &groups, &manager)
+                .unwrap_or_default();
+            return (
+                files.first().cloned().unwrap_or_default(),
+                files.get(1).cloned().unwrap_or_default(),
+            );
         }
         let key = uri.rfind('/').map(|i| &uri[..i]).unwrap_or(uri).to_string();
         if key != self.reel_key {
@@ -1418,6 +1555,17 @@ impl TapSource {
     fn vinyl_file_for(&mut self, uri: &str) -> String {
         if self.vinyl_album_file.is_empty() {
             return String::new();
+        }
+        if let Some(manager) = manager_url() {
+            if folder_candidates(uri, &["x.png".to_string()]).is_empty() {
+                return String::new();
+            }
+            let groups = vec![vec![self.vinyl_album_file.clone()]];
+            return self
+                .remote_vinyl
+                .want(uri, &groups, &manager)
+                .and_then(|files| files.first().cloned())
+                .unwrap_or_default();
         }
         let key = uri.rfind('/').map(|i| &uri[..i]).unwrap_or(uri).to_string();
         if key != self.vinyl_key {
@@ -1947,6 +2095,63 @@ pub fn input_from_records(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn folder_pictures_come_from_the_manager_on_a_remote() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = thread::spawn(move || {
+            let mut seen = Vec::new();
+            for _ in 0..2 {
+                let (mut s, _) = listener.accept().unwrap();
+                let mut buf = [0u8; 4096];
+                let n = s.read(&mut buf).unwrap();
+                let first = String::from_utf8_lossy(&buf[..n])
+                    .lines()
+                    .next()
+                    .unwrap_or("")
+                    .to_string();
+                if first.contains("name=back.png") {
+                    let body = b"PNGBYTES";
+                    write!(
+                        s,
+                        "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .unwrap();
+                    s.write_all(body).unwrap();
+                } else {
+                    write!(
+                        s,
+                        "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                    )
+                    .unwrap();
+                }
+                seen.push(first);
+            }
+            seen
+        });
+        let home = std::env::temp_dir().join(format!("glass-track-{}", std::process::id()));
+        let files = fetch_folder_files(
+            &format!("http://{addr}"),
+            home.to_str().unwrap(),
+            "music-library/INTERNAL/Queen/Opera/01.flac",
+            &[vec!["Back.png".to_string(), "back.png".to_string()]],
+        );
+        let seen = server.join().unwrap();
+        assert_eq!(
+            seen.len(),
+            2,
+            "the first name was refused, the second served"
+        );
+        assert!(seen[0].contains("name=Back.png") && seen[1].contains("name=back.png"));
+        assert_eq!(files.len(), 1);
+        assert!(files[0].ends_with("/back.png"), "{}", files[0]);
+        assert_eq!(std::fs::read(&files[0]).unwrap(), b"PNGBYTES");
+        let _ = std::fs::remove_dir_all(&home);
+    }
 
     #[test]
     fn records_become_ui_levels_and_bins() {

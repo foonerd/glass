@@ -610,6 +610,7 @@ pub fn remote_main(
         std::env::set_var(lead::HOME_VAR, &home);
         std::env::remove_var("GLASS_CONFIG");
         intake::set_player(&beacon.address(), beacon.player_port);
+        intake::set_manager(&beacon.manager_url());
         intake::set_overrides(Overrides {
             fps: config.display.fps,
             ..run.overrides.clone()
