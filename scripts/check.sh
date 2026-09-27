@@ -25,6 +25,36 @@ for script in get-glass.sh scripts/*.sh remote/linux/*.sh plugin/*.sh; do
   sh -n "$script" || { echo "check: $script does not parse" >&2; exit 1; }
 done
 
+echo "check: windows installer"
+# The installer is run, with -Check, against both layouts it accepts: the
+# release archive (bin/glass.exe) and a checkout after the cross build
+# (bin/windows-x64/glass.exe); and it must refuse a layout with neither.
+# PowerShell on the machine, else the PowerShell image; skipped without both.
+if command -v pwsh >/dev/null 2>&1; then
+  run_installer() { pwsh -NoProfile -File "$1/remote/windows/install.ps1" "${@:2}"; }
+elif command -v docker >/dev/null 2>&1; then
+  run_installer() { docker run --rm --user "$(id -u):$(id -g)" -v "$1:/layout:ro" mcr.microsoft.com/powershell pwsh -NoProfile -File /layout/remote/windows/install.ps1 "${@:2}"; }
+else
+  run_installer() { echo "check: windows installer skipped (no pwsh, no docker)"; return 0; }
+fi
+if command -v pwsh >/dev/null 2>&1 || command -v docker >/dev/null 2>&1; then
+  layout=$(mktemp -d)
+  for bin in bin bin/windows-x64; do
+    rm -rf "$layout"/* && mkdir -p "$layout/$bin" "$layout/remote/windows"
+    cp remote/windows/*.ps1 "$layout/remote/windows/"
+    : > "$layout/$bin/glass.exe"; : > "$layout/$bin/SDL2.dll"
+    said=$(run_installer "$layout" -Check) || { echo "check: install.ps1 fails with the display under $bin" >&2; rm -rf "$layout"; exit 1; }
+    echo "$said" | grep -q "would install from" || { echo "check: install.ps1 -Check said: $said" >&2; rm -rf "$layout"; exit 1; }
+  done
+  rm -rf "$layout"/* && mkdir -p "$layout/remote/windows" && cp remote/windows/*.ps1 "$layout/remote/windows/"
+  if run_installer "$layout" -Check >/dev/null 2>&1; then
+    echo "check: install.ps1 must refuse a layout without the display" >&2; rm -rf "$layout"; exit 1
+  fi
+  rm -rf "$layout"
+else
+  run_installer ""
+fi
+
 echo "check: plugin files"
 # Volumio's core reads every plugin's strings at its start: one bad file
 # takes the whole backend down, so every JSON the plugin ships must parse.
