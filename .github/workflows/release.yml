@@ -77,7 +77,17 @@ jobs:
       - name: Per-architecture archives of the display, the tap and the remote installer
         run: |
           for arch in arm armv7 armv8 x64; do
-            tar -C . --transform "s,^,glass-${GITHUB_REF_NAME#v}-$arch/," -czf "dist/glass-${GITHUB_REF_NAME#v}-$arch.tar.gz" "bin/$arch" "lib/$arch" remote
+            tar -C . --transform "s,^,glass-${GITHUB_REF_NAME#v}-$arch/," -czf "dist/glass-${GITHUB_REF_NAME#v}-$arch.tar.gz" "bin/$arch" "lib/$arch" remote/README.md remote/linux
+          # What a remote needs is a few megabytes; anything more is the
+          # build's leavings, never to be published again.
+          for f in dist/glass-*-*.tar.gz; do
+            size=$(stat -c %s "$f")
+            if [ "$size" -gt 16000000 ]; then
+              echo "$f is $size bytes, more than a remote needs:" >&2
+              tar -tzf "$f" | head -40 >&2
+              exit 1
+            fi
+          done
           done
       - name: The Windows archive of the display and the remote installer
         run: |
