@@ -43,6 +43,17 @@ pub struct Status {
     pub rate: u32,
     /// This page's address on the network, once known.
     pub page: String,
+    /// The screens this machine has, once the window opened.
+    pub monitors: Vec<MonitorInfo>,
+}
+
+/// One screen of this machine.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct MonitorInfo {
+    pub index: u32,
+    pub name: String,
+    pub width: u32,
+    pub height: u32,
 }
 
 /// The remote's state shared between the frame loop and the page.
@@ -358,6 +369,31 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
                     "discovery",
                     format!("port {DEFAULT_BEACON_PORT}: {e}"),
                 ),
+            }
+        }
+        (Method::Get, "/api/local/themes") => {
+            let dir = query(&url, "dir")
+                .filter(|d| !d.trim().is_empty())
+                .or_else(|| app.config().themes_dir)
+                .unwrap_or_default();
+            if dir.trim().is_empty() {
+                return respond_error(request, 400, "no-folder", "no themes folder named");
+            }
+            match config::local_themes(&dir) {
+                Ok(themes) => {
+                    let (templates, spectrum) = config::local_roots(&dir);
+                    respond_json(
+                        request,
+                        200,
+                        json!({
+                            "dir": dir,
+                            "templates": templates.to_string_lossy(),
+                            "spectrum": spectrum.to_string_lossy(),
+                            "themes": themes,
+                        }),
+                    );
+                }
+                Err(e) => respond_error(request, 400, "not-a-folder", e),
             }
         }
         (Method::Get, "/api/player/themes") => {

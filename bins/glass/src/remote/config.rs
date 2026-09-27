@@ -47,6 +47,13 @@ pub enum ThemeChoice {
         #[serde(default)]
         meter: MeterChoice,
     },
+    /// A theme from the folder on this machine the configuration names
+    /// (`themes_dir`): a disk of this machine's, or a share mounted here.
+    Local {
+        folder: String,
+        #[serde(default)]
+        meter: MeterChoice,
+    },
 }
 
 /// Which meters of an own theme show, and how they move on.
@@ -117,6 +124,89 @@ impl MeterChoice {
     }
 }
 
+/// The folders a themes folder on this machine resolves to: the theme
+/// folders, and their spectrum twins. The folder may hold theme folders
+/// itself, or a `templates` folder with `templates_spectrum` beside it,
+/// as Glass's own data folder is laid out; a `templates` folder named
+/// directly finds its twins beside it.
+pub fn local_roots(dir: &str) -> (PathBuf, PathBuf) {
+    let dir = PathBuf::from(dir.trim());
+    if dir.join("templates").is_dir() {
+        (dir.join("templates"), dir.join("templates_spectrum"))
+    } else if dir.file_name().is_some_and(|n| n == "templates") {
+        let beside = dir.parent().map(Path::to_path_buf).unwrap_or_default();
+        (dir.clone(), beside.join("templates_spectrum"))
+    } else {
+        let twins = dir.join("templates_spectrum");
+        (dir, twins)
+    }
+}
+
+/// A theme folder found on this machine.
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct LocalTheme {
+    pub folder: String,
+    /// The meters, by section name of `meters.txt`.
+    pub meters: Vec<String>,
+    /// Whether a spectrum twin exists.
+    pub spectrum: bool,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+}
+
+/// The themes under a folder on this machine: every folder with a
+/// `meters.txt`, sorted by name, with the size a `WxH` at the front of the
+/// name says.
+pub fn local_themes(dir: &str) -> Result<Vec<LocalTheme>, String> {
+    let (templates, spectrum) = local_roots(dir);
+    let entries =
+        std::fs::read_dir(&templates).map_err(|e| format!("{}: {e}", templates.display()))?;
+    let mut themes = Vec::new();
+    for entry in entries.flatten() {
+        let path = entry.path();
+        let Some(name) = path.file_name().and_then(|n| n.to_str()) else {
+            continue;
+        };
+        if name.starts_with('.') || !path.join("meters.txt").is_file() {
+            continue;
+        }
+        let text = std::fs::read_to_string(path.join("meters.txt")).unwrap_or_default();
+        let (width, height) = size_in_name(name);
+        themes.push(LocalTheme {
+            folder: name.to_string(),
+            meters: section_names(&text),
+            spectrum: spectrum.join(name).join("spectrum.txt").is_file(),
+            width,
+            height,
+        });
+    }
+    themes.sort_by(|a, b| a.folder.cmp(&b.folder));
+    Ok(themes)
+}
+
+/// The `[section]` names of a configuration text, in order, without the
+/// `[current]` bookmark.
+fn section_names(text: &str) -> Vec<String> {
+    text.lines()
+        .map(str::trim)
+        .filter_map(|l| l.strip_prefix('[').and_then(|r| r.strip_suffix(']')))
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty() && !s.eq_ignore_ascii_case("current"))
+        .collect()
+}
+
+/// The `WxH` a theme folder's name starts with, when it does.
+fn size_in_name(name: &str) -> (Option<u32>, Option<u32>) {
+    let head: String = name
+        .chars()
+        .take_while(|c| c.is_ascii_digit() || *c == 'x')
+        .collect();
+    match head.split_once('x') {
+        Some((w, h)) => (w.parse().ok(), h.parse().ok()),
+        None => (None, None),
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum WindowMode {
@@ -139,6 +229,9 @@ pub struct Display {
     /// A frame rate of this remote's own; the player's when absent.
     #[serde(default)]
     pub fps: Option<u32>,
+    /// The screen the window opens on, by the system's count from 0.
+    #[serde(default)]
+    pub monitor: u32,
 }
 
 fn default_true() -> bool {
@@ -152,6 +245,7 @@ impl Default for Display {
             position: None,
             fit: true,
             fps: None,
+            monitor: 0,
         }
     }
 }
@@ -178,6 +272,11 @@ pub struct RemoteConfig {
     /// The port of this remote's own page.
     #[serde(default = "default_page_port")]
     pub page_port: u16,
+    /// A folder of themes on this machine, for a player's `Local` theme
+    /// choice: theme folders, or a `templates` folder with
+    /// `templates_spectrum` beside it, as Glass's own data folder is laid out.
+    #[serde(default)]
+    pub themes_dir: Option<String>,
 }
 
 fn default_version() -> u32 {
@@ -197,6 +296,7 @@ impl Default for RemoteConfig {
             display: Display::default(),
             gain_db: 0.0,
             page_port: DEFAULT_PAGE_PORT,
+            themes_dir: None,
         }
     }
 }
@@ -245,6 +345,11 @@ impl RemoteConfig {
         if self.page_port == 0 {
             self.page_port = DEFAULT_PAGE_PORT;
         }
+        self.themes_dir = self
+            .themes_dir
+            .take()
+            .map(|d| d.trim().to_string())
+            .filter(|d| !d.is_empty());
         if let Some(fps) = self.display.fps {
             self.display.fps = Some(fps.clamp(lead::MIN_FRAME_RATE, lead::MAX_FRAME_RATE));
         }
@@ -272,6 +377,20 @@ impl RemoteConfig {
     pub fn check(&self) -> Result<(), String> {
         if self.page_port < 1024 {
             return Err("the page port must be 1024 or above".to_string());
+        }
+        for (id, player) in &self.players {
+            if let ThemeChoice::Local { folder, .. } = &player.theme {
+                if self.themes_dir.is_none() {
+                    return Err(format!(
+                        "player {id} takes a theme from this machine, but no themes folder is set"
+                    ));
+                }
+                if folder.trim().is_empty() || folder.contains(['/', '\\']) {
+                    return Err(format!(
+                        "player {id}: the theme is a folder name under the themes folder"
+                    ));
+                }
+            }
         }
         for (id, player) in &self.players {
             if !id
@@ -506,5 +625,95 @@ mod tests {
         assert_eq!(config.players[&a].manager_port, 5590);
         let json = serde_json::to_string(&config).unwrap();
         assert!(json.contains("\"mode\":\"follow\""));
+    }
+}
+
+#[cfg(test)]
+mod local_tests {
+    use super::*;
+
+    #[test]
+    fn a_themes_folder_on_this_machine_lists_its_themes_and_their_twins() {
+        let dir = std::env::temp_dir().join(format!("glass-local-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(dir.join("templates/1280x720_mine")).unwrap();
+        std::fs::create_dir_all(dir.join("templates/plain/sub")).unwrap();
+        std::fs::create_dir_all(dir.join("templates/.hidden")).unwrap();
+        std::fs::create_dir_all(dir.join("templates_spectrum/1280x720_mine")).unwrap();
+        std::fs::write(
+            dir.join("templates/1280x720_mine/meters.txt"),
+            "[first]\nmeter.type = circular\n\n[second]\nmeter.type = linear\n",
+        )
+        .unwrap();
+        std::fs::write(dir.join("templates/plain/meters.txt"), "[only]\n").unwrap();
+        std::fs::write(dir.join("templates/.hidden/meters.txt"), "[x]\n").unwrap();
+        std::fs::write(
+            dir.join("templates_spectrum/1280x720_mine/spectrum.txt"),
+            "[s]\n",
+        )
+        .unwrap();
+        // The data folder layout, the templates folder named directly, and a bare folder of themes.
+        let text = dir.to_string_lossy().into_owned();
+        let (templates, twins) = local_roots(&text);
+        assert_eq!(templates, dir.join("templates"));
+        assert_eq!(twins, dir.join("templates_spectrum"));
+        let (templates, twins) = local_roots(&dir.join("templates").to_string_lossy());
+        assert_eq!(templates, dir.join("templates"));
+        assert_eq!(twins, dir.join("templates_spectrum"));
+        let (bare, bare_twins) = local_roots("/nowhere/skins");
+        assert_eq!(bare, PathBuf::from("/nowhere/skins"));
+        assert_eq!(
+            bare_twins,
+            PathBuf::from("/nowhere/skins/templates_spectrum")
+        );
+        let themes = local_themes(&text).unwrap();
+        assert_eq!(
+            themes,
+            vec![
+                LocalTheme {
+                    folder: "1280x720_mine".to_string(),
+                    meters: vec!["first".to_string(), "second".to_string()],
+                    spectrum: true,
+                    width: Some(1280),
+                    height: Some(720),
+                },
+                LocalTheme {
+                    folder: "plain".to_string(),
+                    meters: vec!["only".to_string()],
+                    spectrum: false,
+                    width: None,
+                    height: None,
+                },
+            ]
+        );
+        assert!(local_themes("/nowhere/at/all").is_err());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_local_theme_needs_a_themes_folder_and_a_plain_name() {
+        let mut config = RemoteConfig::default();
+        config.players.insert(
+            "one".to_string(),
+            Player {
+                host: "player".to_string(),
+                manager_port: 5582,
+                name: String::new(),
+                theme: ThemeChoice::Local {
+                    folder: "1280x720_mine".to_string(),
+                    meter: MeterChoice::default(),
+                },
+            },
+        );
+        assert!(config.check().is_err(), "no folder set");
+        config.themes_dir = Some(" /media/skins ".to_string());
+        config.tidy();
+        assert_eq!(config.themes_dir.as_deref(), Some("/media/skins"));
+        assert!(config.check().is_ok());
+        config.players.get_mut("one").unwrap().theme = ThemeChoice::Local {
+            folder: "../etc".to_string(),
+            meter: MeterChoice::default(),
+        };
+        assert!(config.check().is_err(), "a path is not a folder name");
     }
 }
