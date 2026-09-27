@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.10] - 2026-09-27
+
+Logging and performance profiles, on the Manager's Status tab. What Glass writes to the player's journal is set by a level, errors only, warnings (the default), info, verbose or trace, and at the two finest levels by targets: the audio path, the channel, the display, remotes, themes, artwork, the manager and upgrades, settings. The display's and the frames daemon's lines now reach the journal as they are written and follow the same level from their next start; before, the display's lines were kept until it left and then dropped. The panel shows the last three hundred Glass lines and downloads the last thousand as a file for a report. A performance profile sets the frame rate, the rotation quality and the transitions together: Full, Standard, Light, Minimal, or Auto, which reads the board (a Raspberry Pi 5, 4, 3 or Zero 2 W, or a PC) and picks the row for it; a value changed by hand on the settings page makes the profile Custom. An upgrade now waits until the player's plugin registry shows Glass enabled before it restarts the backend, and sets it when it does not, so an upgrade cannot leave the plugin installed and off.
+
 ## [0.7.9] - 2026-09-27
 
 A remote shows the pictures a theme takes from the playing track's folder: folder layers, a record or reel picture from the album. The player's manager serves one picture from the track's folder on request, under the same rule the display applies on the player (the folder under `/mnt`, a plain picture name), and the remote brings the first candidate the player has into its cache home in the background, once per track folder, so a track change costs the remote no frame.

@@ -85,8 +85,10 @@ impl RemoteSession {
             screen: [skin.width, skin.height],
             page: self.page.clone(),
         });
-        println!(
-            "glass: remote {} of {}: frames from {frames}, channel {}:{}",
+        logline::say!(
+            Info,
+            "remotes",
+            "remote {} of {}: frames from {frames}, channel {}:{}",
             self.name,
             self.beacon.name,
             self.beacon.address(),
@@ -114,6 +116,12 @@ impl RemoteSession {
         let per_s = (received.saturating_sub(self.received_at_status)) as f32 / elapsed;
         self.received_at_status = received;
         let connected = source.channel_connected();
+        logline::say!(
+            Trace,
+            "remotes",
+            "frames {per_s:.0}/s, received {received}, refused {refused}, channel {}",
+            if connected { "up" } else { "down" }
+        );
         let theme = self.theme.clone();
         let meter = skin.name.clone();
         let screen = [skin.width, skin.height];
@@ -170,7 +178,7 @@ fn status_screen(
     wait: Option<Duration>,
 ) -> Outcome {
     for line in lines {
-        println!("glass: {line}");
+        logline::say!(Info, "remotes", "{line}");
     }
     let generation = app.generation();
     let started = Instant::now();
@@ -350,7 +358,7 @@ fn open_browser(url: &str) {
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let result = start_detached("xdg-open", &[url]);
     match result {
-        Ok(()) => println!("glass: settings page opened in a browser: {url}"),
+        Ok(()) => logline::say!(Info, "remotes", "settings page opened in a browser: {url}"),
         Err(err) => {
             eprintln!("glass: could not open a browser ({err}); the settings page is {url}")
         }
@@ -379,12 +387,18 @@ pub fn remote_main(
     match target {
         "auto" | "page" => {}
         "discover" => {
-            println!("glass: listening for players on port {DEFAULT_BEACON_PORT} for 10 s");
+            logline::say!(
+                Info,
+                "remotes",
+                "listening for players on port {DEFAULT_BEACON_PORT} for 10 s"
+            );
             match intake::remote::discover(DEFAULT_BEACON_PORT, Duration::from_secs(10)) {
                 Ok(list) if !list.is_empty() => {
                     for b in &list {
-                        println!(
-                            "glass: player {} at {} ({})",
+                        logline::say!(
+                            Info,
+                            "remotes",
+                            "player {} at {} ({})",
                             b.name,
                             b.address(),
                             b.release
@@ -402,14 +416,22 @@ pub fn remote_main(
                         theme: ThemeChoice::Follow { same_meter: true },
                     });
                 }
-                Ok(_) => println!("glass: no player announced itself; the page can add one"),
+                Ok(_) => logline::say!(
+                    Info,
+                    "remotes",
+                    "no player announced itself; the page can add one"
+                ),
                 Err(err) => eprintln!("glass: discovery on port {DEFAULT_BEACON_PORT}: {err}"),
             }
         }
         host => {
             let (beacon, note) = Beacon::ask_manager(host, run.manager_port);
             if let Some(note) = note {
-                println!("glass: the player's manager did not answer: {note}");
+                logline::say!(
+                    Warn,
+                    "remotes",
+                    "the player's manager did not answer: {note}"
+                );
             }
             config.put_player(Player {
                 host: host.to_string(),
@@ -431,8 +453,10 @@ pub fn remote_main(
     let app = RemoteApp::new(config_path.clone(), cache_dir.clone(), config);
     let page_port = match super::serve(app.clone()) {
         Ok(port) => {
-            println!(
-                "glass: settings page on port {port} ({})",
+            logline::say!(
+                Info,
+                "remotes",
+                "settings page on port {port} ({})",
                 config_path.display()
             );
             if open_settings {
@@ -445,7 +469,7 @@ pub fn remote_main(
             // a second display, it is a way to that one's page.
             if let Some(release) = page_already_up(wanted_port) {
                 let url = format!("http://127.0.0.1:{wanted_port}/");
-                println!("glass: a remote (Glass {release}) is already running here; its settings page is {url}");
+                logline::say!(Info, "remotes", "a remote (Glass {release}) is already running here; its settings page is {url}");
                 if open_settings {
                     open_browser(&url);
                 }
@@ -559,8 +583,10 @@ pub fn remote_main(
         let theme = match sync.run_with(&choice) {
             Ok(synced) => {
                 config_version = synced.version.clone();
-                println!(
-                    "glass: synced from {}: theme {} ({} fetched, {} kept, configuration {})",
+                logline::say!(
+                    Info,
+                    "remotes",
+                    "synced from {}: theme {} ({} fetched, {} kept, configuration {})",
                     beacon.address(),
                     synced.theme,
                     synced.fetched,
@@ -576,7 +602,7 @@ pub fn remote_main(
                 synced.theme
             }
             Err(err) => {
-                eprintln!("glass: sync from {}: {err}", beacon.address());
+                logline::say!(Warn, "remotes", "sync from {}: {err}", beacon.address());
                 if !home.join("config/meter.txt").is_file() {
                     let outcome = status_screen(
                         &run,
@@ -597,7 +623,7 @@ pub fn remote_main(
                         Outcome::Reload(_) => continue,
                     }
                 }
-                eprintln!("glass: showing what was brought before");
+                logline::say!(Warn, "remotes", "showing what was brought before");
                 app.set_status(|s| {
                     s.synced = format!("kept from before; the last sync failed: {err}")
                 });
@@ -605,7 +631,7 @@ pub fn remote_main(
             }
         };
         for line in sync.log() {
-            println!("glass: {line}");
+            logline::say!(Info, "remotes", "{line}");
         }
         std::env::set_var(lead::HOME_VAR, &home);
         std::env::remove_var("GLASS_CONFIG");
@@ -634,12 +660,17 @@ pub fn remote_main(
             page,
         };
         if let ThemeChoice::Own { meter, .. } = &player.theme {
-            println!("glass: own theme {theme}, meter {}", meter.meter_value());
+            logline::say!(
+                Info,
+                "remotes",
+                "own theme {theme}, meter {}",
+                meter.meter_value()
+            );
         }
         match session(&run, Some(&mut remote), &mut window) {
             Outcome::Exit(code) => return code,
             Outcome::Reload(why) => {
-                println!("glass: around again ({why})");
+                logline::say!(Info, "remotes", "around again ({why})");
                 app.set_phase(&format!("starting again: {why}"));
                 continue;
             }

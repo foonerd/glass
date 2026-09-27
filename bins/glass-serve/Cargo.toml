@@ -11,6 +11,7 @@ name = "glass-serve"
 path = "src/main.rs"
 
 [dependencies]
+logline = { path = "../../crates/logline" }
 tap = { path = "../../crates/tap" }
 serde_json = "1"
 

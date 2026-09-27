@@ -16,6 +16,7 @@ const express = require('express');
 
 const { Zip, ZipError, unitsOf, extractUnit, safeFolderName } = require('./zip');
 const { trackFilePath } = require('./trackfile');
+const logging = require('./logging');
 const { Catalog, CatalogError } = require('./catalog');
 const { Previews } = require('./previews');
 const { Updater, UpdateError } = require('./update');
@@ -440,6 +441,38 @@ class Manager {
       if (!file) return res.status(404).json({ error: 'not-found' });
       res.sendFile(file, { maxAge: 0 });
     });
+
+    // Logging: the level and targets, and the last lines from the journal.
+    app.get('/api/logging', function (req, res) {
+      res.json(Object.assign({ levels: logging.LEVELS, targetsAvailable: logging.TARGETS }, self.plugin.logSettings()));
+    });
+
+    app.post('/api/logging', function (req, res) {
+      res.json(Object.assign({ ok: true, levels: logging.LEVELS, targetsAvailable: logging.TARGETS }, self.plugin.setLogSettings(req.body || {})));
+    });
+
+    app.get('/api/logs', function (req, res) {
+      const found = self.plugin.recentLog(req.query.lines);
+      if (found.error) return res.status(500).json(found);
+      if (req.query.download === '1') {
+        const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16);
+        res.setHeader('Content-Disposition', 'attachment; filename="glass-log-' + os.hostname() + '-' + stamp + '.txt"');
+        res.type('text/plain').send(found.lines.join('\n') + '\n');
+        return;
+      }
+      res.json(found);
+    });
+
+    // The performance profile.
+    app.get('/api/performance', function (req, res) {
+      res.json(self.plugin.performanceInfo());
+    });
+
+    app.post('/api/performance', wrap(async function (req, res) {
+      const result = await self.exclusive(function () { return self.plugin.applyPerformanceProfile(req.body && req.body.profile); });
+      if (result.error) return res.status(400).json(result);
+      res.json(Object.assign({ ok: true }, result));
+    }));
 
     // Upgrading Glass itself.
     app.get('/api/update', wrap(async function (req, res) {

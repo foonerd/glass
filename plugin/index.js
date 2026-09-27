@@ -33,6 +33,9 @@ const runFlag = '/tmp/glass_running';
 const persistFile = '/tmp/glass_persist';
 const dismissFile = '/tmp/glass_dismiss';
 const LaunchScript = PluginPath + '/run_glass.sh';
+const logging = require('./manager/logging');
+const spawn = require('child_process').spawn;
+const performance = require('./manager/performance');
 const ConfigDir = PluginPath + '/config';
 const MeterConfigFile = ConfigDir + '/meter.txt';
 const SpectrumConfigFile = ConfigDir + '/spectrum.txt';
@@ -340,9 +343,125 @@ function Glass(context) {
     var self = this;
     self.context = context;
     self.commandRouter = self.context.coreCommand;
-    self.logger = self.context.logger;
+    // Every line the plugin writes passes a level and, at the fine levels,
+    // a target gate set on the manager's Status tab.
+    self.logger = logging.makeLogger(self.context.logger, id, function () { return self.logSettings(); });
     self.configManager = self.context.configManager;
 }
+
+// The logging settings: the level and, at verbose and trace, the targets.
+Glass.prototype.logSettings = function () {
+    var self = this;
+    var level = null;
+    var targets = [];
+    try {
+        level = self.config ? self.config.get('logLevel') : null;
+        var raw = self.config ? self.config.get('logTargets') : '';
+        targets = String(raw || '').split(',').map(function (t) { return t.trim(); }).filter(Boolean);
+    } catch (e) { /* before the configuration is loaded */ }
+    return logging.normalize({ level: level, targets: targets });
+};
+
+Glass.prototype.setLogSettings = function (data) {
+    var self = this;
+    var wanted = logging.normalize(data || {});
+    var before = self.logSettings();
+    self.config.set('logLevel', wanted.level);
+    self.config.set('logTargets', wanted.targets.join(','));
+    var changed = before.level !== wanted.level || before.targets.join(',') !== wanted.targets.join(',');
+    if (changed) { self.context.logger.info(id + 'logging: level ' + wanted.level + (wanted.targets.length ? ', targets ' + wanted.targets.join(', ') : '')); }
+    return Object.assign({ changed: changed }, self.logSettings());
+};
+
+// The last lines Glass wrote to the player's journal, newest last.
+Glass.prototype.recentLog = function (count) {
+    var wanted = Math.min(Math.max(parseInt(count, 10) || 300, 20), 3000);
+    var out = '';
+    try {
+        out = require('child_process').execFileSync('/bin/journalctl', ['-u', 'volumio', '-n', String(wanted * 8), '--no-pager', '-o', 'short-iso'], { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, timeout: 15000 });
+    } catch (e) {
+        return { error: 'journal', message: String(e && e.message ? e.message : e), lines: [] };
+    }
+    var lines = out.split('\n').filter(function (l) { return /glass/i.test(l); });
+    return { lines: lines.slice(-wanted), total: lines.length };
+};
+
+// The board this player is, for the performance profiles.
+Glass.prototype.boardInfo = function () {
+    var model = '';
+    try { model = fs.readFileSync('/proc/device-tree/model', 'utf8').replace(/\0/g, '').trim(); } catch (e) {}
+    var cores = 1;
+    try { cores = require('os').cpus().length || 1; } catch (e) {}
+    var arch = process.arch === 'x64' ? 'x86_64' : (require('os').arch() || '');
+    return { model: model, cores: cores, arch: arch, class: performance.boardClass(model, cores, arch) };
+};
+
+// The performance profile: the values as they are, which profile they
+// are, the one chosen, and the one the board would be given.
+Glass.prototype.performanceInfo = function () {
+    var self = this;
+    self.loadConfigs();
+    var current = (meterConfig && meterConfig.current) || {};
+    var values = {
+        frameRate: parseInt(current['frame.rate'], 10) || 30,
+        rotationQuality: String(current['rotation.quality'] || 'medium'),
+        rotationFps: parseInt(current['rotation.fps'], 10) || 8,
+        transitions: String(current['transition.type'] || 'fade') !== 'none'
+    };
+    var board = self.boardInfo();
+    var height = parseInt(current['screen.height'], 10) || 720;
+    var auto = performance.autoProfile(board.class, height);
+    // Until a profile is chosen, the values say which one they are.
+    var chosen = String(self.config.get('perfProfile') || '');
+    if (performance.NAMES.indexOf(chosen) === -1) { chosen = performance.nameOf(values); }
+    return { profile: chosen, auto: auto, values: values, valuesProfile: performance.nameOf(values), board: board, profiles: performance.PROFILES };
+};
+
+// Apply a profile: its values into the meter configuration and the
+// settings page's mirrors; the display starts again with them.
+Glass.prototype.applyPerformanceProfile = function (name) {
+    var self = this;
+    var chosen = String(name || 'auto');
+    if (performance.NAMES.indexOf(chosen) === -1) { return { error: 'bad-profile' }; }
+    self.loadConfigs();
+    if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return { error: 'GLASS.NO_PEPPYCONFIG' }; }
+    self.config.set('perfProfile', chosen);
+    if (chosen === 'custom') { return Object.assign({ changed: false }, self.performanceInfo()); }
+    var info = self.performanceInfo();
+    var target = chosen === 'auto' ? info.auto : chosen;
+    var p = performance.PROFILES[target];
+    var changed = false;
+    var set = function (key, value) {
+        if (String(meterConfig.current[key]) !== String(value)) { meterConfig.current[key] = value; changed = true; }
+    };
+    set('frame.rate', p.frameRate);
+    set('rotation.quality', p.rotationQuality);
+    set('rotation.fps', p.rotationFps);
+    set('transition.type', p.transitions ? 'fade' : 'none');
+    set('start.animation', p.transitions ? 'True' : 'False');
+    self.config.set('frameRate', p.frameRate);
+    self.config.set('rotationQuality', p.rotationQuality);
+    self.config.set('rotationFPS', p.rotationFps);
+    self.config.set('transitionType', p.transitions ? 'fade' : 'none');
+    self.config.set('animation', p.transitions);
+    if (changed) {
+        fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+        try { self.updateConfigVersion(); } catch (e) {}
+        if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+        uiNeedsUpdate = true;
+        self.updateUIConfig();
+        self.logger.info(id + 'performance: profile ' + chosen + (chosen === 'auto' ? ' (' + target + ')' : '') + ': ' + p.frameRate + ' fps, rotation ' + p.rotationQuality);
+    }
+    return Object.assign({ changed: changed }, self.performanceInfo());
+};
+
+// A setting changed by hand on the settings page leaves the profile.
+Glass.prototype.profileTouched = function () {
+    var self = this;
+    try {
+        if (String(self.config.get('perfProfile') || 'auto') !== 'custom') { self.config.set('perfProfile', 'custom'); }
+    } catch (e) {}
+};
 
 Glass.prototype.onVolumioStart = function () {
     var self = this;
@@ -397,11 +516,14 @@ Glass.prototype.loadConfigs = function () {
 Glass.prototype.launchEnv = function () {
     var self = this;
     var display = String(self.config.get('displayOutput') || '0').replace(/[^0-9]/g, '') || '0';
+    var log = self.logSettings();
     return Object.assign({}, process.env, {
         DISPLAY: ':' + display,
         GLASS_HOME: PluginPath,
         GLASS_DISMISS_FILE: dismissFile,
-        GLASS_CHANNEL: channelPath
+        GLASS_CHANNEL: channelPath,
+        GLASS_LOG: log.level,
+        GLASS_LOG_TARGETS: log.targets.join(',')
     });
 };
 
@@ -569,9 +691,26 @@ Glass.prototype.onStart = function () {
                         if (self.meterChild && self.meterChild.exitCode === null) {
                             return;
                         }
-                        var child = exec(LaunchScript, { uid: 1000, gid: 1000, env: self.launchEnv() }, function (error, stdout, stderr) {
+                        // The display's lines reach the journal as it writes them,
+                        // through the same gate as the plugin's own.
+                        var child = spawn('/bin/sh', [LaunchScript], { uid: 1000, gid: 1000, env: self.launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+                        var lastErr = [];
+                        var relay = function (chunk, isErr) {
+                            String(chunk).split('\n').forEach(function (line) {
+                                line = line.trim();
+                                if (!line) { return; }
+                                if (isErr) { lastErr.push(line); if (lastErr.length > 5) { lastErr.shift(); } }
+                                // The display prefixes its lines as the plugin does; one prefix is enough.
+                                self.logger.info(id + line.replace(/^glass: /, ''));
+                            });
+                        };
+                        child.stdout.on('data', function (chunk) { relay(chunk, false); });
+                        child.stderr.on('data', function (chunk) { relay(chunk, true); });
+                        child.on('error', function (e) { lastErr.push(String(e && e.message ? e.message : e)); });
+                        child.on('exit', function (code, signal) {
+                            var error = (code === 0) ? null : new Error(signal ? 'signal ' + signal : 'exit ' + code);
                             if (error !== null) {
-                                self.logger.error(id + 'the display did not run: ' + error + (stderr ? ' ' + String(stderr).trim() : ''));
+                                self.logger.error(id + 'the display did not run: ' + error.message + (lastErr.length ? ' ' + lastErr.join(' | ') : ''));
                             } else {
                                 self.logger.info(id + 'the display ran and left');
                             }
@@ -1450,6 +1589,7 @@ Glass.prototype.savePerformanceConf = function (confData) {
             if (meterConfig.current['frame.rate'] != confData.frameRate) {
                 meterConfig.current['frame.rate'] = confData.frameRate;
                 noChanges = false;
+                self.profileTouched();
             }
         }
         if (!noChanges) {
@@ -1605,6 +1745,7 @@ Glass.prototype.saveAnimationConf = function (confData) {
     var transitionType = confData.transitionType.value || 'fade';
     if (meterConfig.current['transition.type'] != transitionType) {
         meterConfig.current['transition.type'] = transitionType;
+        self.profileTouched();
         noChanges = false;
     }
     
@@ -1676,6 +1817,7 @@ Glass.prototype.saveRotationConf = function (confData) {
     var rotationQuality = confData.rotationQuality.value || 'medium';
     if (meterConfig.current['rotation.quality'] != rotationQuality) {
         meterConfig.current['rotation.quality'] = rotationQuality;
+        self.profileTouched();
         noChanges = false;
     }
     
@@ -3216,10 +3358,10 @@ Glass.prototype.startServe = function () {
         self.logger.error(id + 'remotes: no glass-serve for ' + arch);
         return;
     }
-    var spawn = require('child_process').spawn;
     var child;
     try {
-        child = spawn(bin, ['--port', String(ports.frames), '--rate', '60', '--status', REMOTE_SERVE_STATUS], { uid: 1000, gid: 1000, stdio: ['ignore', 'pipe', 'pipe'] });
+        var log = self.logSettings();
+        child = spawn(bin, ['--port', String(ports.frames), '--rate', '60', '--status', REMOTE_SERVE_STATUS], { uid: 1000, gid: 1000, stdio: ['ignore', 'pipe', 'pipe'], env: Object.assign({}, process.env, { GLASS_LOG: log.level, GLASS_LOG_TARGETS: log.targets.join(',') }) });
     } catch (e) {
         self.logger.error(id + 'remotes: glass-serve: ' + (e && e.message ? e.message : e));
         return;
@@ -3804,7 +3946,41 @@ Glass.prototype.updateApply = function (stagedName) {
             url: 'http://127.0.0.1:3000/plugin-serve/' + name,
             category: 'user_interface',
             name: 'glass'
-        }).then(function () { resolve(); }, function (e) { reject(e instanceof Error ? e : new Error(String(e))); });
+        }).then(function () {
+            // The plugin manager enables the plugin again through its own
+            // configuration, which it saves a moment later; the restart must
+            // not land before that, or the plugin comes back installed and off.
+            self.ensureEnabledInRegistry().then(resolve, resolve);
+        }, function (e) { reject(e instanceof Error ? e : new Error(String(e))); });
+    });
+};
+
+Glass.prototype.ensureEnabledInRegistry = function () {
+    var self = this;
+    var file = '/data/configuration/plugins.json';
+    var pm = self.commandRouter.pluginManager;
+    var reads = function () {
+        try {
+            var p = JSON.parse(fs.readFileSync(file, 'utf8'));
+            var g = p.user_interface && p.user_interface.glass;
+            return !!(g && g.enabled && g.enabled.value === true);
+        } catch (e) { return false; }
+    };
+    return new Promise(function (resolve) {
+        var tries = 0;
+        var look = function () {
+            if (reads()) { self.logger.info(id + 'upgrade: the registry shows Glass enabled'); return resolve(); }
+            if (tries === 2 && pm && pm.config && typeof pm.config.set === 'function') {
+                try {
+                    pm.config.set('user_interface.glass.enabled', true);
+                    pm.config.set('user_interface.glass.status', 'STARTED');
+                    self.logger.warn(id + 'upgrade: the registry did not show Glass enabled; set it');
+                } catch (e) { self.logger.warn(id + 'upgrade: registry: ' + (e && e.message ? e.message : e)); }
+            }
+            if (++tries > 12) { self.logger.warn(id + 'upgrade: the registry never showed Glass enabled; restarting anyway'); return resolve(); }
+            setTimeout(look, 500);
+        };
+        look();
     });
 };
 
@@ -3848,6 +4024,8 @@ Glass.prototype.statusInfo = function () {
             artist: state.artist || null
         },
         showing: self.channel && self.channel.showing ? self.channel.showing : null,
+        logging: Object.assign({ levels: logging.LEVELS, targetsAvailable: logging.TARGETS }, self.logSettings()),
+        performance: self.performanceInfo(),
         legacy: self.legacyEnabled(),
         language: self.managerLanguage()
     };

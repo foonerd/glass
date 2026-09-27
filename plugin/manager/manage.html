@@ -289,6 +289,30 @@
       </div>
       <pre id="upd-notes" class="hidden" style="white-space:pre-wrap;margin-top:10px;font:inherit;font-size:13px;color:#ccc;background:#1a1a1a;border:1px solid var(--line);border-radius:8px;padding:10px"></pre>
     </div>
+    <div class="panel" id="perf-panel">
+      <h2 id="perf-title" style="margin:0 0 10px"></h2>
+      <div class="help" id="perf-help" style="margin-bottom:10px"></div>
+      <div class="form">
+        <div><label id="perf-profile-label"></label><select id="perf-profile"></select></div>
+        <div class="full help" id="perf-board"></div>
+        <div class="full" id="perf-values"></div>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="primary" id="btn-perf-apply"></button></div>
+    </div>
+    <div class="panel" id="log-panel">
+      <h2 id="log-title" style="margin:0 0 10px"></h2>
+      <div class="help" id="log-help" style="margin-bottom:10px"></div>
+      <div class="form">
+        <div><label id="log-level-label"></label><select id="log-level"></select></div>
+        <div class="full hidden" id="log-targets-block"><label id="log-targets-label"></label><div class="checks" id="log-targets"></div></div>
+      </div>
+      <div class="row" style="margin-top:10px">
+        <button class="primary" id="btn-log-apply"></button>
+        <button id="btn-log-show"></button>
+        <a id="btn-log-download" href="/api/logs?lines=1000&download=1" style="text-decoration:none"><button></button></a>
+      </div>
+      <pre id="log-lines" class="hidden" style="white-space:pre-wrap;margin-top:10px;font-family:monospace;font-size:12px;color:#ccc;background:#1a1a1a;border:1px solid var(--line);border-radius:8px;padding:10px;max-height:420px;overflow:auto"></pre>
+    </div>
   </section>
 </div>
 
@@ -477,6 +501,8 @@
     $('btn-bk-create').textContent = t('BACKUP_CREATE');
     $('btn-bk-upload').textContent = t('MANAGER_BK_UPLOAD');
     $('st-title').textContent = t('MANAGER_TAB_STATUS');
+    $('perf-title').textContent = t('MANAGER_PERF_TITLE'); $('perf-help').textContent = t('MANAGER_PERF_HELP'); $('perf-profile-label').textContent = t('MANAGER_PERF_PROFILE'); $('btn-perf-apply').textContent = t('MANAGER_APPLY');
+    $('log-title').textContent = t('MANAGER_LOG_TITLE'); $('log-help').textContent = t('MANAGER_LOG_HELP'); $('log-level-label').textContent = t('MANAGER_LOG_LEVEL'); $('log-targets-label').textContent = t('MANAGER_LOG_TARGETS'); $('btn-log-apply').textContent = t('MANAGER_APPLY'); $('btn-log-show').textContent = t('MANAGER_LOG_SHOW'); $('btn-log-download').querySelector('button').textContent = t('MANAGER_LOG_DOWNLOAD');
     $('btn-status-refresh').textContent = t('MANAGER_REFRESH');
     $('upd-title').textContent = t('MANAGER_UPD_TITLE');
     $('btn-upd-check').textContent = t('MANAGER_UPD_CHECK');
@@ -515,7 +541,7 @@
     if (name === 'catalog' && !state.catalog) loadCatalog(false);
     if (name === 'artwork') loadArtwork();
     if (name === 'backups') loadBackups();
-    if (name === 'status') { loadStatus(); loadUpdate(false); }
+    if (name === 'status') { loadStatus(); loadUpdate(false); loadPerformance(); loadLogging(); }
     if (name === 'remotes') loadRemotes();
   }
 
@@ -1068,7 +1094,52 @@
       $('st-table').innerHTML = rows.map(function (r) { return '<tr><td>' + esc(t(r[0])) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
     }).catch(function (e) { toast(errorText(e), 'error'); });
   }
-  $('btn-status-refresh').onclick = function () { loadStatus(); loadUpdate(false); };
+  $('btn-status-refresh').onclick = function () { loadStatus(); loadUpdate(false); loadPerformance(); loadLogging(); };
+
+  // ---- the performance profile ------------------------------------------
+  function loadPerformance() {
+    return api('GET', '/api/performance').then(renderPerformance).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  function renderPerformance(p) {
+    state.performance = p;
+    var names = ['auto', 'full', 'standard', 'light', 'minimal', 'custom'];
+    $('perf-profile').innerHTML = names.map(function (n) {
+      var label = t('MANAGER_PERF_' + n.toUpperCase()) + (n === 'auto' ? ' (' + t('MANAGER_PERF_' + p.auto.toUpperCase()) + ')' : '');
+      return '<option value="' + n + '"' + (p.profile === n ? ' selected' : '') + '>' + esc(label) + '</option>';
+    }).join('');
+    $('perf-board').textContent = t('MANAGER_PERF_BOARD') + ' ' + (p.board.model || p.board.arch || '?') + ' · ' + p.board.cores + ' ' + t('MANAGER_PERF_CORES') + ' · ' + t('MANAGER_PERF_AUTO_IS') + ' ' + t('MANAGER_PERF_' + p.auto.toUpperCase());
+    var v = p.values;
+    $('perf-values').innerHTML = '<table class="kv"><tr><td>' + esc(t('FRAME_RATE')) + '</td><td>' + v.frameRate + '</td></tr><tr><td>' + esc(t('ROTATION_QUALITY')) + '</td><td>' + esc(v.rotationQuality) + ' · ' + v.rotationFps + ' fps</td></tr><tr><td>' + esc(t('TRANSITION_TYPE')) + '</td><td>' + esc(v.transitions ? t('MANAGER_ST_YES') : t('MANAGER_ST_NO')) + '</td></tr><tr><td>' + esc(t('MANAGER_PERF_THESE_ARE')) + '</td><td>' + esc(t('MANAGER_PERF_' + p.valuesProfile.toUpperCase())) + '</td></tr></table>';
+  }
+  $('btn-perf-apply').onclick = function () {
+    api('POST', '/api/performance', { profile: $('perf-profile').value }).then(function (p) { renderPerformance(p); toast(p.changed ? t('MANAGER_PERF_APPLIED') : t('MANAGER_PERF_UNCHANGED')); loadStatus(); }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
+
+  // ---- logging ------------------------------------------------------------
+  function loadLogging() {
+    return api('GET', '/api/logging').then(renderLogging).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  function renderLogging(l) {
+    state.logging = l;
+    $('log-level').innerHTML = l.levels.map(function (n) { return '<option value="' + n + '"' + (l.level === n ? ' selected' : '') + '>' + esc(t('MANAGER_LOG_' + n.toUpperCase())) + '</option>'; }).join('');
+    $('log-targets').innerHTML = l.targetsAvailable.map(function (n) { return '<label class="switch"><input type="checkbox" name="log-target" value="' + n + '"' + (l.targets.indexOf(n) !== -1 ? ' checked' : '') + '><span>' + esc(t('MANAGER_LOG_T_' + n.toUpperCase())) + '</span></label>'; }).join('');
+    logTargetsVisible();
+  }
+  function logTargetsVisible() {
+    var fine = $('log-level').value === 'verbose' || $('log-level').value === 'trace';
+    $('log-targets-block').classList.toggle('hidden', !fine);
+  }
+  $('log-level').onchange = logTargetsVisible;
+  $('btn-log-apply').onclick = function () {
+    var targets = Array.prototype.map.call(document.querySelectorAll('input[name=log-target]:checked'), function (i) { return i.value; });
+    api('POST', '/api/logging', { level: $('log-level').value, targets: targets }).then(function (l) { renderLogging(l); toast(t('MANAGER_LOG_APPLIED')); }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
+  $('btn-log-show').onclick = function () {
+    var pre = $('log-lines');
+    if (!pre.classList.contains('hidden')) { pre.classList.add('hidden'); return; }
+    pre.textContent = t('MANAGER_LOADING'); pre.classList.remove('hidden');
+    api('GET', '/api/logs?lines=300').then(function (d) { pre.textContent = d.lines.length ? d.lines.join('\n') : t('MANAGER_LOG_EMPTY'); pre.scrollTop = pre.scrollHeight; }).catch(function (e) { pre.textContent = errorText(e); });
+  };
 
   // ---- upgrading Glass ---------------------------------------------------
   function loadUpdate(force) {

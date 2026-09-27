@@ -296,6 +296,7 @@ struct Recorded<'a> {
 }
 
 fn main() -> ExitCode {
+    logline::init("glass");
     let mut once = false;
     let mut headless = false;
     let mut print_scene = false;
@@ -604,8 +605,10 @@ fn session(
     };
     let mut motion = Motion::new(threads, adaptive);
     let period = frame_period(frame_rate);
-    println!(
-        "glass: frame.rate={frame_rate} size={}x{} theme={} meter={} threads={threads}{}",
+    logline::say!(
+        Info,
+        "display",
+        "frame.rate={frame_rate} size={}x{} theme={} meter={} threads={threads}{}",
         skin.width,
         skin.height,
         if skin.theme_dir.is_empty() {
@@ -617,7 +620,12 @@ fn session(
         if adaptive.is_some() { " as needed" } else { "" }
     );
     let mut assets = Assets::load(&skin);
-    println!("glass: fonts loaded {} of 5", assets.fonts.loaded());
+    logline::say!(
+        Verbose,
+        "display",
+        "fonts loaded {} of 5",
+        assets.fonts.loaded()
+    );
     if profiling {
         println!(
             "glass: memory kept for the meter: {}",
@@ -748,7 +756,7 @@ fn session(
             }
             motion.ramp.begin(now);
             switched_at = Instant::now();
-            println!("glass: meter={name}");
+            logline::say!(Info, "display", "meter={name}");
             if reports {
                 source.report_showing(&theme_folder, &skin.name);
             }
@@ -769,9 +777,13 @@ fn session(
                     && version != remote.config_version;
                 if remote.follow && (other_theme || other_version) {
                     if other_theme {
-                        println!("glass: the player's theme is now {theme}");
+                        logline::say!(Info, "remotes", "the player's theme is now {theme}");
                     } else {
-                        println!("glass: the player's configuration is now {version}");
+                        logline::say!(
+                            Info,
+                            "remotes",
+                            "the player's configuration is now {version}"
+                        );
                     }
                     reload = Some("the player's configuration changed");
                     leave = Some("the player's configuration changed");
@@ -807,7 +819,7 @@ fn session(
                     let stem = skin.name.replace('/', "_");
                     let file = folder.join(format!("{stem}.png"));
                     match write_png(&file, frame) {
-                        Ok(()) => println!("glass: snapshot {}", file.display()),
+                        Ok(()) => logline::say!(Info, "display", "snapshot {}", file.display()),
                         Err(err) => eprintln!("glass: snapshot {}: {err}", file.display()),
                     }
                     // The thumbnail keeps the frame's shape at the asked width.
@@ -1080,7 +1092,7 @@ fn session(
             }
         }
         if let Some(why) = leave {
-            println!("glass: leaving ({why})");
+            logline::say!(Info, "display", "leaving ({why})");
             // Leave the way the engine leaves: fade out when a fade in was shown.
             if let (Some(window), true) = (surface.as_mut(), did_fade_in && skin.transition.fade) {
                 let now = started.elapsed().as_millis() as u64;
