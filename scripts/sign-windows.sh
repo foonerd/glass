@@ -35,5 +35,15 @@ for file in bin/windows-x64/glass.exe remote/windows/install.ps1 remote/windows/
     --name "Glass Remote" --url https://github.com/foonerd/glass \
     "$file"
 done
+# The runner has no Microsoft root certificates, so osslsigncode cannot
+# walk the chain and calls the verification failed; Windows walks it.
+# What is checked here is what the runner can see: a signature issued by
+# Microsoft's public code signing CA, and a timestamp.
 echo "sign-windows: verify"
-osslsigncode verify bin/windows-x64/glass.exe | grep -E "Signature verification|Subject:" | sed 's/^/sign-windows:   /'
+report=$(osslsigncode verify bin/windows-x64/glass.exe 2>&1 || true)
+echo "$report" | grep -E "Subject:|verification" | sed 's/^/sign-windows:   /'
+echo "$report" | grep -q "Microsoft ID Verified Code Signing PCA" \
+  || { echo "sign-windows: glass.exe carries no signature under Microsoft's public code signing CA" >&2; exit 1; }
+echo "$report" | grep -q "Timestamping CA" \
+  || { echo "sign-windows: glass.exe carries no timestamp" >&2; exit 1; }
+echo "sign-windows: signed and timestamped"

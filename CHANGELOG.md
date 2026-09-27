@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.23] - 2026-09-27
+
+The first signed release. 0.7.22 signed its binary and then refused its own signature: the check ran on a Linux runner without Microsoft's root certificates, so the chain could not be walked there, and the release was not published. The check now looks for what the runner can see, a signature issued by Microsoft's public code signing authority and a timestamp, and leaves the chain to Windows.
+
 ## [0.7.22] - 2026-09-27
 
 The Windows binary and its installer scripts are signed. `glass.exe`, `install.ps1` and `uninstall.ps1` carry an Authenticode signature issued through Azure Artifact Signing under Microsoft's public root and timestamped, so Windows knows the publisher: SmartScreen does not ask, and Smart App Control lets the program run. The file's Properties show the signature on its Digital Signatures tab.
