@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.22] - 2026-09-27
+
+The Windows binary and its installer scripts are signed. `glass.exe`, `install.ps1` and `uninstall.ps1` carry an Authenticode signature by Data Technics IT Limited, issued through Azure Artifact Signing under Microsoft's public root and timestamped, so Windows knows the publisher: SmartScreen does not ask, and Smart App Control lets the program run. The file's Properties show the signature on its Digital Signatures tab.
+
 ## [0.7.21] - 2026-09-27
 
 The release workflow finds the Android NDK on the runner; 0.7.20's release did not build, so this is the first release that carries the Android app.
