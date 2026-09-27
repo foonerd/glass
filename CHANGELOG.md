@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.19] - 2026-09-27
+
+On Windows the display is a windowed program: no console window opens behind the meters when a Start menu entry starts it. Started from a terminal, it attaches to that terminal's console first, so its lines still arrive there, and `glass.exe --help` still answers. The executable carries an icon, the remote's, which Explorer, the taskbar and the Start menu entries show, and a version block that the file's Properties show; both are compiled with windres from the cross build.
+
 ## [0.7.18] - 2026-09-27
 
 The remote opens its window on Windows. The display opened a window only when the `DISPLAY` variable named an X11 display, which Windows does not have, so a remote there ran its session, synced the theme and followed the player, and showed nothing; a window now opens on Windows and macOS whenever `--headless` is not given, and on Linux when `DISPLAY` or `WAYLAND_DISPLAY` is set.
