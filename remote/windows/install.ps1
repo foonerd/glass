@@ -29,6 +29,9 @@ $programs = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs/Glass 
 New-Item -ItemType Directory -Force -Path $programs | Out-Null
 Copy-Item (Join-Path $source 'glass.exe') $programs -Force
 Copy-Item (Join-Path $source 'SDL2.dll') $programs -Force
+# Files unpacked from a download carry the mark of the web; without it
+# SmartScreen does not ask about a program it has not seen before.
+Get-ChildItem $programs | Unblock-File -ErrorAction SilentlyContinue
 $exe = Join-Path $programs 'glass.exe'
 Write-Output "installed: $exe"
 
@@ -51,3 +54,4 @@ if ($Startup) {
     Shortcut (Join-Path $menu 'Startup/Glass Remote.lnk') '--remote' 'A Volumio player''s meters on this screen'
 }
 Write-Output "The first start shows the settings page address on the screen; Glass Remote Settings opens it."
+Write-Output "When Windows Defender Firewall asks whether glass may accept connections on private networks, allow it: that is how players announce themselves."
