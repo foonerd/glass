@@ -44,7 +44,8 @@
   table.kv td:first-child { color: var(--muted); width: 36%; }
   .checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 14px; }
   .toasts { position: fixed; right: 16px; bottom: 16px; display: flex; flex-direction: column; gap: 8px; z-index: 70; }
-  .toast { background: #333; border-left: 4px solid var(--accent); color: #fff; padding: 10px 14px; border-radius: 6px; max-width: 380px; font-size: 14px; }
+  .banner { margin: 12px auto 0; max-width: 1060px; padding: 10px 14px; border-radius: 8px; background: #3a1d1d; color: #f3c6c6; }
+    .toast { background: #333; border-left: 4px solid var(--accent); color: #fff; padding: 10px 14px; border-radius: 6px; max-width: 380px; font-size: 14px; }
   .toast.error { border-left-color: var(--danger); }
   .hidden { display: none !important; }
   .dirty { color: var(--warn); font-size: 13px; }
@@ -52,6 +53,7 @@
 </style>
 </head>
 <body>
+  <div id="unreached" class="banner hidden"></div>
 <div class="header">
   <div><h1>Glass Remote</h1><div class="sub" id="subtitle"></div></div>
   <div class="grow"></div>
@@ -148,6 +150,7 @@
   // ---- state ----
   function load() {
     return api('GET', '/api/state').then(function (s) {
+      $('unreached').classList.add('hidden');
       state.config = s.config;
       $('subtitle').textContent = 'Glass ' + s.release + ' · protocol ' + s.protocol;
       $('paths').textContent = 'Configuration: ' + s.configPath + ' · cache: ' + s.cache;
@@ -161,7 +164,7 @@
       ['Showing', st.phase || ''],
       ['Player', st.player ? st.player + ' (' + st.host + (st.player_release ? ', Glass ' + st.player_release : '') + ')' : 'none'],
       ['Channel', st.connected ? 'connected' : 'not connected'],
-      ['Frames', (st.rate ? 'drawn at ' + st.rate + ' a second · ' : '') + (st.frames_per_s ? 'received ' + st.frames_per_s.toFixed(0) + ' a second' : 'none' + (st.received ? '' : '') + (st.refused ? ' (' + st.refused + ' refused)' : '')],
+      ['Frames', (st.rate ? 'drawn at ' + st.rate + ' a second · ' : '') + (st.frames_per_s ? 'received ' + st.frames_per_s.toFixed(0) + ' a second' : 'none') + (st.refused ? ' (' + st.refused + ' refused)' : '')],
       ['Theme', st.theme ? st.theme + (st.meter ? ' · ' + st.meter : '') : ''],
       ['Screen', st.screen && st.screen[0] ? st.screen[0] + 'x' + st.screen[1] : ''],
       ['Synced', st.synced || ''],
@@ -291,7 +294,14 @@
     api('POST', '/api/config', c).then(function (d) { state.config = d.config; setDirty(false); toast(portChanged ? 'Applied. The page moves to port ' + c.page_port + ' when the remote starts again.' : 'Applied.'); fill(d.config); renderPlayers(d.config); }).catch(function (e) { toast(e.message, 'error'); });
   };
 
-  load().then(loadThemes);
+  function loadOrSay() {
+    return load().then(loadThemes).catch(function (e) {
+      $('unreached').textContent = 'This page could not read the remote\'s state (' + e.message + '). The remote may have stopped: start it again and reload this page.';
+      $('unreached').classList.remove('hidden');
+      setTimeout(loadOrSay, 5000);
+    });
+  }
+  loadOrSay();
   setInterval(function () { api('GET', '/api/state').then(function (s) { renderStatus(s.status); }).catch(function () {}); }, 2000);
 })();
 </script>

@@ -203,6 +203,17 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
     let method = request.method().clone();
     let url = request.url().to_string();
     let path = url.split('?').next().unwrap_or("").to_string();
+    if path != "/" && path != "/index.html" {
+        logline::say!(
+            Verbose,
+            "remotes",
+            "page: {method} {url} from {}",
+            request
+                .remote_addr()
+                .map(|a| a.to_string())
+                .unwrap_or_default()
+        );
+    }
     match (method, path.as_str()) {
         (Method::Get, "/") | (Method::Get, "/index.html") => {
             let response = Response::from_string(PAGE)

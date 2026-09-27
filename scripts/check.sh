@@ -55,6 +55,27 @@ else
   run_installer ""
 fi
 
+echo "check: page scripts"
+# The remote's settings page and the manager's page carry their script
+# inline; a browser runs all of it or none, so each must parse.
+python3 - bins/glass/src/remote/page.html plugin/manager/manage.html <<'PY'
+import re, sys
+for path in sys.argv[1:]:
+    text = open(path, encoding='utf-8').read()
+    blocks = re.findall(r'<script>(.*?)</script>', text, re.S)
+    if not blocks:
+        print(f"check: {path} has no script", file=sys.stderr); sys.exit(1)
+    open(path + '.check.js', 'w', encoding='utf-8').write('\n'.join(blocks))
+PY
+for page in bins/glass/src/remote/page.html plugin/manager/manage.html; do
+  if command -v node >/dev/null 2>&1; then
+    node --check "$page.check.js" || { rm -f "$page.check.js"; echo "check: the script of $page does not parse" >&2; exit 1; }
+  else
+    docker run --rm -v "$ROOT:/glass:ro" node:20-slim node --check "/glass/$page.check.js" || { rm -f "$page.check.js"; echo "check: the script of $page does not parse" >&2; exit 1; }
+  fi
+  rm -f "$page.check.js"
+done
+
 echo "check: plugin files"
 # Volumio's core reads every plugin's strings at its start: one bad file
 # takes the whole backend down, so every JSON the plugin ships must parse.

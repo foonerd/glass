@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.17] - 2026-09-27
+
+A remote's settings page works again. Since 0.7.13 its script had not parsed (a parenthesis left open in the Frames row of the status), and a browser runs all of a script or none, so the page showed its form but read nothing, and finding players, adding one and Apply did nothing; the project's checks now parse the scripts of the remote's page and the manager's page. The page also says when it cannot read the remote's state, in a banner at the top with the reason, and tries again every five seconds. The remote says every request its page receives at the verbose level (`page: POST /api/player from 127.0.0.1:52140`), so a report from a machine where the page does nothing tells whether the requests arrive. The Windows installer removes the mark of the web from what it copies, so SmartScreen does not ask about the Start menu entries, and says that Windows Defender Firewall's question about private networks is to be answered yes, since players announce themselves with a broadcast; the wiki's Remotes page has the same, with what Smart App Control does to an unsigned program.
+
 ## [0.7.16] - 2026-09-27
 
 The Windows installer finds the display in the release archive. `install.ps1` looked for `glass.exe` under `bin\windows-x64`, the layout of a checkout that ran the cross build, while the archive holds it under `bin`, so an install from the archive stopped with "glass.exe is missing"; it now takes either layout, and `-Check` only says where the files would come from, which the project's checks run against both layouts.
