@@ -1980,6 +1980,23 @@ fn pick_glyph<'f>(
     (font, id)
 }
 
+/// The scale that sets a face's em at `size` pixels, as FreeType sizes a
+/// face for pygame. An ab_glyph scale is the face's ascent-to-descent
+/// height, so the size is scaled by that height over the units per em: a
+/// face whose height is its em (Lato, DSEG7) is unchanged by this, while
+/// PeppyFont's height is 1.227 em.
+fn em_scale(face: &FontRef<'static>, size: u32) -> PxScale {
+    let size = size.max(1) as f32;
+    let upem = face.units_per_em().unwrap_or(1000.0);
+    PxScale::from(size * face.height_unscaled() / upem)
+}
+
+/// FreeType's FT_CEIL of a pixel value: rounded to 26.6 fixed point, then
+/// up to a whole pixel.
+fn ft_ceil(px: f32) -> i32 {
+    ((px * 64.0).round() as i32 + 63).div_euclid(64)
+}
+
 fn render_line(
     font: Option<&FontRef<'static>>,
     fallback: Option<&FontRef<'static>>,
@@ -1993,17 +2010,19 @@ fn render_line(
         return None;
     }
     let fallback = fallback.filter(|f| !std::ptr::eq(*f, font));
-    let scale = PxScale::from(size.max(1) as f32);
-    let scaled = font.as_scaled(scale);
-    let ascent = scaled.ascent();
-    let line_height = (ascent - scaled.descent()).ceil().max(1.0) as u32;
+    let scaled = font.as_scaled(em_scale(font, size));
+    // The baseline sits the face's ascent below the line's top and the
+    // line is ascent to descent high, both whole pixels rounded up, as
+    // FreeType sets them for pygame.
+    let ascent = ft_ceil(scaled.ascent()) as f32;
+    let line_height = ft_ceil(scaled.ascent() - scaled.descent()).max(1) as u32;
     let mut advance = 0.0f32;
     // The last glyph and the face it came from; kerning is only between
     // glyphs of one face.
     let mut last: Option<(&FontRef<'static>, ab_glyph::GlyphId)> = None;
     for ch in text.chars() {
         let (face, id) = pick_glyph(font, fallback, ch);
-        let face_scaled = face.as_scaled(scale);
+        let face_scaled = face.as_scaled(em_scale(face, size));
         if let Some((prev_face, prev)) = last {
             if std::ptr::eq(prev_face, face) {
                 advance += face_scaled.kern(prev, id);
@@ -2022,13 +2041,13 @@ fn render_line(
     let mut last: Option<(&FontRef<'static>, ab_glyph::GlyphId)> = None;
     for ch in text.chars() {
         let (face, id) = pick_glyph(font, fallback, ch);
-        let face_scaled = face.as_scaled(scale);
+        let face_scaled = face.as_scaled(em_scale(face, size));
         if let Some((prev_face, prev)) = last {
             if std::ptr::eq(prev_face, face) {
                 pen += face_scaled.kern(prev, id);
             }
         }
-        let glyph = id.with_scale_and_position(scale, ab_glyph::point(pen, ascent));
+        let glyph = id.with_scale_and_position(face_scaled.scale(), ab_glyph::point(pen, ascent));
         if let Some(outline) = face.outline_glyph(glyph) {
             let bounds = outline.px_bounds();
             outline.draw(|gx, gy, coverage| {
@@ -4572,6 +4591,72 @@ pub fn draw_text(frame: &mut Frame, x: u32, y: u32, text: &str) {
 
 #[cfg(test)]
 mod tests {
+    /// The rows a rendered line inks (alpha above 60), first and last.
+    fn ink_rows(frame: &Frame) -> (u32, u32) {
+        let inked = |y: u32| {
+            (0..frame.width).any(|x| frame.rgba[((y * frame.width + x) * 4 + 3) as usize] > 60)
+        };
+        let first = (0..frame.height).find(|&y| inked(y)).unwrap();
+        let last = (0..frame.height).rev().find(|&y| inked(y)).unwrap();
+        (first, last)
+    }
+
+    /// A line lands on the rows pygame's SDL_ttf sets it on, measured with
+    /// pygame 2.5.2 (SDL_ttf 2.22, FreeType 2.12): the size is the em in
+    /// pixels, the baseline the ascent rounded up. PeppyFont's height is
+    /// 1.227 em, so its glyphs would come out small and high were the size
+    /// taken as the height; DSEG7's height is its em.
+    #[test]
+    fn a_line_sits_on_the_rows_pygame_sets_it_on() {
+        let mut fonts = Fonts::default();
+        let white = [255, 255, 255];
+        let clock = fonts
+            .face(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../plugin/fonts/DSEG7Classic-Italic.ttf"
+            ))
+            .expect("the clock font ships with the plugin");
+        let italic = fonts
+            .face(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../plugin/fonts/PeppyFont-Italic.ttf"
+            ))
+            .expect("the italic face ships with the plugin");
+        // pygame: DSEG7 26 'H' surface height 26, ink rows 1..24; 40: 40, 2..37.
+        let h = render_line(Some(&clock.font), None, 26, white, "H", 0).unwrap();
+        assert_eq!((h.height, ink_rows(&h)), (26, (1, 24)));
+        let h = render_line(Some(&clock.font), None, 40, white, "H", 0).unwrap();
+        assert_eq!((h.height, ink_rows(&h)), (40, (2, 37)));
+        // pygame: PeppyFont-Italic 26 'H' height 32, rows 8..25; 'Hg' 8..31; 40 'H' 50, 11..39.
+        // FreeType hints the outlines onto the pixel grid and this raster
+        // does not, so a glyph's top may start one row of anti-aliasing
+        // above pygame's; the baseline row and the line's height are exact.
+        let as_pygame = |frame: &Frame, height: u32, top: u32, bottom: u32| {
+            let rows = ink_rows(frame);
+            assert_eq!((frame.height, rows.1), (height, bottom));
+            assert!(
+                rows.0 == top || rows.0 + 1 == top,
+                "top row {} for {top}",
+                rows.0
+            );
+        };
+        let h = render_line(Some(&italic.font), None, 26, white, "H", 0).unwrap();
+        as_pygame(&h, 32, 8, 25);
+        let hg = render_line(Some(&italic.font), None, 26, white, "Hg", 0).unwrap();
+        as_pygame(&hg, 32, 8, 31);
+        let h = render_line(Some(&italic.font), None, 40, white, "H", 0).unwrap();
+        as_pygame(&h, 50, 11, 39);
+        // A letter from the fallback face is set at the text's em, on the
+        // text's baseline: lambda in a clock line at 26 sits where the
+        // italic face sets it alone (pygame: rows 6..25, both baselines 26).
+        let lambda = "\u{3bb}";
+        let helped =
+            render_line(Some(&clock.font), Some(&italic.font), 26, white, lambda, 0).unwrap();
+        let alone = render_line(Some(&italic.font), None, 26, white, lambda, 0).unwrap();
+        assert_eq!(ink_rows(&helped), ink_rows(&alone));
+        as_pygame(&alone, 32, 6, 25);
+    }
+
     /// A face that lacks a character hands it to the fallback face: the
     /// clock font sets digits and the hex letters, so a Greek letter comes
     /// from the host's font and takes the width it has there.
