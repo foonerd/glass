@@ -87,10 +87,44 @@ pub fn say(level: Level, target: &str, args: Arguments) {
         return;
     }
     let prefix = settings().prefix;
+    #[cfg(target_os = "android")]
+    {
+        android::write(level, prefix, &format!("{args}"));
+    }
+    #[cfg(not(target_os = "android"))]
     if level <= Level::Warn {
         eprintln!("{prefix}: {args}");
     } else {
         println!("{prefix}: {args}");
+    }
+}
+
+/// On Android the lines go to the system log, read with `adb logcat -s
+/// glass`, since a program there has no terminal.
+#[cfg(target_os = "android")]
+mod android {
+    use super::Level;
+    use std::ffi::{c_char, c_int, CString};
+
+    #[link(name = "log")]
+    extern "C" {
+        fn __android_log_write(priority: c_int, tag: *const c_char, text: *const c_char) -> c_int;
+    }
+
+    pub fn write(level: Level, tag: &str, text: &str) {
+        let priority = match level {
+            Level::Error => 6,
+            Level::Warn => 5,
+            Level::Info => 4,
+            _ => 3,
+        };
+        let (Ok(tag), Ok(text)) = (CString::new(tag), CString::new(text)) else {
+            return;
+        };
+        // SAFETY: two C strings that live for the call, which copies them.
+        unsafe {
+            __android_log_write(priority, tag.as_ptr(), text.as_ptr());
+        }
     }
 }
 

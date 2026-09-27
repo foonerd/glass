@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.20] - 2026-09-27
+
+Glass runs as a remote display on Android. The release carries `glass-<version>-android.apk`: the display as a library inside SDL's Android activity, run as a remote, landscape, the screen kept on, with a Wi-Fi multicast lock so players' announcements arrive. The first start shows the settings page's address on the screen, as on the other platforms; the page is reached from a browser on the phone at `http://127.0.0.1:5583/` or from any machine on the network. The configuration and what is brought from players live in the app's own storage, and the display's lines go to the system log under the tag `glass`. The display's entry point is now a library function, `glass::run`, that the `glass` binary and the Android shell (`bins/glass-android`, `libmain.so`) both call. `scripts/ship-android.sh` builds SDL2 for Android from the SDL source, pinned by checksum, the display for arm64, arm and x86_64 with cargo-ndk, and the app with Gradle; `scripts/android/Dockerfile` is the image with the Android SDK, NDK and emulator for a machine without them.
+
 ## [0.7.19] - 2026-09-27
 
 On Windows the display is a windowed program: no console window opens behind the meters when a Start menu entry starts it. Started from a terminal, it attaches to that terminal's console first, so its lines still arrive there, and `glass.exe --help` still answers. The executable carries an icon, the remote's, which Explorer, the taskbar and the Start menu entries show, and a version block that the file's Properties show; both are compiled with windres from the cross build.

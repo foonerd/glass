@@ -21,13 +21,36 @@ jobs:
     environment: release
     steps:
       - uses: actions/checkout@v7
-      - run: rustup toolchain install && rustup show active-toolchain && rustup target add x86_64-pc-windows-gnu
+      - run: rustup toolchain install && rustup show active-toolchain && rustup target add x86_64-pc-windows-gnu aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+      - name: The Android NDK, build tools and cargo-ndk
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "build-tools;35.0.0" "platforms;android-35" >/dev/null
+          cargo install cargo-ndk --locked
       - name: Cross compilers and the libraries the host build links against
         run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu libc6-dev-armhf-cross libc6-dev-arm64-cross mingw-w64 libsdl2-dev libasound2-dev alsa-utils
       - uses: Swatinem/rust-cache@v2
       - run: scripts/check.sh
       - run: scripts/ship.sh
       - run: scripts/ship-windows.sh
+      # The Android app is signed with the project's key when the repository
+      # holds it (secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASS);
+      # without it the apk carries a throwaway key and is not published.
+      - name: The Android app
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASS: ${{ secrets.ANDROID_KEYSTORE_PASS }}
+        run: |
+          if [ -n "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/glass-android.jks"
+            export ANDROID_KEYSTORE="$RUNNER_TEMP/glass-android.jks"
+          fi
+          scripts/ship-android.sh
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "no signing key in the repository: the apk is not published"
+            rm -f dist/glass-*-android.apk
+          fi
       # The Windows binary and the installer are signed with Azure Trusted
       # Signing when the repository holds the account (variables
       # TRUSTED_SIGNING_ENDPOINT, _ACCOUNT, _PROFILE; secrets AZURE_TENANT_ID,
@@ -70,3 +93,4 @@ jobs:
           files: |
             dist/glass-*.zip
             dist/glass-*.tar.gz
+            dist/glass-*-android.apk

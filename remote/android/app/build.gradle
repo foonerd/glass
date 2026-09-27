@@ -1,0 +1,39 @@
+plugins {
+    id 'com.android.application'
+}
+
+// The version comes from the workspace, through the environment the
+// build script sets: 0.7.20 becomes versionName 0.7.20 and versionCode 720.
+def glassVersion = System.getenv('GLASS_VERSION') ?: '0.0.0'
+def glassVersionCode = (System.getenv('GLASS_VERSION_CODE') ?: '1') as Integer
+
+android {
+    namespace 'io.github.foonerd.glass'
+    compileSdk 35
+    // The build tools the image and the runner install; without this the
+    // plugin asks for its own default and tries to install it.
+    buildToolsVersion '35.0.0'
+    defaultConfig {
+        applicationId 'io.github.foonerd.glass'
+        minSdk 24
+        targetSdk 35
+        versionCode glassVersionCode
+        versionName glassVersion
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+        }
+    }
+    sourceSets {
+        main {
+            // libSDL2.so, libc++_shared.so and libmain.so, per ABI, built
+            // before Gradle runs; nothing is compiled by Gradle itself.
+            jniLibs.srcDirs = ['src/main/jniLibs']
+        }
+    }
+    lint {
+        abortOnError false
+        checkReleaseBuilds false
+    }
+}

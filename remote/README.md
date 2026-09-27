@@ -27,6 +27,10 @@ It puts `glass.exe` and `SDL2.dll` under the user's programs folder (`%LOCALAPPD
 
 The configuration is `%APPDATA%\glass-remote\config.json`; what is brought from players is under `%LOCALAPPDATA%\glass-remote`.
 
+## Android
+
+Download `glass-<version>-android.apk` from the release to the phone or tablet, open it, and allow the install when Android asks about apps from this source (the app is not in the Play Store). Open **Glass Remote**: the first start shows the settings page's address on the screen. Open that page in the phone's own browser at `http://127.0.0.1:5583/`, or from any machine on the network at the address shown, add the player, and the meters appear. The app runs landscape, keeps the screen on, and asks for no permission beyond the network. Its configuration and what it brings from players live in its own storage; its lines are in the system log under the tag `glass` (`adb logcat -s glass`). Android 7 or later, 64 bit arm, 32 bit arm or x86_64.
+
 ## The settings page
 
 The first start shows a page address on the screen; the page adds a player (found on the network or typed), chooses the theme (the player's, or one of the player's themes kept as this remote's own with its own meter rotation), the window (full screen, a window, or a frameless one at a fixed place), the frame rate and the gain. Changes apply while the display runs. On Linux the configuration is `~/.config/glass-remote/config.json`; what is brought from players is under `~/.cache/glass-remote`.
