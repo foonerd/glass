@@ -15,6 +15,7 @@ const os = require('os');
 const express = require('express');
 
 const { Zip, ZipError, unitsOf, extractUnit, safeFolderName } = require('./zip');
+const { trackFilePath } = require('./trackfile');
 const { Catalog, CatalogError } = require('./catalog');
 const { Previews } = require('./previews');
 const { Updater, UpdateError } = require('./update');
@@ -25,6 +26,7 @@ const MAX_BACKUP_FILE_BYTES = 4 * 1024 * 1024;
 const BACKUP_FILES = ['manifest.json', 'config.json', 'peppymeter_config.txt', 'spectrum_config.txt'];
 
 const DEFAULT_PORT = 5582;
+const MAX_TRACK_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
 const JOBS_KEPT = 50;
 const METER_NAME = /^[^/\\\0]{1,128}$/;
@@ -412,6 +414,17 @@ class Manager {
       const file = self.plugin.assetPath(String(req.params.kind), String(req.params.name));
       if (!file) return res.status(404).json({ error: 'not-found' });
       res.sendFile(file, { maxAge: 0 });
+    });
+
+    // A picture from the playing track's folder, for a remote's folder
+    // layers, records and reels: the same names the display looks for.
+    app.get('/api/remote/track-file', function (req, res) {
+      const file = trackFilePath(String(req.query.uri || ''), String(req.query.name || ''));
+      if (!file) return res.status(404).json({ error: 'not-found' });
+      fs.stat(file, function (err, stat) {
+        if (err || !stat.isFile() || stat.size > MAX_TRACK_FILE_BYTES) return res.status(404).json({ error: 'not-found' });
+        res.sendFile(file, { maxAge: 0 });
+      });
     });
 
     app.get('/api/themes/:folder/files', function (req, res) {
