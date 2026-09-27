@@ -474,7 +474,9 @@ pub fn own_address_towards(player: &str, port: u16) -> Option<IpAddr> {
 }
 
 /// This host's own IPv4 addresses, loopback left out: on Linux from the
-/// kernel's routing trie, elsewhere none.
+/// kernel's routing trie, on Android from the interface list (the routing
+/// table is closed to applications there), elsewhere the address a route
+/// to the outside would leave from.
 pub fn own_addresses() -> Vec<std::net::Ipv4Addr> {
     #[cfg(target_os = "linux")]
     {
@@ -482,14 +484,50 @@ pub fn own_addresses() -> Vec<std::net::Ipv4Addr> {
             .map(|text| local_addresses_in(&text))
             .unwrap_or_default()
     }
-    // Elsewhere the address a route to the outside would leave from.
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(target_os = "android")]
+    {
+        interface_addresses()
+    }
+    #[cfg(not(any(target_os = "linux", target_os = "android")))]
     {
         match own_address_towards("192.0.2.1", 9) {
             Some(IpAddr::V4(ip)) if !ip.is_loopback() => vec![ip],
             _ => Vec::new(),
         }
     }
+}
+
+/// The IPv4 address of every interface that is up, loopback left out,
+/// from the C library's interface list.
+#[cfg(target_os = "android")]
+fn interface_addresses() -> Vec<std::net::Ipv4Addr> {
+    let mut found = Vec::new();
+    let mut head: *mut libc::ifaddrs = std::ptr::null_mut();
+    // SAFETY: getifaddrs fills a list the C library owns until freeifaddrs;
+    // every pointer is checked before it is read, and the list is walked
+    // once and freed once.
+    unsafe {
+        if libc::getifaddrs(&mut head) != 0 {
+            return found;
+        }
+        let mut cur = head;
+        while !cur.is_null() {
+            let entry = &*cur;
+            if !entry.ifa_addr.is_null()
+                && i32::from((*entry.ifa_addr).sa_family) == libc::AF_INET
+                && (entry.ifa_flags & libc::IFF_UP as u32) != 0
+            {
+                let sin = &*(entry.ifa_addr as *const libc::sockaddr_in);
+                let ip = std::net::Ipv4Addr::from(u32::from_be(sin.sin_addr.s_addr));
+                if !ip.is_loopback() && !found.contains(&ip) {
+                    found.push(ip);
+                }
+            }
+            cur = entry.ifa_next;
+        }
+        libc::freeifaddrs(head);
+    }
+    found
 }
 
 /// The `/32 host LOCAL` entries of a routing trie dump: each is an address
