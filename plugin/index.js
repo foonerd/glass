@@ -3492,6 +3492,20 @@ function fileDigest(file) {
     }
 }
 
+// Volumio's own format icons, beside its web application: the display
+// looks there after the theme's and the plugin's.
+var StockIcons = '/volumio/http/www3/app/assets-common/format-icons';
+
+function isFontFile(name) { return /\.(ttf|otf)$/i.test(name); }
+function isIconFile(name) { return /\.(svg|png)$/i.test(name); }
+
+// The directory the meter configuration's font.path names, when it is one.
+function fontPathDir() {
+    var v = meterConfig && meterConfig.current ? String(meterConfig.current['font.path'] || '').trim() : '';
+    v = v.replace(/\/+$/, '');
+    try { return v && fs.statSync(v).isDirectory() ? v : null; } catch (e) { return null; }
+}
+
 function filesOf(dir, filter) {
     var out = [];
     try {
@@ -3512,12 +3526,12 @@ Glass.prototype.remoteConfig = function () {
     var spectrumText = '';
     try { meterText = fs.readFileSync(MeterConfigFile, 'utf8'); } catch (e) {}
     try { spectrumText = fs.readFileSync(SpectrumConfigFile, 'utf8'); } catch (e) {}
-    var webfonts = [];
-    ['font.light', 'font.regular', 'font.bold'].forEach(function (key) {
-        var v = meterConfig && meterConfig.current ? String(meterConfig.current[key] || '') : '';
-        v = v.replace(/^\/+/, '');
-        if (v && v.indexOf('/') === -1 && webfonts.indexOf(v) === -1) { webfonts.push(v); }
+    // The plugin's own icons first, then Volumio's, as the display looks.
+    var icons = filesOf(PluginPath + '/format-icons', isIconFile);
+    filesOf(StockIcons, isIconFile).forEach(function (icon) {
+        if (!icons.some(function (own) { return own.name === icon.name; })) { icons.push(icon); }
     });
+    var fontDir = fontPathDir();
     return {
         version: remoteConfigVersion,
         release: pluginVersion,
@@ -3525,10 +3539,10 @@ Glass.prototype.remoteConfig = function () {
         meter: String((meterConfig && meterConfig.current && meterConfig.current.meter) || ''),
         files: { meter: meterText, spectrum: spectrumText },
         assets: {
-            fonts: filesOf(PluginPath + '/fonts', function (n) { return /\.(ttf|otf)$/i.test(n); }),
-            icons: filesOf(PluginPath + '/format-icons', function (n) { return /\.(svg|png)$/i.test(n); })
-        },
-        webfonts: webfonts
+            fonts: filesOf(PluginPath + '/fonts', isFontFile),
+            icons: icons,
+            webfonts: fontDir ? filesOf(fontDir, isFontFile) : []
+        }
     };
 };
 
@@ -3581,12 +3595,24 @@ Glass.prototype.themeFilePath = function (folder, tree, relative) {
     return target;
 };
 
+// A font, an icon or a web font by name, from the directories the display
+// looks in, in their order: the plugin's icons before Volumio's, the web
+// fonts from the directory the meter configuration's font.path names.
 Glass.prototype.assetPath = function (kind, name) {
-    var dir = kind === 'font' ? PluginPath + '/fonts' : (kind === 'icon' ? PluginPath + '/format-icons' : null);
-    if (!dir || typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,127}$/.test(name)) { return null; }
-    var file = dir + '/' + name;
-    try { if (!fs.statSync(file).isFile()) { return null; } } catch (e) { return null; }
-    return file;
+    if (typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,127}$/.test(name)) { return null; }
+    var dirs = [];
+    if (kind === 'font' && isFontFile(name)) { dirs = [PluginPath + '/fonts']; }
+    else if (kind === 'icon' && isIconFile(name)) { dirs = [PluginPath + '/format-icons', StockIcons]; }
+    else if (kind === 'webfont' && isFontFile(name)) {
+        if (!meterConfig) { this.loadConfigs(); }
+        var fontDir = fontPathDir();
+        if (fontDir) { dirs = [fontDir]; }
+    }
+    for (var i = 0; i < dirs.length; i++) {
+        var file = dirs[i] + '/' + name;
+        try { if (fs.statSync(file).isFile()) { return file; } } catch (e) {}
+    }
+    return null;
 };
 
 // ---- The manager's view of the plugin --------------------------------

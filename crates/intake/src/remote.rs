@@ -488,8 +488,6 @@ struct RemoteConfig {
     files: RemoteFiles,
     #[serde(default)]
     assets: RemoteAssets,
-    #[serde(default)]
-    webfonts: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -505,6 +503,10 @@ struct RemoteAssets {
     fonts: Vec<Asset>,
     #[serde(default)]
     icons: Vec<Asset>,
+    /// The player's web fonts, the ones its configuration's `font.path`
+    /// names; a player older than Glass 0.7.14 lists none.
+    #[serde(default)]
+    webfonts: Vec<Asset>,
 }
 
 #[derive(Deserialize)]
@@ -715,20 +717,19 @@ impl Sync {
             );
             count(self.bring(&format!("format-icons/{}", icon.name), &url, &icon.sha256)?);
         }
-        for name in &config.webfonts {
-            let name = name.trim_start_matches('/');
-            if name.is_empty() || name.contains("..") || name.contains('/') {
-                continue;
-            }
+        for font in &config.assets.webfonts {
             let url = format!(
-                "{}/app/themes/volumio3/assets/variants/volumio/fonts/{}",
-                self.player,
-                encode(name)
+                "{}/api/remote/asset/webfont/{}",
+                self.manager,
+                encode(&font.name)
             );
-            match self.bring(&format!("webfonts/{name}"), &url, "") {
-                Ok(brought) => count(brought),
-                Err(err) => self.log.push(format!("web font {name} not brought: {err}")),
-            }
+            count(self.bring(&format!("webfonts/{}", font.name), &url, &font.sha256)?);
+        }
+        if config.assets.webfonts.is_empty() {
+            self.log.push(
+                "the player lists no web fonts (its Glass is older than 0.7.14): text is set in the plugin's font"
+                    .to_string(),
+            );
         }
 
         let theme: ThemeFiles = serde_json::from_str(&self.get_text(&format!(
@@ -860,6 +861,23 @@ pub fn remote_id(cache: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_player_lists_its_web_fonts_and_every_icon_as_assets_with_checksums() {
+        let listed = r#"{"version":"v","theme":"t","meter":"m","files":{"meter":"[current]\n"},
+            "assets":{"fonts":[],"icons":[{"name":"mp3.svg","sha256":"ab"}],
+            "webfonts":[{"name":"Lato-Light.ttf","sha256":"cd","bytes":3}]}}"#;
+        let config: RemoteConfig = serde_json::from_str(listed).unwrap();
+        assert_eq!(config.assets.webfonts[0].name, "Lato-Light.ttf");
+        assert_eq!(config.assets.webfonts[0].sha256, "cd");
+        assert_eq!(config.assets.icons[0].name, "mp3.svg");
+        // A player older than 0.7.14 named its web fonts by file only, and
+        // its web server answered a path to one with its page: not fetched.
+        let older = r#"{"version":"v","theme":"t","files":{"meter":""},
+            "assets":{"fonts":[],"icons":[]},"webfonts":["Lato-Light.ttf"]}"#;
+        let config: RemoteConfig = serde_json::from_str(older).unwrap();
+        assert!(config.assets.webfonts.is_empty());
+    }
+
     use super::*;
 
     #[test]
