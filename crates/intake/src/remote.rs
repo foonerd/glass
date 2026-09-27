@@ -512,6 +512,10 @@ struct RemoteAssets {
     /// names; a player older than Glass 0.7.14 lists none.
     #[serde(default)]
     webfonts: Vec<Asset>,
+    /// Fonts the listener uploaded to the player, named by path in its
+    /// configuration; a player older than Glass 0.7.27 lists none.
+    #[serde(default)]
+    custom: Vec<Asset>,
 }
 
 #[derive(Deserialize)]
@@ -674,11 +678,24 @@ impl Sync {
         let webfonts = webfonts.to_string_lossy().into_owned();
         let interval = choice.interval_s.map(|i| i.clamp(15, 1000).to_string());
         let on_title = choice.on_title.map(|t| if t { "True" } else { "False" });
+        // A style set in an uploaded font names it by its path on the player;
+        // here it is the copy brought into this home.
+        let custom_dir = self.home.join("customfonts");
+        let custom_names: Vec<String> = config
+            .assets
+            .custom
+            .iter()
+            .map(|f| f.name.clone())
+            .collect();
+        let custom_keys = custom_font_keys(&config.files.meter, &custom_dir, &custom_names);
         let mut keys: Vec<(&str, &str)> = vec![
             ("base.folder", &templates),
             ("font.path", &webfonts),
             ("meter.folder", &theme_wanted),
         ];
+        for (key, value) in &custom_keys {
+            keys.push((key.as_str(), value.as_str()));
+        }
         if let Some(meter) = choice.meter.as_deref().filter(|m| !m.trim().is_empty()) {
             keys.push(("meter", meter));
         }
@@ -729,6 +746,14 @@ impl Sync {
                 encode(&font.name)
             );
             count(self.bring(&format!("webfonts/{}", font.name), &url, &font.sha256)?);
+        }
+        for font in &config.assets.custom {
+            let url = format!(
+                "{}/api/remote/asset/custom/{}",
+                self.manager,
+                encode(&font.name)
+            );
+            count(self.bring(&format!("customfonts/{}", font.name), &url, &font.sha256)?);
         }
         if config.assets.webfonts.is_empty() {
             self.log.push(
@@ -791,6 +816,33 @@ impl Sync {
 
 /// `key = value` lines at the top level of a configuration, the given keys
 /// given new values; a key not there is added under `[current]`.
+/// The `font.<style>` keys whose value names an uploaded font by path,
+/// each with the path of that font's copy under `dir`, by file name.
+pub fn custom_font_keys(text: &str, dir: &Path, names: &[String]) -> Vec<(String, String)> {
+    [
+        "font.light",
+        "font.regular",
+        "font.bold",
+        "font.italic",
+        "font.digi",
+    ]
+    .iter()
+    .filter_map(|key| {
+        let value = lead::current_value(text, key)?;
+        let value = value.trim();
+        let name = Path::new(value).file_name()?.to_str()?;
+        if value.starts_with('/') && names.iter().any(|n| n == name) {
+            Some((
+                (*key).to_string(),
+                dir.join(name).to_string_lossy().into_owned(),
+            ))
+        } else {
+            None
+        }
+    })
+    .collect()
+}
+
 pub fn rewrite_config(text: &str, keys: &[(&str, &str)]) -> String {
     let mut out: Vec<String> = Vec::new();
     let mut seen: Vec<&str> = Vec::new();
@@ -866,6 +918,28 @@ pub fn remote_id(cache: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn an_uploaded_font_named_by_path_points_at_the_copy_brought_here() {
+        let text = "[current]\nfont.path = /volumio/fonts\nfont.light = /Lato-Light.ttf\nfont.bold = /data/INTERNAL/glass/fonts/Mine.ttf\nfont.italic = builtin\n";
+        let keys = custom_font_keys(
+            text,
+            Path::new("/home/x/customfonts"),
+            &["Mine.ttf".to_string()],
+        );
+        assert_eq!(
+            keys,
+            vec![(
+                "font.bold".to_string(),
+                "/home/x/customfonts/Mine.ttf".to_string()
+            )]
+        );
+        let none = custom_font_keys(text, Path::new("/home/x/customfonts"), &[]);
+        assert!(
+            none.is_empty(),
+            "a font the player does not list is left as named"
+        );
+    }
+
     #[test]
     fn a_player_lists_its_web_fonts_and_every_icon_as_assets_with_checksums() {
         let listed = r#"{"version":"v","theme":"t","meter":"m","files":{"meter":"[current]\n"},

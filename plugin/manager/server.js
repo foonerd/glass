@@ -15,6 +15,7 @@ const os = require('os');
 const express = require('express');
 
 const { Zip, ZipError, unitsOf, extractUnit, safeFolderName } = require('./zip');
+const { MAX_FONT_BYTES } = require('./fonts');
 const { trackFilePath } = require('./trackfile');
 const logging = require('./logging');
 const { Catalog, CatalogError } = require('./catalog');
@@ -337,6 +338,28 @@ class Manager {
       const result = self.plugin.setFontsSettings(req.body || {});
       if (result.error) return res.status(400).json(result);
       res.json(Object.assign({ ok: true }, self.plugin.fontsSettings()));
+    }));
+
+    // A font file sent as the request body, kept on the player under its name.
+    app.post('/api/fonts/upload', wrap(async function (req, res) {
+      const rawName = String(req.query.name || req.headers['x-file-name'] || 'font.ttf');
+      const file = path.join(os.tmpdir(), 'glass-font-' + process.pid + '-' + Date.now());
+      try {
+        await self.receive(req, file, MAX_FONT_BYTES);
+      } catch (e) {
+        await fsp.rm(file, { force: true });
+        return res.status(e.code === 'too-large' ? 413 : 400).json(failure(e));
+      }
+      const result = self.plugin.addCustomFont(file, rawName);
+      await fsp.rm(file, { force: true });
+      if (result.error) return res.status(400).json(result);
+      res.json(Object.assign({ ok: true, name: result.name }, self.plugin.fontsSettings()));
+    }));
+
+    app.delete('/api/fonts/custom/:name', wrap(async function (req, res) {
+      const result = self.plugin.removeCustomFont(String(req.params.name));
+      if (result.error) return res.status(result.error === 'not-found' ? 404 : 400).json(result);
+      res.json(Object.assign({ ok: true, removed: result.removed, freed: result.freed }, self.plugin.fontsSettings()));
     }));
 
     app.post('/api/artwork/clear-cache', wrap(async function (req, res) {

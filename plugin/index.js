@@ -280,6 +280,9 @@ function themeFolderForEdition(album, uri, rulesText) {
 // The file names inside a backup are the ones PeppyMeter Screensaver used,
 // so a backup made there restores here.
 const BackupsPath = DATA_DIR + '/backups';
+// Fonts the listener uploads live under DATA_DIR too, and reach the remotes.
+const CustomFontsPath = DATA_DIR + '/fonts';
+const fontFiles = require('./manager/fonts');
 const BackupSchemaVersion = 1;
 const BackupNameRegex = /^[A-Za-z0-9 _.\-]{1,64}$/;
 const BackupMinFreeBytes = 10 * 1024 * 1024;
@@ -434,38 +437,159 @@ Glass.prototype.setGovernor = function (on) {
     return { changed: true };
 };
 
-// The fonts the text is set in: the plugin's own multi-script PeppyFont set
-// (use.system.fonts false, the default) or the ones the meter configuration
-// names under font.path, Volumio's on a player.
+// The fonts the text is set in, one per style. A style's font.<style> value
+// in the meter configuration is `builtin` (the plugin's multi-script
+// PeppyFont face of that style, DSEG7 for the clock), the name of a file
+// under font.path (the player's own fonts, Volumio's Lato), or the path of a
+// font the listener uploaded under CustomFontsPath.
+var FONT_STYLES = ['light', 'regular', 'bold', 'italic', 'digi'];
+var BUILTIN_FACES = { light: 'PeppyFont-Light.ttf', regular: 'PeppyFont-Regular.ttf', bold: 'PeppyFont-Bold.ttf', italic: 'PeppyFont-Italic.ttf', digi: 'DSEG7Classic-Italic.ttf' };
+
+function customFontPath(name) {
+    if (typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,127}\.(ttf|otf)$/i.test(name)) { return null; }
+    var file = CustomFontsPath + '/' + name;
+    try { return fs.statSync(file).isFile() ? file : null; } catch (e) { return null; }
+}
+
+// What a style's configured value means to the panel: `builtin`, a player
+// font by name, an uploaded font by name, or the value as it stands.
+function fontChoice(value) {
+    var v = String(value || '').trim();
+    if (!v || v.toLowerCase() === 'builtin') { return { kind: 'builtin', value: 'builtin' }; }
+    if (v.indexOf('/') === 0) {
+        var name = path.basename(v);
+        if (path.dirname(v) === CustomFontsPath && customFontPath(name)) { return { kind: 'custom', value: name }; }
+    }
+    var plain = v.replace(/^\/+/, '');
+    var dir = fontPathDir();
+    if (plain.indexOf('/') === -1 && dir && fs.existsSync(dir + '/' + plain)) { return { kind: 'player', value: plain }; }
+    return { kind: 'other', value: v };
+}
+
 Glass.prototype.fontsSettings = function () {
     var self = this;
     self.loadConfigs();
     var current = (meterConfig && meterConfig.current) || {};
-    var system = String(current['use.system.fonts'] || 'False').trim().toLowerCase() === 'true';
-    var shipped = ['PeppyFont-Light.ttf', 'PeppyFont-Regular.ttf', 'PeppyFont-Bold.ttf', 'PeppyFont-Italic.ttf'].filter(function (n) {
-        return fs.existsSync(PluginPath + '/fonts/' + n);
-    });
+    var styles = {};
+    FONT_STYLES.forEach(function (style) { styles[style] = fontChoice(current['font.' + style]); });
+    var builtIn = {};
+    FONT_STYLES.forEach(function (style) { builtIn[style] = fs.existsSync(PluginPath + '/fonts/' + BUILTIN_FACES[style]); });
+    var dir = fontPathDir();
     return {
-        builtIn: !system,
-        shipped: shipped,
-        fontPath: String(current['font.path'] || ''),
-        system: { light: String(current['font.light'] || ''), regular: String(current['font.regular'] || ''), bold: String(current['font.bold'] || '') }
+        styles: styles,
+        builtIn: builtIn,
+        player: { path: dir || '', fonts: dir ? filesOf(dir, isFontFile).map(function (f) { return f.name; }) : [] },
+        custom: filesOf(CustomFontsPath, isFontFile).map(function (f) { return { name: f.name, bytes: f.bytes }; })
     };
 };
 
+// Set styles: `{ styles: { light: 'builtin' | '<player font>' | { custom: '<name>' } } }`.
+// A style not given keeps its value. The display starts again with a change.
 Glass.prototype.setFontsSettings = function (data) {
     var self = this;
     self.loadConfigs();
     if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return { error: 'GLASS.NO_PEPPYCONFIG' }; }
-    var builtIn = data.builtIn === undefined ? true : (data.builtIn === true || data.builtIn === 'true');
-    var wanted = builtIn ? 'False' : 'True';
-    if (String(meterConfig.current['use.system.fonts'] || 'False') === wanted) { return { changed: false }; }
-    meterConfig.current['use.system.fonts'] = wanted;
+    var wanted = (data && data.styles) || {};
+    var writes = {};
+    var dir = fontPathDir();
+    for (var i = 0; i < FONT_STYLES.length; i++) {
+        var style = FONT_STYLES[i];
+        if (wanted[style] === undefined) { continue; }
+        var choice = wanted[style];
+        var value;
+        if (choice && typeof choice === 'object' && typeof choice.custom === 'string') {
+            value = customFontPath(choice.custom);
+            if (!value) { return { error: 'bad-font', style: style }; }
+        } else {
+            var v = String(choice || 'builtin').trim();
+            if (v.toLowerCase() === 'builtin') { value = 'builtin'; }
+            else if (/^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,127}$/.test(v) && dir && fs.existsSync(dir + '/' + v)) { value = v; }
+            else { return { error: 'bad-font', style: style }; }
+        }
+        writes[style] = value;
+    }
+    var changed = false;
+    Object.keys(writes).forEach(function (style) {
+        if (String(meterConfig.current['font.' + style] || '') !== writes[style]) { meterConfig.current['font.' + style] = writes[style]; changed = true; }
+    });
+    if (meterConfig.current['use.system.fonts'] !== undefined) { delete meterConfig.current['use.system.fonts']; changed = true; }
+    if (!changed) { return { changed: false }; }
     fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
     try { self.updateConfigVersion(); } catch (e) {}
     if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
-    self.logger.info(id + 'fonts: ' + (builtIn ? 'the built-in multi-script set' : 'the fonts the configuration names'));
+    self.logger.info(id + 'fonts: ' + Object.keys(writes).map(function (s) { return s + '=' + writes[s]; }).join(' '));
     return { changed: true };
+};
+
+// An older configuration's one switch, use.system.fonts, folded into the
+// per-style values once: False (the default, the built-in set) names the
+// built-in face for every style; True keeps the names under font.path.
+Glass.prototype.migrateFontsConfig = function () {
+    var self = this;
+    if (!meterConfig || !meterConfig.current || meterConfig.current['use.system.fonts'] === undefined) { return; }
+    var system = String(meterConfig.current['use.system.fonts']).trim().toLowerCase() === 'true';
+    if (!system) {
+        ['light', 'regular', 'bold', 'italic'].forEach(function (style) { meterConfig.current['font.' + style] = 'builtin'; });
+    }
+    delete meterConfig.current['use.system.fonts'];
+    fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+    self.logger.info(id + 'fonts: use.system.fonts folded into the styles (' + (system ? 'the player fonts' : 'built-in') + ')');
+};
+
+// A font file received into `file` is kept under CustomFontsPath by a plain
+// name, when its bytes are a TrueType or OpenType face. Re-uploading a name
+// replaces it; the display starts again if a style is set in it.
+Glass.prototype.addCustomFont = function (file, rawName) {
+    var self = this;
+    var head = Buffer.alloc(4);
+    var fd;
+    try {
+        fd = fs.openSync(file, 'r');
+        fs.readSync(fd, head, 0, 4, 0);
+    } catch (e) { return { error: 'not-a-font' }; } finally { if (fd !== undefined) { try { fs.closeSync(fd); } catch (e) {} } }
+    var kind = fontFiles.fontKind(head);
+    if (!kind) { return { error: 'not-a-font' }; }
+    var name = fontFiles.safeFontName(rawName, kind);
+    if (!name) { return { error: 'bad-name' }; }
+    fs.ensureDirSync(CustomFontsPath);
+    fs.moveSync(file, CustomFontsPath + '/' + name, { overwrite: true });
+    self.loadConfigs();
+    var inUse = self.stylesIn(name).length > 0;
+    if (inUse) {
+        try { self.updateConfigVersion(); } catch (e) {}
+        if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+    }
+    self.pushRemoteConfig();
+    self.logger.info(id + 'fonts: uploaded ' + name + (inUse ? ' (in use)' : ''));
+    return { name: name };
+};
+
+// The styles set in the uploaded font of that name.
+Glass.prototype.stylesIn = function (name) {
+    var current = (meterConfig && meterConfig.current) || {};
+    return FONT_STYLES.filter(function (style) {
+        var v = String(current['font.' + style] || '').trim();
+        return v.indexOf('/') === 0 && path.dirname(v) === CustomFontsPath && path.basename(v) === name;
+    });
+};
+
+// Remove an uploaded font; a style set in it goes back to the built-in face.
+Glass.prototype.removeCustomFont = function (name) {
+    var self = this;
+    var file = customFontPath(name);
+    if (!file) { return { error: 'not-found' }; }
+    self.loadConfigs();
+    var freed = self.stylesIn(name);
+    fs.removeSync(file);
+    if (freed.length && meterConfig) {
+        freed.forEach(function (style) { meterConfig.current['font.' + style] = 'builtin'; });
+        fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+        try { self.updateConfigVersion(); } catch (e) {}
+        if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+    }
+    self.pushRemoteConfig();
+    self.logger.info(id + 'fonts: removed ' + name + (freed.length ? ' (' + freed.join(', ') + ' back to built-in)' : ''));
+    return { removed: name, freed: freed };
 };
 
 // Apply a profile: its values into the meter configuration and the
@@ -649,6 +773,9 @@ Glass.prototype.onStart = function () {
     }
     try { self.importLegacySettings(); } catch (e) {
         self.logger.warn(id + 'settings import: ' + (e && e.message ? e.message : e));
+    }
+    try { self.migrateFontsConfig(); } catch (e) {
+        self.logger.warn(id + 'fonts: ' + (e && e.message ? e.message : e));
     }
 
     // The audio path: the tap heads the ALSA contribution and meters every
@@ -3610,7 +3737,8 @@ Glass.prototype.remoteConfig = function () {
         assets: {
             fonts: filesOf(PluginPath + '/fonts', isFontFile),
             icons: icons,
-            webfonts: fontDir ? filesOf(fontDir, isFontFile) : []
+            webfonts: fontDir ? filesOf(fontDir, isFontFile) : [],
+            custom: filesOf(CustomFontsPath, isFontFile)
         }
     };
 };
@@ -3664,13 +3792,15 @@ Glass.prototype.themeFilePath = function (folder, tree, relative) {
     return target;
 };
 
-// A font, an icon or a web font by name, from the directories the display
-// looks in, in their order: the plugin's icons before Volumio's, the web
-// fonts from the directory the meter configuration's font.path names.
+// A font, an icon, a web font or an uploaded font by name, from the
+// directories the display looks in, in their order: the plugin's icons
+// before Volumio's, the web fonts from the directory the meter
+// configuration's font.path names, the uploaded fonts from their own.
 Glass.prototype.assetPath = function (kind, name) {
     if (typeof name !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,127}$/.test(name)) { return null; }
     var dirs = [];
     if (kind === 'font' && isFontFile(name)) { dirs = [PluginPath + '/fonts']; }
+    else if (kind === 'custom' && isFontFile(name)) { dirs = [CustomFontsPath]; }
     else if (kind === 'icon' && isIconFile(name)) { dirs = [PluginPath + '/format-icons', StockIcons]; }
     else if (kind === 'webfont' && isFontFile(name)) {
         if (!meterConfig) { this.loadConfigs(); }
