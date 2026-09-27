@@ -486,6 +486,7 @@
     "MANAGER_ST_RING_LIVE": "actif",
     "MANAGER_ST_RING_QUIET": "silencieux depuis",
     "MANAGER_TAB_REMOTES": "Écrans distants",
+    "MANAGER_TAB_SYSTEM": "Système",
     "MANAGER_RM_TITLE": "Écrans distants",
     "MANAGER_RM_HELP": "Un écran distant est Glass sur une autre machine, montrant les vumètres de ce lecteur avec son thème ou avec un thème de son choix. Il trouve le lecteur par sa balise ou par son nom, reçoit les trames par le réseau et se règle sur une page à lui, liée ci-dessous quand il en sert une. Lancement : glass --remote",
     "MANAGER_RM_OFF": "Les écrans distants sont désactivés sur ce lecteur.",

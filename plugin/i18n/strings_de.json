@@ -486,6 +486,7 @@
     "MANAGER_ST_RING_LIVE": "aktiv",
     "MANAGER_ST_RING_QUIET": "still seit",
     "MANAGER_TAB_REMOTES": "Fernanzeigen",
+    "MANAGER_TAB_SYSTEM": "System",
     "MANAGER_RM_TITLE": "Fernanzeigen",
     "MANAGER_RM_HELP": "Eine Fernanzeige ist Glass auf einem anderen Rechner und zeigt die Meter dieses Players mit dessen Theme oder mit einem selbst gewählten. Sie findet den Player über sein Signal oder seinen Namen, holt die Frames über das Netz und wird auf einer eigenen Seite eingerichtet, die unten verlinkt ist, wenn sie eine anbietet. Start: glass --remote",
     "MANAGER_RM_OFF": "Fernanzeigen sind auf diesem Player ausgeschaltet.",
