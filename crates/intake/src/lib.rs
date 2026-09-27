@@ -1357,11 +1357,11 @@ impl TapSource {
         self.showing_seen.take()
     }
 
-    /// Say which meter this display shows. False without a channel.
-    pub fn report_showing(&mut self, theme: &str, meter: &str) -> bool {
+    /// Say which meter this display shows, and at what rate. False without a channel.
+    pub fn report_showing(&mut self, theme: &str, meter: &str, rate: u32) -> bool {
         self.channel
             .as_mut()
-            .is_some_and(|c| c.report_showing(theme, meter))
+            .is_some_and(|c| c.report_showing(theme, meter, rate))
     }
 
     /// Whether the channel to the player is up.
@@ -1827,6 +1827,14 @@ impl Source for TapSource {
 }
 
 /// `frame.rate` from the installed `config.txt`, or 30 when that file is absent.
+/// Whether the display may lower its frame rate when it cannot keep up:
+/// `frame.rate.governor` in the configuration, on unless it says `False`.
+pub fn installed_governor() -> bool {
+    config_text()
+        .and_then(|text| current_value(&text, "frame.rate.governor"))
+        .is_none_or(|v| !v.trim().eq_ignore_ascii_case("false"))
+}
+
 pub fn installed_frame_rate() -> u32 {
     match config_text().ok_or(()) {
         Ok(text) => frame_rate_from_config(&text),

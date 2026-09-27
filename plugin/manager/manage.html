@@ -264,6 +264,7 @@
         <div><label id="perf-profile-label"></label><select id="perf-profile"></select></div>
         <div class="full help" id="perf-board"></div>
         <div class="full" id="perf-values"></div>
+        <div class="full"><label class="switch"><input type="checkbox" id="perf-governor"><span id="perf-governor-label"></span></label><div class="help" id="perf-governor-help"></div></div>
       </div>
       <div class="row" style="margin-top:10px"><button class="primary" id="btn-perf-apply"></button></div>
     </div>
@@ -505,7 +506,7 @@
     $('btn-bk-create').textContent = t('BACKUP_CREATE');
     $('btn-bk-upload').textContent = t('MANAGER_BK_UPLOAD');
     $('st-title').textContent = t('MANAGER_TAB_STATUS');
-    $('perf-title').textContent = t('MANAGER_PERF_TITLE'); $('perf-help').textContent = t('MANAGER_PERF_HELP'); $('perf-profile-label').textContent = t('MANAGER_PERF_PROFILE'); $('btn-perf-apply').textContent = t('MANAGER_APPLY');
+    $('perf-title').textContent = t('MANAGER_PERF_TITLE'); $('perf-help').textContent = t('MANAGER_PERF_HELP'); $('perf-profile-label').textContent = t('MANAGER_PERF_PROFILE'); $('btn-perf-apply').textContent = t('MANAGER_APPLY'); $('perf-governor-label').textContent = t('MANAGER_PERF_GOVERNOR'); $('perf-governor-help').textContent = t('MANAGER_PERF_GOVERNOR_DOC');
     $('log-title').textContent = t('MANAGER_LOG_TITLE'); $('log-help').textContent = t('MANAGER_LOG_HELP'); $('log-level-label').textContent = t('MANAGER_LOG_LEVEL'); $('log-targets-label').textContent = t('MANAGER_LOG_TARGETS'); $('btn-log-apply').textContent = t('MANAGER_APPLY'); $('btn-log-show').textContent = t('MANAGER_LOG_SHOW'); $('btn-log-download').querySelector('button').textContent = t('MANAGER_LOG_DOWNLOAD');
     $('btn-status-refresh').textContent = t('MANAGER_REFRESH');
     $('upd-title').textContent = t('MANAGER_UPD_TITLE');
@@ -1082,7 +1083,7 @@
       $('subtitle').textContent = (s.hostname || '') + ' · Glass ' + s.version;
       var rows = [
         ['MANAGER_ST_VERSION', s.version + ' (' + s.arch + (s.binary ? '' : ', ' + t('MANAGER_ST_NO_BINARY')) + ')'],
-        ['MANAGER_ST_DISPLAY', s.headless ? t('DISPLAY_OUTPUT_NONE') : (s.running ? t('MANAGER_ST_RUNNING') : t('MANAGER_ST_IDLE')) + ' · DISPLAY=:' + s.display + ' · ' + t('MANAGER_ST_TIMEOUT') + ' ' + s.timeout + ' s'],
+        ['MANAGER_ST_DISPLAY', s.headless ? t('DISPLAY_OUTPUT_NONE') : (s.running ? t('MANAGER_ST_RUNNING') : t('MANAGER_ST_IDLE')) + ' · DISPLAY=:' + s.display + ' · ' + t('MANAGER_ST_TIMEOUT') + ' ' + s.timeout + ' s' + (s.running && s.showing && s.showing.rate && s.performance && s.showing.rate < s.performance.values.frameRate ? ' · ' + t('MANAGER_ST_GOVERNED') + ' ' + s.showing.rate + ' fps' : '')],
         ['MANAGER_ST_THEME', s.activeTheme + ' · ' + ({ random: t('MANAGER_MODE_RANDOM'), list: t('MANAGER_MODE_LIST'), single: t('MANAGER_MODE_SINGLE') }[s.meter.mode] || s.meter.mode) + (s.meter.mode !== 'random' ? ': ' + s.meter.names.join(', ') : '') + (s.showing && s.showing.meter ? ' · ' + t('MANAGER_ST_SHOWING') + ' ' + s.showing.meter : '')],
         ['MANAGER_ST_PLAYER', (s.channel.status || '-') + (s.channel.service ? ' · ' + s.channel.service : '') + (s.channel.title ? ' · ' + (s.channel.artist ? s.channel.artist + ' - ' : '') + s.channel.title : '') +
           (s.channel.status === 'play' ? ' · ' + (s.measured ? t('MANAGER_ST_MEASURED') : t('MANAGER_ST_NOT_MEASURED')) : '')],
@@ -1114,10 +1115,12 @@
     }).join('');
     $('perf-board').textContent = t('MANAGER_PERF_BOARD') + ' ' + (p.board.model || p.board.arch || '?') + ' · ' + p.board.cores + ' ' + t('MANAGER_PERF_CORES') + ' · ' + t('MANAGER_PERF_AUTO_IS') + ' ' + t('MANAGER_PERF_' + p.auto.toUpperCase());
     var v = p.values;
-    $('perf-values').innerHTML = '<table class="kv"><tr><td>' + esc(t('FRAME_RATE')) + '</td><td>' + v.frameRate + '</td></tr><tr><td>' + esc(t('ROTATION_QUALITY')) + '</td><td>' + esc(v.rotationQuality) + ' · ' + v.rotationFps + ' fps</td></tr><tr><td>' + esc(t('TRANSITION_TYPE')) + '</td><td>' + esc(v.transitions ? t('MANAGER_ST_YES') : t('MANAGER_ST_NO')) + '</td></tr><tr><td>' + esc(t('MANAGER_PERF_THESE_ARE')) + '</td><td>' + esc(t('MANAGER_PERF_' + p.valuesProfile.toUpperCase())) + '</td></tr></table>';
+    $('perf-governor').checked = p.governor !== false;
+    var lowered = p.showing && p.showing.rate && p.showing.rate < v.frameRate ? ' · ' + t('MANAGER_ST_GOVERNED') + ' ' + p.showing.rate : '';
+    $('perf-values').innerHTML = '<table class="kv"><tr><td>' + esc(t('FRAME_RATE')) + '</td><td>' + v.frameRate + esc(lowered) + '</td></tr><tr><td>' + esc(t('ROTATION_QUALITY')) + '</td><td>' + esc(v.rotationQuality) + ' · ' + v.rotationFps + ' fps</td></tr><tr><td>' + esc(t('TRANSITION_TYPE')) + '</td><td>' + esc(v.transitions ? t('MANAGER_ST_YES') : t('MANAGER_ST_NO')) + '</td></tr><tr><td>' + esc(t('MANAGER_PERF_THESE_ARE')) + '</td><td>' + esc(t('MANAGER_PERF_' + p.valuesProfile.toUpperCase())) + '</td></tr></table>';
   }
   $('btn-perf-apply').onclick = function () {
-    api('POST', '/api/performance', { profile: $('perf-profile').value }).then(function (p) { renderPerformance(p); toast(p.changed ? t('MANAGER_PERF_APPLIED') : t('MANAGER_PERF_UNCHANGED')); loadStatus(); }).catch(function (e) { toast(errorText(e), 'error'); });
+    api('POST', '/api/performance', { profile: $('perf-profile').value, governor: $('perf-governor').checked }).then(function (p) { renderPerformance(p); toast(p.changed ? t('MANAGER_PERF_APPLIED') : t('MANAGER_PERF_UNCHANGED')); loadStatus(); }).catch(function (e) { toast(errorText(e), 'error'); });
   };
 
   // ---- logging ------------------------------------------------------------

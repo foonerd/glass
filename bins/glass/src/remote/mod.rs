@@ -39,6 +39,8 @@ pub struct Status {
     pub synced: String,
     pub player_release: String,
     pub since: String,
+    /// The frame rate in force, which the governor may have lowered.
+    pub rate: u32,
     /// This page's address on the network, once known.
     pub page: String,
 }

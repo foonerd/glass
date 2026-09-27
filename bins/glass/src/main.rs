@@ -23,6 +23,7 @@ use pane::{publish, write_ppm, Shown, Surface, WindowMode, WindowOptions};
 use plot::{step, Scene};
 use std::time::Duration;
 
+mod governor;
 mod remote;
 
 use remote::run::RemoteSession;
@@ -592,9 +593,6 @@ fn session(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
-    if reports {
-        source.report_showing(&theme_folder, &skin.name);
-    }
     // A remote showing the player's meter does not rotate on its own.
     let mirroring = remote.as_deref().is_some_and(|r| r.follow && r.same_meter);
     // Why a session starts again, when it does.
@@ -615,12 +613,28 @@ fn session(
             Some(frame_rate),
         ),
     };
+    // Painting time added for a bench, to see the painters and the governor
+    // work on any machine.
+    let bench_delay = env::var("GLASS_BENCH_DELAY_MS")
+        .ok()
+        .and_then(|v| v.parse::<u64>().ok())
+        .map(Duration::from_millis);
     let mut motion = Motion::new(threads, adaptive);
-    let period = frame_period(frame_rate);
+    motion.bench_delay = bench_delay;
+    let mut period = frame_period(frame_rate);
+    // The governor lowers the rate when frames keep overrunning with the
+    // painters at their most; not for a snapshot, a single frame, or a
+    // rate asked for on the command line.
+    let governing =
+        !once && snapshot.is_none() && overrides.fps.is_none() && intake::installed_governor();
+    let mut governor = governor::Governor::new(frame_rate, governing, started.elapsed());
+    if reports {
+        source.report_showing(&theme_folder, &skin.name, governor.target());
+    }
     logline::say!(
         Info,
         "display",
-        "frame.rate={frame_rate} size={}x{} theme={} meter={} threads={threads}{}",
+        "frame.rate={frame_rate} size={}x{} theme={} meter={} threads={threads}{} governor={}",
         skin.width,
         skin.height,
         if skin.theme_dir.is_empty() {
@@ -629,7 +643,8 @@ fn session(
             &skin.theme_dir
         },
         skin.name,
-        if adaptive.is_some() { " as needed" } else { "" }
+        if adaptive.is_some() { " as needed" } else { "" },
+        if governing { "on" } else { "off" }
     );
     let mut assets = Assets::load(&skin);
     logline::say!(
@@ -763,6 +778,7 @@ fn session(
             vinyl_slot = PlainSlot::default();
             reel_slots = Default::default();
             motion = Motion::new(threads, adaptive);
+            motion.bench_delay = bench_delay;
             let now = started.elapsed().as_millis() as u64;
             if skin.transition.fade && fade_lock_free(skin.transition.duration_s) {
                 motion.fade.begin_in(
@@ -776,8 +792,10 @@ fn session(
             motion.ramp.begin(now);
             switched_at = Instant::now();
             logline::say!(Info, "display", "meter={name}");
+            governor.reset(started.elapsed());
+            period = frame_period(frame_rate);
             if reports {
-                source.report_showing(&theme_folder, &skin.name);
+                source.report_showing(&theme_folder, &skin.name, governor.target());
             }
             if run.dev {
                 if let Some(s) = surface.as_mut() {
@@ -822,7 +840,7 @@ fn session(
                 reload = Some("settings changed");
                 leave = Some("settings changed");
             }
-            remote.note(&source, &skin);
+            remote.note(&source, &skin, governor.target());
             // The player moved to another meter of the theme: show it too.
             if mirroring {
                 if let Some((theme, meter)) = source.take_showing() {
@@ -1243,8 +1261,37 @@ fn session(
         if once {
             break;
         }
-        // Pace to the frame rate: sleep what is left of the period, not a whole one.
+        // The governor judges the frame against its period, a quarter past
+        // it counting as overrun, so a window in step with the screen's
+        // refresh is never taken for one; a change of rate is said, and
+        // told to the plugin with the meter on show.
         let spent = frame_started.elapsed();
+        match governor.frame(
+            started.elapsed(),
+            spent > period + period / 4,
+            motion.painters() >= threads,
+        ) {
+            Some(governor::Change::Lowered(rate)) => {
+                period = frame_period(rate);
+                logline::say!(
+                    Info,
+                    "display",
+                    "governor: {rate} fps, the theme is heavy for this player"
+                );
+                if reports {
+                    source.report_showing(&theme_folder, &skin.name, rate);
+                }
+            }
+            Some(governor::Change::Raised(rate)) => {
+                period = frame_period(rate);
+                logline::say!(Info, "display", "governor: back to {rate} fps");
+                if reports {
+                    source.report_showing(&theme_folder, &skin.name, rate);
+                }
+            }
+            None => {}
+        }
+        // Pace to the frame rate: sleep what is left of the period, not a whole one.
         if spent < period {
             thread::sleep(period - spent);
         }
