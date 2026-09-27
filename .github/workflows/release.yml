@@ -6,6 +6,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write
 
 env:
   CARGO_TERM_COLOR: always
@@ -23,6 +24,25 @@ jobs:
       - run: scripts/check.sh
       - run: scripts/ship.sh
       - run: scripts/ship-windows.sh
+      # The Windows binary and the installer are signed with Azure Trusted
+      # Signing when the repository holds the account (variables
+      # TRUSTED_SIGNING_ENDPOINT, _ACCOUNT, _PROFILE; secrets AZURE_TENANT_ID,
+      # AZURE_CLIENT_ID, AZURE_SUBSCRIPTION_ID for a federated login);
+      # without them the archive is published unsigned, as before.
+      - name: Azure login for Trusted Signing
+        if: ${{ vars.TRUSTED_SIGNING_ACCOUNT != '' }}
+        uses: azure/login@v2
+        with:
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      - name: Sign the Windows binary and the installer
+        if: ${{ vars.TRUSTED_SIGNING_ACCOUNT != '' }}
+        run: scripts/sign-windows.sh
+        env:
+          TRUSTED_SIGNING_ENDPOINT: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
+          TRUSTED_SIGNING_ACCOUNT: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
+          TRUSTED_SIGNING_PROFILE: ${{ vars.TRUSTED_SIGNING_PROFILE }}
       - name: The tap passes every format through byte for byte
         run: scripts/tap_exact.sh lib/x64/libglasstap.so bin/x64/tapdump
       - run: scripts/package.sh
