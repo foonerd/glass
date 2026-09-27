@@ -73,7 +73,8 @@ impl RemoteSession {
         let release = env!("CARGO_PKG_VERSION").to_string();
         let hops = NetHops::new(frames, &id, &self.name, &release)
             .map_err(|e| format!("frames socket: {e}"))?
-            .with_gain_db(self.app.config().gain_db);
+            .with_gain_db(self.app.config().gain_db)
+            .with_spectrum_decay(self.app.config().spectrum_decay);
         let channel = intake::Channel::tcp(format!(
             "{}:{}",
             self.beacon.address(),
@@ -477,6 +478,7 @@ pub fn remote_main(
     }
     let wanted_port = config.page_port;
     let app = RemoteApp::new(config_path.clone(), cache_dir.clone(), config);
+    super::apply_log_level(&app.config());
     let page_port = match super::serve(app.clone()) {
         Ok(port) => {
             logline::say!(

@@ -127,7 +127,8 @@
     <h2>Levels</h2>
     <div class="form">
       <div><label>Gain, dB, this remote only</label><input type="number" id="gain" min="-12" max="12" step="0.5" value="0"></div>
-      <div class="full help">Scales what the needles and bars show here. The player's own display and its audio are not touched.</div>
+      <div><label>Spectrum decay per frame, this remote only</label><input type="number" id="decay" min="0" max="0.99" step="0.01" placeholder="0: as the player sends"></div>
+      <div class="full help">The gain scales what the needles and bars show here. The decay is the share of its height a bar may fall per frame at most: 0.85 falls fast, 0.98 slowly, 0 (or empty) shows the bars as the player sends them. The player's own display and its audio are not touched.</div>
     </div>
   </div>
 
@@ -136,6 +137,8 @@
     <div class="form">
       <div><label>Name, as the player's manager lists it</label><input type="text" id="r-name" placeholder="Kitchen"></div>
       <div><label>Port of this page</label><input type="number" id="r-port" min="1024" max="65535"></div>
+      <div><label>Log level of this remote</label><select id="r-log"><option value="">As started</option><option value="error">Error</option><option value="warn">Warn</option><option value="info">Info</option><option value="verbose">Verbose</option><option value="trace">Trace</option></select></div>
+      <div class="full"><a href="/api/config/export" download style="text-decoration:none"><button class="small">Download the configuration</button></a> <input type="file" id="cfg-file" accept=".json,application/json" class="hidden"><button class="small" id="btn-cfg-import">Upload a configuration</button><div class="help">A configuration downloaded from this or another remote is applied at once and kept; folder paths in it are taken as they are, so one from another machine may need its themes folder changed here.</div></div>
       <div class="full help" id="paths"></div>
     </div>
   </div>
@@ -304,7 +307,7 @@
     renderMonitors(c.display.monitor || 0);
     $('d-mode').value = c.display.mode; $('d-x').value = c.display.position ? c.display.position[0] : ''; $('d-y').value = c.display.position ? c.display.position[1] : '';
     $('d-fps').value = c.display.fps || ''; $('d-fit').checked = !!c.display.fit;
-    $('gain').value = c.gain_db; $('r-name').value = c.name; $('r-port').value = c.page_port;
+    $('gain').value = c.gain_db; $('decay').value = c.spectrum_decay ? c.spectrum_decay : ''; $('r-name').value = c.name; $('r-port').value = c.page_port; $('r-log').value = c.log_level || '';
     renderNames();
   }
   function gather() {
@@ -324,10 +327,23 @@
     c.themes_dir = $('local-dir').value.trim() || null;
     var x = $('d-x').value.trim(), y = $('d-y').value.trim();
     c.display = { mode: $('d-mode').value, position: (x !== '' && y !== '') ? [parseInt(x, 10) || 0, parseInt(y, 10) || 0] : null, fit: $('d-fit').checked, fps: $('d-fps').value ? parseInt($('d-fps').value, 10) : null, monitor: parseInt($('d-monitor').value, 10) || 0 };
-    c.gain_db = parseFloat($('gain').value) || 0; c.name = $('r-name').value.trim(); c.page_port = parseInt($('r-port').value, 10) || 5583;
+    c.gain_db = parseFloat($('gain').value) || 0; c.spectrum_decay = parseFloat($('decay').value) || 0; c.name = $('r-name').value.trim(); c.page_port = parseInt($('r-port').value, 10) || 5583; c.log_level = $('r-log').value || null;
     return c;
   }
-  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'gain', 'r-name', 'r-port'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
+  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'gain', 'decay', 'r-name', 'r-port', 'r-log'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
+  $('btn-cfg-import').onclick = function () { $('cfg-file').click(); };
+  $('cfg-file').onchange = function () {
+    var file = $('cfg-file').files[0];
+    if (!file) return;
+    $('cfg-file').value = '';
+    var reader = new FileReader();
+    reader.onload = function () {
+      var parsed;
+      try { parsed = JSON.parse(String(reader.result)); } catch (e) { toast('Not a configuration file: ' + e.message, 'error'); return; }
+      api('POST', '/api/config/import', parsed).then(function (d) { state.config = d.config; setDirty(false); toast('Configuration applied.'); fill(d.config); renderPlayers(d.config); return loadThemes(); }).catch(function (e) { toast(e.message, 'error'); });
+    };
+    reader.readAsText(file);
+  };
   $('btn-apply').onclick = function () {
     var c = gather(); var portChanged = state.config && c.page_port !== state.config.page_port;
     api('POST', '/api/config', c).then(function (d) { state.config = d.config; setDirty(false); toast(portChanged ? 'Applied. The page moves to port ' + c.page_port + ' when the remote starts again.' : 'Applied.'); fill(d.config); renderPlayers(d.config); }).catch(function (e) { toast(e.message, 'error'); });

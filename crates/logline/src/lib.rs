@@ -6,6 +6,7 @@
 //! standard error stream, the rest to the standard output.
 
 use std::fmt::Arguments;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::sync::OnceLock;
 
 /// How much is said, from the least to the most.
@@ -19,6 +20,17 @@ pub enum Level {
 }
 
 impl Level {
+    /// The level at an index, in the order declared; the finest past the end.
+    fn from_index(index: u8) -> Level {
+        match index {
+            0 => Level::Error,
+            1 => Level::Warn,
+            2 => Level::Info,
+            3 => Level::Verbose,
+            _ => Level::Trace,
+        }
+    }
+
     /// The level a word names, or none.
     pub fn parse(word: &str) -> Option<Level> {
         match word.trim().to_ascii_lowercase().as_str() {
@@ -39,6 +51,28 @@ struct Settings {
 }
 
 static SETTINGS: OnceLock<Settings> = OnceLock::new();
+
+/// A level set while running, over the environment's: 0 for none, else
+/// the level's index plus one.
+static OVERRIDE: AtomicU8 = AtomicU8::new(0);
+
+/// Say this much from now on, whatever the environment said; a program's
+/// settings page uses this.
+pub fn set_level(level: Level) {
+    OVERRIDE.store(level as u8 + 1, Ordering::Relaxed);
+}
+
+/// Back to the environment's level.
+pub fn clear_level() {
+    OVERRIDE.store(0, Ordering::Relaxed);
+}
+
+fn current_level() -> Level {
+    match OVERRIDE.load(Ordering::Relaxed) {
+        0 => settings().level,
+        n => Level::from_index(n - 1),
+    }
+}
 
 /// Read the environment once, and name the program in every line. A
 /// second call changes nothing.
@@ -65,14 +99,14 @@ fn settings() -> &'static Settings {
 
 /// The level in force.
 pub fn level() -> Level {
-    settings().level
+    current_level()
 }
 
 /// Whether a line at `level` about `target` is written: within the level,
 /// and, at verbose and trace, among the targets when any are named.
 pub fn on(level: Level, target: &str) -> bool {
     let s = settings();
-    if level > s.level {
+    if level > current_level() {
         return false;
     }
     if level >= Level::Verbose && !s.targets.is_empty() && !s.targets.iter().any(|t| t == target) {
