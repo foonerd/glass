@@ -224,7 +224,19 @@
         </div>
       </div>
     </div>
-  </section>
+      <div class="panel">
+      <h2 id="fonts-title"></h2>
+      <div class="help" id="fonts-help" style="margin-bottom:12px"></div>
+      <div class="form">
+        <div class="full">
+          <label class="switch"><input type="checkbox" id="fonts-builtin"><span id="fonts-builtin-label"></span></label>
+          <div class="help" id="fonts-builtin-doc"></div>
+        </div>
+        <div class="full help" id="fonts-shipped"></div>
+      </div>
+      <div class="row" style="margin-top:12px"><button class="primary" id="btn-fonts-save"></button></div>
+    </div>
+</section>
 
   <!-- Backups -->
   <section class="view" id="view-backups">
@@ -481,6 +493,11 @@
     $('catalog-search').placeholder = t('MANAGER_SEARCH');
     $('btn-catalog-refresh').textContent = t('MANAGER_CATALOG_REFRESH');
     $('art-title').textContent = t('MANAGER_ARTWORK_TITLE');
+    $('fonts-title').textContent = t('MANAGER_FONTS_TITLE');
+    $('fonts-help').textContent = t('MANAGER_FONTS_HELP');
+    $('fonts-builtin-label').textContent = t('MANAGER_FONTS_BUILTIN');
+    $('fonts-builtin-doc').textContent = t('MANAGER_FONTS_BUILTIN_DOC');
+    $('btn-fonts-save').textContent = t('MANAGER_SAVE');
     $('art-help').textContent = t('FANART_ENABLE_DOC');
     $('art-enabled-label').textContent = t('FANART_ENABLE_LABEL');
     $('art-keymode-label').textContent = t('FANART_KEY_MODE_LABEL');
@@ -544,7 +561,7 @@
     document.querySelectorAll('.view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + name); });
     try { localStorage.setItem('glass-manager-tab', name); } catch (e) {}
     if (name === 'catalog' && !state.catalog) loadCatalog(false);
-    if (name === 'artwork') loadArtwork();
+    if (name === 'artwork') loadArtwork(); loadFonts();
     if (name === 'backups') loadBackups();
     if (name === 'status') { loadStatus(); }
     if (name === 'system') { loadUpdate(false); loadPerformance(); loadLogging(); }
@@ -993,6 +1010,16 @@
   $('btn-catalog-refresh').onclick = function () { loadCatalog(true); };
 
   // ---- artwork ----------------------------------------------------------
+  function loadFonts() {
+    api('GET', '/api/fonts').then(function (f) {
+      $('fonts-builtin').checked = !!f.builtIn;
+      var names = (f.shipped || []).map(function (n) { return n.replace('PeppyFont-', '').replace('.ttf', ''); });
+      $('fonts-shipped').textContent = names.length ? t('MANAGER_FONTS_SHIPPED') + ' ' + names.join(', ') : t('MANAGER_FONTS_MISSING');
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  $('btn-fonts-save').onclick = function () {
+    api('POST', '/api/fonts', { builtIn: $('fonts-builtin').checked }).then(function () { toast(t('MANAGER_SAVED')); loadFonts(); }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
   function loadArtwork() {
     api('GET', '/api/artwork').then(function (a) {
       $('art-enabled').checked = a.enabled;
@@ -1013,7 +1040,7 @@
       transitionMs: parseInt($('art-ms').value, 10), unlimited: $('art-unlimited').checked
     };
     var save = function () {
-      api('POST', '/api/artwork', body).then(function () { toast(t('MANAGER_SAVED')); loadArtwork(); }).catch(function (e) { toast(errorText(e), 'error'); });
+      api('POST', '/api/artwork', body).then(function () { toast(t('MANAGER_SAVED')); loadArtwork(); loadFonts(); }).catch(function (e) { toast(errorText(e), 'error'); });
     };
     if (body.unlimited && !(state.artwork && state.artwork.unlimited)) {
       confirmDialog(t('FANART_UNLIMITED_CONFIRM_TITLE'), t('MANAGER_UNLIMITED_CONFIRM'), t('FANART_UNLIMITED_CONFIRM_BTN')).then(function (ok) { if (ok) save(); else $('art-unlimited').checked = false; });

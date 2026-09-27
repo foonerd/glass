@@ -26,6 +26,25 @@ for arch in arm armv7 armv8 x64; do
   fi
 done
 
+# The multi-script text fonts, from the peppy_fonts repository at a pinned
+# commit, checked by digest: 16 MB each, fetched at packaging rather than
+# kept in this repository. PeppyFont-Italic and the DSEG7 set are in git.
+FONTS_COMMIT=6693040
+fetch_font() {
+  local name=$1 sha=$2
+  local file="$STAGE/fonts/$name"
+  local cache="$ROOT/target/sysroot/fonts/$name"
+  if [ ! -f "$cache" ] || ! echo "$sha  $cache" | sha256sum -c - >/dev/null 2>&1; then
+    mkdir -p "$ROOT/target/sysroot/fonts"
+    curl -fsSL -o "$cache" "https://raw.githubusercontent.com/foonerd/peppy_fonts/$FONTS_COMMIT/fonts/$name"
+    echo "$sha  $cache" | sha256sum -c - >/dev/null
+  fi
+  cp "$cache" "$file"
+}
+fetch_font PeppyFont-Light.ttf 5ac2a7127f4670b30d21416ffb37b3ef3322c6d26c870794f5a736e6e5fd70ed
+fetch_font PeppyFont-Regular.ttf 73f59fa152e94379ae6ed1e3624008e1cd446b29cc1d0f09293105b3c8481a8e
+fetch_font PeppyFont-Bold.ttf 86de026072952f4a9101b53029d90b9c6cb60e6af70d5751e0300dfa0c0a0d19
+
 # Node modules: with npm on this machine, directly; otherwise in a container.
 if command -v npm >/dev/null 2>&1; then
   ( cd "$STAGE" && npm install --omit=dev --no-audit --no-fund --loglevel=error >/dev/null )

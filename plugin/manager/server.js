@@ -320,6 +320,16 @@ class Manager {
       res.json(Object.assign({ ok: true }, self.plugin.artworkSettings()));
     }));
 
+    app.get('/api/fonts', function (req, res) {
+      res.json(self.plugin.fontsSettings());
+    });
+
+    app.post('/api/fonts', wrap(async function (req, res) {
+      const result = self.plugin.setFontsSettings(req.body || {});
+      if (result.error) return res.status(400).json(result);
+      res.json(Object.assign({ ok: true }, self.plugin.fontsSettings()));
+    }));
+
     app.post('/api/artwork/clear-cache', wrap(async function (req, res) {
       const result = self.plugin.clearFanartImages();
       if (result.error) return res.status(500).json(result);

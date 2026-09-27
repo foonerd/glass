@@ -2,6 +2,8 @@
 //! station does not open devices or draw.
 
 /// Bin count in the Volumio ALSA template.
+use std::path::Path;
+
 pub const DEFAULT_SPECTRUM_BINS: usize = 20;
 
 /// UI full-scale that matches `meter_max`.
@@ -1584,6 +1586,10 @@ pub struct FontFiles {
     pub digi: String,
     #[serde(default)]
     pub italic: String,
+    /// A multi-script face consulted glyph by glyph when a text's own face
+    /// lacks a character; empty when the plugin ships none.
+    #[serde(default)]
+    pub fallback: String,
 }
 
 /// The text placements one meter declares.
@@ -2231,11 +2237,14 @@ pub fn meter_text_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Opti
     (title, artist)
 }
 
-/// Font files from `[current]`: `font.path` joined with `font.light`,
-/// `font.regular`, `font.bold` and `font.italic`. `font.digi` is optional;
+/// Font files from `[current]`. With `use.system.fonts` true, `font.path`
+/// joined with `font.light`, `font.regular`, `font.bold` and `font.italic`;
+/// otherwise, the default, the PeppyFont set under `plugin_fonts`, the
+/// multi-script faces the plugin ships, for every style it has. `font.digi`
+/// is optional;
 /// `digi_default` stands in when it is absent, and `italic_default` when
 /// `font.italic` is.
-pub fn fonts_from_config(text: &str, digi_default: &str, italic_default: &str) -> FontFiles {
+pub fn fonts_from_config(text: &str, plugin_fonts: &Path) -> FontFiles {
     let base = current_value(text, "font.path").unwrap_or_default();
     let join = |file: Option<String>| -> String {
         let file = file.unwrap_or_default();
@@ -2251,22 +2260,59 @@ pub fn fonts_from_config(text: &str, digi_default: &str, italic_default: &str) -
             format!("{base}/{file}")
         }
     };
+    let shipped = |name: &str| -> String {
+        let path = plugin_fonts.join(name);
+        if path.is_file() {
+            path.to_string_lossy().into_owned()
+        } else {
+            String::new()
+        }
+    };
+    let or = |first: String, second: String| if first.is_empty() { second } else { first };
+    let system = current_value(text, "use.system.fonts")
+        .is_some_and(|v| v.trim().eq_ignore_ascii_case("true"));
     let digi = current_value(text, "font.digi").unwrap_or_default();
-    let italic = join(current_value(text, "font.italic"));
+    let digi = if digi.trim().is_empty() {
+        plugin_fonts
+            .join("DSEG7Classic-Italic.ttf")
+            .to_string_lossy()
+            .into_owned()
+    } else {
+        digi.trim().to_string()
+    };
+    let italic_default = plugin_fonts
+        .join("PeppyFont-Italic.ttf")
+        .to_string_lossy()
+        .into_owned();
+    let peppy_regular = shipped("PeppyFont-Regular.ttf");
+    let (light, regular, bold, italic) = if !system && !peppy_regular.is_empty() {
+        (
+            or(
+                shipped("PeppyFont-Light.ttf"),
+                join(current_value(text, "font.light")),
+            ),
+            peppy_regular.clone(),
+            or(
+                shipped("PeppyFont-Bold.ttf"),
+                join(current_value(text, "font.bold")),
+            ),
+            or(shipped("PeppyFont-Italic.ttf"), italic_default),
+        )
+    } else {
+        (
+            join(current_value(text, "font.light")),
+            join(current_value(text, "font.regular")),
+            join(current_value(text, "font.bold")),
+            or(join(current_value(text, "font.italic")), italic_default),
+        )
+    };
     FontFiles {
-        light: join(current_value(text, "font.light")),
-        regular: join(current_value(text, "font.regular")),
-        bold: join(current_value(text, "font.bold")),
-        digi: if digi.trim().is_empty() {
-            digi_default.to_string()
-        } else {
-            digi.trim().to_string()
-        },
-        italic: if italic.is_empty() {
-            italic_default.to_string()
-        } else {
-            italic
-        },
+        light,
+        regular,
+        bold,
+        digi,
+        italic,
+        fallback: peppy_regular,
     }
 }
 
@@ -3853,22 +3899,16 @@ mod tests {
 
     #[test]
     fn font_files_join_the_path_and_default_the_clock_font() {
+        let none = Path::new("/nowhere/fonts");
         let text = "[current]\nfont.path = /fonts\nfont.light = /Lato-Light.ttf\nfont.bold = Lato-Bold.ttf\n";
-        let fonts = fonts_from_config(
-            text,
-            "/plugin/fonts/DSEG7.ttf",
-            "/plugin/fonts/PeppyFont-Italic.ttf",
-        );
+        let fonts = fonts_from_config(text, none);
         assert_eq!(fonts.light, "/fonts/Lato-Light.ttf");
         assert_eq!(fonts.bold, "/fonts/Lato-Bold.ttf");
         assert_eq!(fonts.regular, "");
-        assert_eq!(fonts.digi, "/plugin/fonts/DSEG7.ttf");
-        assert_eq!(fonts.italic, "/plugin/fonts/PeppyFont-Italic.ttf");
-        let own = fonts_from_config(
-            "[current]\nfont.path = /f\nfont.italic = /I.ttf\n",
-            "",
-            "/d/i.ttf",
-        );
+        assert_eq!(fonts.digi, "/nowhere/fonts/DSEG7Classic-Italic.ttf");
+        assert_eq!(fonts.italic, "/nowhere/fonts/PeppyFont-Italic.ttf");
+        assert_eq!(fonts.fallback, "");
+        let own = fonts_from_config("[current]\nfont.path = /f\nfont.italic = /I.ttf\n", none);
         assert_eq!(own.italic, "/f/I.ttf");
         let speeds = scroll_speeds_from_config("[current]\nscrolling.mode = custom\nscrolling.speed.title = 8\nscrolling.speed.artist = 10\n");
         assert_eq!(
@@ -3880,5 +3920,41 @@ mod tests {
             ),
             ("custom", 8.0, 10.0, 40.0)
         );
+    }
+
+    /// With the PeppyFont set shipped, the styles are set in it unless the
+    /// configuration asks for the system fonts; the regular face is the
+    /// fallback either way.
+    #[test]
+    fn the_shipped_multi_script_faces_are_the_default_and_the_fallback() {
+        let dir = std::env::temp_dir().join(format!("glass-fonts-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        for name in [
+            "PeppyFont-Light.ttf",
+            "PeppyFont-Regular.ttf",
+            "PeppyFont-Bold.ttf",
+            "PeppyFont-Italic.ttf",
+        ] {
+            std::fs::write(dir.join(name), b"").unwrap();
+        }
+        let lato = "[current]\nfont.path = /fonts\nfont.light = /Lato-Light.ttf\nfont.regular = /Lato-Regular.ttf\nfont.bold = /Lato-Bold.ttf\n";
+        let at = |name: &str| dir.join(name).to_string_lossy().into_owned();
+        let built_in = fonts_from_config(lato, &dir);
+        assert_eq!(built_in.light, at("PeppyFont-Light.ttf"));
+        assert_eq!(built_in.regular, at("PeppyFont-Regular.ttf"));
+        assert_eq!(built_in.bold, at("PeppyFont-Bold.ttf"));
+        assert_eq!(built_in.italic, at("PeppyFont-Italic.ttf"));
+        assert_eq!(built_in.fallback, at("PeppyFont-Regular.ttf"));
+        let system = fonts_from_config(&format!("{lato}use.system.fonts = True\n"), &dir);
+        assert_eq!(system.light, "/fonts/Lato-Light.ttf");
+        assert_eq!(system.regular, "/fonts/Lato-Regular.ttf");
+        assert_eq!(system.bold, "/fonts/Lato-Bold.ttf");
+        assert_eq!(system.italic, at("PeppyFont-Italic.ttf"));
+        assert_eq!(
+            system.fallback,
+            at("PeppyFont-Regular.ttf"),
+            "the fallback stays whatever the switch"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }
