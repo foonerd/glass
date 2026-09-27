@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.34] - 2026-09-27
+
+The Linux archives of the display are small again. Since 0.7.20 they carried the Android build's leavings from the same checkout, 80 to 97 MB in place of 4 to 5; the archive now takes the display, the tap, the remote installer and its README by name, and the release fails on an archive above 16 MB.
+
 ## [0.7.33] - 2026-09-27
 
 The remote's status screen, the one that says where the settings page is or what it waits for, is set in a face of the machine's own, Roboto on Android and the system's sans elsewhere, in place of the bitmap face. On Android the first-run screen names the device's real address for its page, read from the interface list, where it said localhost.
