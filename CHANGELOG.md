@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.33] - 2026-09-27
+
+The remote's status screen, the one that says where the settings page is or what it waits for, is set in a face of the machine's own, Roboto on Android and the system's sans elsewhere, in place of the bitmap face. On Android the first-run screen names the device's real address for its page, read from the interface list, where it said localhost.
+
 ## [0.7.32] - 2026-09-27
 
 The remote's page rounds out its settings. The configuration downloads as a file and a downloaded one uploads and applies at once, so a remote's settings move to another machine. The log level of the remote is set on the page and applies at once, over the environment's. A spectrum decay of the remote's own lets the bars fall by at most a share of their height per frame, as Peppy Remote's decay rate did; off, the bars show as the player sends them.

@@ -17,3 +17,6 @@ sha2 = "0.10"
 
 [lints]
 workspace = true
+
+[target.'cfg(target_os = "android")'.dependencies]
+libc = "0.2"

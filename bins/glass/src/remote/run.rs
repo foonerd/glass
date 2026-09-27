@@ -154,6 +154,46 @@ impl RemoteSession {
 
 /// A frame with a few lines of text: what the window shows when there is
 /// nothing else to show.
+/// A face of this machine's for the status screen: Roboto on Android,
+/// DejaVu, Liberation or Noto on Linux, Segoe UI or Arial on Windows,
+/// Arial on macOS; none when the machine has none of them.
+fn host_font() -> Option<String> {
+    let windows_fonts = std::env::var("WINDIR")
+        .map(|w| format!("{w}\\Fonts"))
+        .unwrap_or_else(|_| "C:\\Windows\\Fonts".to_string());
+    let candidates: Vec<String> = if cfg!(target_os = "android") {
+        vec![
+            "/system/fonts/Roboto-Regular.ttf".to_string(),
+            "/system/fonts/DroidSans.ttf".to_string(),
+        ]
+    } else if cfg!(windows) {
+        vec![
+            format!("{windows_fonts}\\segoeui.ttf"),
+            format!("{windows_fonts}\\arial.ttf"),
+        ]
+    } else if cfg!(target_os = "macos") {
+        vec![
+            "/System/Library/Fonts/Supplemental/Arial.ttf".to_string(),
+            "/Library/Fonts/Arial.ttf".to_string(),
+        ]
+    } else {
+        vec![
+            "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf".to_string(),
+            "/usr/share/fonts/dejavu/DejaVuSans.ttf".to_string(),
+            "/usr/share/fonts/TTF/DejaVuSans.ttf".to_string(),
+            "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf".to_string(),
+            "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf".to_string(),
+            "/usr/share/fonts/noto/NotoSans-Regular.ttf".to_string(),
+        ]
+    };
+    candidates
+        .into_iter()
+        .find(|p| std::path::Path::new(p).is_file())
+}
+
+/// The status screen: `lines` set in a face of this machine's when it has
+/// one, the first line larger as a title; in the built-in bitmap face
+/// otherwise.
 fn status_frame(lines: &[String]) -> expose::Frame {
     let (width, height) = (800u32, 480u32);
     let mut frame = expose::Frame {
@@ -164,10 +204,50 @@ fn status_frame(lines: &[String]) -> expose::Frame {
     for px in frame.rgba.as_chunks_mut::<4>().0 {
         *px = [18, 18, 18, 255];
     }
+    let fonts = host_font().map(|path| {
+        expose::Fonts::load(&lead::FontFiles {
+            light: path.clone(),
+            regular: path.clone(),
+            bold: path.clone(),
+            digi: path.clone(),
+            italic: path.clone(),
+            fallback: path,
+        })
+    });
     let mut y = 120u32;
-    for line in lines {
-        expose::draw_text(&mut frame, 60, y, line);
-        y += 28;
+    for (i, line) in lines.iter().enumerate() {
+        match &fonts {
+            Some(fonts) => {
+                let size = if i == 0 { 34 } else { 22 };
+                expose::draw_text_styled(
+                    &mut frame,
+                    &plot::Text {
+                        x: 60,
+                        y,
+                        style: lead::TextStyle::Regular,
+                        size,
+                        color: if i == 0 {
+                            [255, 255, 255]
+                        } else {
+                            [220, 220, 220]
+                        },
+                        max_width: width - 120,
+                        text: line.clone(),
+                        align: Default::default(),
+                        speed: 0.0,
+                        direction: Default::default(),
+                        loop_thirds: false,
+                        font_file: String::new(),
+                    },
+                    Some(fonts),
+                );
+                y += if i == 0 { 52 } else { 34 };
+            }
+            None => {
+                expose::draw_text(&mut frame, 60, y, line);
+                y += 28;
+            }
+        }
     }
     frame
 }
@@ -525,6 +605,18 @@ pub fn remote_main(
                 }
             });
             let others = other_addresses(&url);
+            // Without an address yet (a network still coming up), the
+            // screen looks again in a few seconds.
+            let unknown = url.contains("localhost");
+            if unknown {
+                logline::say!(
+                    Info,
+                    "remotes",
+                    "no address of this machine's yet: interfaces {:?}, route {:?}",
+                    intake::remote::own_addresses(),
+                    intake::remote::own_address_towards("192.0.2.1", 9)
+                );
+            }
             let outcome = status_screen(
                 &run,
                 &app,
@@ -540,7 +632,7 @@ pub fn remote_main(
                         format!("This machine is also {}.", others.join(", "))
                     },
                 ],
-                None,
+                unknown.then_some(Duration::from_secs(5)),
             );
             match outcome {
                 Outcome::Exit(code) => return code,
