@@ -2237,29 +2237,16 @@ pub fn meter_text_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Opti
     (title, artist)
 }
 
-/// Font files from `[current]`. With `use.system.fonts` true, `font.path`
-/// joined with `font.light`, `font.regular`, `font.bold` and `font.italic`;
-/// otherwise, the default, the PeppyFont set under `plugin_fonts`, the
-/// multi-script faces the plugin ships, for every style it has. `font.digi`
-/// is optional;
-/// `digi_default` stands in when it is absent, and `italic_default` when
-/// `font.italic` is.
+/// Font files from `[current]`. Each style's `font.<style>` value is one
+/// of: `builtin` (or nothing), the plugin's multi-script PeppyFont face of
+/// that style; an absolute path to a file, a font the listener uploaded;
+/// or a file name under `font.path`, the player's own fonts. An older
+/// configuration's `use.system.fonts = False` sets every style to the
+/// built-in face, as it always meant. `font.digi` is the clock font,
+/// DSEG7 unless a file is named. The fallback is the built-in regular face.
 pub fn fonts_from_config(text: &str, plugin_fonts: &Path) -> FontFiles {
     let base = current_value(text, "font.path").unwrap_or_default();
-    let join = |file: Option<String>| -> String {
-        let file = file.unwrap_or_default();
-        let file = file.trim();
-        if file.is_empty() {
-            return String::new();
-        }
-        if file.starts_with('/') && !base.is_empty() {
-            format!("{base}{file}")
-        } else if base.is_empty() {
-            file.to_string()
-        } else {
-            format!("{base}/{file}")
-        }
-    };
+    let base = base.trim().trim_end_matches('/').to_string();
     let shipped = |name: &str| -> String {
         let path = plugin_fonts.join(name);
         if path.is_file() {
@@ -2268,51 +2255,41 @@ pub fn fonts_from_config(text: &str, plugin_fonts: &Path) -> FontFiles {
             String::new()
         }
     };
-    let or = |first: String, second: String| if first.is_empty() { second } else { first };
-    let system = current_value(text, "use.system.fonts")
-        .is_some_and(|v| v.trim().eq_ignore_ascii_case("true"));
+    let force_builtin = current_value(text, "use.system.fonts")
+        .is_some_and(|v| !v.trim().eq_ignore_ascii_case("true"));
+    let style = |key: &str, face: &str| -> String {
+        let value = current_value(text, key).unwrap_or_default();
+        let value = value.trim();
+        let builtin = value.is_empty() || value.eq_ignore_ascii_case("builtin");
+        if builtin || force_builtin && !Path::new(value).is_file() {
+            return shipped(face);
+        }
+        if value.starts_with('/') && Path::new(value).is_file() {
+            return value.to_string();
+        }
+        if base.is_empty() {
+            value.to_string()
+        } else {
+            format!("{base}/{}", value.trim_start_matches('/'))
+        }
+    };
     let digi = current_value(text, "font.digi").unwrap_or_default();
-    let digi = if digi.trim().is_empty() {
+    let digi = digi.trim();
+    let digi = if digi.is_empty() || digi.eq_ignore_ascii_case("builtin") {
         plugin_fonts
             .join("DSEG7Classic-Italic.ttf")
             .to_string_lossy()
             .into_owned()
     } else {
-        digi.trim().to_string()
-    };
-    let italic_default = plugin_fonts
-        .join("PeppyFont-Italic.ttf")
-        .to_string_lossy()
-        .into_owned();
-    let peppy_regular = shipped("PeppyFont-Regular.ttf");
-    let (light, regular, bold, italic) = if !system && !peppy_regular.is_empty() {
-        (
-            or(
-                shipped("PeppyFont-Light.ttf"),
-                join(current_value(text, "font.light")),
-            ),
-            peppy_regular.clone(),
-            or(
-                shipped("PeppyFont-Bold.ttf"),
-                join(current_value(text, "font.bold")),
-            ),
-            or(shipped("PeppyFont-Italic.ttf"), italic_default),
-        )
-    } else {
-        (
-            join(current_value(text, "font.light")),
-            join(current_value(text, "font.regular")),
-            join(current_value(text, "font.bold")),
-            or(join(current_value(text, "font.italic")), italic_default),
-        )
+        digi.to_string()
     };
     FontFiles {
-        light,
-        regular,
-        bold,
+        light: style("font.light", "PeppyFont-Light.ttf"),
+        regular: style("font.regular", "PeppyFont-Regular.ttf"),
+        bold: style("font.bold", "PeppyFont-Bold.ttf"),
         digi,
-        italic,
-        fallback: peppy_regular,
+        italic: style("font.italic", "PeppyFont-Italic.ttf"),
+        fallback: shipped("PeppyFont-Regular.ttf"),
     }
 }
 
@@ -3900,13 +3877,14 @@ mod tests {
     #[test]
     fn font_files_join_the_path_and_default_the_clock_font() {
         let none = Path::new("/nowhere/fonts");
-        let text = "[current]\nfont.path = /fonts\nfont.light = /Lato-Light.ttf\nfont.bold = Lato-Bold.ttf\n";
+        // The player's fonts, named under font.path (the old form with a leading slash too).
+        let text = "[current]\nuse.system.fonts = True\nfont.path = /fonts\nfont.light = /Lato-Light.ttf\nfont.bold = Lato-Bold.ttf\n";
         let fonts = fonts_from_config(text, none);
         assert_eq!(fonts.light, "/fonts/Lato-Light.ttf");
         assert_eq!(fonts.bold, "/fonts/Lato-Bold.ttf");
-        assert_eq!(fonts.regular, "");
+        assert_eq!(fonts.regular, "", "nothing named and nothing shipped");
         assert_eq!(fonts.digi, "/nowhere/fonts/DSEG7Classic-Italic.ttf");
-        assert_eq!(fonts.italic, "/nowhere/fonts/PeppyFont-Italic.ttf");
+        assert_eq!(fonts.italic, "", "no italic shipped here");
         assert_eq!(fonts.fallback, "");
         let own = fonts_from_config("[current]\nfont.path = /f\nfont.italic = /I.ttf\n", none);
         assert_eq!(own.italic, "/f/I.ttf");
@@ -3934,27 +3912,45 @@ mod tests {
             "PeppyFont-Regular.ttf",
             "PeppyFont-Bold.ttf",
             "PeppyFont-Italic.ttf",
+            "Mine.ttf",
         ] {
             std::fs::write(dir.join(name), b"").unwrap();
         }
-        let lato = "[current]\nfont.path = /fonts\nfont.light = /Lato-Light.ttf\nfont.regular = /Lato-Regular.ttf\nfont.bold = /Lato-Bold.ttf\n";
         let at = |name: &str| dir.join(name).to_string_lossy().into_owned();
-        let built_in = fonts_from_config(lato, &dir);
-        assert_eq!(built_in.light, at("PeppyFont-Light.ttf"));
-        assert_eq!(built_in.regular, at("PeppyFont-Regular.ttf"));
-        assert_eq!(built_in.bold, at("PeppyFont-Bold.ttf"));
-        assert_eq!(built_in.italic, at("PeppyFont-Italic.ttf"));
-        assert_eq!(built_in.fallback, at("PeppyFont-Regular.ttf"));
-        let system = fonts_from_config(&format!("{lato}use.system.fonts = True\n"), &dir);
-        assert_eq!(system.light, "/fonts/Lato-Light.ttf");
-        assert_eq!(system.regular, "/fonts/Lato-Regular.ttf");
-        assert_eq!(system.bold, "/fonts/Lato-Bold.ttf");
-        assert_eq!(system.italic, at("PeppyFont-Italic.ttf"));
-        assert_eq!(
-            system.fallback,
-            at("PeppyFont-Regular.ttf"),
-            "the fallback stays whatever the switch"
+        // Nothing named, or builtin: the shipped faces.
+        let plain = fonts_from_config(
+            "[current]\nfont.path = /fonts\nfont.regular = builtin\n",
+            &dir,
         );
+        assert_eq!(plain.light, at("PeppyFont-Light.ttf"));
+        assert_eq!(plain.regular, at("PeppyFont-Regular.ttf"));
+        assert_eq!(plain.bold, at("PeppyFont-Bold.ttf"));
+        assert_eq!(plain.italic, at("PeppyFont-Italic.ttf"));
+        assert_eq!(plain.fallback, at("PeppyFont-Regular.ttf"));
+        // An uploaded font, named by its path, for one style; the others stay built in.
+        let custom = fonts_from_config(
+            &format!(
+                "[current]\nfont.path = /fonts\nfont.bold = {}\n",
+                at("Mine.ttf")
+            ),
+            &dir,
+        );
+        assert_eq!(custom.bold, at("Mine.ttf"));
+        assert_eq!(custom.light, at("PeppyFont-Light.ttf"));
+        // The player's fonts by name under font.path.
+        let lato = "[current]\nfont.path = /fonts\nfont.light = /Lato-Light.ttf\nfont.regular = Lato-Regular.ttf\n";
+        let players = fonts_from_config(lato, &dir);
+        assert_eq!(players.light, "/fonts/Lato-Light.ttf");
+        assert_eq!(players.regular, "/fonts/Lato-Regular.ttf");
+        assert_eq!(
+            players.bold,
+            at("PeppyFont-Bold.ttf"),
+            "unnamed styles stay built in"
+        );
+        // An older configuration: use.system.fonts False meant the built-in set, whatever the names.
+        let older = fonts_from_config(&format!("{lato}use.system.fonts = False\n"), &dir);
+        assert_eq!(older.light, at("PeppyFont-Light.ttf"));
+        assert_eq!(older.regular, at("PeppyFont-Regular.ttf"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

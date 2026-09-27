@@ -227,14 +227,16 @@
       <div class="panel">
       <h2 id="fonts-title"></h2>
       <div class="help" id="fonts-help" style="margin-bottom:12px"></div>
-      <div class="form">
-        <div class="full">
-          <label class="switch"><input type="checkbox" id="fonts-builtin"><span id="fonts-builtin-label"></span></label>
-          <div class="help" id="fonts-builtin-doc"></div>
-        </div>
-        <div class="full help" id="fonts-shipped"></div>
-      </div>
+      <div class="form" id="fonts-styles"></div>
+      <div class="help" id="fonts-shipped" style="margin-top:8px"></div>
       <div class="row" style="margin-top:12px"><button class="primary" id="btn-fonts-save"></button></div>
+      <h3 id="fonts-custom-title" style="margin-top:20px"></h3>
+      <div class="help" id="fonts-custom-doc" style="margin-bottom:8px"></div>
+      <div class="list" id="fonts-custom-list"></div>
+      <div class="row" style="margin-top:12px">
+        <input type="file" id="fonts-file" accept=".ttf,.otf,font/ttf,font/otf" class="hidden">
+        <button id="btn-fonts-upload"></button>
+      </div>
     </div>
 </section>
 
@@ -424,7 +426,7 @@
   function api(method, url, body, raw) {
     var opts = { method: method, headers: {} };
     if (body !== undefined && !raw) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-    if (raw) { opts.headers['Content-Type'] = 'application/zip'; opts.body = body; }
+    if (raw) { opts.headers['Content-Type'] = raw === true ? 'application/zip' : raw; opts.body = body; }
     return fetch(url, opts).then(function (res) {
       return res.json().catch(function () { return {}; }).then(function (data) {
         if (!res.ok) {
@@ -445,7 +447,7 @@
       return t(key) + (e.data && e.data.message ? ' ' + e.data.message : '');
     }
     var known = { 'checksum': 'MANAGER_ERR_CHECKSUM', 'size': 'MANAGER_ERR_SIZE', 'units-differ': 'MANAGER_ERR_UNITS', 'bad-theme': 'MANAGER_ERR_BAD_THEME', 'not-a-zip': 'MANAGER_ERR_NOT_ZIP', 'timeout': 'MANAGER_ERR_NETWORK', 'network': 'MANAGER_ERR_NETWORK', 'too-large': 'MANAGER_ERR_TOO_LARGE', 'render-failed': 'MANAGER_ERR_RENDER',
-      'no-release': 'MANAGER_ERR_NO_RELEASE', 'bad-release': 'MANAGER_ERR_NO_RELEASE', 'up-to-date': 'MANAGER_UPD_UPTODATE', 'no-previous': 'MANAGER_UPD_NONE', 'no-digest': 'MANAGER_ERR_NO_DIGEST', 'apply': 'MANAGER_ERR_APPLY', 'busy': 'MANAGER_ERR_BUSY', 'bad-backup': 'MANAGER_ERR_BAD_BACKUP' };
+      'no-release': 'MANAGER_ERR_NO_RELEASE', 'bad-release': 'MANAGER_ERR_NO_RELEASE', 'up-to-date': 'MANAGER_UPD_UPTODATE', 'no-previous': 'MANAGER_UPD_NONE', 'no-digest': 'MANAGER_ERR_NO_DIGEST', 'apply': 'MANAGER_ERR_APPLY', 'busy': 'MANAGER_ERR_BUSY', 'bad-backup': 'MANAGER_ERR_BAD_BACKUP', 'not-a-font': 'MANAGER_FONTS_NOT_A_FONT', 'bad-font': 'MANAGER_FONTS_BAD_CHOICE', 'empty': 'MANAGER_FONTS_NOT_A_FONT' };
     if (known[code]) return t(known[code]) + (e.message && e.message !== code ? ' (' + e.message + ')' : '');
     return e.message || t('MANAGER_ERROR');
   }
@@ -509,9 +511,10 @@
     $('share-on-doc').textContent = t('MANAGER_SHARE_ON_DOC');
     $('btn-share-apply').textContent = t('MANAGER_APPLY');
     $('fonts-help').textContent = t('MANAGER_FONTS_HELP');
-    $('fonts-builtin-label').textContent = t('MANAGER_FONTS_BUILTIN');
-    $('fonts-builtin-doc').textContent = t('MANAGER_FONTS_BUILTIN_DOC');
     $('btn-fonts-save').textContent = t('MANAGER_SAVE');
+    $('fonts-custom-title').textContent = t('MANAGER_FONTS_CUSTOM_TITLE');
+    $('fonts-custom-doc').textContent = t('MANAGER_FONTS_CUSTOM_DOC');
+    $('btn-fonts-upload').textContent = t('MANAGER_FONTS_UPLOAD');
     $('art-help').textContent = t('FANART_ENABLE_DOC');
     $('art-enabled-label').textContent = t('FANART_ENABLE_LABEL');
     $('art-keymode-label').textContent = t('FANART_KEY_MODE_LABEL');
@@ -1024,15 +1027,86 @@
   $('btn-catalog-refresh').onclick = function () { loadCatalog(true); };
 
   // ---- artwork ----------------------------------------------------------
+  // Fonts: one choice per text style, among the built-in face, the fonts
+  // uploaded here and the player's own; uploads and removals below.
+  var FONT_STYLES = ['light', 'regular', 'bold', 'italic', 'digi'];
+  function renderFonts(f) {
+    var form = $('fonts-styles');
+    form.innerHTML = '';
+    FONT_STYLES.forEach(function (style) {
+      var choice = (f.styles && f.styles[style]) || { kind: 'builtin', value: 'builtin' };
+      var box = document.createElement('div');
+      var label = document.createElement('label');
+      label.textContent = t('MANAGER_FONTS_STYLE_' + style.toUpperCase());
+      var select = document.createElement('select');
+      select.id = 'fonts-style-' + style;
+      var groups = [
+        [t('MANAGER_FONTS_GROUP_BUILTIN'), f.builtIn && f.builtIn[style] ? [{ value: 'builtin', label: t(style === 'digi' ? 'MANAGER_FONTS_BUILTIN_DIGI' : 'MANAGER_FONTS_BUILTIN_FACE') }] : []],
+        [t('MANAGER_FONTS_GROUP_CUSTOM'), (f.custom || []).map(function (c) { return { value: 'custom:' + c.name, label: c.name }; })],
+        [t('MANAGER_FONTS_GROUP_PLAYER'), ((f.player && f.player.fonts) || []).map(function (n) { return { value: 'player:' + n, label: n }; })]
+      ];
+      groups.forEach(function (g) {
+        if (!g[1].length) return;
+        var og = document.createElement('optgroup');
+        og.label = g[0];
+        g[1].forEach(function (o) { var opt = document.createElement('option'); opt.value = o.value; opt.textContent = o.label; og.appendChild(opt); });
+        select.appendChild(og);
+      });
+      var selected = choice.kind === 'builtin' ? 'builtin' : (choice.kind === 'other' ? 'other' : choice.kind + ':' + choice.value);
+      if (selected === 'other') {
+        var opt = document.createElement('option');
+        opt.value = 'other';
+        opt.textContent = t('MANAGER_FONTS_AS_SET') + ' ' + choice.value;
+        select.appendChild(opt);
+      }
+      select.value = selected;
+      box.appendChild(label);
+      box.appendChild(select);
+      form.appendChild(box);
+    });
+    var shipped = FONT_STYLES.filter(function (s) { return f.builtIn && f.builtIn[s]; });
+    $('fonts-shipped').textContent = shipped.length === FONT_STYLES.length ? '' : (shipped.length ? t('MANAGER_FONTS_SHIPPED') + ' ' + shipped.join(', ') : t('MANAGER_FONTS_MISSING'));
+    var list = $('fonts-custom-list');
+    list.innerHTML = '';
+    if (!(f.custom || []).length) { list.innerHTML = '<div class="empty">' + esc(t('MANAGER_FONTS_NONE')) + '</div>'; return; }
+    f.custom.forEach(function (c) {
+      var used = FONT_STYLES.filter(function (s) { return f.styles && f.styles[s] && f.styles[s].kind === 'custom' && f.styles[s].value === c.name; });
+      var el = document.createElement('div');
+      el.className = 'item';
+      el.innerHTML = '<div class="grow"><div class="name">' + esc(c.name) + '</div><div class="muted" style="font-size:13px">' + esc(fmtBytes(c.bytes)) + (used.length ? ' · ' + esc(t('MANAGER_FONTS_USED_BY')) + ' ' + esc(used.join(', ')) : '') + '</div></div>' +
+        '<button class="small danger" data-act="delete">' + esc(t('MANAGER_DELETE')) + '</button>';
+      el.querySelector('[data-act=delete]').onclick = function () {
+        confirmDialog(t('MANAGER_FONTS_REMOVE_TITLE'), t('MANAGER_FONTS_REMOVE_MSG') + ' ' + c.name, t('MANAGER_DELETE')).then(function (ok) {
+          if (!ok) return;
+          api('DELETE', '/api/fonts/custom/' + encodeURIComponent(c.name)).then(function (data) { toast(t('MANAGER_FONTS_REMOVED')); renderFonts(data); }).catch(function (e) { toast(errorText(e), 'error'); });
+        });
+      };
+      list.appendChild(el);
+    });
+  }
   function loadFonts() {
-    api('GET', '/api/fonts').then(function (f) {
-      $('fonts-builtin').checked = !!f.builtIn;
-      var names = (f.shipped || []).map(function (n) { return n.replace('PeppyFont-', '').replace('.ttf', ''); });
-      $('fonts-shipped').textContent = names.length ? t('MANAGER_FONTS_SHIPPED') + ' ' + names.join(', ') : t('MANAGER_FONTS_MISSING');
-    }).catch(function (e) { toast(errorText(e), 'error'); });
+    api('GET', '/api/fonts').then(renderFonts).catch(function (e) { toast(errorText(e), 'error'); });
   }
   $('btn-fonts-save').onclick = function () {
-    api('POST', '/api/fonts', { builtIn: $('fonts-builtin').checked }).then(function () { toast(t('MANAGER_SAVED')); loadFonts(); }).catch(function (e) { toast(errorText(e), 'error'); });
+    var styles = {};
+    FONT_STYLES.forEach(function (style) {
+      var el = $('fonts-style-' + style);
+      var v = el ? el.value : 'other';
+      if (v === 'builtin') styles[style] = 'builtin';
+      else if (v.indexOf('custom:') === 0) styles[style] = { custom: v.slice(7) };
+      else if (v.indexOf('player:') === 0) styles[style] = v.slice(7);
+    });
+    api('POST', '/api/fonts', { styles: styles }).then(function (data) { toast(t('MANAGER_SAVED')); renderFonts(data); }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
+  $('btn-fonts-upload').onclick = function () { $('fonts-file').click(); };
+  $('fonts-file').onchange = function () {
+    var file = $('fonts-file').files[0];
+    if (!file) return;
+    $('fonts-file').value = '';
+    api('POST', '/api/fonts/upload?name=' + encodeURIComponent(file.name), file, 'application/octet-stream').then(function (data) {
+      toast(t('MANAGER_FONTS_UPLOADED') + ' ' + data.name);
+      renderFonts(data);
+    }).catch(function (e) { toast(errorText(e), 'error'); });
   };
   function loadArtwork() {
     api('GET', '/api/artwork').then(function (a) {

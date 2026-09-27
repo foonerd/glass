@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.27] - 2026-09-27
+
+Fonts of your own. The Manager's Appearance tab takes a font file, TrueType or OpenType, and keeps it on the player, and each text style, light, regular, bold, italic and the clock, is set in a face of your choice: one of the built-in multi-script faces, one of the player's own fonts (Volumio's Lato), or one you uploaded. A remote brings uploaded fonts from its player with the other fonts and sets its text the same way. In the meter configuration a style's `font.<style>` value is now `builtin`, a file name under `font.path`, or the path of an uploaded font; an older configuration's `use.system.fonts` is read once and folded into those values. The one switch of 0.7.25 became the per-style choice.
+
 ## [0.7.26] - 2026-09-27
 
 Themes can be edited in place from a computer on the network again. Volumio shares its Internal Storage folder, where the theme folders live, and a switch on the Manager's System tab, "Let computers on the network edit the themes", makes every theme folder writable over that share, now and for themes installed later; off, the folders go back to the player's own permissions and can be read over the share but not changed. The old plugin had this switch and it had not come across; the setting a player took over from it applies.
