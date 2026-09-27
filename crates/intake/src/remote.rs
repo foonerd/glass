@@ -49,6 +49,11 @@ pub struct NetHops {
     pub refused: u64,
     /// The factor levels are scaled by on this remote, from a gain in decibels.
     gain: f32,
+    /// The share of its height a spectrum bar may fall per frame at most;
+    /// 0 leaves the bars as the player sends them.
+    decay: f32,
+    /// The bars as last shown, for the decay.
+    last_spectrum: [Vec<f32>; 2],
 }
 
 impl NetHops {
@@ -83,6 +88,8 @@ impl NetHops {
             received: 0,
             refused: 0,
             gain: 1.0,
+            decay: 0.0,
+            last_spectrum: [Vec::new(), Vec::new()],
         })
     }
 
@@ -98,6 +105,17 @@ impl NetHops {
             0.0
         };
         self.gain = 10f32.powf(db / 20.0);
+        self
+    }
+
+    /// Let a spectrum bar fall by at most this share of its height per
+    /// frame, 0.5 to 0.99 (Peppy Remote's decay rate); 0 turns it off.
+    pub fn with_spectrum_decay(mut self, per_frame: f32) -> Self {
+        self.decay = if per_frame.is_finite() && per_frame >= 0.5 {
+            per_frame.min(0.99)
+        } else {
+            0.0
+        };
         self
     }
 
@@ -163,6 +181,7 @@ impl Hops for NetHops {
                                 && packet.bins.iter().all(|b| *b == 0);
                             if silent {
                                 self.last_packet_at = None;
+                                self.last_spectrum = [Vec::new(), Vec::new()];
                                 continue;
                             }
                             self.last_packet_at = Some(Instant::now());
@@ -171,6 +190,9 @@ impl Hops for NetHops {
                             let mut frame = packet.frame();
                             if self.gain != 1.0 {
                                 scale_frame(&mut frame, self.gain);
+                            }
+                            if self.decay > 0.0 {
+                                decay_spectrum(&mut frame, &mut self.last_spectrum, self.decay);
                             }
                             frames.push(frame);
                         }
@@ -204,6 +226,23 @@ fn scale_frame(frame: &mut Frame, gain: f32) {
         .flat_map(|channel| channel.iter_mut())
     {
         *bin = (*bin * gain).min(1.0);
+    }
+}
+
+/// Each spectrum bar no lower than the last one's height times `decay`:
+/// bars rise at once and fall by at most that share per frame. `last`
+/// keeps what was shown; a channel with a different number of bins
+/// starts afresh.
+fn decay_spectrum(frame: &mut Frame, last: &mut [Vec<f32>; 2], decay: f32) {
+    for (channel, kept) in frame.spectrum.iter_mut().zip(last.iter_mut()) {
+        if kept.len() != channel.len() {
+            kept.clear();
+            kept.resize(channel.len(), 0.0);
+        }
+        for (bin, held) in channel.iter_mut().zip(kept.iter_mut()) {
+            *bin = bin.max(*held * decay);
+            *held = *bin;
+        }
     }
 }
 
@@ -949,6 +988,51 @@ pub fn remote_id(cache: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_decay_lets_bars_rise_at_once_and_fall_by_a_share_per_frame() {
+        let mut last = [Vec::new(), Vec::new()];
+        let mut frame = Frame {
+            frames: 0,
+            seq: 0,
+            time_ns: 0,
+            peak: [0.0; 2],
+            rms: [0.0; 2],
+            spectrum: [vec![1.0, 0.5], vec![0.2, 0.0]],
+        };
+        decay_spectrum(&mut frame, &mut last, 0.9);
+        assert_eq!(
+            frame.spectrum,
+            [vec![1.0, 0.5], vec![0.2, 0.0]],
+            "the first frame shows as sent"
+        );
+        let mut next = Frame {
+            frames: 0,
+            seq: 0,
+            time_ns: 0,
+            peak: [0.0; 2],
+            rms: [0.0; 2],
+            spectrum: [vec![0.0, 0.6], vec![0.0, 0.0]],
+        };
+        decay_spectrum(&mut next, &mut last, 0.9);
+        assert!((next.spectrum[0][0] - 0.9).abs() < 1e-6, "fell by a tenth");
+        assert_eq!(next.spectrum[0][1], 0.6, "rose at once");
+        assert!((next.spectrum[1][0] - 0.18).abs() < 1e-6);
+        let mut other_size = Frame {
+            frames: 0,
+            seq: 0,
+            time_ns: 0,
+            peak: [0.0; 2],
+            rms: [0.0; 2],
+            spectrum: [vec![0.1, 0.1, 0.1], vec![0.1]],
+        };
+        decay_spectrum(&mut other_size, &mut last, 0.9);
+        assert_eq!(
+            other_size.spectrum[0],
+            vec![0.1, 0.1, 0.1],
+            "a new bin count starts afresh"
+        );
+    }
+
     #[test]
     fn an_uploaded_font_named_by_path_points_at_the_copy_brought_here() {
         let text = "[current]\nfont.path = /volumio/fonts\nfont.light = /Lato-Light.ttf\nfont.bold = /data/INTERNAL/glass/fonts/Mine.ttf\nfont.italic = builtin\n";

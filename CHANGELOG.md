@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.32] - 2026-09-27
+
+The remote's page rounds out its settings. The configuration downloads as a file and a downloaded one uploads and applies at once, so a remote's settings move to another machine. The log level of the remote is set on the page and applies at once, over the environment's. A spectrum decay of the remote's own lets the bars fall by at most a share of their height per frame, as Peppy Remote's decay rate did; off, the bars show as the player sends them.
+
 ## [0.7.31] - 2026-09-27
 
 Themes from the remote's own machine. A remote's page takes a themes folder on that machine, a disk of its own or a share mounted there (theme folders, or a `templates` folder with `templates_spectrum` beside it, as the player's data folder is laid out), reads it, and a player's theme choice can be one of those themes with the same meter selection as an own theme of the player's; nothing is brought from the player for it but the fonts and icons. The Display section chooses the screen the window opens on, on a machine with more than one.

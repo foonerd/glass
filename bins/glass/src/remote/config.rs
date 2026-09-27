@@ -277,6 +277,14 @@ pub struct RemoteConfig {
     /// `templates_spectrum` beside it, as Glass's own data folder is laid out.
     #[serde(default)]
     pub themes_dir: Option<String>,
+    /// How much this remote logs: `error`, `warn`, `info`, `verbose` or
+    /// `trace`; as started (the environment, else info) when absent.
+    #[serde(default)]
+    pub log_level: Option<String>,
+    /// The share of its height a spectrum bar may fall per frame at most,
+    /// 0.5 to 0.99, on this remote; 0 shows the bars as the player sends them.
+    #[serde(default)]
+    pub spectrum_decay: f32,
 }
 
 fn default_version() -> u32 {
@@ -297,6 +305,8 @@ impl Default for RemoteConfig {
             gain_db: 0.0,
             page_port: DEFAULT_PAGE_PORT,
             themes_dir: None,
+            log_level: None,
+            spectrum_decay: 0.0,
         }
     }
 }
@@ -350,6 +360,16 @@ impl RemoteConfig {
             .take()
             .map(|d| d.trim().to_string())
             .filter(|d| !d.is_empty());
+        self.log_level = self
+            .log_level
+            .take()
+            .filter(|l| logline::Level::parse(l).is_some())
+            .map(|l| l.trim().to_ascii_lowercase());
+        self.spectrum_decay = if self.spectrum_decay.is_finite() && self.spectrum_decay >= 0.5 {
+            self.spectrum_decay.min(0.99)
+        } else {
+            0.0
+        };
         if let Some(fps) = self.display.fps {
             self.display.fps = Some(fps.clamp(lead::MIN_FRAME_RATE, lead::MAX_FRAME_RATE));
         }
@@ -715,5 +735,25 @@ mod local_tests {
             meter: MeterChoice::default(),
         };
         assert!(config.check().is_err(), "a path is not a folder name");
+    }
+
+    #[test]
+    fn the_log_level_and_the_decay_are_kept_within_what_they_mean() {
+        let mut config = RemoteConfig {
+            log_level: Some(" Verbose ".to_string()),
+            spectrum_decay: 1.5,
+            ..Default::default()
+        };
+        config.tidy();
+        assert_eq!(config.log_level.as_deref(), Some("verbose"));
+        assert_eq!(config.spectrum_decay, 0.99);
+        config.log_level = Some("loud".to_string());
+        config.spectrum_decay = 0.2;
+        config.tidy();
+        assert_eq!(config.log_level, None);
+        assert_eq!(config.spectrum_decay, 0.0, "below the range means off");
+        config.spectrum_decay = 0.9;
+        config.tidy();
+        assert_eq!(config.spectrum_decay, 0.9);
     }
 }

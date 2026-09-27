@@ -98,6 +98,7 @@ impl RemoteApp {
         next.save(&self.path)?;
         *guard = next.clone();
         self.generation.fetch_add(1, Ordering::AcqRel);
+        apply_log_level(&next);
         Ok(next)
     }
 
@@ -134,6 +135,14 @@ pub fn serve(app: Arc<RemoteApp>) -> Result<u16, String> {
         })
         .map_err(|e| e.to_string())?;
     Ok(port)
+}
+
+/// The configuration's log level in force, or the environment's without one.
+pub fn apply_log_level(config: &RemoteConfig) {
+    match config.log_level.as_deref().and_then(logline::Level::parse) {
+        Some(level) => logline::set_level(level),
+        None => logline::clear_level(),
+    }
 }
 
 fn header(name: &str, value: &str) -> Header {
@@ -246,6 +255,43 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
                     "cache": app.cache.to_string_lossy(),
                 }),
             );
+        }
+        (Method::Get, "/api/config/export") => {
+            let config = app.config();
+            let name: String = config
+                .name
+                .chars()
+                .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+                .collect();
+            let file = format!(
+                "glass-remote-{}.json",
+                if name.is_empty() { "config" } else { &name }
+            );
+            let body = serde_json::to_string_pretty(&config).unwrap_or_default();
+            let response = Response::from_string(body)
+                .with_header(header("Content-Type", "application/json; charset=utf-8"))
+                .with_header(header(
+                    "Content-Disposition",
+                    &format!("attachment; filename=\"{file}\""),
+                ))
+                .with_header(header("Cache-Control", "no-cache"));
+            let _ = request.respond(response);
+        }
+        // A configuration file from this or another remote: checked and
+        // kept whole, its folder paths as they are.
+        (Method::Post, "/api/config/import") => {
+            let body = match read_body(&mut request) {
+                Ok(v) => v,
+                Err(e) => return respond_error(request, 400, "bad-json", e),
+            };
+            let incoming: RemoteConfig = match serde_json::from_value(body) {
+                Ok(c) => c,
+                Err(e) => return respond_error(request, 400, "bad-config", e.to_string()),
+            };
+            match app.update(|c| *c = incoming) {
+                Ok(config) => respond_json(request, 200, json!({ "ok": true, "config": config })),
+                Err(e) => respond_error(request, 400, "refused", e),
+            }
         }
         (Method::Post, "/api/config") => {
             let body = match read_body(&mut request) {
