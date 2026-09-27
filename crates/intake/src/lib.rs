@@ -1934,18 +1934,13 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
     // The clock font and the player's icon set ship in the plugin's home:
     // <home>/fonts and <home>/format-icons, one level above the configuration.
     let handlers_dir = Path::new(&path).parent().and_then(Path::parent);
-    let digi_default = handlers_dir
-        .map(|dir| dir.join("fonts").join("DSEG7Classic-Italic.ttf"))
-        .map(|p| p.to_string_lossy().into_owned())
-        .unwrap_or_default();
-    let italic_default = handlers_dir
-        .map(|dir| dir.join("fonts").join("PeppyFont-Italic.ttf"))
-        .map(|p| p.to_string_lossy().into_owned())
+    let plugin_fonts = handlers_dir
+        .map(|dir| dir.join("fonts"))
         .unwrap_or_default();
     skin.plugin_icons = handlers_dir
         .map(|dir| dir.join("format-icons").to_string_lossy().into_owned())
         .unwrap_or_default();
-    skin.fonts = fonts_from_config(&text, &digi_default, &italic_default);
+    skin.fonts = fonts_from_config(&text, &plugin_fonts);
     skin.data_source = data_source_from_config(&text);
     skin.meter_max = skin.data_source.max_ui;
     // The spectrum configuration sits beside the meter configuration; the

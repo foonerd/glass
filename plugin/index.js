@@ -434,6 +434,40 @@ Glass.prototype.setGovernor = function (on) {
     return { changed: true };
 };
 
+// The fonts the text is set in: the plugin's own multi-script PeppyFont set
+// (use.system.fonts false, the default) or the ones the meter configuration
+// names under font.path, Volumio's on a player.
+Glass.prototype.fontsSettings = function () {
+    var self = this;
+    self.loadConfigs();
+    var current = (meterConfig && meterConfig.current) || {};
+    var system = String(current['use.system.fonts'] || 'False').trim().toLowerCase() === 'true';
+    var shipped = ['PeppyFont-Light.ttf', 'PeppyFont-Regular.ttf', 'PeppyFont-Bold.ttf', 'PeppyFont-Italic.ttf'].filter(function (n) {
+        return fs.existsSync(PluginPath + '/fonts/' + n);
+    });
+    return {
+        builtIn: !system,
+        shipped: shipped,
+        fontPath: String(current['font.path'] || ''),
+        system: { light: String(current['font.light'] || ''), regular: String(current['font.regular'] || ''), bold: String(current['font.bold'] || '') }
+    };
+};
+
+Glass.prototype.setFontsSettings = function (data) {
+    var self = this;
+    self.loadConfigs();
+    if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return { error: 'GLASS.NO_PEPPYCONFIG' }; }
+    var builtIn = data.builtIn === undefined ? true : (data.builtIn === true || data.builtIn === 'true');
+    var wanted = builtIn ? 'False' : 'True';
+    if (String(meterConfig.current['use.system.fonts'] || 'False') === wanted) { return { changed: false }; }
+    meterConfig.current['use.system.fonts'] = wanted;
+    fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+    try { self.updateConfigVersion(); } catch (e) {}
+    if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+    self.logger.info(id + 'fonts: ' + (builtIn ? 'the built-in multi-script set' : 'the fonts the configuration names'));
+    return { changed: true };
+};
+
 // Apply a profile: its values into the meter configuration and the
 // settings page's mirrors; the display starts again with them.
 Glass.prototype.applyPerformanceProfile = function (name) {

@@ -32,6 +32,8 @@ pub struct Fonts {
     bold: Option<Arc<Face>>,
     italic: Option<Arc<Face>>,
     digi: Option<Arc<Face>>,
+    /// The face a glyph comes from when a text's own face lacks it.
+    fallback: Option<Arc<Face>>,
     /// Fonts a field names by file.
     files: HashMap<String, Arc<Face>>,
     /// Every face by its path.
@@ -69,7 +71,13 @@ impl Fonts {
         fonts.bold = fonts.face(&files.bold);
         fonts.italic = fonts.face(&files.italic);
         fonts.digi = fonts.face(&files.digi);
+        fonts.fallback = fonts.face(&files.fallback);
         fonts
+    }
+
+    /// The face consulted for a glyph the text's own face lacks.
+    fn fallback(&self) -> Option<&FontRef<'static>> {
+        self.fallback.as_ref().map(|f| &f.font)
     }
 
     /// The face of a file, mapped on the first ask.
@@ -1597,7 +1605,8 @@ impl TextMotion {
         );
         if self.lines.get(&key).is_none_or(|(k, _)| *k != line_key) {
             let font = fonts.and_then(|f| f.get_for(text.style, &text.font_file));
-            let line = render_line(font, text.size, text.color, &text.text, 0)
+            let fallback = fonts.and_then(Fonts::fallback);
+            let line = render_line(font, fallback, text.size, text.color, &text.text, 0)
                 .unwrap_or_else(|| bitmap_line(&text.text));
             self.lines.insert(key, (line_key, line));
         }
@@ -1942,6 +1951,7 @@ pub fn render_text(
 ) -> Option<Frame> {
     render_line(
         fonts.and_then(|f| f.get(style)),
+        fonts.and_then(Fonts::fallback),
         size,
         color,
         text,
@@ -1949,8 +1959,30 @@ pub fn render_text(
     )
 }
 
+/// The face and glyph for a character: the text's own face when it has the
+/// character, else the fallback face when that has it, else the own face's
+/// missing-glyph mark.
+fn pick_glyph<'f>(
+    font: &'f FontRef<'static>,
+    fallback: Option<&'f FontRef<'static>>,
+    ch: char,
+) -> (&'f FontRef<'static>, ab_glyph::GlyphId) {
+    let id = font.glyph_id(ch);
+    if id.0 != 0 {
+        return (font, id);
+    }
+    if let Some(other) = fallback {
+        let alt = other.glyph_id(ch);
+        if alt.0 != 0 {
+            return (other, alt);
+        }
+    }
+    (font, id)
+}
+
 fn render_line(
     font: Option<&FontRef<'static>>,
+    fallback: Option<&FontRef<'static>>,
     size: u32,
     color: [u8; 3],
     text: &str,
@@ -1960,19 +1992,25 @@ fn render_line(
     if text.is_empty() {
         return None;
     }
+    let fallback = fallback.filter(|f| !std::ptr::eq(*f, font));
     let scale = PxScale::from(size.max(1) as f32);
     let scaled = font.as_scaled(scale);
     let ascent = scaled.ascent();
     let line_height = (ascent - scaled.descent()).ceil().max(1.0) as u32;
     let mut advance = 0.0f32;
-    let mut last: Option<ab_glyph::GlyphId> = None;
+    // The last glyph and the face it came from; kerning is only between
+    // glyphs of one face.
+    let mut last: Option<(&FontRef<'static>, ab_glyph::GlyphId)> = None;
     for ch in text.chars() {
-        let id = font.glyph_id(ch);
-        if let Some(prev) = last {
-            advance += scaled.kern(prev, id);
+        let (face, id) = pick_glyph(font, fallback, ch);
+        let face_scaled = face.as_scaled(scale);
+        if let Some((prev_face, prev)) = last {
+            if std::ptr::eq(prev_face, face) {
+                advance += face_scaled.kern(prev, id);
+            }
         }
-        advance += scaled.h_advance(id);
-        last = Some(id);
+        advance += face_scaled.h_advance(id);
+        last = Some((face, id));
     }
     let mut width = advance.ceil().max(1.0) as u32;
     if max_width > 0 {
@@ -1981,14 +2019,17 @@ fn render_line(
     let height = line_height;
     let mut rgba = vec![0u8; (width * height * 4) as usize];
     let mut pen = 0.0f32;
-    let mut last: Option<ab_glyph::GlyphId> = None;
+    let mut last: Option<(&FontRef<'static>, ab_glyph::GlyphId)> = None;
     for ch in text.chars() {
-        let id = font.glyph_id(ch);
-        if let Some(prev) = last {
-            pen += scaled.kern(prev, id);
+        let (face, id) = pick_glyph(font, fallback, ch);
+        let face_scaled = face.as_scaled(scale);
+        if let Some((prev_face, prev)) = last {
+            if std::ptr::eq(prev_face, face) {
+                pen += face_scaled.kern(prev, id);
+            }
         }
         let glyph = id.with_scale_and_position(scale, ab_glyph::point(pen, ascent));
-        if let Some(outline) = font.outline_glyph(glyph) {
+        if let Some(outline) = face.outline_glyph(glyph) {
             let bounds = outline.px_bounds();
             outline.draw(|gx, gy, coverage| {
                 let px = bounds.min.x as i32 + gx as i32;
@@ -2007,8 +2048,8 @@ fn render_line(
                 }
             });
         }
-        pen += scaled.h_advance(id);
-        last = Some(id);
+        pen += face_scaled.h_advance(id);
+        last = Some((face, id));
         if pen >= width as f32 {
             break;
         }
@@ -4531,6 +4572,73 @@ pub fn draw_text(frame: &mut Frame, x: u32, y: u32, text: &str) {
 
 #[cfg(test)]
 mod tests {
+    /// A face that lacks a character hands it to the fallback face: the
+    /// clock font sets digits and the hex letters, so a Greek letter comes
+    /// from the host's font and takes the width it has there.
+    #[test]
+    fn a_glyph_the_face_lacks_comes_from_the_fallback_face() {
+        let Some(host_font) = any_font() else {
+            println!("no TrueType font on this host; fallback path only");
+            return;
+        };
+        let digits = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../plugin/fonts/DSEG7Classic-Regular.ttf"
+        );
+        let mut fonts = Fonts::default();
+        let clock = fonts
+            .face(digits)
+            .expect("the clock font ships with the plugin");
+        let other = fonts.face(&host_font).expect("a host font");
+        let lambda = "\u{3bb}";
+        if other.font.glyph_id('\u{3bb}').0 == 0 {
+            println!("the host's font has no Greek; fallback path only");
+            return;
+        }
+        assert_eq!(
+            clock.font.glyph_id('\u{3bb}').0,
+            0,
+            "the clock font lacks lambda"
+        );
+        let white = [255, 255, 255];
+        let helped =
+            render_line(Some(&clock.font), Some(&other.font), 24, white, lambda, 0).unwrap();
+        let from_other = render_line(Some(&other.font), None, 24, white, lambda, 0).unwrap();
+        assert_eq!(
+            helped.width, from_other.width,
+            "the letter is set in the fallback face"
+        );
+        assert!(
+            helped.rgba.iter().skip(3).step_by(4).any(|&a| a > 0),
+            "the letter is drawn"
+        );
+        // A digit stays with the clock font, fallback or not.
+        let one = render_line(Some(&clock.font), Some(&other.font), 24, white, "1", 0).unwrap();
+        let one_alone = render_line(Some(&clock.font), None, 24, white, "1", 0).unwrap();
+        assert_eq!(one.width, one_alone.width);
+        // With the shipped multi-script face at hand, a Japanese title sets whole.
+        let peppy = concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../plugin/fonts/PeppyFont-Regular.ttf"
+        );
+        if let Some(multi) = fonts.face(peppy) {
+            let japan = render_line(
+                Some(&other.font),
+                Some(&multi.font),
+                24,
+                white,
+                "Ellie \u{65e5}\u{672c}",
+                0,
+            )
+            .unwrap();
+            let latin_only = render_line(Some(&other.font), None, 24, white, "Ellie ", 0).unwrap();
+            assert!(
+                japan.width > latin_only.width + 20,
+                "two kanji were set after the Latin word"
+            );
+        }
+    }
+
     #[test]
     fn a_picture_is_read_by_its_bytes_whatever_its_name() {
         // A remote saves what it fetches as <hash>.img; the loader must not

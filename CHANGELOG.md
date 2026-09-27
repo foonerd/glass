@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.25] - 2026-09-27
+
+Text in every script again. The plugin carries the whole PeppyFont set once more, Light, Regular, Bold and Italic, multi-script faces that cover Latin, Cyrillic, Greek, Arabic, Hebrew, Thai, the Indic scripts and the Chinese, Japanese and Korean ones, and the display follows the rule the configuration always had: with `use.system.fonts` false, the default, the light, regular, bold and italic styles are set in PeppyFont; true keeps the fonts `font.path`, `font.light`, `font.regular` and `font.bold` name, Volumio's Lato on a player. A switch on the settings page's Theme section sets it. Since 0.5.0 only the italic face had shipped and the rule had gone unread, so a title in Chinese, Japanese or Korean lost its glyphs in three of the four styles. New with it: a fallback face consulted glyph by glyph, so a line that mixes scripts, a Latin artist with a Japanese title, or a theme's own font that lacks a character, is set whole, the missing glyphs taken from PeppyFont Regular. The three weights are fetched at packaging from the peppy_fonts repository at a pinned commit and checked by digest; a remote brings them from its player like the other fonts.
+
 ## [0.7.24] - 2026-09-27
 
 Artist fanart shows on remotes. A remote asked the player for the artist's pictures and fetched them, but kept them under hashed names with no telling extension, and the loader the fanart slot uses chose its decoder by the file's name, so the pictures never appeared; album art took another loader and did. The loader now reads the format from the bytes, on every platform.
