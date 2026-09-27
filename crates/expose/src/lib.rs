@@ -1462,25 +1462,31 @@ fn changed_boxes(prev: &[(u64, Option<Box4>)], cur: &[(u64, Option<Box4>)]) -> V
 /// both, since an overlap painted twice comes out the same; past eight,
 /// the pair whose union wastes the least is merged until eight remain.
 fn merge_boxes(mut boxes: Vec<Box4>) -> Vec<Box4> {
+    // The boxes come in the order of their steps' keys, which carry
+    // picture identities and differ from run to run; the merge goes by
+    // geometry so the same scene always paints the same boxes.
+    boxes.sort_unstable();
     loop {
-        let mut merged = false;
-        'pairs: for i in 0..boxes.len() {
+        // Of the pairs that meet, the one whose union wastes the least
+        // (an overlap counts as a saving) is merged first.
+        let mut best: Option<(i64, usize, usize)> = None;
+        for i in 0..boxes.len() {
             for j in i + 1..boxes.len() {
-                if boxes_meet(boxes[i], boxes[j])
-                    && box_area(box_union(boxes[i], boxes[j]))
-                        <= box_area(boxes[i]) + box_area(boxes[j])
-                {
-                    let union = box_union(boxes[i], boxes[j]);
-                    boxes.swap_remove(j);
-                    boxes[i] = union;
-                    merged = true;
-                    break 'pairs;
+                if !boxes_meet(boxes[i], boxes[j]) {
+                    continue;
+                }
+                let waste = box_area(box_union(boxes[i], boxes[j]))
+                    - box_area(boxes[i])
+                    - box_area(boxes[j]);
+                if waste <= 0 && best.is_none_or(|b| waste < b.0) {
+                    best = Some((waste, i, j));
                 }
             }
         }
-        if !merged {
-            break;
-        }
+        let Some((_, i, j)) = best else { break };
+        let union = box_union(boxes[i], boxes[j]);
+        boxes.swap_remove(j);
+        boxes[i] = union;
     }
     while boxes.len() > 8 {
         let mut best = (i64::MAX, 0, 1);

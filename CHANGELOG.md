@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.8] - 2026-09-27
+
+One line installs Glass on a player: `get-glass.sh`, fetched with curl and run as the player's user, downloads the latest release (or the one named), hands it to the player's own plugin manager over its socket, enables the plugin and restarts the backend, so the command line tool's staging step, which fails when the zip sits in the folder, is not part of the way in. The damage boxes a frame paints are merged in the order of their geometry, so the same scene always paints the same boxes; they were merged in the order of their steps' keys, which carry picture identities and differ from run to run, and one order of a test scene painted a few pixels over the test's bound.
+
 ## [0.7.7] - 2026-09-27
 
 A remote that follows the player shows the meter the player shows. The player's own display tells the plugin which meter it moves to, the plugin passes it to every remote and to a remote that connects, and a following remote switches to that meter instead of rolling its own; "Show the same meter as the player" on the remote's page, on by default, turns it off for a remote that should keep its own rotation. The Status tab names the meter on show.
