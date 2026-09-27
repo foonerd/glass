@@ -432,14 +432,19 @@ pub fn own_addresses() -> Vec<std::net::Ipv4Addr> {
             .map(|text| local_addresses_in(&text))
             .unwrap_or_default()
     }
+    // Elsewhere the address a route to the outside would leave from.
     #[cfg(not(target_os = "linux"))]
     {
-        Vec::new()
+        match own_address_towards("192.0.2.1", 9) {
+            Some(IpAddr::V4(ip)) if !ip.is_loopback() => vec![ip],
+            _ => Vec::new(),
+        }
     }
 }
 
 /// The `/32 host LOCAL` entries of a routing trie dump: each is an address
 /// of this host's own, named on the line before its `/32` line.
+#[cfg(any(target_os = "linux", test))]
 fn local_addresses_in(trie: &str) -> Vec<std::net::Ipv4Addr> {
     let mut found: Vec<std::net::Ipv4Addr> = Vec::new();
     let mut last: Option<std::net::Ipv4Addr> = None;

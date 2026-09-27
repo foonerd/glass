@@ -15,4 +15,18 @@ It puts `glass` in `~/.local/bin` and two entries in the applications menu: **Gl
 
 `install.sh --service` also installs a user service that starts the display with the session and keeps it running, for a screen on the wall. `sudo loginctl enable-linger $USER` starts it before anyone logs in. `uninstall.sh` takes everything out again; `--purge` also removes the configuration and the cache.
 
-The first start shows a page address on the screen; the page adds a player (found on the network or typed), chooses the theme (the player's, or one of the player's themes kept as this remote's own with its own meter rotation), the window (full screen, a window, or a frameless one at a fixed place), the frame rate and the gain. Changes apply while the display runs. The configuration is `~/.config/glass-remote/config.json`; what is brought from players is under `~/.cache/glass-remote`.
+## Windows
+
+Unpack `glass-<version>-windows-x64.zip` and run the installer in a PowerShell window, as the user who will run the display:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File glass-<version>-windows-x64\remote\windows\install.ps1
+```
+
+It puts `glass.exe` and `SDL2.dll` under the user's programs folder (`%LOCALAPPDATA%\Programs\Glass Remote`) and two entries in the Start menu: **Glass Remote**, the display, and **Glass Remote Settings**, which opens the display's settings page in a browser. `install.ps1 -Startup` also starts the display with the session. `uninstall.ps1` takes everything out again; `-Purge` also removes the configuration and the cache. Nothing needs administrator rights, and nothing else needs installing: SDL2 comes in the archive. The binary runs on Windows 10 or later, 64 bit. The binary can also be run straight from the unpacked folder: `glass.exe --remote`.
+
+The configuration is `%APPDATA%\glass-remote\config.json`; what is brought from players is under `%LOCALAPPDATA%\glass-remote`.
+
+## The settings page
+
+The first start shows a page address on the screen; the page adds a player (found on the network or typed), chooses the theme (the player's, or one of the player's themes kept as this remote's own with its own meter rotation), the window (full screen, a window, or a frameless one at a fixed place), the frame rate and the gain. Changes apply while the display runs. On Linux the configuration is `~/.config/glass-remote/config.json`; what is brought from players is under `~/.cache/glass-remote`.

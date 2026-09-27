@@ -17,13 +17,18 @@
 pub mod analysis;
 pub mod dop;
 pub mod dsd;
+#[cfg(unix)]
 pub mod fifo;
 pub mod legacy;
+#[cfg(unix)]
 pub mod measure;
+#[cfg(unix)]
 pub mod relay;
 pub mod ring;
 pub mod sample;
 pub mod wire;
 
 pub use analysis::Analyser;
-pub use ring::{Frame, Reader, Writer, MAX_CHANNELS};
+pub use ring::{Frame, MAX_CHANNELS};
+#[cfg(unix)]
+pub use ring::{Reader, Writer};

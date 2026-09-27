@@ -41,3 +41,20 @@ jobs:
           name: glass-plugin
           path: dist/glass-*.zip
           if-no-files-found: error
+
+  windows:
+    name: windows cross build
+    runs-on: ubuntu-24.04
+    needs: check
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install && rustup show active-toolchain && rustup target add x86_64-pc-windows-gnu
+      - name: MinGW-w64, for the link
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends mingw-w64
+      - uses: Swatinem/rust-cache@v2
+      - run: scripts/ship-windows.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: glass-windows-x64
+          path: bin/windows-x64
+          if-no-files-found: error

@@ -1304,6 +1304,7 @@ pub struct TapSource {
     rederive: bool,
 }
 
+#[cfg(unix)]
 use tap::ring::merge_hops;
 
 /// The meter falls no faster than this from full scale, as the old scope had it.
@@ -1311,6 +1312,7 @@ const METER_DECAY_MS: u32 = 500;
 /// The old scope's smoothing of the spectrum bins.
 const SPECTRUM_SMOOTHING: u32 = 60;
 /// A ring not written for this long is silence: the player has stopped.
+#[cfg(unix)]
 const RING_QUIET_NS: u64 = 500_000_000;
 
 impl TapSource {

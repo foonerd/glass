@@ -437,12 +437,17 @@ fn main() -> ExitCode {
             },
             "--list" => list = true,
             "--help" => {
+                let ring = if cfg!(unix) {
+                    "Reads the tap's ring under /dev/shm and the player's state."
+                } else {
+                    "Shows a player's meters as a remote display: glass --remote."
+                };
                 println!(
                     "glass [--once] [--headless] [--print] [--output frame.png|frame.ppm] [--record step.json]\n      \
                      [--theme FOLDER] [--meter NAME|random|a,b,c] [--interval SECONDS] [--fps N] [--threads N]\n      \
                      [--list] [--snapshot DIR [--settle SECONDS] [--thumb WIDTH]]\n      \
                      [--remote [HOST|discover] [--name NAME] [--cache DIR] [--config FILE] [--manager-port N] [--settings]] [--dev]\n\
-                     Reads the tap's ring under /dev/shm and the player's state.\n\
+                     {ring}\n\
                      A window opens when DISPLAY is set. --headless skips it.\n\
                      --output writes every frame as a PNG or PPM and still rasters.\n\
                      --record writes the skin, input and scene of each step as JSON.\n\
@@ -757,6 +762,7 @@ fn session(
     let running_for_plugin = !once && show_window && remote.is_none();
     if running_for_plugin {
         let _ = std::fs::write(RUN_FLAG, b"");
+        #[cfg(unix)]
         let _ = std::fs::set_permissions(
             RUN_FLAG,
             std::os::unix::fs::PermissionsExt::from_mode(0o777),
@@ -1313,6 +1319,9 @@ fn cache_dir(given: Option<&str>) -> std::path::PathBuf {
     }
     if let Some(xdg) = env::var_os("XDG_CACHE_HOME").filter(|v| !v.is_empty()) {
         return std::path::PathBuf::from(xdg).join("glass-remote");
+    }
+    if let Some(local) = env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty()) {
+        return std::path::PathBuf::from(local).join("glass-remote");
     }
     if let Some(home) = env::var_os("HOME").filter(|v| !v.is_empty()) {
         return std::path::PathBuf::from(home)

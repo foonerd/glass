@@ -4,7 +4,7 @@ VU meters, spectrum analysers, turntables and cassette decks on a Volumio player
 
 <p align="center"><img src="https://raw.githubusercontent.com/wiki/foonerd/glass/images/display-turntable.png" width="720" alt="Glass on a player's screen"></p>
 
-The workspace version is **0.7.14**.
+The workspace version is **0.7.15**.
 
 ## Get it
 
@@ -19,7 +19,7 @@ The [Quick Start](https://github.com/foonerd/glass/wiki/Quick-Start) on the wiki
 | Player | Volumio 4 on a Raspberry Pi 3, 4, 5 or Zero 2 W, or a PC. |
 | --- | --- |
 | Screen | Anything the Touch Display plugin drives, or none: a player without a screen serves remote displays. |
-| Remote display | Any Linux machine with a screen, from the same release archive. |
+| Remote display | Any Linux or Windows machine with a screen, from the release archives. |
 
 ## What is in the box
 
@@ -51,11 +51,11 @@ flowchart LR
 | `glass-serve` | `bins/glass-serve` | Sends the ring's frames to subscribed remotes over UDP. |
 | `tapdump` | `bins/tapdump` | Reads the ring from the command line. |
 | The plugin | `plugin/` | The Volumio plugin: the settings page, the audio path, the channel to the display, the manager, remotes, upgrades. `plugin/README.md` says what is in it. |
-| The remote installer | `remote/` | Desktop entries, an icon and a user service for a Linux machine used as a remote display. |
+| The remote installer | `remote/` | Desktop entries, an icon and a user service for a Linux machine used as a remote display; Start menu entries for a Windows one. |
 
 ## The display from the command line
 
-`glass` runs without the plugin to review themes: `--list` names the installed themes and their meters; `--theme`, `--meter`, `--interval` and `--fps` stand in for the configuration's values; `--once --headless --output frame.png` writes one frame; `--snapshot DIR` writes every meter of a theme, and `--thumb` a thumbnail of each; `--record` writes the skin, input and scene of a frame as JSON; `--print` prints the levels. `GLASS_PROFILE` in the environment prints where each frame's time goes; `GLASS_BENCH_DELAY_MS` adds that many milliseconds to every frame's painting, to watch the painters grow and the frame rate governor step down on a machine that would never overrun. `glass --remote` runs as a remote display; the wiki's Remotes page has its switches and settings. `--dev`, with or without `--remote`, opens a window at the theme's exact size with a title bar naming the theme and the meter on show, to move about a desktop while a theme is reviewed; nothing is saved.
+`glass` runs without the plugin to review themes: `--list` names the installed themes and their meters; `--theme`, `--meter`, `--interval` and `--fps` stand in for the configuration's values; `--once --headless --output frame.png` writes one frame; `--snapshot DIR` writes every meter of a theme, and `--thumb` a thumbnail of each; `--record` writes the skin, input and scene of a frame as JSON; `--print` prints the levels. `GLASS_PROFILE` in the environment prints where each frame's time goes; `GLASS_BENCH_DELAY_MS` adds that many milliseconds to every frame's painting, to watch the painters grow and the frame rate governor step down on a machine that would never overrun. `glass --remote` runs as a remote display, on Linux and on Windows (`scripts/ship-windows.sh` cross-compiles `glass.exe`); the wiki's Remotes page has its switches and settings. `--dev`, with or without `--remote`, opens a window at the theme's exact size with a title bar naming the theme and the meter on show, to move about a desktop while a theme is reviewed; nothing is saved.
 
 ## Building
 
