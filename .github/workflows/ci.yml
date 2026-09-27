@@ -72,9 +72,8 @@ jobs:
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "build-tools;35.0.0" "platforms;android-35" >/dev/null
           cargo install cargo-ndk --locked
       - uses: Swatinem/rust-cache@v2
+      # The script finds the NDK under the runner's ANDROID_HOME itself.
       - run: scripts/ship-android.sh
-        env:
-          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
       - uses: actions/upload-artifact@v7
         with:
           name: glass-android
