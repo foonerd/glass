@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.16] - 2026-09-27
+
+The Windows installer finds the display in the release archive. `install.ps1` looked for `glass.exe` under `bin\windows-x64`, the layout of a checkout that ran the cross build, while the archive holds it under `bin`, so an install from the archive stopped with "glass.exe is missing"; it now takes either layout, and `-Check` only says where the files would come from, which the project's checks run against both layouts.
+
 ## [0.7.15] - 2026-09-27
 
 Glass runs as a remote display on Windows. The release carries `glass-<version>-windows-x64.zip` with `glass.exe`, the `SDL2.dll` it loads and an installer (`remote\windows\install.ps1`) that puts both under the user's programs folder and two entries in the Start menu, Glass Remote and Glass Remote Settings, with `-Startup` for a display that starts with the session; `uninstall.ps1` takes them out. The configuration lives at `%APPDATA%\glass-remote\config.json` and what is brought from players under `%LOCALAPPDATA%\glass-remote`. The build is a cross-compilation with MinGW-w64 (`scripts/ship-windows.sh`, and `scripts/windows/Dockerfile` for a machine without MinGW) against the SDL project's MinGW package, pinned by checksum; the tap's FIFO, relay, ring and measuring thread, the player's side, are left out of the Windows binary, which shows a player's meters as a remote only.

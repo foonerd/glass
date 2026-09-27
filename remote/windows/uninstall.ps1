@@ -4,15 +4,16 @@
 # (%LOCALAPPDATA%\glass-remote).
 #
 #   powershell -ExecutionPolicy Bypass -File remote\windows\uninstall.ps1 [-Purge]
-param([switch]$Purge)
+param([switch]$Purge, [switch]$Check)
 $ErrorActionPreference = 'Continue'
+if ($Check) { Write-Output 'uninstall.ps1: parsed'; exit 0 }
 
-Get-Process glass -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "*Glass Remote*" } | Stop-Process -Force
-$menu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs'
-foreach ($link in (Join-Path $menu 'Glass Remote.lnk'), (Join-Path $menu 'Glass Remote Settings.lnk'), (Join-Path $menu 'Startup\Glass Remote.lnk')) {
+Get-Process glass -ErrorAction SilentlyContinue | Where-Object { $_.Path -like '*Glass Remote*' } | Stop-Process -Force
+$menu = Join-Path $env:APPDATA 'Microsoft/Windows/Start Menu/Programs'
+foreach ($link in (Join-Path $menu 'Glass Remote.lnk'), (Join-Path $menu 'Glass Remote Settings.lnk'), (Join-Path $menu 'Startup/Glass Remote.lnk')) {
     if (Test-Path $link) { Remove-Item $link -Force; Write-Output "removed: $link" }
 }
-$programs = Join-Path $env:LOCALAPPDATA 'Programs\Glass Remote'
+$programs = Join-Path $env:LOCALAPPDATA 'Programs/Glass Remote'
 if (Test-Path $programs) { Remove-Item $programs -Recurse -Force; Write-Output "removed: $programs" }
 if ($Purge) {
     foreach ($dir in (Join-Path $env:APPDATA 'glass-remote'), (Join-Path $env:LOCALAPPDATA 'glass-remote')) {
