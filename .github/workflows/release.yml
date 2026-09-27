@@ -57,7 +57,7 @@ jobs:
       # without them the archive is published unsigned, as before.
       - name: Azure login for Trusted Signing
         if: ${{ vars.TRUSTED_SIGNING_ACCOUNT != '' }}
-        uses: azure/login@v2
+        uses: azure/login@v3
         with:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           client-id: ${{ secrets.AZURE_CLIENT_ID }}

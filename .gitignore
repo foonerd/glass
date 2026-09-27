@@ -6,6 +6,7 @@ dist/
 /lib/
 # The Android app's build inputs and outputs that scripts/ship-android.sh makes
 /remote/android/app/jni/SDL
+/remote/android/.sdl/
 /remote/android/app/src/main/java/org/
 /remote/android/app/src/main/jniLibs/
 /remote/android/app/build/
