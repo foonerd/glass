@@ -10,6 +10,7 @@ use std::io::{ErrorKind, Read, Write};
 use std::net::{TcpStream, ToSocketAddrs};
 #[cfg(unix)]
 use std::os::unix::net::UnixStream;
+#[cfg(unix)]
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
@@ -162,6 +163,13 @@ impl Channel {
     #[cfg(unix)]
     pub fn at(path: impl Into<PathBuf>) -> Self {
         Self::to(Target::Path(path.into()))
+    }
+
+    /// Elsewhere there is no local channel: one that never connects, until
+    /// `with_channel` puts a player's TCP channel in its place.
+    #[cfg(not(unix))]
+    pub fn at(_path: impl AsRef<std::path::Path>) -> Self {
+        Self::to(Target::Tcp(String::new()))
     }
 
     /// The same over TCP, `host:port`, for a remote display.

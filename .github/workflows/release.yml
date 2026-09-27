@@ -16,12 +16,13 @@ jobs:
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-      - run: rustup toolchain install && rustup show active-toolchain
+      - run: rustup toolchain install && rustup show active-toolchain && rustup target add x86_64-pc-windows-gnu
       - name: Cross compilers and the libraries the host build links against
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu libc6-dev-armhf-cross libc6-dev-arm64-cross libsdl2-dev libasound2-dev alsa-utils
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu libc6-dev-armhf-cross libc6-dev-arm64-cross mingw-w64 libsdl2-dev libasound2-dev alsa-utils
       - uses: Swatinem/rust-cache@v2
       - run: scripts/check.sh
       - run: scripts/ship.sh
+      - run: scripts/ship-windows.sh
       - name: The tap passes every format through byte for byte
         run: scripts/tap_exact.sh lib/x64/libglasstap.so bin/x64/tapdump
       - run: scripts/package.sh
@@ -32,6 +33,13 @@ jobs:
           for arch in arm armv7 armv8 x64; do
             tar -C . --transform "s,^,glass-${GITHUB_REF_NAME#v}-$arch/," -czf "dist/glass-${GITHUB_REF_NAME#v}-$arch.tar.gz" "bin/$arch" "lib/$arch" remote
           done
+      - name: The Windows archive of the display and the remote installer
+        run: |
+          top="glass-${GITHUB_REF_NAME#v}-windows-x64"
+          rm -rf "dist/$top" && mkdir -p "dist/$top/remote"
+          cp -r bin/windows-x64 "dist/$top/bin"
+          cp -r remote/windows remote/README.md "dist/$top/remote/"
+          (cd dist && zip -qr "$top.zip" "$top") && rm -rf "dist/$top"
       - uses: softprops/action-gh-release@v3
         with:
           body_path: dist/notes.md

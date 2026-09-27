@@ -14,18 +14,25 @@
 //!   per channel, and the sequence again. A reader whose two sequences
 //!   disagree with the header's caught a write in flight and tries again.
 
+#[cfg(unix)]
 use std::ffi::CString;
+#[cfg(unix)]
 use std::fs;
+#[cfg(unix)]
 use std::io;
+#[cfg(unix)]
 use std::path::{Path, PathBuf};
+#[cfg(unix)]
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 /// Writers made by this process so far, for their file names.
+#[cfg(unix)]
 static INSTANCE: AtomicU32 = AtomicU32::new(0);
 
 /// Remove the rings left under `dir` by writers whose process is gone: a
 /// player killed outright never drops its writer. Every new writer sweeps
 /// first. Returns how many went.
+#[cfg(unix)]
 pub fn sweep(dir: &Path) -> usize {
     let mut gone = 0;
     let own = std::process::id() as i32;
@@ -119,33 +126,54 @@ pub struct Info {
     pub written_ns: u64,
 }
 
+#[cfg(unix)]
 const H_MAGIC: usize = 0;
+#[cfg(unix)]
 const H_VERSION: usize = 8;
+#[cfg(unix)]
 const H_HEADER_BYTES: usize = 12;
+#[cfg(unix)]
 const H_RATE: usize = 16;
+#[cfg(unix)]
 const H_CHANNELS: usize = 20;
+#[cfg(unix)]
 const H_FFT: usize = 24;
+#[cfg(unix)]
 const H_BINS: usize = 28;
+#[cfg(unix)]
 const H_SLOTS: usize = 32;
+#[cfg(unix)]
 const H_SLOT_BYTES: usize = 36;
+#[cfg(unix)]
 const H_PID: usize = 40;
+#[cfg(unix)]
 const H_HOP: usize = 44;
+#[cfg(unix)]
 const H_SEQ: usize = 48;
+#[cfg(unix)]
 const H_WRITTEN: usize = 56;
 
+#[cfg(unix)]
 const S_SEQ: usize = 0;
+#[cfg(unix)]
 const S_TIME: usize = 8;
+#[cfg(unix)]
 const S_FRAMES: usize = 16;
+#[cfg(unix)]
 const S_PEAK: usize = 24;
+#[cfg(unix)]
 const S_RMS: usize = 32;
+#[cfg(unix)]
 const S_SPECTRUM: usize = 40;
 
+#[cfg(unix)]
 fn slot_bytes(bins: usize) -> usize {
     let raw = S_SPECTRUM + bins * MAX_CHANNELS * 4 + 8;
     raw.div_ceil(64) * 64
 }
 
 /// Nanoseconds of the monotonic clock.
+#[cfg(unix)]
 pub fn now_ns() -> u64 {
     let mut ts = libc::timespec {
         tv_sec: 0,
@@ -156,12 +184,25 @@ pub fn now_ns() -> u64 {
     ts.tv_sec as u64 * 1_000_000_000 + ts.tv_nsec as u64
 }
 
+/// Elsewhere the ring is not shared between processes, so a monotonic
+/// clock of this process's own serves: its origin is as arbitrary as the
+/// system clock's, and only differences are ever taken.
+#[cfg(not(unix))]
+pub fn now_ns() -> u64 {
+    use std::sync::OnceLock;
+    static START: OnceLock<std::time::Instant> = OnceLock::new();
+    let start = START.get_or_init(std::time::Instant::now);
+    start.elapsed().as_nanos() as u64
+}
+
 /// A mapped file. Unmapped when dropped.
+#[cfg(unix)]
 struct Map {
     ptr: *mut u8,
     len: usize,
 }
 
+#[cfg(unix)]
 impl Map {
     fn open(fd: i32, len: usize, write: bool) -> io::Result<Self> {
         let prot = if write {
@@ -195,6 +236,7 @@ impl Map {
     }
 }
 
+#[cfg(unix)]
 impl Drop for Map {
     fn drop(&mut self) {
         unsafe { libc::munmap(self.ptr as *mut libc::c_void, self.len) };
@@ -203,30 +245,38 @@ impl Drop for Map {
 
 // The ring is shared between processes by design; the mapping itself is
 // owned by one writer or one reader at a time.
+#[cfg(unix)]
 unsafe impl Send for Map {}
 
+#[cfg(unix)]
 fn put_u32(bytes: &mut [u8], at: usize, v: u32) {
     bytes[at..at + 4].copy_from_slice(&v.to_le_bytes());
 }
+#[cfg(unix)]
 fn get_u32(bytes: &[u8], at: usize) -> u32 {
     u32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
 }
+#[cfg(unix)]
 fn put_u64(bytes: &mut [u8], at: usize, v: u64) {
     bytes[at..at + 8].copy_from_slice(&v.to_le_bytes());
 }
+#[cfg(unix)]
 fn get_u64(bytes: &[u8], at: usize) -> u64 {
     let mut b = [0u8; 8];
     b.copy_from_slice(&bytes[at..at + 8]);
     u64::from_le_bytes(b)
 }
+#[cfg(unix)]
 fn put_f32(bytes: &mut [u8], at: usize, v: f32) {
     bytes[at..at + 4].copy_from_slice(&v.to_le_bytes());
 }
+#[cfg(unix)]
 fn get_f32(bytes: &[u8], at: usize) -> f32 {
     f32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
 }
 
 /// The writing side. Creating one creates the file; dropping it removes it.
+#[cfg(unix)]
 pub struct Writer {
     map: Map,
     path: PathBuf,
@@ -236,6 +286,7 @@ pub struct Writer {
     seq: u64,
 }
 
+#[cfg(unix)]
 impl Writer {
     /// Create the ring for a stream. `slots` is how many hops are kept; the
     /// reader takes the latest, a history view can take more.
@@ -339,6 +390,7 @@ impl Writer {
     }
 }
 
+#[cfg(unix)]
 impl Drop for Writer {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.path);
@@ -346,12 +398,14 @@ impl Drop for Writer {
 }
 
 /// The reading side of one ring.
+#[cfg(unix)]
 pub struct Reader {
     map: Map,
     path: PathBuf,
     info: Info,
 }
 
+#[cfg(unix)]
 impl Reader {
     /// Open a ring by path.
     pub fn open(path: &Path) -> io::Result<Self> {
@@ -497,7 +551,7 @@ impl Reader {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod tests {
     use super::*;
 
