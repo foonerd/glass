@@ -43,7 +43,7 @@ function Shortcut([string]$path, [string]$arguments, [string]$description) {
     $link.Arguments = $arguments
     $link.WorkingDirectory = $programs
     $link.Description = $description
-    $link.WindowStyle = 7
+    $link.IconLocation = "$exe,0"
     $link.Save()
     Write-Output "installed: $path"
 }
