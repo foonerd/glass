@@ -86,7 +86,8 @@
     <h2>Theme</h2>
     <div class="form">
       <div class="full">
-        <label class="switch"><input type="radio" name="tmode" value="follow" id="tmode-follow"><span>Follow the player: its theme and meter, as it shows them</span></label>
+        <label class="switch"><input type="radio" name="tmode" value="follow" id="tmode-follow"><span>Follow the player: its theme and meter selection, as it has them</span></label>
+        <div id="follow-block" style="margin:6px 0 10px 28px"><label class="switch"><input type="checkbox" id="tmode-same"><span>Show the same meter as the player</span></label><div class="help">Off, this remote rolls its own meter of the theme under a random or list selection.</div></div>
         <label class="switch"><input type="radio" name="tmode" value="own" id="tmode-own"><span>An own theme of the player's, kept whatever the player shows</span></label>
       </div>
       <div id="own-block" class="full hidden">
@@ -180,7 +181,7 @@
     ids.forEach(function (id) {
       var p = c.players[id]; var el = document.createElement('div');
       el.className = 'item' + (c.active === id ? ' active' : '');
-      el.innerHTML = '<div class="grow"><div class="name">' + esc(p.name || p.host) + ' ' + (c.active === id ? '<span class="badge green">shown</span>' : '') + '</div><div class="help">' + esc(p.host) + ' · manager ' + p.manager_port + ' · ' + (p.theme && p.theme.mode === 'own' ? 'own theme ' + esc(p.theme.folder) : 'follows the player') + '</div></div>' +
+      el.innerHTML = '<div class="grow"><div class="name">' + esc(p.name || p.host) + ' ' + (c.active === id ? '<span class="badge green">shown</span>' : '') + '</div><div class="help">' + esc(p.host) + ' · manager ' + p.manager_port + ' · ' + (p.theme && p.theme.mode === 'own' ? 'own theme ' + esc(p.theme.folder) : (p.theme && p.theme.same_meter === false ? 'follows the player, its own meter' : 'follows the player')) + '</div></div>' +
         (c.active === id ? '' : '<button class="small" data-act="show">Show this player</button>') + '<button class="small danger" data-act="remove">Remove</button>';
       el.querySelector('[data-act=remove]').onclick = function () { api('DELETE', '/api/player/' + encodeURIComponent(id)).then(function () { toast('Removed ' + (p.name || p.host)); setDirty(false); load(); }).catch(function (e) { toast(e.message, 'error'); }); };
       var show = el.querySelector('[data-act=show]');
@@ -239,7 +240,8 @@
   $('own-title').onchange = function () { renderNames(); setDirty(true); };
   $('own-interval').onchange = function () { setDirty(true); };
   $('own-names').onchange = function () { setDirty(true); };
-  $('tmode-follow').onchange = $('tmode-own').onchange = function () { $('own-block').classList.toggle('hidden', !$('tmode-own').checked); setDirty(true); };
+  $('tmode-follow').onchange = $('tmode-own').onchange = function () { $('own-block').classList.toggle('hidden', !$('tmode-own').checked); $('follow-block').classList.toggle('hidden', $('tmode-own').checked); setDirty(true); };
+  $('tmode-same').onchange = function () { setDirty(true); };
 
   // ---- fill and gather ----
   function fill(c) {
@@ -249,6 +251,8 @@
       var own = p.theme && p.theme.mode === 'own';
       $('tmode-own').checked = own; $('tmode-follow').checked = !own;
       $('own-block').classList.toggle('hidden', !own);
+      $('follow-block').classList.toggle('hidden', own);
+      $('tmode-same').checked = !(p.theme && p.theme.same_meter === false);
       if (own) {
         $('own-theme').value = p.theme.folder;
         var m = p.theme.meter || { select: 'random' };
@@ -273,7 +277,7 @@
         else meter = { select: 'single', name: names[0] || '' };
         c.players[c.active].theme = { mode: 'own', folder: $('own-theme').value, meter: meter };
       } else {
-        c.players[c.active].theme = { mode: 'follow' };
+        c.players[c.active].theme = { mode: 'follow', same_meter: $('tmode-same').checked };
       }
     }
     var x = $('d-x').value.trim(), y = $('d-y').value.trim();

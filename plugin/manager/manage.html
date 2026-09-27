@@ -1052,7 +1052,7 @@
       var rows = [
         ['MANAGER_ST_VERSION', s.version + ' (' + s.arch + (s.binary ? '' : ', ' + t('MANAGER_ST_NO_BINARY')) + ')'],
         ['MANAGER_ST_DISPLAY', s.headless ? t('DISPLAY_OUTPUT_NONE') : (s.running ? t('MANAGER_ST_RUNNING') : t('MANAGER_ST_IDLE')) + ' · DISPLAY=:' + s.display + ' · ' + t('MANAGER_ST_TIMEOUT') + ' ' + s.timeout + ' s'],
-        ['MANAGER_ST_THEME', s.activeTheme + ' · ' + ({ random: t('MANAGER_MODE_RANDOM'), list: t('MANAGER_MODE_LIST'), single: t('MANAGER_MODE_SINGLE') }[s.meter.mode] || s.meter.mode) + (s.meter.mode !== 'random' ? ': ' + s.meter.names.join(', ') : '')],
+        ['MANAGER_ST_THEME', s.activeTheme + ' · ' + ({ random: t('MANAGER_MODE_RANDOM'), list: t('MANAGER_MODE_LIST'), single: t('MANAGER_MODE_SINGLE') }[s.meter.mode] || s.meter.mode) + (s.meter.mode !== 'random' ? ': ' + s.meter.names.join(', ') : '') + (s.showing && s.showing.meter ? ' · ' + t('MANAGER_ST_SHOWING') + ' ' + s.showing.meter : '')],
         ['MANAGER_ST_PLAYER', (s.channel.status || '-') + (s.channel.service ? ' · ' + s.channel.service : '') + (s.channel.title ? ' · ' + (s.channel.artist ? s.channel.artist + ' - ' : '') + s.channel.title : '') +
           (s.channel.status === 'play' ? ' · ' + (s.measured ? t('MANAGER_ST_MEASURED') : t('MANAGER_ST_NOT_MEASURED')) : '')],
         ['MANAGER_ST_CHANNEL', s.channel.clients + ' ' + t('MANAGER_ST_CLIENTS')],

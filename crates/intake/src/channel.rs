@@ -31,6 +31,8 @@ pub enum Event {
         theme: String,
         meter: String,
     },
+    /// The meter the player's own display shows, for remotes that follow it.
+    Showing { theme: String, meter: String },
 }
 
 /// A command for the player, sent to the plugin.
@@ -310,6 +312,15 @@ impl Channel {
         self.send_line(&command.line())
     }
 
+    /// Tell the plugin which meter this display shows, so remotes that
+    /// follow the player can show the same one.
+    pub fn report_showing(&mut self, theme: &str, meter: &str) -> bool {
+        let mut line =
+            serde_json::json!({ "kind": "showing", "theme": theme, "meter": meter }).to_string();
+        line.push('\n');
+        self.send_line(&line)
+    }
+
     fn send_line(&mut self, line: &str) -> bool {
         let Some(stream) = self.stream.as_mut() else {
             return false;
@@ -351,6 +362,10 @@ fn decode(line: &[u8]) -> Option<Event> {
         )),
         "config" => Some(Event::Config {
             version: text("version"),
+            theme: text("theme"),
+            meter: text("meter"),
+        }),
+        "showing" => Some(Event::Showing {
             theme: text("theme"),
             meter: text("meter"),
         }),
@@ -517,6 +532,20 @@ mod tests {
             "{\"kind\":\"hello\",\"remote\":{\"id\":\"kitchen\",\"name\":\"Kitchen\",\"page\":\"http://10.0.0.7:5583/\",\"release\":\"0.7.0\",\"screen\":[1280,720]}}\n"
         );
         assert_eq!(command, "{\"kind\":\"command\",\"name\":\"toggle\"}\n");
+    }
+
+    #[test]
+    fn the_meter_on_show_is_parsed_and_reported() {
+        let event = decode(br#"{"kind":"showing","theme":"1280x720_x","meter":"gold"}"#)
+            .expect("a showing line");
+        assert_eq!(
+            event,
+            Event::Showing {
+                theme: "1280x720_x".into(),
+                meter: "gold".into()
+            }
+        );
+        assert_eq!(decode(br#"{"kind":"unknown"}"#), None);
     }
 
     #[test]

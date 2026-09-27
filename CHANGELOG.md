@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.7] - 2026-09-27
+
+A remote that follows the player shows the meter the player shows. The player's own display tells the plugin which meter it moves to, the plugin passes it to every remote and to a remote that connects, and a following remote switches to that meter instead of rolling its own; "Show the same meter as the player" on the remote's page, on by default, turns it off for a remote that should keep its own rotation. The Status tab names the meter on show.
+
 ## [0.7.6] - 2026-09-26
 
 A remote keeps moving across a track change. The frames daemon numbered its datagrams with the ring's own hop count, which starts again with every stream, so after a track change that opened a new stream the remote took the new packets for old ones and dropped them until the count passed the old stream's; the player's own display, reading the ring directly, never saw it. The daemon numbers its datagrams itself now, and the remote also takes a packet whose stamp from the player is later than the last, whatever its number, so it moves with a daemon of an earlier release too.

@@ -515,6 +515,7 @@
     "MANAGER_RM_APPLIED": "Angewendet.",
     "MANAGER_RM_PROBLEM": "Problem:",
     "MANAGER_ST_REMOTES": "Fernanzeigen",
+    "MANAGER_ST_SHOWING": "gerade",
     "MANAGER_ST_RECEIVING": "empfangen Frames"
   }
 }

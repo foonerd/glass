@@ -20,6 +20,20 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 echo "check: ALSA templates"
 scripts/asound_check.sh
 
+echo "check: plugin files"
+# Volumio's core reads every plugin's strings at its start: one bad file
+# takes the whole backend down, so every JSON the plugin ships must parse.
+python3 - plugin/package.json plugin/config.json plugin/UIConfig.json plugin/i18n/*.json <<'PY'
+import json, sys
+for path in sys.argv[1:]:
+    with open(path, encoding='utf-8') as f:
+        text = f.read()
+    json.loads(text)
+    if not text.endswith('\n') or text.rstrip('\n') != text.rstrip():
+        raise SystemExit(f'{path}: must end with one newline and nothing after the JSON')
+print(f'{len(sys.argv) - 1} plugin files parse')
+PY
+
 echo "check: plugin"
 if command -v node >/dev/null 2>&1; then
   node --check plugin/index.js

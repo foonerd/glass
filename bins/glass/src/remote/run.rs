@@ -30,6 +30,8 @@ pub struct RemoteSession {
     pub config_version: String,
     /// Whether the player's theme is followed.
     pub follow: bool,
+    /// Whether, following, the meter the player shows is shown too.
+    pub same_meter: bool,
     generation: u64,
     status_at: Instant,
     received_at_status: u64,
@@ -397,7 +399,7 @@ pub fn remote_main(
                         },
                         manager_port: first.manager_port,
                         name: first.name.clone(),
-                        theme: ThemeChoice::Follow,
+                        theme: ThemeChoice::Follow { same_meter: true },
                     });
                 }
                 Ok(_) => println!("glass: no player announced itself; the page can add one"),
@@ -413,7 +415,7 @@ pub fn remote_main(
                 host: host.to_string(),
                 manager_port: run.manager_port,
                 name: beacon.name.clone(),
-                theme: ThemeChoice::Follow,
+                theme: ThemeChoice::Follow { same_meter: true },
             });
         }
     }
@@ -538,7 +540,7 @@ pub fn remote_main(
         }
         // The theme: the player's, or one of its own.
         let (choice, follow) = match &player.theme {
-            ThemeChoice::Follow => (Choice::default(), true),
+            ThemeChoice::Follow { .. } => (Choice::default(), true),
             ThemeChoice::Own { folder, meter } => (
                 Choice {
                     theme: Some(folder.clone()),
@@ -622,6 +624,7 @@ pub fn remote_main(
             beacon: beacon.clone(),
             theme: theme.clone(),
             config_version,
+            same_meter: matches!(player.theme, ThemeChoice::Follow { same_meter: true }),
             follow,
             generation,
             status_at: Instant::now(),
