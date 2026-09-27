@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.29] - 2026-09-27
+
+Glass keeps its themes in its own folder. A player that took its themes over from PeppyMeter Screensaver in place, and still read them from that plugin's folder under Internal Storage, has them copied into Glass's folder at the plugin's start, once, and its configuration pointed there; the old folder is left exactly as it was, for a return to that plugin. The installer copies too and no longer moves a preserved folder. The share panel and the guide name Glass's folders only.
+
 ## [0.7.28] - 2026-09-27
 
 Text sits where the Python engine set it. A font size is the em in pixels, as FreeType sizes a face for pygame, and the baseline sits the face's ascent below the line's top, rounded up to a whole pixel; the line is ascent to descent high. The raster had taken the size as the face's ascent-to-descent height, which is the em for Lato and DSEG7 but 1.227 em for PeppyFont, so text set in the built-in faces was drawn smaller and higher than the same theme under PeppyMeter. A character taken from the fallback face is set at the same em as the text.

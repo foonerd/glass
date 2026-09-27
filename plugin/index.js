@@ -46,6 +46,7 @@ const SpectrumFolderStr = 'spectrum.folder';
 const LEGACY_PLUGIN = 'peppy_screensaver';
 const LEGACY_CONFIG = '/data/configuration/user_interface/peppy_screensaver/config.json';
 const LEGACY_METER_CONFIG = '/data/plugins/user_interface/peppy_screensaver/screensaver/peppymeter/config.txt';
+const LEGACY_DATA = '/data/INTERNAL/' + LEGACY_PLUGIN;
 
 // The channel to the display: a local socket the plugin serves, one JSON
 // object per line. A display that connects gets a greeting, then the player's
@@ -794,9 +795,12 @@ Glass.prototype.onStart = function () {
         self.logger.error(id + 'remotes: ' + (e && e.message ? e.message : e));
     }
 
-    // The manager: the web application on its own port.
-    if (self.config.get('smbShareAccess') === true) { self.normalizeTemplatePermissions(true); }
-    self.startManager().catch(function () {
+    // Themes still read from the old plugin's folder come into Glass's own
+    // first; then the manager, the web application on its own port.
+    self.adoptLegacyThemes().then(function () {
+        if (self.config.get('smbShareAccess') === true) { self.normalizeTemplatePermissions(true); }
+        return self.startManager();
+    }).catch(function () {
         self.commandRouter.pushToastMessage('error', self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
             self.commandRouter.getI18nString('GLASS.MANAGER_PORT_IN_USE') + ' ' + (parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT));
     });
@@ -1157,6 +1161,81 @@ Glass.prototype.disableLegacyAndStart = function () {
 // configuration when it is installed, and the meter configuration keys the
 // display reads. Without an installed plugin, the newest named backup the
 // installer adopted is restored instead.
+// Kilobytes under a folder, and free on the filesystem holding a path.
+function folderKb(dir) {
+    var total = 0;
+    var visit = function (d) {
+        var names = [];
+        try { names = fs.readdirSync(d); } catch (e) { return; }
+        names.forEach(function (name) {
+            var full = d + '/' + name;
+            var stat;
+            try { stat = fs.lstatSync(full); } catch (e) { return; }
+            if (stat.isDirectory()) { visit(full); } else if (stat.isFile()) { total += stat.size; }
+        });
+    };
+    visit(dir);
+    return Math.ceil(total / 1024);
+}
+function freeKb(path) {
+    try { var s = fs.statfsSync(path); return Math.floor(s.bavail * s.bsize / 1024); } catch (e) { return -1; }
+}
+
+// A configuration that still names the old plugin's theme folders (a
+// player that took its themes over in place) has them copied into Glass's
+// own folders once, and is pointed there; the old folders are left as they
+// were, for a return to that plugin. Nothing happens when the free space
+// would not hold the copy. Resolves, true after a copy, when the manager
+// may start on the folders the configuration names.
+Glass.prototype.adoptLegacyThemes = function () {
+    var self = this;
+    self.loadConfigs();
+    var inOld = function (root) { return String(root || '').indexOf(LEGACY_DATA + '/') === 0; };
+    var jobs = [];
+    if (inOld(base_folder_P)) { jobs.push({ from: base_folder_P.replace(/\/$/, ''), to: DATA_DIR + '/templates' }); }
+    if (inOld(base_folder_S)) { jobs.push({ from: base_folder_S.replace(/\/$/, ''), to: DATA_DIR + '/templates_spectrum' }); }
+    jobs = jobs.filter(function (j) { try { return fs.statSync(j.from).isDirectory(); } catch (e) { return false; } });
+    if (!jobs.length) { return Promise.resolve(false); }
+    var need = jobs.reduce(function (sum, j) { return sum + folderKb(j.from); }, 0);
+    fs.ensureDirSync(DATA_DIR);
+    var free = freeKb(DATA_DIR);
+    if (free < 0 || free < need + 65536) {
+        self.logger.warn(id + 'themes: ' + LEGACY_PLUGIN + "'s folders stay in use: " + Math.round(need / 1024) + ' MB to copy, ' + Math.round(Math.max(free, 0) / 1024) + ' MB free');
+        return Promise.resolve(false);
+    }
+    self.logger.info(id + 'themes: copying ' + jobs.map(function (j) { return j.from; }).join(' and ') + ' into ' + DATA_DIR + ' (' + Math.round(need / 1024) + ' MB)');
+    var started = Date.now();
+    return jobs.reduce(function (chain, j) {
+        return chain.then(function () { return fs.copy(j.from, j.to, { overwrite: true, preserveTimestamps: true }); });
+    }, Promise.resolve()).then(function () {
+        // A folder added to the old tree while the copy ran comes over too.
+        jobs.forEach(function (j) {
+            fs.readdirSync(j.from).forEach(function (name) {
+                if (name.indexOf('.') !== 0 && !fs.existsSync(j.to + '/' + name)) { fs.copySync(j.from + '/' + name, j.to + '/' + name, { preserveTimestamps: true }); }
+            });
+        });
+        // The switch: the configurations name Glass's folders from now on.
+        self.loadConfigs();
+        if (meterConfig && inOld(base_folder_P)) {
+            meterConfig.current['base.folder'] = DATA_DIR + '/templates';
+            fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+        }
+        if (spectrum_config && inOld(base_folder_S)) {
+            spectrum_config.current['base.folder'] = DATA_DIR + '/templates_spectrum';
+            fs.writeFileSync(SpectrumConfigFile, ini.stringify(spectrum_config, { whitespace: true }));
+        }
+        self.loadConfigs();
+        try { self.updateConfigVersion(); } catch (e) {}
+        if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+        self.pushRemoteConfig();
+        self.logger.info(id + 'themes: ' + LEGACY_PLUGIN + "'s themes copied into " + DATA_DIR + ' in ' + Math.round((Date.now() - started) / 1000) + ' s; the old folders are left as they were');
+        return true;
+    }).catch(function (e) {
+        self.logger.error(id + 'themes: copying from ' + LEGACY_PLUGIN + ': ' + (e && e.message ? e.message : e));
+        return false;
+    });
+};
+
 Glass.prototype.importLegacySettings = function () {
     var self = this;
     if (self.config.get('legacyImported') === true) {
