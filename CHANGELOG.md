@@ -4,7 +4,7 @@ All notable changes to Glass are recorded here. The format follows [Keep a Chang
 
 ## [0.7.22] - 2026-09-27
 
-The Windows binary and its installer scripts are signed. `glass.exe`, `install.ps1` and `uninstall.ps1` carry an Authenticode signature by Data Technics IT Limited, issued through Azure Artifact Signing under Microsoft's public root and timestamped, so Windows knows the publisher: SmartScreen does not ask, and Smart App Control lets the program run. The file's Properties show the signature on its Digital Signatures tab.
+The Windows binary and its installer scripts are signed. `glass.exe`, `install.ps1` and `uninstall.ps1` carry an Authenticode signature issued through Azure Artifact Signing under Microsoft's public root and timestamped, so Windows knows the publisher: SmartScreen does not ask, and Smart App Control lets the program run. The file's Properties show the signature on its Digital Signatures tab.
 
 ## [0.7.21] - 2026-09-27
 
