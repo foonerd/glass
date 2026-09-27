@@ -448,7 +448,7 @@ fn main() -> ExitCode {
                      [--list] [--snapshot DIR [--settle SECONDS] [--thumb WIDTH]]\n      \
                      [--remote [HOST|discover] [--name NAME] [--cache DIR] [--config FILE] [--manager-port N] [--settings]] [--dev]\n\
                      {ring}\n\
-                     A window opens when DISPLAY is set. --headless skips it.\n\
+                     A window opens when a screen is there (DISPLAY on Linux). --headless skips it.\n\
                      --output writes every frame as a PNG or PPM and still rasters.\n\
                      --record writes the skin, input and scene of each step as JSON.\n\
                      --theme, --meter, --interval and --fps stand in for the installed configuration's values.\n\
@@ -703,7 +703,7 @@ fn session(
     let mut vinyl_slot = PlainSlot::default();
     // Album reel pictures for the track, scaled to the theme reels.
     let mut reel_slots: (PlainSlot, PlainSlot) = Default::default();
-    let show_window = env::var_os("DISPLAY").is_some() && !headless;
+    let show_window = screen_available() && !headless;
     let write_file = output.is_some() || snapshot.is_some();
     let serving_remote = false;
     // The window: the player's is full screen at the theme's size; a
@@ -1309,6 +1309,14 @@ fn session(
         Some(why) => Outcome::Reload(why),
         None => Outcome::Exit(ExitCode::SUCCESS),
     }
+}
+
+/// Whether a window can open: on Windows and macOS always, on Linux when
+/// an X11 or Wayland display is named in the environment.
+pub(crate) fn screen_available() -> bool {
+    cfg!(any(windows, target_os = "macos"))
+        || env::var_os("DISPLAY").is_some_and(|v| !v.is_empty())
+        || env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
 }
 
 /// Where a remote display keeps what it brought from players: `--cache`,
