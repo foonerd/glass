@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.36] - 2026-09-27
+
+A full screen remote can be set up from the machine it covers. Escape now leaves full screen and keeps the remote showing in a window, so its settings page can be used in a browser beside it; F takes the screen again; Q quits, as Escape did before. The page has the same two buttons under Display, for a touch screen. The change is for the run; the Display setting says what the next start takes.
+
 ## [0.7.35] - 2026-09-27
 
 The remote's page says when the remote is gone. A button pressed after the remote stopped (Escape or Q closes its window) or after its page moved used to show the browser's own words, "NetworkError when attempting to fetch resource"; the page now says the remote did not answer and asks for it to be started again and the page reloaded, in the banner and in the toast.

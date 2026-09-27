@@ -299,8 +299,17 @@ fn status_screen(
     loop {
         if let Some((_, surface)) = window.as_mut() {
             let _ = surface.fit_to(frame.width, frame.height);
+            if let Some(mode) = app.take_window_request() {
+                let _ = surface.set_mode(mode);
+            }
             match surface.show(&frame, &[whole]) {
                 Ok(Shown::Closed) => return Outcome::Exit(ExitCode::SUCCESS),
+                Ok(Shown::LeaveFullscreen) => {
+                    let _ = surface.set_mode(WindowMode::Windowed);
+                }
+                Ok(Shown::EnterFullscreen) => {
+                    let _ = surface.set_mode(WindowMode::Fullscreen);
+                }
                 Ok(_) => {}
                 Err(err) => {
                     eprintln!("glass: {err}");

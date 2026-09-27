@@ -1102,9 +1102,24 @@ fn session(
             let frame = painted.frame;
             rastered_at = Instant::now();
             if let Some(window) = surface.as_mut() {
+                if let Some(mode) = remote.as_deref().and_then(|r| r.app.take_window_request()) {
+                    if let Err(err) = window.set_mode(mode) {
+                        eprintln!("glass: window: {err}");
+                    }
+                }
                 match window.show(frame, painted.damage) {
                     Ok(Shown::Kept) => {}
                     Ok(Shown::Closed) => leave = Some("window closed"),
+                    Ok(Shown::LeaveFullscreen) => {
+                        if let Err(err) = window.set_mode(WindowMode::Windowed) {
+                            eprintln!("glass: window: {err}");
+                        }
+                    }
+                    Ok(Shown::EnterFullscreen) => {
+                        if let Err(err) = window.set_mode(WindowMode::Fullscreen) {
+                            eprintln!("glass: window: {err}");
+                        }
+                    }
                     Ok(Shown::Touched) => {
                         if let Some(remote) = remote.as_deref() {
                             // A touch on a remote plays or pauses the player.
