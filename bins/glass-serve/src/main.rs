@@ -168,6 +168,7 @@ fn write_status(
 }
 
 fn main() -> ExitCode {
+    logline::init("glass-serve");
     let args = match parse_args() {
         Ok(args) => args,
         Err(err) => {
@@ -223,7 +224,11 @@ fn main() -> ExitCode {
                 Ok((n, from)) => {
                     if let Some((id, name, release)) = parse_subscribe(&buffer[..n]) {
                         let entry = subscribers.entry(from).or_insert_with(|| {
-                            println!("glass-serve: {from} subscribed ({name}, {release})");
+                            logline::say!(
+                                Verbose,
+                                "remotes",
+                                "{from} subscribed ({name}, {release})"
+                            );
                             Subscriber {
                                 id: id.clone(),
                                 name: name.clone(),
@@ -247,7 +252,7 @@ fn main() -> ExitCode {
         subscribers.retain(|addr, s| {
             let kept = now.duration_since(s.seen) < SUBSCRIBER_TTL;
             if !kept {
-                println!("glass-serve: {addr} gone");
+                logline::say!(Verbose, "remotes", "{addr} gone");
             }
             kept
         });
@@ -262,7 +267,7 @@ fn main() -> ExitCode {
                     .map(|r| r.path() != found.path())
                     .unwrap_or(true)
                 {
-                    println!("glass-serve: ring {}", found.path().display());
+                    logline::say!(Info, "remotes", "ring {}", found.path().display());
                     last_seq = 0;
                 }
                 ring = Some(found);

@@ -11,6 +11,7 @@ name = "glass"
 path = "src/main.rs"
 
 [dependencies]
+logline = { path = "../../crates/logline" }
 expose = { path = "../../crates/expose" }
 intake = { path = "../../crates/intake" }
 lead = { path = "../../crates/lead" }

@@ -1,0 +1,9 @@
+[package]
+name = "logline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The lines Glass's programs write, gated by a level and targets from the environment"
+
+[lints]
+workspace = true

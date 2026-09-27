@@ -1707,9 +1707,9 @@ impl Source for TapSource {
             if live != self.channel_was_live {
                 self.channel_was_live = live;
                 if live {
-                    println!("glass: channel {}", channel.name());
+                    logline::say!(Verbose, "channel", "channel {}", channel.name());
                 } else {
-                    println!("glass: channel gone, asking the player");
+                    logline::say!(Verbose, "channel", "channel gone, asking the player");
                 }
             }
         }
