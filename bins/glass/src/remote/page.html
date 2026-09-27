@@ -120,6 +120,7 @@
       <div><label>Position Y</label><input type="number" id="d-y" placeholder="centred"></div>
       <div><label>Frame rate, empty for the player's</label><input type="number" id="d-fps" min="10" max="60" placeholder="player's"></div>
       <div class="full"><label class="switch"><input type="checkbox" id="d-fit"><span>Fit the theme to the screen, keeping its shape</span></label><div class="help">Off, the theme shows pixel for pixel, centred, as on the player's own screen.</div></div>
+      <div class="full"><button class="small" id="btn-win-leave">Leave full screen now</button> <button class="small" id="btn-win-full">Full screen now</button><div class="help">For this run only, so this page can be used on the same machine while the display keeps showing; the setting above is what the next start takes. On the keyboard, Escape leaves full screen, F returns to it, Q quits the remote.</div></div>
     </div>
   </div>
 
@@ -338,6 +339,8 @@
     return c;
   }
   ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'gain', 'decay', 'r-name', 'r-port', 'r-log'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
+  $('btn-win-leave').onclick = function () { api('POST', '/api/window', { mode: 'windowed' }).then(function () { toast('The display is a window now.'); }).catch(function (e) { toast(e.message, 'error'); }); };
+  $('btn-win-full').onclick = function () { api('POST', '/api/window', { mode: 'fullscreen' }).then(function () { toast('The display takes the screen.'); }).catch(function (e) { toast(e.message, 'error'); }); };
   $('btn-cfg-import').onclick = function () { $('cfg-file').click(); };
   $('cfg-file').onchange = function () {
     var file = $('cfg-file').files[0];

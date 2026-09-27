@@ -11,7 +11,7 @@ use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
 use sdl2::pixels::PixelFormatEnum;
 use sdl2::render::{Canvas, Texture, TextureCreator};
-use sdl2::video::{Window, WindowContext};
+use sdl2::video::{FullscreenType, Window, WindowContext, WindowPos};
 use sdl2::EventPump;
 
 /// What happened while a frame went up.
@@ -23,6 +23,11 @@ pub enum Shown {
     Closed,
     /// A finger or a mouse button was lifted on the window.
     Touched,
+    /// Escape: the window should leave full screen, so the desktop behind
+    /// it can be used, and keep showing.
+    LeaveFullscreen,
+    /// F: the window should take the screen again.
+    EnterFullscreen,
 }
 
 /// How the window sits on the screen.
@@ -88,6 +93,33 @@ impl Surface {
     /// Open the player's window: the whole screen, no frame, no pointer.
     pub fn open(width: u32, height: u32) -> Result<Self, String> {
         Self::open_with(width, height, &WindowOptions::default())
+    }
+
+    /// Change how the open window sits: full screen takes the screen it is
+    /// on; windowed shows the frame at its size, centred, with a frame;
+    /// frameless the same without one.
+    pub fn set_mode(&mut self, mode: WindowMode) -> Result<(), String> {
+        let (width, height) = self.frame_size;
+        let window = self.canvas.window_mut();
+        match mode {
+            WindowMode::Fullscreen => {
+                window.set_bordered(false);
+                window
+                    .set_fullscreen(FullscreenType::Desktop)
+                    .map_err(|err| err.to_string())?;
+            }
+            WindowMode::Windowed | WindowMode::Frameless => {
+                window
+                    .set_fullscreen(FullscreenType::Off)
+                    .map_err(|err| err.to_string())?;
+                window.set_bordered(mode == WindowMode::Windowed);
+                window
+                    .set_size(width.max(1), height.max(1))
+                    .map_err(|err| err.to_string())?;
+                window.set_position(WindowPos::Centered, WindowPos::Centered);
+            }
+        }
+        Ok(())
     }
 
     /// The screens this machine has, by index: name, width and height.
@@ -218,9 +250,17 @@ impl Surface {
             match event {
                 Event::Quit { .. } => return Ok(Shown::Closed),
                 Event::KeyDown {
-                    keycode: Some(Keycode::Escape | Keycode::Q),
+                    keycode: Some(Keycode::Q),
                     ..
                 } if self.keys => return Ok(Shown::Closed),
+                Event::KeyDown {
+                    keycode: Some(Keycode::Escape),
+                    ..
+                } if self.keys => return Ok(Shown::LeaveFullscreen),
+                Event::KeyDown {
+                    keycode: Some(Keycode::F),
+                    ..
+                } if self.keys => return Ok(Shown::EnterFullscreen),
                 Event::MouseButtonUp { .. } | Event::FingerUp { .. } => touched = true,
                 _ => {}
             }

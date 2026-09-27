@@ -63,6 +63,8 @@ pub struct RemoteApp {
     config: Mutex<RemoteConfig>,
     generation: AtomicU64,
     status: Mutex<Status>,
+    /// A window mode the page asked for, until the display takes it.
+    window_request: Mutex<Option<pane::WindowMode>>,
 }
 
 impl RemoteApp {
@@ -73,6 +75,7 @@ impl RemoteApp {
             config: Mutex::new(config),
             generation: AtomicU64::new(1),
             status: Mutex::new(Status::default()),
+            window_request: Mutex::new(None),
         })
     }
 
@@ -100,6 +103,22 @@ impl RemoteApp {
         self.generation.fetch_add(1, Ordering::AcqRel);
         apply_log_level(&next);
         Ok(next)
+    }
+
+    /// Ask the display to change how its window sits, live.
+    pub fn request_window(&self, mode: pane::WindowMode) {
+        *self
+            .window_request
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(mode);
+    }
+
+    /// The mode the page asked for, once.
+    pub fn take_window_request(&self) -> Option<pane::WindowMode> {
+        self.window_request
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take()
     }
 
     pub fn status(&self) -> Status {
@@ -255,6 +274,29 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
                     "cache": app.cache.to_string_lossy(),
                 }),
             );
+        }
+        // The window, live: full screen, or a window so the desktop behind
+        // it can be used (Escape and F on the keyboard do the same).
+        (Method::Post, "/api/window") => {
+            let body = match read_body(&mut request) {
+                Ok(v) => v,
+                Err(e) => return respond_error(request, 400, "bad-json", e),
+            };
+            let mode = match body.get("mode").and_then(Value::as_str) {
+                Some("fullscreen") => pane::WindowMode::Fullscreen,
+                Some("windowed") => pane::WindowMode::Windowed,
+                Some("frameless") => pane::WindowMode::Frameless,
+                _ => {
+                    return respond_error(
+                        request,
+                        400,
+                        "bad-mode",
+                        "mode: fullscreen, windowed or frameless",
+                    )
+                }
+            };
+            app.request_window(mode);
+            respond_json(request, 200, json!({ "ok": true }));
         }
         (Method::Get, "/api/config/export") => {
             let config = app.config();
