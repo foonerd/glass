@@ -154,7 +154,14 @@
   function api(method, url, body) {
     var opts = { method: method, headers: {} };
     if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
-    return fetch(url, opts).then(function (res) { return res.json().catch(function () { return {}; }).then(function (data) { if (!res.ok) { var e = new Error(data.message || data.error || ('HTTP ' + res.status)); e.code = data.error; throw e; } return data; }); });
+    return fetch(url, opts).catch(function () {
+      // No answer at all: the remote has stopped (Escape or Q closes its window), or its page moved.
+      var e = new Error('The remote did not answer: it has stopped, or its page moved. Start it again and reload this page.');
+      e.code = 'unreached';
+      $('unreached').textContent = e.message;
+      $('unreached').classList.remove('hidden');
+      throw e;
+    }).then(function (res) { return res.json().catch(function () { return {}; }).then(function (data) { if (!res.ok) { var e = new Error(data.message || data.error || ('HTTP ' + res.status)); e.code = data.error; throw e; } return data; }); });
   }
   function setDirty(on) { state.dirty = on; $('dirty').classList.toggle('hidden', !on); }
 

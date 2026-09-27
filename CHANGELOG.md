@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.35] - 2026-09-27
+
+The remote's page says when the remote is gone. A button pressed after the remote stopped (Escape or Q closes its window) or after its page moved used to show the browser's own words, "NetworkError when attempting to fetch resource"; the page now says the remote did not answer and asks for it to be started again and the page reloaded, in the banner and in the toast.
+
 ## [0.7.34] - 2026-09-27
 
 The Linux archives of the display are small again. Since 0.7.20 they carried the Android build's leavings from the same checkout, 80 to 97 MB in place of 4 to 5; the archive now takes the display, the tap, the remote installer and its README by name, and the release fails on an archive above 16 MB.
