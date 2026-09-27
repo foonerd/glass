@@ -320,6 +320,15 @@ class Manager {
       res.json(Object.assign({ ok: true }, self.plugin.artworkSettings()));
     }));
 
+    app.get('/api/sharing', function (req, res) {
+      res.json(self.plugin.sharingInfo());
+    });
+
+    app.post('/api/sharing', wrap(async function (req, res) {
+      const result = self.plugin.setSharing((req.body || {}).shared);
+      res.json(Object.assign({ ok: true, changed: !!result.changed }, self.plugin.sharingInfo()));
+    }));
+
     app.get('/api/fonts', function (req, res) {
       res.json(self.plugin.fontsSettings());
     });
@@ -698,6 +707,7 @@ class Manager {
       this.logger.warn('glass: manager ' + job.kind + ' ' + job.name + ' failed: ' + job.error.message);
     } else {
       job.state = 'done';
+      if (!error && job.kind !== 'upgrade' && this.plugin && typeof this.plugin.themesWritten === 'function') { try { this.plugin.themesWritten(); } catch (e) {} }
       this.logger.info('glass: manager ' + job.kind + ' ' + job.name + ' done: ' + job.folders.map(function (f) { return f.install + '/' + f.folder; }).join(', '));
     }
   }

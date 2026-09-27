@@ -280,6 +280,15 @@
       </div>
       <div class="row" style="margin-top:10px"><button class="primary" id="btn-perf-apply"></button></div>
     </div>
+    <div class="panel" id="share-panel">
+      <h2 id="share-title" style="margin:0 0 10px"></h2>
+      <div class="help" id="share-help" style="margin-bottom:10px"></div>
+      <div class="form">
+        <div class="full"><label class="switch"><input type="checkbox" id="share-on"><span id="share-on-label"></span></label><div class="help" id="share-on-doc"></div></div>
+        <div class="full help" id="share-roots"></div>
+      </div>
+      <div class="row" style="margin-top:10px"><button class="primary" id="btn-share-apply"></button></div>
+    </div>
     <div class="panel" id="log-panel">
       <h2 id="log-title" style="margin:0 0 10px"></h2>
       <div class="help" id="log-help" style="margin-bottom:10px"></div>
@@ -494,6 +503,11 @@
     $('btn-catalog-refresh').textContent = t('MANAGER_CATALOG_REFRESH');
     $('art-title').textContent = t('MANAGER_ARTWORK_TITLE');
     $('fonts-title').textContent = t('MANAGER_FONTS_TITLE');
+    $('share-title').textContent = t('MANAGER_SHARE_TITLE');
+    $('share-help').textContent = t('MANAGER_SHARE_HELP');
+    $('share-on-label').textContent = t('MANAGER_SHARE_ON');
+    $('share-on-doc').textContent = t('MANAGER_SHARE_ON_DOC');
+    $('btn-share-apply').textContent = t('MANAGER_APPLY');
     $('fonts-help').textContent = t('MANAGER_FONTS_HELP');
     $('fonts-builtin-label').textContent = t('MANAGER_FONTS_BUILTIN');
     $('fonts-builtin-doc').textContent = t('MANAGER_FONTS_BUILTIN_DOC');
@@ -564,7 +578,7 @@
     if (name === 'artwork') loadArtwork(); loadFonts();
     if (name === 'backups') loadBackups();
     if (name === 'status') { loadStatus(); }
-    if (name === 'system') { loadUpdate(false); loadPerformance(); loadLogging(); }
+    if (name === 'system') { loadUpdate(false); loadPerformance(); loadSharing(); loadLogging(); }
     if (name === 'remotes') loadRemotes();
   }
 
@@ -1130,6 +1144,15 @@
   $('btn-status-refresh').onclick = function () { loadStatus(); };
 
   // ---- the performance profile ------------------------------------------
+  function loadSharing() {
+    return api('GET', '/api/sharing').then(function (sh) {
+      $('share-on').checked = !!sh.shared;
+      $('share-roots').textContent = (sh.roots || []).join(' · ');
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  $('btn-share-apply').onclick = function () {
+    api('POST', '/api/sharing', { shared: $('share-on').checked }).then(function (sh) { $('share-on').checked = !!sh.shared; toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
   function loadPerformance() {
     return api('GET', '/api/performance').then(renderPerformance).catch(function (e) { toast(errorText(e), 'error'); });
   }
