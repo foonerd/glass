@@ -749,6 +749,11 @@ fn session(
                     if remote.is_none() && !skin.run.centered {
                         surface.place_at(skin.run.x, skin.run.y);
                     }
+                    if let Some(remote) = remote.as_deref() {
+                        remote
+                            .app
+                            .set_status(|s| s.monitors = remote::run::monitors_of(&surface));
+                    }
                     *window = Some((options, surface));
                 }
                 Err(err) => {

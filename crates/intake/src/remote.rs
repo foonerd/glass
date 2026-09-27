@@ -405,7 +405,8 @@ pub fn frames_address(beacon: &Beacon) -> std::io::Result<SocketAddr> {
 /// the player's themes with a meter choice of its own.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Choice {
-    /// A theme folder of the player's to bring instead of the one on show.
+    /// A theme folder of the player's to bring instead of the one on show,
+    /// or, with `local` set, a theme folder under the local folders.
     pub theme: Option<String>,
     /// The `meter` value: a name, a comma list, or `random`.
     pub meter: Option<String>,
@@ -413,6 +414,16 @@ pub struct Choice {
     pub interval_s: Option<u32>,
     /// Whether a new title moves to the next meter.
     pub on_title: Option<bool>,
+    /// Themes on the remote's own machine: the configuration is pointed
+    /// at these folders and no theme is brought from the player.
+    pub local: Option<LocalThemes>,
+}
+
+/// The folders themes are read from on the remote's own machine.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct LocalThemes {
+    pub templates: PathBuf,
+    pub spectrum: PathBuf,
 }
 
 /// The address this host reaches `player` from: what the player sees as
@@ -664,8 +675,13 @@ impl Sync {
         let config: RemoteConfig =
             serde_json::from_str(&self.get_text(&format!("{}/api/remote/config", self.manager))?)
                 .map_err(|e| format!("remote config: {e}"))?;
-        let templates = self.home.join("templates");
-        let spectrum_templates = self.home.join("templates_spectrum");
+        let (templates, spectrum_templates) = match &choice.local {
+            Some(local) => (local.templates.clone(), local.spectrum.clone()),
+            None => (
+                self.home.join("templates"),
+                self.home.join("templates_spectrum"),
+            ),
+        };
         let webfonts = self.home.join("webfonts");
         let theme_wanted = choice
             .theme
@@ -762,39 +778,54 @@ impl Sync {
             );
         }
 
-        let theme: ThemeFiles = serde_json::from_str(&self.get_text(&format!(
-            "{}/api/themes/{}/files",
-            self.manager,
-            encode(&theme_wanted)
-        ))?)
-        .map_err(|e| format!("theme files: {e}"))?;
-        for file in &theme.files {
-            let url = format!(
-                "{}/api/themes/{}/file?tree=templates&path={}",
+        if let Some(local) = &choice.local {
+            // The theme is on this machine: it only has to be there.
+            if !local
+                .templates
+                .join(&theme_wanted)
+                .join("meters.txt")
+                .is_file()
+            {
+                return Err(format!(
+                    "theme {theme_wanted} is not under {}",
+                    local.templates.display()
+                ));
+            }
+        } else {
+            let theme: ThemeFiles = serde_json::from_str(&self.get_text(&format!(
+                "{}/api/themes/{}/files",
                 self.manager,
-                encode(&theme.folder),
-                encode(&file.path)
-            );
-            count(self.bring(
-                &format!("templates/{}/{}", theme.folder, file.path),
-                &url,
-                &file.sha256,
-            )?);
-            let _ = file.bytes;
-        }
-        if let Some(spectrum) = &theme.spectrum {
-            for file in &spectrum.files {
+                encode(&theme_wanted)
+            ))?)
+            .map_err(|e| format!("theme files: {e}"))?;
+            for file in &theme.files {
                 let url = format!(
-                    "{}/api/themes/{}/file?tree=templates_spectrum&path={}",
+                    "{}/api/themes/{}/file?tree=templates&path={}",
                     self.manager,
-                    encode(&spectrum.folder),
+                    encode(&theme.folder),
                     encode(&file.path)
                 );
                 count(self.bring(
-                    &format!("templates_spectrum/{}/{}", spectrum.folder, file.path),
+                    &format!("templates/{}/{}", theme.folder, file.path),
                     &url,
                     &file.sha256,
                 )?);
+                let _ = file.bytes;
+            }
+            if let Some(spectrum) = &theme.spectrum {
+                for file in &spectrum.files {
+                    let url = format!(
+                        "{}/api/themes/{}/file?tree=templates_spectrum&path={}",
+                        self.manager,
+                        encode(&spectrum.folder),
+                        encode(&file.path)
+                    );
+                    count(self.bring(
+                        &format!("templates_spectrum/{}/{}", spectrum.folder, file.path),
+                        &url,
+                        &file.sha256,
+                    )?);
+                }
             }
         }
         self.ledger.version = config.version.clone();

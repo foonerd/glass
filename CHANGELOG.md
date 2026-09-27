@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.31] - 2026-09-27
+
+Themes from the remote's own machine. A remote's page takes a themes folder on that machine, a disk of its own or a share mounted there (theme folders, or a `templates` folder with `templates_spectrum` beside it, as the player's data folder is laid out), reads it, and a player's theme choice can be one of those themes with the same meter selection as an own theme of the player's; nothing is brought from the player for it but the fonts and icons. The Display section chooses the screen the window opens on, on a machine with more than one.
+
 ## [0.7.30] - 2026-09-27
 
 A fuller Status tab: the theme folders with how many themes and spectrum twins each holds, the face each text style is set in and how many fonts were uploaded, whether the themes are editable over the network share, the artist fanart settings with the artists cached, and the performance profile with its frame rate, the governor and the board.

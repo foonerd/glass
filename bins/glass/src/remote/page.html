@@ -91,6 +91,13 @@
         <label class="switch"><input type="radio" name="tmode" value="follow" id="tmode-follow"><span>Follow the player: its theme and meter selection, as it has them</span></label>
         <div id="follow-block" style="margin:6px 0 10px 28px"><label class="switch"><input type="checkbox" id="tmode-same"><span>Show the same meter as the player</span></label><div class="help">Off, this remote rolls its own meter of the theme under a random or list selection.</div></div>
         <label class="switch"><input type="radio" name="tmode" value="own" id="tmode-own"><span>An own theme of the player's, kept whatever the player shows</span></label>
+        <label class="switch"><input type="radio" name="tmode" value="local" id="tmode-local"><span>A theme from a folder on this machine, or a share mounted here</span></label>
+      </div>
+      <div id="local-block" class="full hidden">
+        <div class="form">
+          <div class="full"><label>Themes folder on this machine</label><input type="text" id="local-dir" placeholder="/media/music/glass or \\player\Internal Storage\glass"><div class="help">Theme folders, or a templates folder with templates_spectrum beside it, as the player's own data folder is laid out. A network share is mounted first, or named by its UNC path on Windows.</div></div>
+          <div class="full"><button class="small" id="btn-local-read">Read the folder</button> <span class="help" id="local-found"></span></div>
+        </div>
       </div>
       <div id="own-block" class="full hidden">
         <div class="form">
@@ -108,6 +115,7 @@
     <h2>Display</h2>
     <div class="form">
       <div><label>Window</label><select id="d-mode"><option value="fullscreen">Fullscreen</option><option value="windowed">Windowed</option><option value="frameless">Frameless</option></select></div>
+      <div><label>Screen</label><select id="d-monitor"></select></div>
       <div><label>Position X, windowed or frameless</label><input type="number" id="d-x" placeholder="centred"></div>
       <div><label>Position Y</label><input type="number" id="d-y" placeholder="centred"></div>
       <div><label>Frame rate, empty for the player's</label><input type="number" id="d-fps" min="10" max="60" placeholder="player's"></div>
@@ -138,7 +146,7 @@
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) { return String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
-  var state = { config: null, themes: [], dirty: false };
+  var state = { config: null, themes: [], local: [], status: null, dirty: false };
   function toast(text, kind) { var el = document.createElement('div'); el.className = 'toast' + (kind ? ' ' + kind : ''); el.textContent = text; $('toasts').appendChild(el); setTimeout(function () { el.remove(); }, kind === 'error' ? 7000 : 3500); }
   function api(method, url, body) {
     var opts = { method: method, headers: {} };
@@ -151,7 +159,7 @@
   function load() {
     return api('GET', '/api/state').then(function (s) {
       $('unreached').classList.add('hidden');
-      state.config = s.config;
+      state.config = s.config; state.status = s.status;
       $('subtitle').textContent = 'Glass ' + s.release + ' · protocol ' + s.protocol;
       $('paths').textContent = 'Configuration: ' + s.configPath + ' · cache: ' + s.cache;
       renderStatus(s.status);
@@ -218,18 +226,44 @@
   // ---- theme ----
   function loadThemes() {
     var c = state.config; if (!c || !c.active) { state.themes = []; renderOwn(); return Promise.resolve(); }
-    return api('GET', '/api/player/themes').then(function (d) { state.themes = d.themes || []; renderOwn(); }).catch(function (e) { state.themes = []; renderOwn(); toast('The player\'s themes could not be read: ' + e.message, 'error'); });
+    var local = c.themes_dir ? loadLocal(c.themes_dir) : Promise.resolve();
+    return api('GET', '/api/player/themes').then(function (d) { state.themes = d.themes || []; renderOwn(); }).catch(function (e) { state.themes = []; renderOwn(); toast('The player\'s themes could not be read: ' + e.message, 'error'); }).then(function () { return local; });
   }
-  function currentOwn() { var c = state.config; var p = c && c.active ? c.players[c.active] : null; return p && p.theme && p.theme.mode === 'own' ? p.theme : null; }
+  // The themes under the folder on this machine, as the page names it.
+  function loadLocal(dir) {
+    if (!dir) { state.local = []; $('local-found').textContent = ''; renderOwn(); return Promise.resolve(); }
+    return api('GET', '/api/local/themes?dir=' + encodeURIComponent(dir)).then(function (d) {
+      state.local = d.themes || [];
+      $('local-found').textContent = state.local.length + (state.local.length === 1 ? ' theme in ' : ' themes in ') + d.templates + (state.local.some(function (t) { return t.spectrum; }) ? ', spectrum twins in ' + d.spectrum : '');
+      renderOwn();
+    }).catch(function (e) { state.local = []; $('local-found').textContent = 'Not read: ' + e.message; renderOwn(); });
+  }
+  function themeMode() { return $('tmode-local').checked ? 'local' : ($('tmode-own').checked ? 'own' : 'follow'); }
+  function themeList() { return themeMode() === 'local' ? (state.local || []) : state.themes; }
+  function currentOwn() { var c = state.config; var p = c && c.active ? c.players[c.active] : null; return p && p.theme && (p.theme.mode === 'own' || p.theme.mode === 'local') ? p.theme : null; }
   function renderOwn() {
-    var own = currentOwn();
+    var own = currentOwn(); var list = themeList();
     var sel = $('own-theme'); var chosen = sel.value || (own && own.folder) || '';
-    sel.innerHTML = state.themes.map(function (t) { return '<option value="' + esc(t.folder) + '">' + esc(t.folder) + (t.width ? ' (' + t.width + 'x' + t.height + ')' : '') + (t.active ? ' (on the player)' : '') + '</option>'; }).join('');
-    if (chosen && state.themes.some(function (t) { return t.folder === chosen; })) sel.value = chosen;
+    sel.innerHTML = list.map(function (t) { return '<option value="' + esc(t.folder) + '">' + esc(t.folder) + (t.width ? ' (' + t.width + 'x' + t.height + ')' : '') + (t.active ? ' (on the player)' : '') + '</option>'; }).join('');
+    if (chosen && list.some(function (t) { return t.folder === chosen; })) sel.value = chosen;
     renderNames();
   }
+  function showThemeBlocks() {
+    var m = themeMode();
+    $('own-block').classList.toggle('hidden', m === 'follow');
+    $('local-block').classList.toggle('hidden', m !== 'local');
+    $('follow-block').classList.toggle('hidden', m !== 'follow');
+  }
+  function renderMonitors(selected) {
+    var list = (state.status && state.status.monitors) || [];
+    var sel = $('d-monitor');
+    if (!list.length) list = [{ index: 0, name: 'the first screen', width: 0, height: 0 }];
+    sel.innerHTML = list.map(function (m) { return '<option value="' + m.index + '">' + (m.index + 1) + ': ' + esc(m.name || 'screen') + (m.width ? ' (' + m.width + 'x' + m.height + ')' : '') + '</option>'; }).join('');
+    if (!list.some(function (m) { return m.index === selected; })) sel.innerHTML += '<option value="' + (selected || 0) + '">' + ((selected || 0) + 1) + ': not present now</option>';
+    sel.value = String(selected || 0);
+  }
   function renderNames() {
-    var t = state.themes.find(function (x) { return x.folder === $('own-theme').value; });
+    var t = themeList().find(function (x) { return x.folder === $('own-theme').value; });
     var own = currentOwn(); var picked = own && own.meter ? (own.meter.names || (own.meter.name ? [own.meter.name] : [])) : [];
     var single = $('own-select').value === 'single';
     $('own-names').innerHTML = ((t && t.meters) || []).map(function (m) { return '<label class="switch"><input type="' + (single ? 'radio' : 'checkbox') + '" name="own-name" value="' + esc(m) + '"' + (picked.indexOf(m) !== -1 ? ' checked' : '') + '><span>' + esc(m) + '</span></label>'; }).join('');
@@ -243,19 +277,21 @@
   $('own-title').onchange = function () { renderNames(); setDirty(true); };
   $('own-interval').onchange = function () { setDirty(true); };
   $('own-names').onchange = function () { setDirty(true); };
-  $('tmode-follow').onchange = $('tmode-own').onchange = function () { $('own-block').classList.toggle('hidden', !$('tmode-own').checked); $('follow-block').classList.toggle('hidden', $('tmode-own').checked); setDirty(true); };
+  $('tmode-follow').onchange = $('tmode-own').onchange = $('tmode-local').onchange = function () { showThemeBlocks(); renderOwn(); setDirty(true); };
   $('tmode-same').onchange = function () { setDirty(true); };
+  $('btn-local-read').onclick = function () { loadLocal($('local-dir').value.trim()); };
+  $('local-dir').onchange = function () { setDirty(true); };
 
   // ---- fill and gather ----
   function fill(c) {
     var p = c.active ? c.players[c.active] : null;
     $('theme-panel').classList.toggle('hidden', !p);
     if (p) {
-      var own = p.theme && p.theme.mode === 'own';
-      $('tmode-own').checked = own; $('tmode-follow').checked = !own;
-      $('own-block').classList.toggle('hidden', !own);
-      $('follow-block').classList.toggle('hidden', own);
+      var mode = (p.theme && p.theme.mode) || 'follow';
+      $('tmode-own').checked = mode === 'own'; $('tmode-local').checked = mode === 'local'; $('tmode-follow').checked = mode === 'follow';
+      showThemeBlocks();
       $('tmode-same').checked = !(p.theme && p.theme.same_meter === false);
+      var own = mode !== 'follow';
       if (own) {
         $('own-theme').value = p.theme.folder;
         var m = p.theme.meter || { select: 'random' };
@@ -264,6 +300,8 @@
         $('own-title').checked = !!m.on_title;
       }
     }
+    $('local-dir').value = c.themes_dir || '';
+    renderMonitors(c.display.monitor || 0);
     $('d-mode').value = c.display.mode; $('d-x').value = c.display.position ? c.display.position[0] : ''; $('d-y').value = c.display.position ? c.display.position[1] : '';
     $('d-fps').value = c.display.fps || ''; $('d-fit').checked = !!c.display.fit;
     $('gain').value = c.gain_db; $('r-name').value = c.name; $('r-port').value = c.page_port;
@@ -272,23 +310,24 @@
   function gather() {
     var c = JSON.parse(JSON.stringify(state.config));
     if (c.active && c.players[c.active]) {
-      if ($('tmode-own').checked) {
+      if ($('tmode-own').checked || $('tmode-local').checked) {
         var select = $('own-select').value; var meter;
         var names = Array.prototype.map.call(document.querySelectorAll('input[name=own-name]:checked'), function (i) { return i.value; });
         if (select === 'random') meter = { select: 'random', interval_s: parseInt($('own-interval').value, 10) || 60, on_title: $('own-title').checked };
         else if (select === 'list') meter = { select: 'list', names: names, interval_s: parseInt($('own-interval').value, 10) || 60, on_title: $('own-title').checked };
         else meter = { select: 'single', name: names[0] || '' };
-        c.players[c.active].theme = { mode: 'own', folder: $('own-theme').value, meter: meter };
+        c.players[c.active].theme = { mode: themeMode(), folder: $('own-theme').value, meter: meter };
       } else {
         c.players[c.active].theme = { mode: 'follow', same_meter: $('tmode-same').checked };
       }
     }
+    c.themes_dir = $('local-dir').value.trim() || null;
     var x = $('d-x').value.trim(), y = $('d-y').value.trim();
-    c.display = { mode: $('d-mode').value, position: (x !== '' && y !== '') ? [parseInt(x, 10) || 0, parseInt(y, 10) || 0] : null, fit: $('d-fit').checked, fps: $('d-fps').value ? parseInt($('d-fps').value, 10) : null };
+    c.display = { mode: $('d-mode').value, position: (x !== '' && y !== '') ? [parseInt(x, 10) || 0, parseInt(y, 10) || 0] : null, fit: $('d-fit').checked, fps: $('d-fps').value ? parseInt($('d-fps').value, 10) : null, monitor: parseInt($('d-monitor').value, 10) || 0 };
     c.gain_db = parseFloat($('gain').value) || 0; c.name = $('r-name').value.trim(); c.page_port = parseInt($('r-port').value, 10) || 5583;
     return c;
   }
-  ['d-mode', 'd-x', 'd-y', 'd-fps', 'd-fit', 'gain', 'r-name', 'r-port'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
+  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'gain', 'r-name', 'r-port'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
   $('btn-apply').onclick = function () {
     var c = gather(); var portChanged = state.config && c.page_port !== state.config.page_port;
     api('POST', '/api/config', c).then(function (d) { state.config = d.config; setDirty(false); toast(portChanged ? 'Applied. The page moves to port ' + c.page_port + ' when the remote starts again.' : 'Applied.'); fill(d.config); renderPlayers(d.config); }).catch(function (e) { toast(e.message, 'error'); });

@@ -53,6 +53,7 @@ fn window_options_of(display: &super::config::Display, title: String) -> WindowO
         pointer: mode != WindowMode::Fullscreen,
         keys: true,
         title,
+        display: display.monitor,
     }
 }
 
@@ -204,7 +205,10 @@ fn status_screen(
     if show_window && !same {
         *window = None;
         match Surface::open_with(frame.width, frame.height, &options) {
-            Ok(surface) => *window = Some((options, surface)),
+            Ok(surface) => {
+                app.set_status(|s| s.monitors = monitors_of(&surface));
+                *window = Some((options, surface));
+            }
             Err(err) => {
                 eprintln!("glass: {err}");
                 return Outcome::Exit(ExitCode::from(1));
@@ -234,6 +238,20 @@ fn status_screen(
         }
         std::thread::sleep(Duration::from_millis(100));
     }
+}
+
+/// The screens the window's system reports, for the page's choice.
+pub fn monitors_of(surface: &Surface) -> Vec<super::MonitorInfo> {
+    surface
+        .monitors()
+        .into_iter()
+        .map(|(index, name, width, height)| super::MonitorInfo {
+            index,
+            name,
+            width,
+            height,
+        })
+        .collect()
 }
 
 /// The address a browser on the network reaches this remote's page at:
@@ -579,9 +597,27 @@ pub fn remote_main(
                     meter: Some(meter.meter_value()),
                     interval_s: Some(meter.interval_s()),
                     on_title: Some(meter.on_title()),
+                    local: None,
                 },
                 false,
             ),
+            ThemeChoice::Local { folder, meter } => {
+                let dir = app.config().themes_dir.unwrap_or_default();
+                let (templates, spectrum) = super::config::local_roots(&dir);
+                (
+                    Choice {
+                        theme: Some(folder.clone()),
+                        meter: Some(meter.meter_value()),
+                        interval_s: Some(meter.interval_s()),
+                        on_title: Some(meter.on_title()),
+                        local: Some(intake::remote::LocalThemes {
+                            templates,
+                            spectrum,
+                        }),
+                    },
+                    false,
+                )
+            }
         };
         app.set_phase("syncing");
         let home = cache_dir.join(beacon.address().replace([':', '/'], "_"));
@@ -667,12 +703,17 @@ pub fn remote_main(
             name,
             page,
         };
-        if let ThemeChoice::Own { meter, .. } = &player.theme {
+        if let ThemeChoice::Own { meter, .. } | ThemeChoice::Local { meter, .. } = &player.theme {
             logline::say!(
                 Info,
                 "remotes",
-                "own theme {theme}, meter {}",
-                meter.meter_value()
+                "own theme {theme}, meter {}{}",
+                meter.meter_value(),
+                if matches!(player.theme, ThemeChoice::Local { .. }) {
+                    " (from this machine)"
+                } else {
+                    ""
+                }
             );
         }
         match session(&run, Some(&mut remote), &mut window) {

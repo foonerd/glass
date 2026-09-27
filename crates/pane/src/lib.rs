@@ -51,6 +51,8 @@ pub struct WindowOptions {
     /// Escape or Q closes the window.
     pub keys: bool,
     pub title: String,
+    /// The screen the window opens on, by SDL's count from 0.
+    pub display: u32,
 }
 
 impl Default for WindowOptions {
@@ -62,6 +64,7 @@ impl Default for WindowOptions {
             pointer: false,
             keys: false,
             title: "Glass".to_string(),
+            display: 0,
         }
     }
 }
@@ -87,16 +90,34 @@ impl Surface {
         Self::open_with(width, height, &WindowOptions::default())
     }
 
+    /// The screens this machine has, by index: name, width and height.
+    pub fn monitors(&self) -> Vec<(u32, String, u32, u32)> {
+        let video = self.canvas.window().subsystem();
+        let count = video.num_video_displays().unwrap_or(0).max(0) as u32;
+        (0..count)
+            .map(|i| {
+                let name = video.display_name(i as i32).unwrap_or_default();
+                let (w, h) = video
+                    .display_bounds(i as i32)
+                    .map(|b| (b.width(), b.height()))
+                    .unwrap_or((0, 0));
+                (i, name, w, h)
+            })
+            .collect()
+    }
+
     /// Open a window as the options say. Fails when SDL cannot start.
     pub fn open_with(width: u32, height: u32, options: &WindowOptions) -> Result<Self, String> {
         let sdl = sdl2::init()?;
         let video = sdl.video()?;
         let (width, height) = (width.max(1), height.max(1));
         let mut builder = video.window(&options.title, width, height);
+        // Centred on the chosen screen; a full screen window takes that screen.
+        let centred = (sdl2::sys::SDL_WINDOWPOS_CENTERED_MASK | options.display.min(15)) as i32;
         match options.mode {
             WindowMode::Fullscreen => {
                 builder
-                    .position_centered()
+                    .position(centred, centred)
                     .fullscreen_desktop()
                     .borderless();
             }
@@ -105,7 +126,7 @@ impl Surface {
                     builder.position(x, y);
                 }
                 None => {
-                    builder.position_centered();
+                    builder.position(centred, centred);
                 }
             },
             WindowMode::Frameless => {
@@ -114,7 +135,7 @@ impl Surface {
                         builder.position(x, y);
                     }
                     None => {
-                        builder.position_centered();
+                        builder.position(centred, centred);
                     }
                 }
                 builder.borderless();
