@@ -1,0 +1,6 @@
+// The Android app around the display: SDL's activity, our activity on top
+// of it, and the native libraries scripts/ship-android.sh builds into
+// app/src/main/jniLibs before Gradle runs.
+plugins {
+    id 'com.android.application' version '8.7.3' apply false
+}

@@ -296,7 +296,7 @@ fn page_already_up(port: u16) -> Option<String> {
 /// goes through `posix_spawnp` directly: the standard library's spawn
 /// refers to glibc 2.39's `pidfd_spawnp`, and a binary linked against a
 /// 2.39 sysroot then refuses to load on Volumio's glibc 2.36.
-#[cfg(unix)]
+#[cfg(all(unix, not(target_os = "android")))]
 fn start_detached(program: &str, args: &[&str]) -> Result<(), String> {
     use std::ffi::CString;
     let c = |text: &str| CString::new(text).map_err(|e| e.to_string());
@@ -348,7 +348,7 @@ fn start_detached(program: &str, args: &[&str]) -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(not(unix))]
+#[cfg(any(not(unix), target_os = "android"))]
 fn start_detached(program: &str, args: &[&str]) -> Result<(), String> {
     std::process::Command::new(program)
         .args(args)

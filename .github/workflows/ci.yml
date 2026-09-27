@@ -58,3 +58,25 @@ jobs:
           name: glass-windows-x64
           path: bin/windows-x64
           if-no-files-found: error
+
+  android:
+    name: android build
+    runs-on: ubuntu-24.04
+    needs: check
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install && rustup show active-toolchain && rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+      - name: The NDK, the build tools and cargo-ndk
+        run: |
+          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "build-tools;35.0.0" "platforms;android-35" >/dev/null
+          cargo install cargo-ndk --locked
+      - uses: Swatinem/rust-cache@v2
+      - run: scripts/ship-android.sh
+        env:
+          ANDROID_NDK_HOME: ${{ env.ANDROID_HOME }}/ndk/27.2.12479018
+      - uses: actions/upload-artifact@v7
+        with:
+          name: glass-android
+          path: dist/glass-*-android.apk
+          if-no-files-found: error
