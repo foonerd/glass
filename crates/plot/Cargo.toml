@@ -7,6 +7,7 @@ publish.workspace = true
 description = "Input and a skin become a Scene"
 
 [dependencies]
+bank = { path = "../bank" }
 lead = { path = "../lead" }
 serde = { version = "1", features = ["derive"] }
 

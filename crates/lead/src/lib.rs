@@ -910,7 +910,7 @@ pub enum Fill {
 /// A spectrum analyser as the spectrum engine draws it: a box on screen,
 /// bars rising from an origin inside it, an optional reflection below the
 /// origin, a topping that falls after the bar, and pictures around them.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SpectrumSpec {
     /// `spectrum.x/y`: the box on screen. Everything is clipped to it.
     pub x: i32,
@@ -944,6 +944,559 @@ pub struct SpectrumSpec {
     /// as its `size` rounded up.
     #[serde(default)]
     pub demand: Option<bank::Demand>,
+    /// The analyser look, for a section with a `style`; `None` draws the
+    /// previous engine's bars from the keys above.
+    #[serde(default)]
+    pub look: Option<Look>,
+}
+
+/// The family an analyser section draws.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LookStyle {
+    #[default]
+    Bars,
+}
+
+/// How the bands' colours are taken from the palette.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorMode {
+    /// The palette runs along the bar, from the base to its top.
+    #[default]
+    Gradient,
+    /// Each bar takes one colour by its place across the bands.
+    Index,
+    /// Each bar takes one colour by its level.
+    Level,
+}
+
+/// How two channels share the box.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Layout {
+    /// The two channels' average, one set of bars.
+    #[default]
+    Single,
+    /// Both channels over each other, the right one translucent.
+    DualCombined,
+    /// The left channel on the left half, the right on the right.
+    DualHorizontal,
+    /// The left channel on the top half rising, the right below it hanging.
+    DualVertical,
+}
+
+/// A weighting curve applied to the bands by their frequency.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Weighting {
+    #[default]
+    None,
+    A,
+    B,
+    C,
+    D,
+    #[serde(rename = "468")]
+    Itu468,
+}
+
+impl Weighting {
+    pub fn parse(word: &str) -> Option<Self> {
+        match word.trim().to_ascii_lowercase().as_str() {
+            "" | "none" | "off" => Some(Self::None),
+            "a" => Some(Self::A),
+            "b" => Some(Self::B),
+            "c" => Some(Self::C),
+            "d" => Some(Self::D),
+            "468" | "itu-r 468" | "itu468" => Some(Self::Itu468),
+            _ => None,
+        }
+    }
+
+    /// The curve's gain at `hz`, in decibels, zero at 1 kHz.
+    pub fn gain_db(self, hz: f32) -> f32 {
+        let f = hz.max(1.0);
+        let f2 = f * f;
+        match self {
+            Self::None => 0.0,
+            Self::A => {
+                let n = 12194.0f32.powi(2) * f2 * f2;
+                let d = (f2 + 20.6f32.powi(2))
+                    * ((f2 + 107.7f32.powi(2)) * (f2 + 737.9f32.powi(2))).sqrt()
+                    * (f2 + 12194.0f32.powi(2));
+                20.0 * (n / d).log10() + 2.0
+            }
+            Self::B => {
+                let n = 12194.0f32.powi(2) * f2 * f;
+                let d = (f2 + 20.6f32.powi(2))
+                    * (f2 + 158.5f32.powi(2)).sqrt()
+                    * (f2 + 12194.0f32.powi(2));
+                20.0 * (n / d).log10() + 0.17
+            }
+            Self::C => {
+                let n = 12194.0f32.powi(2) * f2;
+                let d = (f2 + 20.6f32.powi(2)) * (f2 + 12194.0f32.powi(2));
+                20.0 * (n / d).log10() + 0.06
+            }
+            Self::D => {
+                let h = ((1_037_918.5 - f2).powi(2) + 1_080_768.1 * f2)
+                    / ((9_837_328.0 - f2).powi(2) + 11_723_776.0 * f2);
+                let n = f / 6.896_689e-5 * (h / ((f2 + 79_919.29) * (f2 + 1_345_600.0))).sqrt();
+                20.0 * n.log10()
+            }
+            Self::Itu468 => {
+                // The curve's samples at the standard's frequencies, in
+                // decibels, joined by straight lines on the log axis.
+                const POINTS: [(f32, f32); 16] = [
+                    (31.5, -29.9),
+                    (63.0, -23.9),
+                    (100.0, -19.8),
+                    (200.0, -13.8),
+                    (400.0, -7.8),
+                    (800.0, -1.9),
+                    (1000.0, 0.0),
+                    (2000.0, 5.6),
+                    (3150.0, 9.0),
+                    (4000.0, 10.5),
+                    (5000.0, 11.7),
+                    (6300.0, 12.2),
+                    (7100.0, 12.0),
+                    (8000.0, 11.4),
+                    (10000.0, 7.8),
+                    (20000.0, -22.2),
+                ];
+                if f <= POINTS[0].0 {
+                    return POINTS[0].1;
+                }
+                for pair in POINTS.windows(2) {
+                    let ((f0, g0), (f1, g1)) = (pair[0], pair[1]);
+                    if f <= f1 {
+                        let t = (f.log10() - f0.log10()) / (f1.log10() - f0.log10());
+                        return g0 + (g1 - g0) * t;
+                    }
+                }
+                POINTS[POINTS.len() - 1].1
+            }
+        }
+    }
+}
+
+/// One colour of a palette: at a position along the bar (0 the base, 1
+/// the top), at a level (the bar's level from which it takes over), or
+/// evenly spaced when neither is said.
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub struct Stop {
+    pub color: [u8; 4],
+    #[serde(default)]
+    pub pos: Option<f32>,
+    #[serde(default)]
+    pub level: Option<f32>,
+}
+
+/// A palette: the colours along a bar, or across the bands, or by level.
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Palette {
+    pub stops: Vec<Stop>,
+    /// The name it was taken from; empty for stops of the theme's own.
+    #[serde(default)]
+    pub name: String,
+}
+
+impl Palette {
+    /// The shipped palettes, by name.
+    pub fn named(name: &str) -> Option<Self> {
+        let hex = |s: &str| -> [u8; 4] {
+            let n = u32::from_str_radix(s, 16).unwrap_or(0);
+            [(n >> 16) as u8, (n >> 8) as u8, n as u8, 255]
+        };
+        let stops: Vec<&str> = match name.trim().to_ascii_lowercase().as_str() {
+            "classic" => vec!["2ecc40", "ffdc00", "ff4136"],
+            "orangered" => vec!["ff7f00", "ff2a00"],
+            "prism" => vec!["d94a4a", "e8a33d", "e6d34f", "4fc46a", "3fa9dd", "7a5fd0"],
+            "rainbow" => vec!["ff0000", "ffa500", "ffff00", "00ff00", "00bfff", "8a2be2"],
+            "steelblue" => vec!["0b3d66", "2f7fbf", "9fd3ff"],
+            "aurora" => vec!["0b6e63", "2fd3a6", "57e0d0", "7a8bf0", "a06ee0"],
+            "ember" => vec!["5a1010", "c23a1a", "f07f26", "ffc24d", "ffe9a6"],
+            "ice" => vec!["0d3f66", "1f6fa8", "3fa3d6", "8fd0ea", "e8f7ff"],
+            "violet" => vec!["2a1454", "5a2fa0", "8a4fd0", "c07fe8", "efc9ff"],
+            "mono" => vec!["2a2f36", "6a737d", "c8d2dc", "ffffff"],
+            _ => return None,
+        };
+        Some(Self {
+            stops: stops
+                .into_iter()
+                .map(|h| Stop {
+                    color: hex(h),
+                    pos: None,
+                    level: None,
+                })
+                .collect(),
+            name: name.trim().to_ascii_lowercase(),
+        })
+    }
+
+    /// A palette from a configuration value: a shipped name, or a list of
+    /// stops `color[@pos][/level]` separated by commas, a colour being
+    /// `#rrggbb`, `#rrggbbaa` or `(r,g,b[,a])`.
+    pub fn parse(value: &str) -> Option<Self> {
+        let value = value.trim();
+        if let Some(named) = Self::named(value) {
+            return Some(named);
+        }
+        let stops: Vec<Stop> = split_stops(value)
+            .into_iter()
+            .filter_map(|item| parse_stop(&item))
+            .collect();
+        (!stops.is_empty()).then_some(Self {
+            stops,
+            name: String::new(),
+        })
+    }
+
+    /// The colour a fraction `t` of the way along the palette: stops at
+    /// their positions, or evenly spaced.
+    pub fn at(&self, t: f32) -> [u8; 4] {
+        let n = self.stops.len();
+        if n == 0 {
+            return [255, 255, 255, 255];
+        }
+        if n == 1 {
+            return self.stops[0].color;
+        }
+        let t = t.clamp(0.0, 1.0);
+        let positions: Vec<f32> = (0..n)
+            .map(|i| {
+                self.stops[i]
+                    .pos
+                    .unwrap_or(i as f32 / (n - 1) as f32)
+                    .clamp(0.0, 1.0)
+            })
+            .collect();
+        let mut i = 0;
+        while i + 1 < n && t > positions[i + 1] {
+            i += 1;
+        }
+        if i + 1 >= n {
+            return self.stops[n - 1].color;
+        }
+        let span = (positions[i + 1] - positions[i]).max(1e-6);
+        let f = ((t - positions[i]) / span).clamp(0.0, 1.0);
+        let (a, b) = (self.stops[i].color, self.stops[i + 1].color);
+        let mix = |x: u8, y: u8| (x as f32 + (y as f32 - x as f32) * f).round() as u8;
+        [
+            mix(a[0], b[0]),
+            mix(a[1], b[1]),
+            mix(a[2], b[2]),
+            mix(a[3], b[3]),
+        ]
+    }
+
+    /// The colour for a bar at `level`: the last stop whose level is at
+    /// or below it, else the colour along the palette at that level.
+    pub fn for_level(&self, level: f32) -> [u8; 4] {
+        let mut chosen = None;
+        for stop in &self.stops {
+            if let Some(from) = stop.level {
+                if level >= from {
+                    chosen = Some(stop.color);
+                }
+            }
+        }
+        chosen.unwrap_or_else(|| self.at(level))
+    }
+}
+
+/// The stops of a palette value, split at the commas outside parentheses.
+fn split_stops(value: &str) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut depth = 0;
+    let mut current = String::new();
+    for c in value.chars() {
+        match c {
+            '(' => {
+                depth += 1;
+                current.push(c);
+            }
+            ')' => {
+                depth -= 1;
+                current.push(c);
+            }
+            ',' if depth == 0 => {
+                out.push(std::mem::take(&mut current));
+            }
+            _ => current.push(c),
+        }
+    }
+    if !current.trim().is_empty() {
+        out.push(current);
+    }
+    out
+}
+
+/// One stop: `#rrggbb`, `#rrggbbaa` or `(r,g,b[,a])`, then `@pos` and
+/// `/level` as fractions.
+fn parse_stop(item: &str) -> Option<Stop> {
+    let item = item.trim();
+    let (color_part, rest) = match item.find(['@', '/']) {
+        Some(i) => (&item[..i], &item[i..]),
+        None => (item, ""),
+    };
+    let color = if let Some(hex) = color_part.trim().strip_prefix('#') {
+        let n = u32::from_str_radix(hex, 16).ok()?;
+        match hex.len() {
+            6 => [(n >> 16) as u8, (n >> 8) as u8, n as u8, 255],
+            8 => [(n >> 24) as u8, (n >> 16) as u8, (n >> 8) as u8, n as u8],
+            _ => return None,
+        }
+    } else {
+        let inner = color_part
+            .trim()
+            .trim_start_matches('(')
+            .trim_end_matches(')');
+        color_quad(inner)?
+    };
+    let mut pos = None;
+    let mut level = None;
+    let mut rest = rest;
+    while !rest.is_empty() {
+        let (mark, tail) = rest.split_at(1);
+        let end = tail.find(['@', '/']).unwrap_or(tail.len());
+        let number: f32 = tail[..end].trim().parse().ok()?;
+        match mark {
+            "@" => pos = Some(number.clamp(0.0, 1.0)),
+            _ => level = Some(number.clamp(0.0, 1.0)),
+        }
+        rest = &tail[end..];
+    }
+    Some(Stop { color, pos, level })
+}
+
+/// An analyser section's look: audioMotion's controls as theme keys, with
+/// its defaults, so a configuration ports across.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Look {
+    pub style: LookStyle,
+    /// `range`: the bands drawn, in hertz.
+    pub range: (f32, f32),
+    /// `level.range`: the decibels of an empty and a full bar.
+    pub level_range: (f32, f32),
+    /// `level.scale = linear`: the bar by amplitude, raised to `1 / level.boost`.
+    pub level_linear: bool,
+    pub level_boost: f32,
+    pub weighting: Weighting,
+    /// `smoothing`: 0 follows every hop, 1 never moves.
+    pub smoothing: f32,
+    pub peaks: bool,
+    pub peak_hold_ms: u32,
+    /// `peaks.fade`: milliseconds a peak fades over instead of falling.
+    pub peak_fade_ms: Option<u32>,
+    /// `gravity`: thousands of pixels a second squared a peak falls with.
+    pub gravity: f32,
+    /// `bar.space`: below 1 a share of the bar's pitch, else pixels.
+    pub bar_space: f32,
+    pub round: bool,
+    pub outline: bool,
+    pub line_width: f32,
+    pub fill_alpha: f32,
+    pub led: bool,
+    pub led_max: u32,
+    /// `led.space`: the gaps between LEDs vertically and horizontally.
+    pub led_space: (f32, f32),
+    pub led_true: bool,
+    pub lumi: bool,
+    pub alpha_bars: bool,
+    /// `mirror`: -1 the bands mirrored to the left, 1 to the right.
+    pub mirror: i8,
+    pub layout: Layout,
+    pub palette: Palette,
+    pub palette_left: Option<Palette>,
+    pub palette_right: Option<Palette>,
+    pub palette_split: bool,
+    /// `palette.dir = h`: the palette runs across the bands, not along a bar.
+    pub palette_horizontal: bool,
+    pub color_mode: ColorMode,
+    /// `reflex`: the share of the box the reflection takes, 0 for none.
+    pub reflex: f32,
+    pub reflex_alpha: f32,
+    pub reflex_bright: f32,
+    pub reflex_fit: bool,
+    /// `bgr.alpha`: how solid the box's own background is.
+    pub bgr_alpha: f32,
+}
+
+impl Default for Look {
+    fn default() -> Self {
+        Self {
+            style: LookStyle::Bars,
+            range: (20.0, 22_000.0),
+            level_range: (-85.0, -25.0),
+            level_linear: false,
+            level_boost: 1.0,
+            weighting: Weighting::None,
+            smoothing: 0.5,
+            peaks: true,
+            peak_hold_ms: 500,
+            peak_fade_ms: None,
+            gravity: 3.8,
+            bar_space: 0.1,
+            round: false,
+            outline: false,
+            line_width: 0.0,
+            fill_alpha: 1.0,
+            led: false,
+            led_max: 0,
+            led_space: (0.25, 0.3),
+            led_true: false,
+            lumi: false,
+            alpha_bars: false,
+            mirror: 0,
+            layout: Layout::Single,
+            palette: Palette::named("classic").unwrap_or_default(),
+            palette_left: None,
+            palette_right: None,
+            palette_split: false,
+            palette_horizontal: false,
+            color_mode: ColorMode::Gradient,
+            reflex: 0.0,
+            reflex_alpha: 0.15,
+            reflex_bright: 1.0,
+            reflex_fit: true,
+            bgr_alpha: 0.7,
+        }
+    }
+}
+
+/// The look of a section with a `style`; `None` for a section without
+/// one, or with `style = legacy`.
+fn look_from_section(get: &dyn Fn(&str) -> Option<String>) -> Option<Look> {
+    let style = get("style")?;
+    let style = match style.trim().to_ascii_lowercase().as_str() {
+        "bars" => LookStyle::Bars,
+        _ => return None,
+    };
+    let mut look = Look {
+        style,
+        ..Look::default()
+    };
+    let number = |key: &str| get(key).and_then(|v| v.trim().parse::<f32>().ok());
+    let pair = |key: &str| -> Option<(f32, f32)> {
+        let v = get(key)?;
+        let mut it = v.split(',').map(|p| p.trim().parse::<f32>().ok());
+        Some((it.next()??, it.next()??))
+    };
+    let flag = |key: &str| get(key).map(|v| truthy(Some(v.as_str())));
+    if let Some(r) = pair("range") {
+        look.range = (r.0.max(1.0), r.1.max(r.0 + 1.0));
+    }
+    if let Some(r) = pair("level.range") {
+        look.level_range = (r.0.min(r.1 - 1.0), r.1);
+    }
+    if let Some(v) = get("level.scale") {
+        look.level_linear = v.trim().eq_ignore_ascii_case("linear");
+    }
+    if let Some(v) = number("level.boost") {
+        look.level_boost = v.max(1.0);
+    }
+    if let Some(v) = get("weighting") {
+        look.weighting = Weighting::parse(&v).unwrap_or_default();
+    }
+    if let Some(v) = number("smoothing") {
+        look.smoothing = v.clamp(0.0, 1.0);
+    }
+    if let Some(v) = flag("peaks") {
+        look.peaks = v;
+    }
+    if let Some(v) = number("peaks.hold") {
+        look.peak_hold_ms = v.max(0.0) as u32;
+    }
+    if let Some(v) = get("peaks.fade") {
+        look.peak_fade_ms = match v.trim().to_ascii_lowercase().as_str() {
+            "off" | "false" | "0" | "" => None,
+            "on" | "true" => Some(750),
+            other => other.parse::<f32>().ok().map(|ms| ms.max(0.0) as u32),
+        };
+    }
+    if let Some(v) = number("gravity") {
+        look.gravity = v.max(0.01);
+    }
+    if let Some(v) = number("bar.space") {
+        look.bar_space = v.max(0.0);
+    }
+    if let Some(v) = flag("bar.round") {
+        look.round = v;
+    }
+    if let Some(v) = flag("bar.outline") {
+        look.outline = v;
+    }
+    if let Some(v) = number("line.width") {
+        look.line_width = v.max(0.0);
+    }
+    if let Some(v) = number("fill.alpha") {
+        look.fill_alpha = v.clamp(0.0, 1.0);
+    }
+    if let Some(v) = flag("led") {
+        look.led = v;
+    }
+    if let Some(v) = number("led.max") {
+        look.led_max = v.max(0.0) as u32;
+    }
+    if let Some(r) = pair("led.space") {
+        look.led_space = (r.0.max(0.0), r.1.max(0.0));
+    }
+    if let Some(v) = flag("led.true") {
+        look.led_true = v;
+    }
+    if let Some(v) = flag("lumi") {
+        look.lumi = v;
+    }
+    if let Some(v) = flag("alpha") {
+        look.alpha_bars = v;
+    }
+    if let Some(v) = number("mirror") {
+        look.mirror = v.round().clamp(-1.0, 1.0) as i8;
+    }
+    if let Some(v) = get("layout") {
+        look.layout = match v.trim().to_ascii_lowercase().as_str() {
+            "dual-combined" | "combined" => Layout::DualCombined,
+            "dual-horizontal" | "horizontal" => Layout::DualHorizontal,
+            "dual-vertical" | "vertical" => Layout::DualVertical,
+            _ => Layout::Single,
+        };
+    }
+    if let Some(p) = get("palette").and_then(|v| Palette::parse(&v)) {
+        look.palette = p;
+    }
+    look.palette_left = get("palette.left").and_then(|v| Palette::parse(&v));
+    look.palette_right = get("palette.right").and_then(|v| Palette::parse(&v));
+    if let Some(v) = flag("palette.split") {
+        look.palette_split = v;
+    }
+    if let Some(v) = get("palette.dir") {
+        look.palette_horizontal = v.trim().to_ascii_lowercase().starts_with('h');
+    }
+    if let Some(v) = get("color.mode") {
+        look.color_mode = match v.trim().to_ascii_lowercase().as_str() {
+            "index" | "bar-index" => ColorMode::Index,
+            "level" | "bar-level" => ColorMode::Level,
+            _ => ColorMode::Gradient,
+        };
+    }
+    if let Some(v) = number("reflex") {
+        look.reflex = v.clamp(0.0, 0.99);
+    }
+    if let Some(v) = number("reflex.alpha") {
+        look.reflex_alpha = v.clamp(0.0, 1.0);
+    }
+    if let Some(v) = number("reflex.bright") {
+        look.reflex_bright = v.max(0.0);
+    }
+    if let Some(v) = flag("reflex.fit") {
+        look.reflex_fit = v;
+    }
+    if let Some(v) = number("bgr.alpha") {
+        look.bgr_alpha = v.clamp(0.0, 1.0);
+    }
+    Some(look)
 }
 
 impl SpectrumSpec {
@@ -1106,6 +1659,7 @@ pub fn spectrum_from_theme(
         },
         foreground: get("fgr.filename").map(path).unwrap_or_default(),
         demand: section_demand(get("bins"), get("channels"), get("scale"), get("window")),
+        look: look_from_section(&|key: &str| get(key).map(str::to_string)),
     })
 }
 
@@ -4451,5 +5005,126 @@ mod interactive_tests {
             run_settings("[current]\ntouch.interactive = theme\n").interactive,
             InteractiveMode::Theme
         );
+    }
+}
+
+#[cfg(test)]
+mod look_tests {
+    use super::*;
+
+    const SECTION: &str = "[studio]\nstyle = bars\nbins = 128\nchannels = 2\nscale = log\nlayout = dual-vertical\npalette = ember\npalette.split = True\ncolor.mode = index\nbar.space = 0.2\nbar.round = True\nbar.outline = True\nline.width = 1.5\nfill.alpha = 0.3\nled = True\nled.max = 24\nled.space = 0.3, 2\nled.true = True\nlumi = False\nalpha = True\nmirror = -1\npeaks = True\npeaks.hold = 400\npeaks.fade = 600\ngravity = 4\nreflex = 0.25\nreflex.alpha = 0.2\nreflex.bright = 0.7\nreflex.fit = False\nrange = 30, 16000\nlevel.range = -70, -20\nlevel.scale = linear\nlevel.boost = 2\nweighting = A\nsmoothing = 0.6\nbgr.alpha = 0\nbar.width = 4\nbar.height = 100\n\n[plain]\nbar.width = 4\nbar.height = 100\n\n[old]\nstyle = legacy\nbar.width = 4\nbar.height = 100\n";
+
+    fn settings() -> SpectrumSettings {
+        SpectrumSettings {
+            base_folder: String::new(),
+            folder: String::new(),
+            bins: 20,
+            max_value: 100.0,
+        }
+    }
+
+    #[test]
+    fn an_analyser_section_reads_its_keys_and_a_plain_one_has_no_look() {
+        let spec = spectrum_from_theme(SECTION, "studio", (1200, 560), &settings(), "").unwrap();
+        let look = spec.look.expect("a look");
+        assert_eq!(look.style, LookStyle::Bars);
+        assert_eq!(look.layout, Layout::DualVertical);
+        assert_eq!(look.palette.name, "ember");
+        assert_eq!(look.palette.stops.len(), 5);
+        assert!(look.palette_split);
+        assert_eq!(look.color_mode, ColorMode::Index);
+        assert_eq!(look.bar_space, 0.2);
+        assert!(look.round && look.outline && look.led && look.led_true && look.alpha_bars);
+        assert!(!look.lumi);
+        assert_eq!(look.line_width, 1.5);
+        assert_eq!(look.fill_alpha, 0.3);
+        assert_eq!(look.led_max, 24);
+        assert_eq!(look.led_space, (0.3, 2.0));
+        assert_eq!(look.mirror, -1);
+        assert!(look.peaks);
+        assert_eq!(look.peak_hold_ms, 400);
+        assert_eq!(look.peak_fade_ms, Some(600));
+        assert_eq!(look.gravity, 4.0);
+        assert_eq!(look.reflex, 0.25);
+        assert_eq!(look.reflex_alpha, 0.2);
+        assert_eq!(look.reflex_bright, 0.7);
+        assert!(!look.reflex_fit);
+        assert_eq!(look.range, (30.0, 16000.0));
+        assert_eq!(look.level_range, (-70.0, -20.0));
+        assert!(look.level_linear);
+        assert_eq!(look.level_boost, 2.0);
+        assert_eq!(look.weighting, Weighting::A);
+        assert_eq!(look.smoothing, 0.6);
+        assert_eq!(look.bgr_alpha, 0.0);
+        assert_eq!(
+            spec.demand,
+            Some(bank::Demand::new(128, 2, bank::Scale::Log))
+        );
+        let plain = spectrum_from_theme(SECTION, "plain", (100, 50), &settings(), "").unwrap();
+        assert!(plain.look.is_none());
+        let old = spectrum_from_theme(SECTION, "old", (100, 50), &settings(), "").unwrap();
+        assert!(old.look.is_none(), "legacy is the engine's bars");
+        let defaults = Look::default();
+        assert_eq!(defaults.palette.name, "classic");
+        assert_eq!(defaults.peak_hold_ms, 500);
+        assert_eq!(defaults.gravity, 3.8);
+        assert_eq!(defaults.level_range, (-85.0, -25.0));
+    }
+
+    #[test]
+    fn a_palette_parses_names_and_stops_and_gives_colours_by_place_and_level() {
+        let own = Palette::parse("#ff0000, (0,255,0)@0.5, #0000ff80/0.8").expect("stops");
+        assert_eq!(own.stops.len(), 3);
+        assert_eq!(own.stops[0].color, [255, 0, 0, 255]);
+        assert_eq!(own.stops[1].pos, Some(0.5));
+        assert_eq!(own.stops[2].color, [0, 0, 255, 128]);
+        assert_eq!(own.stops[2].level, Some(0.8));
+        assert_eq!(own.at(0.0), [255, 0, 0, 255]);
+        assert_eq!(own.at(0.5), [0, 255, 0, 255]);
+        assert_eq!(own.at(1.0), [0, 0, 255, 128]);
+        let mid = own.at(0.25);
+        assert!(
+            mid[0] > 100 && mid[1] > 100,
+            "between red and green: {mid:?}"
+        );
+        assert_eq!(
+            own.for_level(0.9),
+            [0, 0, 255, 128],
+            "the stop at that level"
+        );
+        assert_eq!(
+            own.for_level(0.2),
+            own.at(0.2),
+            "no stop yet: along the palette"
+        );
+        assert_eq!(Palette::named("prism").unwrap().stops.len(), 6);
+        assert_eq!(Palette::parse(" Rainbow ").unwrap().name, "rainbow");
+        assert!(Palette::parse("nonsense").is_none());
+        assert!(Palette::parse("").is_none());
+    }
+
+    #[test]
+    fn the_weighting_curves_are_flat_at_one_kilohertz_and_shaped_elsewhere() {
+        for w in [
+            Weighting::A,
+            Weighting::B,
+            Weighting::C,
+            Weighting::D,
+            Weighting::Itu468,
+        ] {
+            assert!(
+                w.gain_db(1_000.0).abs() < 0.25,
+                "{w:?} at 1 kHz: {}",
+                w.gain_db(1_000.0)
+            );
+        }
+        assert!((Weighting::A.gain_db(100.0) + 19.1).abs() < 0.5);
+        assert!((Weighting::C.gain_db(100.0) + 0.3).abs() < 0.3);
+        assert!((Weighting::Itu468.gain_db(6_300.0) - 12.2).abs() < 0.1);
+        assert!(Weighting::Itu468.gain_db(20.0) < -29.0);
+        assert_eq!(Weighting::None.gain_db(50.0), 0.0);
+        assert_eq!(Weighting::parse("468"), Some(Weighting::Itu468));
+        assert_eq!(Weighting::parse("off"), Some(Weighting::None));
+        assert_eq!(Weighting::parse("x"), None);
     }
 }

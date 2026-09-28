@@ -2,7 +2,7 @@
 //! Pure: no files, no devices, no pixels.
 
 use lead::{
-    format_key, format_label, FanartSpec, FolderLayerSpec, IndicatorsSpec, Input, Metadata,
+    format_key, format_label, FanartSpec, FolderLayerSpec, IndicatorsSpec, Input, Look, Metadata,
     MeterSpec, ReelsSpec, ScrollDirection, SkinDesc, SpectrumSpec, StateLook, TextAlign, TextSpec,
     TextStyle, TonearmSpec, TypeAlign, TypeMode, VinylSpec,
 };
@@ -101,6 +101,10 @@ pub struct Scene {
     /// The spectrum the meter shows, and each bin's bar height in pixels.
     #[serde(default)]
     pub spectrum: Option<SpectrumSpec>,
+    /// The analyser of a spectrum section with a `style`: its look, its box
+    /// and the bands' levels per channel, ready to draw.
+    #[serde(default)]
+    pub analyser: Option<Analyser>,
     #[serde(default)]
     pub bar_heights: Vec<u32>,
     /// The skin's folder layers, each with the file found for this track, or empty.
@@ -202,6 +206,7 @@ impl Default for Scene {
             meter: MeterSpec::default(),
             spectrum: None,
             bar_heights: Vec::new(),
+            analyser: None,
             folder_layers: Vec::new(),
             fanart: None,
             playing: false,
@@ -255,6 +260,97 @@ pub fn type_area(skin: &SkinDesc, meta: &Metadata) -> Option<TypeArea> {
         font_style: spec.font_style,
         label: format_label(&key),
         icon: meta.type_icon.clone(),
+    })
+}
+
+/// An analyser ready to draw: the section's look, the box on screen, and
+/// for each band drawn its edges in hertz, its level and its peak hold per
+/// channel on the bar scale (0 an empty bar, 1 a full one).
+#[derive(Debug, Clone, PartialEq, Default, Serialize, Deserialize)]
+pub struct Analyser {
+    pub look: Look,
+    pub x: i32,
+    pub y: i32,
+    pub w: u32,
+    pub h: u32,
+    pub edges: Vec<(f32, f32)>,
+    pub levels: [Vec<f32>; 2],
+    pub hold: [Vec<f32>; 2],
+    /// Whether the two channels differ; a one-channel bank gives the same
+    /// twice and draws as one whatever the layout asks.
+    pub stereo: bool,
+    pub onsets: u8,
+}
+
+/// A band's amplitude (a full-scale sine reading 1.0) on the bar scale
+/// the look asks for: by decibels between the level range's ends, or by
+/// amplitude raised to one over the boost.
+pub fn bar_level(look: &Look, amplitude: f32, weighting_db: f32) -> f32 {
+    let amplitude = amplitude.max(0.0) * 10f32.powf(weighting_db / 20.0);
+    if look.level_linear {
+        amplitude
+            .clamp(0.0, 1.0)
+            .powf(1.0 / look.level_boost.max(1.0))
+    } else {
+        if amplitude <= 0.0 {
+            return 0.0;
+        }
+        let db = 20.0 * amplitude.log10();
+        let (lo, hi) = look.level_range;
+        ((db - lo) / (hi - lo).max(1.0)).clamp(0.0, 1.0)
+    }
+}
+
+/// The analyser of a spectrum section with a look, from the bank in the
+/// input: the bands inside the look's range, each weighted by its centre
+/// and put on the bar scale.
+fn analyser(spec: &SpectrumSpec, input: &Input) -> Option<Analyser> {
+    let look = spec.look.clone()?;
+    let bins = input.bins.bank[0].len();
+    if bins == 0 {
+        return Some(Analyser {
+            look,
+            x: spec.x,
+            y: spec.y,
+            w: spec.w,
+            h: spec.h,
+            ..Analyser::default()
+        });
+    }
+    let edges_all = bank::edges(bins, input.bins.scale);
+    let (lo, hi) = look.range;
+    let drawn: Vec<usize> = (0..bins)
+        .filter(|&i| {
+            let (a, b) = edges_all[i];
+            b > lo && a < hi
+        })
+        .collect();
+    let edges: Vec<(f32, f32)> = drawn.iter().map(|&i| edges_all[i]).collect();
+    let weights: Vec<f32> = edges
+        .iter()
+        .map(|&(a, b)| look.weighting.gain_db((a * b).sqrt()))
+        .collect();
+    let map = |bands: &[f32]| -> Vec<f32> {
+        drawn
+            .iter()
+            .zip(weights.iter())
+            .map(|(&i, &w)| bar_level(&look, bands.get(i).copied().unwrap_or(0.0), w))
+            .collect()
+    };
+    let stereo = input.bins.bank[0] != input.bins.bank[1];
+    let levels = [map(&input.bins.bank[0]), map(&input.bins.bank[1])];
+    let hold = [map(&input.bins.hold[0]), map(&input.bins.hold[1])];
+    Some(Analyser {
+        look,
+        x: spec.x,
+        y: spec.y,
+        w: spec.w,
+        h: spec.h,
+        edges,
+        levels,
+        hold,
+        stereo,
+        onsets: input.bins.onsets,
     })
 }
 
@@ -453,6 +549,10 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
             })
             .unwrap_or_default(),
         spectrum: skin.spectrum.clone(),
+        analyser: skin
+            .spectrum
+            .as_ref()
+            .and_then(|spec| analyser(spec, input)),
         folder_layers: skin
             .folder_layers
             .iter()
@@ -929,5 +1029,94 @@ mod tests {
             );
         }
         println!("recorded frames replayed: {}", paths.len());
+    }
+}
+
+#[cfg(test)]
+mod analyser_tests {
+    use super::*;
+    use lead::{Bins, Levels, Look, SpectrumSpec};
+
+    #[test]
+    fn a_band_lands_on_the_bar_scale_by_decibels_or_by_amplitude() {
+        let look = Look::default();
+        assert_eq!(bar_level(&look, 1.0, 0.0), 1.0, "0 dB is over the top");
+        let half = 10f32.powf(-55.0 / 20.0);
+        assert!(
+            (bar_level(&look, half, 0.0) - 0.5).abs() < 0.01,
+            "-55 dB is half way"
+        );
+        assert_eq!(bar_level(&look, 0.0, 0.0), 0.0);
+        assert!(
+            (bar_level(&look, half, 6.0) - 0.6).abs() < 0.01,
+            "6 dB of weighting lifts it"
+        );
+        let linear = Look {
+            level_linear: true,
+            level_boost: 2.0,
+            ..Look::default()
+        };
+        assert!((bar_level(&linear, 0.25, 0.0) - 0.5).abs() < 0.001);
+        assert_eq!(bar_level(&linear, 1.0, 0.0), 1.0);
+    }
+
+    #[test]
+    fn the_analyser_takes_the_bands_in_its_range_per_channel() {
+        let mut skin = SkinDesc::default();
+        let look = Look {
+            range: (100.0, 10_000.0),
+            ..Look::default()
+        };
+        skin.spectrum = Some(SpectrumSpec {
+            x: 40,
+            y: 40,
+            w: 1200,
+            h: 560,
+            look: Some(look),
+            ..SpectrumSpec::default()
+        });
+        let bands = 32;
+        let mut left = vec![0.0f32; bands];
+        let mut right = vec![0.0f32; bands];
+        left[16] = 1.0;
+        // Minus 55 dB: half way up the default decibel range.
+        right[16] = 10f32.powf(-55.0 / 20.0);
+        let input = Input {
+            levels: Levels::default(),
+            bins: Bins {
+                values: Vec::new(),
+                bank: [left, right],
+                hold: [vec![1.0; bands], vec![1.0; bands]],
+                scale: bank::Scale::Log,
+                onsets: 0b0010,
+            },
+            metadata: Metadata::default(),
+        };
+        let scene = step(&skin, &input);
+        let a = scene.analyser.expect("an analyser");
+        assert_eq!((a.x, a.y, a.w, a.h), (40, 40, 1200, 560));
+        assert!(a.stereo);
+        assert_eq!(a.onsets, 0b0010);
+        let all = bank::edges(bands, bank::Scale::Log);
+        let expected = all
+            .iter()
+            .filter(|(lo, hi)| *hi > 100.0 && *lo < 10_000.0)
+            .count();
+        assert_eq!(a.edges.len(), expected);
+        assert_eq!(a.levels[0].len(), expected);
+        assert!(a.edges[0].0 < 100.0 && a.edges[expected - 1].1 > 10_000.0);
+        let loudest = (0..expected)
+            .max_by(|x, y| a.levels[0][*x].total_cmp(&a.levels[0][*y]))
+            .unwrap();
+        assert_eq!(a.levels[0][loudest], 1.0);
+        assert!(
+            (a.levels[1][loudest] - 0.5).abs() < 0.02,
+            "the right channel half way: {}",
+            a.levels[1][loudest]
+        );
+        assert!(a.hold[0].iter().all(|h| *h == 1.0));
+        // Without a look there is no analyser; without a bank an empty one.
+        skin.spectrum.as_mut().unwrap().look = None;
+        assert!(step(&skin, &input).analyser.is_none());
     }
 }
