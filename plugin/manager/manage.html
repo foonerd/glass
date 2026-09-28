@@ -155,6 +155,19 @@
         </div>
       </div>
     </div>
+    <div class="panel" style="margin-top:18px">
+      <h2 id="cd-title"></h2>
+      <div class="help" id="cd-help" style="margin-bottom:12px"></div>
+      <div class="form">
+        <div class="full"><label class="switch"><input type="checkbox" id="cd-on"><span id="cd-on-label"></span></label></div>
+        <div><label id="cd-day-theme-label"></label><select id="cd-day-theme"></select></div>
+        <div><label id="cd-day-at-label"></label><input type="time" id="cd-day-at" value="07:00"></div>
+        <div><label id="cd-night-theme-label"></label><select id="cd-night-theme"></select></div>
+        <div><label id="cd-night-at-label"></label><input type="time" id="cd-night-at" value="20:00"></div>
+        <div class="full help" id="cd-now"></div>
+        <div class="full row"><button class="primary" id="btn-cd-save"></button></div>
+      </div>
+    </div>
   </section>
 
   <!-- Catalog -->
@@ -447,7 +460,7 @@
       return t(key) + (e.data && e.data.message ? ' ' + e.data.message : '');
     }
     var known = { 'checksum': 'MANAGER_ERR_CHECKSUM', 'size': 'MANAGER_ERR_SIZE', 'units-differ': 'MANAGER_ERR_UNITS', 'bad-theme': 'MANAGER_ERR_BAD_THEME', 'not-a-zip': 'MANAGER_ERR_NOT_ZIP', 'timeout': 'MANAGER_ERR_NETWORK', 'network': 'MANAGER_ERR_NETWORK', 'too-large': 'MANAGER_ERR_TOO_LARGE', 'render-failed': 'MANAGER_ERR_RENDER',
-      'no-release': 'MANAGER_ERR_NO_RELEASE', 'bad-release': 'MANAGER_ERR_NO_RELEASE', 'up-to-date': 'MANAGER_UPD_UPTODATE', 'no-previous': 'MANAGER_UPD_NONE', 'no-digest': 'MANAGER_ERR_NO_DIGEST', 'apply': 'MANAGER_ERR_APPLY', 'busy': 'MANAGER_ERR_BUSY', 'bad-backup': 'MANAGER_ERR_BAD_BACKUP', 'not-a-font': 'MANAGER_FONTS_NOT_A_FONT', 'bad-font': 'MANAGER_FONTS_BAD_CHOICE', 'empty': 'MANAGER_FONTS_NOT_A_FONT' };
+      'no-release': 'MANAGER_ERR_NO_RELEASE', 'bad-release': 'MANAGER_ERR_NO_RELEASE', 'up-to-date': 'MANAGER_UPD_UPTODATE', 'no-previous': 'MANAGER_UPD_NONE', 'no-digest': 'MANAGER_ERR_NO_DIGEST', 'apply': 'MANAGER_ERR_APPLY', 'busy': 'MANAGER_ERR_BUSY', 'bad-backup': 'MANAGER_ERR_BAD_BACKUP', 'not-a-font': 'MANAGER_FONTS_NOT_A_FONT', 'bad-font': 'MANAGER_FONTS_BAD_CHOICE', 'empty': 'MANAGER_FONTS_NOT_A_FONT', 'bad-time': 'MANAGER_CD_ERR_TIME', 'same-time': 'MANAGER_CD_ERR_SAME', 'bad-theme': 'MANAGER_CD_ERR_THEME' };
     if (known[code]) return t(known[code]) + (e.message && e.message !== code ? ' (' + e.message + ')' : '');
     return e.message || t('MANAGER_ERROR');
   }
@@ -510,6 +523,9 @@
     $('share-on-label').textContent = t('MANAGER_SHARE_ON');
     $('share-on-doc').textContent = t('MANAGER_SHARE_ON_DOC');
     $('btn-share-apply').textContent = t('MANAGER_APPLY');
+    $('cd-title').textContent = t('MANAGER_CD_TITLE'); $('cd-help').textContent = t('MANAGER_CD_HELP'); $('cd-on-label').textContent = t('MANAGER_CD_ON');
+    $('cd-day-theme-label').textContent = t('MANAGER_CD_DAY_THEME'); $('cd-night-theme-label').textContent = t('MANAGER_CD_NIGHT_THEME');
+    $('cd-day-at-label').textContent = t('MANAGER_CD_DAY_AT'); $('cd-night-at-label').textContent = t('MANAGER_CD_NIGHT_AT'); $('btn-cd-save').textContent = t('MANAGER_SAVE');
     $('fonts-help').textContent = t('MANAGER_FONTS_HELP');
     $('btn-fonts-save').textContent = t('MANAGER_SAVE');
     $('fonts-custom-title').textContent = t('MANAGER_FONTS_CUSTOM_TITLE');
@@ -651,6 +667,7 @@
       state.themes = data.themes;
       state.active = data.active;
       renderThemes();
+      loadCarDash();
       // The rendered previews come in behind the list; the cards are drawn again once they have.
       var loads = data.themes.filter(function (th) { return th.previews === 'fresh' || th.previews === 'stale'; })
         .map(function (th) { return loadPreviews(th.folder, false).catch(function () {}); });
@@ -1025,6 +1042,35 @@
   $('catalog-kind').onchange = renderCatalog;
   $('catalog-state').onchange = renderCatalog;
   $('btn-catalog-refresh').onclick = function () { loadCatalog(true); };
+
+  // ---- Car Dash ---------------------------------------------------------
+  function fillThemeSelect(sel, chosen) {
+    var current = chosen !== undefined ? chosen : sel.value;
+    sel.innerHTML = '<option value=""></option>' + (state.themes || []).map(function (th) { return '<option value="' + esc(th.folder) + '">' + esc(th.folder) + '</option>'; }).join('');
+    if (current && (state.themes || []).some(function (th) { return th.folder === current; })) sel.value = current;
+  }
+  function renderCarDash(c) {
+    $('cd-on').checked = !!c.enabled;
+    fillThemeSelect($('cd-day-theme'), c.dayTheme || '');
+    fillThemeSelect($('cd-night-theme'), c.nightTheme || '');
+    $('cd-day-at').value = c.dayAt || '07:00'; $('cd-night-at').value = c.nightAt || '20:00';
+    var now = '';
+    if (c.enabled && c.period) {
+      var theme = c.period === 'day' ? c.dayTheme : c.nightTheme;
+      now = (c.period === 'day' ? t('MANAGER_CD_NOW_DAY') : t('MANAGER_CD_NOW_NIGHT')) + ' ' + theme;
+      if (c.next) { var d = new Date(c.next.at); now += ' · ' + t('MANAGER_CD_NEXT') + ' ' + d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + ' (' + (c.next.period === 'day' ? t('MANAGER_CD_DAY_THEME') : t('MANAGER_CD_NIGHT_THEME')).toLowerCase() + ')'; }
+    } else {
+      now = t('MANAGER_CD_OFF');
+    }
+    $('cd-now').textContent = now;
+  }
+  function loadCarDash() {
+    api('GET', '/api/cardash').then(renderCarDash).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  $('btn-cd-save').onclick = function () {
+    var body = { enabled: $('cd-on').checked, dayTheme: $('cd-day-theme').value, nightTheme: $('cd-night-theme').value, dayAt: $('cd-day-at').value, nightAt: $('cd-night-at').value };
+    api('POST', '/api/cardash', body).then(function (c) { toast(t('MANAGER_SAVED')); renderCarDash(c); loadThemes(); }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
 
   // ---- artwork ----------------------------------------------------------
   // Fonts: one choice per text style, among the built-in face, the fonts

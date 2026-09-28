@@ -330,6 +330,17 @@ class Manager {
       res.json(Object.assign({ ok: true, changed: !!result.changed }, self.plugin.sharingInfo()));
     }));
 
+    // Car Dash: a day theme and a night theme by the clock.
+    app.get('/api/cardash', function (req, res) {
+      res.json(self.plugin.carDashInfo());
+    });
+
+    app.post('/api/cardash', wrap(async function (req, res) {
+      const result = await self.exclusive(function () { return self.plugin.setCarDash(req.body || {}); });
+      if (result.error) return res.status(400).json(result);
+      res.json(Object.assign({ ok: true }, self.plugin.carDashInfo()));
+    }));
+
     app.get('/api/fonts', function (req, res) {
       res.json(self.plugin.fontsSettings());
     });

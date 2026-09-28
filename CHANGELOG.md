@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.37] - 2026-09-28
+
+Car Dash: two themes by the clock. On the Manager's Themes tab, a day theme from one time and a night theme from another; the player puts the right one on show at those times and after a start, from its own clock, with no scheduler outside the plugin. Remotes that follow the player follow the switch. For a screen in a car, or a dark theme for the evening in a room.
+
 ## [0.7.36] - 2026-09-27
 
 A full screen remote can be set up from the machine it covers. Escape now leaves full screen and keeps the remote showing in a window, so its settings page can be used in a browser beside it; F takes the screen again; Q quits, as Escape did before. The page has the same two buttons under Display, for a touch screen. The change is for the run; the Display setting says what the next start takes.
