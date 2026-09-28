@@ -2157,20 +2157,26 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         skin.artist = texts.artist;
         skin.album = texts.album;
         skin.sample = texts.sample;
-        skin.volume_value = texts.volume_value;
         let font_path = current_value(&text, "font.path").unwrap_or_default();
         let mut time = texts.time;
         let mut time_elapsed = texts.time_elapsed;
         let mut time_total = texts.time_total;
-        for field in [&mut time, &mut time_elapsed, &mut time_total]
-            .into_iter()
-            .flatten()
+        let mut volume_value = texts.volume_value;
+        for field in [
+            &mut time,
+            &mut time_elapsed,
+            &mut time_total,
+            &mut volume_value,
+        ]
+        .into_iter()
+        .flatten()
         {
             resolve_time_font(field, &skin.theme_dir, &font_path);
         }
         skin.time = time;
         skin.time_elapsed = time_elapsed;
         skin.time_total = time_total;
+        skin.volume_value = volume_value;
         skin.next_title = texts.next_title;
         skin.next_artist = texts.next_artist;
         skin.next_album = texts.next_album;

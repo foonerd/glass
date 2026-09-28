@@ -16,7 +16,7 @@ const express = require('express');
 
 const { Zip, ZipError, unitsOf, extractUnit, safeFolderName } = require('./zip');
 const { MAX_FONT_BYTES } = require('./fonts');
-const { trackFilePath } = require('./trackfile');
+const { trackFileFor } = require('./trackfile');
 const logging = require('./logging');
 const { Catalog, CatalogError } = require('./catalog');
 const { Previews } = require('./previews');
@@ -564,9 +564,11 @@ class Manager {
     });
 
     // A picture from the playing track's folder, for a remote's folder
-    // layers, records and reels: the same names the display looks for.
+    // layers, records and reels: the same names the display looks for,
+    // and only the folder of the track the player reports.
     app.get('/api/remote/track-file', function (req, res) {
-      const file = trackFilePath(String(req.query.uri || ''), String(req.query.name || ''));
+      const state = (self.plugin.channel && self.plugin.channel.state) || {};
+      const file = trackFileFor(String(req.query.uri || ''), String(req.query.name || ''), String(state.uri || ''));
       if (!file) return res.status(404).json({ error: 'not-found' });
       fs.stat(file, function (err, stat) {
         if (err || !stat.isFile() || stat.size > MAX_TRACK_FILE_BYTES) return res.status(404).json({ error: 'not-found' });

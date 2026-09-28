@@ -376,7 +376,12 @@ fn main() -> ExitCode {
             last_sent_frames = frame.frames;
             wire_seq = wire_seq.wrapping_add(1).max(1);
             on_wire.seq = u64::from(wire_seq);
-            to_send = Some(wire::encode(&on_wire, info.rate, info.channels, 0));
+            let flags = if on_wire.one_bit {
+                wire::FLAG_ONE_BIT
+            } else {
+                0
+            };
+            to_send = Some(wire::encode(&on_wire, info.rate, info.channels, flags));
         } else if quiet && !silence_sent && ring.is_some() {
             let info = ring.as_ref().map(|r| r.info()).unwrap_or_default();
             wire_seq = wire_seq.wrapping_add(1).max(1);

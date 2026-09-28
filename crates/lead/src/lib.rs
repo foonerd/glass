@@ -2064,6 +2064,12 @@ pub struct ButtonSpec {
     /// `button.<name>.image`'s list; empty draws `image` throughout.
     #[serde(default)]
     pub image_active: String,
+    /// The whole list of `button.<name>.image`: with three or more, one
+    /// picture per state of the action's indicator (repeat: off, all,
+    /// single, infinity; mute: off, muted, zero; random: off, on; play,
+    /// pause, stop and toggle: stop, pause, play) instead of rest and active.
+    #[serde(default)]
+    pub images: Vec<String>,
     pub action: ButtonAction,
 }
 
@@ -2381,15 +2387,16 @@ pub fn meter_indicators(meters_txt: &str, meter: &str, theme_dir: &str) -> Optio
         };
         let (w, h) = upair(&format!("button.{name}.size")).unwrap_or((0, 0));
         // `image = rest.png, active.png`: the second picture shows while
-        // the button is active.
-        let mut pictures = get(&format!("button.{name}.image"))
+        // the button is active; three or more are one per state.
+        let images: Vec<String> = get(&format!("button.{name}.image"))
             .unwrap_or_default()
             .split(',')
             .map(str::trim)
             .filter(|p| !p.is_empty())
-            .map(path);
-        let image = pictures.next().unwrap_or_default();
-        let image_active = pictures.next().unwrap_or_default();
+            .map(path)
+            .collect();
+        let image = images.first().cloned().unwrap_or_default();
+        let image_active = images.get(1).cloned().unwrap_or_default();
         buttons.push(ButtonSpec {
             name: name.clone(),
             x,
@@ -2398,6 +2405,7 @@ pub fn meter_indicators(meters_txt: &str, meter: &str, theme_dir: &str) -> Optio
             h,
             image,
             image_active,
+            images,
             action,
         });
     }
@@ -5011,12 +5019,12 @@ mod interactive_tests {
 
     #[test]
     fn a_meter_names_its_buttons_and_says_whether_it_is_for_fingers() {
-        let text = "[dash]\nmeter.type = linear\nconfig.extend = True\ninteractive = True\nbutton.play.pos = 10,20\nbutton.play.size = 40,40\nbutton.play.action = toggle\nbutton.nextmeter.pos = 60,20\nbutton.nextmeter.image = next.png\nbutton.nextmeter.action = meter.next\nbutton.bad.pos = 1,1\nbutton.zmute.pos = 1,2\nbutton.zmute.image = m_off.png, m_on.png\nbutton.zmute.action = mute\n";
+        let text = "[dash]\nmeter.type = linear\nconfig.extend = True\ninteractive = True\nbutton.play.pos = 10,20\nbutton.play.size = 40,40\nbutton.play.action = toggle\nbutton.nextmeter.pos = 60,20\nbutton.nextmeter.image = next.png\nbutton.nextmeter.action = meter.next\nbutton.bad.pos = 1,1\nbutton.zmute.pos = 1,2\nbutton.zmute.image = m_off.png, m_on.png\nbutton.zmute.action = mute\nbutton.zrepeat.pos = 1,3\nbutton.zrepeat.image = r_off.png, r_all.png, r_single.png\nbutton.zrepeat.action = repeat\n";
         let spec = meter_indicators(text, "dash", "/t").expect("extended");
         assert!(spec.interactive);
         assert_eq!(
             spec.buttons.len(),
-            3,
+            4,
             "a button without an action is no button"
         );
         let mute = &spec.buttons[2];
@@ -5024,6 +5032,13 @@ mod interactive_tests {
             (mute.image.as_str(), mute.image_active.as_str()),
             ("/t/m_off.png", "/t/m_on.png"),
             "the second picture of the list is the active one"
+        );
+        assert_eq!(mute.images.len(), 2);
+        let repeat = &spec.buttons[3];
+        assert_eq!(
+            repeat.images,
+            vec!["/t/r_off.png", "/t/r_all.png", "/t/r_single.png"],
+            "three pictures or more are one per state, kept in order"
         );
         let next = &spec.buttons[0];
         assert_eq!(

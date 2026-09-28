@@ -74,7 +74,10 @@ impl Measure {
             shape: None,
             analyser: None,
             writer: None,
-            quiet: Frame::default(),
+            quiet: Frame {
+                one_bit: true,
+                ..Frame::default()
+            },
             group: 0,
             frames: 0,
             chans: [Vec::new(), Vec::new()],

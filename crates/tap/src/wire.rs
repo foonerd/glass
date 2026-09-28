@@ -218,6 +218,7 @@ impl Packet {
             scale: self.scale,
             window: self.window,
             raw: false,
+            one_bit: self.flags & FLAG_ONE_BIT != 0,
         }
     }
 
@@ -248,6 +249,7 @@ mod tests {
             scale: Scale::Mel,
             window: 8192,
             raw: false,
+            one_bit: false,
         }
     }
 
@@ -341,6 +343,10 @@ mod tests {
         assert_eq!(decode(&lying), Err(WireError::Bins));
         assert_eq!(decode(&bytes[..bytes.len() - 1]), Err(WireError::Bins));
         assert_eq!(decode(&bytes).unwrap().flags & 0x0f, FLAG_ONE_BIT);
+        assert!(
+            decode(&bytes).unwrap().frame().one_bit,
+            "the one-bit flag comes back as the frame's"
+        );
     }
 
     #[test]
