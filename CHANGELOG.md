@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.42] - 2026-09-28
+
+The face takes a finger, and Anymote. A tap or a drag on the theme's controls in the browser acts on the player as on its own screen: the same regions, margins, taps and drags, moved out of the display binary into a crate the display, the remotes and the browser module share; the manager runs what the page sends. Anymote is the face on a page of its own, `/anymote` on the manager's port, filling the window with a full-screen button, and a web manifest so a phone or a tablet keeps it on the home screen as a full-screen app. A configuration that rotates puts its first meter on show until the player says which; the player's state carries across a change of meter.
+
 ## [0.7.41] - 2026-09-28
 
 The face in a browser, the first cut. The Manager's Face tab draws the player's meters live: the display's pipeline compiled to WebAssembly, fed the same configuration, theme, fonts and icons a remote display brings and the same frames the remotes receive, so a phone or a tablet on the network watches what the player's screen shows, following the theme and the meter as they change, full screen on a button. The theme is kept in the browser by checksum and fetched again only when it changes. The frames daemon serves its datagrams to browser pages as an event stream on a local socket and runs whenever the plugin does, the port only while remote displays are served; the manager proxies the stream and adds the player's state. Underneath, the input crates read files and the clock through the host where a target has none, and the remote's hop conditioning and configuration rewriting are shared with the module.

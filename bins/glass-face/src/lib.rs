@@ -15,19 +15,26 @@
 //! 4. `start` with the meter to show, or none for the configuration's.
 //! 5. `hop` for every frames datagram and `event` for every line of the
 //!    plugin's, as they come; `frame` at the page's rate.
+//! 6. `pointer` for every finger or mouse event on the canvas, in the
+//!    frame's pixels; what comes back is for the page to carry out: a
+//!    command to the player, a meter stepped, a dismiss.
 //!
 //! The raw exports at the end wrap [`Face`] for a host without bindings.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use controls::{controls_of, interactive_now, override_scene, Act, Pointer, Touch};
 use expose::{raster_over, MeterAssets, Motion, Stack};
 use intake::bring::{
     asset_plan, config_texts, theme_plan, Bring, Choice, RemoteConfig, ThemeFiles,
 };
 use intake::hops::WireHops;
-use intake::{decode_event, Hops, Source, Taken, TapSource};
-use lead::{vfs, SkinDesc};
+use intake::{decode_event, Event, Hops, Source, Taken, TapSource};
+use lead::{vfs, Metadata, SkinDesc};
+use plot::Indicators;
+
+pub use controls::PointerKind;
 
 /// Where the page's files live in the table.
 pub const HOME: &str = "/glass";
@@ -54,6 +61,20 @@ struct Showing {
     motion: Motion,
     /// The configuration's frame rate, for the page to pace its frames by.
     rate: u32,
+    /// The last frame's indicators and metadata, for a finger on them.
+    indicators: Option<Indicators>,
+    metadata: Metadata,
+}
+
+/// What a pointer event asked of the page.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Happened {
+    /// A command for the player, for the manager to run.
+    Command(intake::Command),
+    /// The rotation stepped: the meter now on show.
+    Meter(String),
+    /// A dismiss button: what leaving the display means here.
+    Dismiss,
 }
 
 /// The pipeline for a page.
@@ -63,7 +84,13 @@ pub struct Face {
     theme: String,
     showing: Option<Showing>,
     /// Events that arrived before the meter was on show, kept for it.
-    early: Vec<intake::Event>,
+    early: Vec<Event>,
+    /// The player's last state and infinity, given to every meter put on
+    /// show, so a change of meter does not wait for the next push.
+    last_state: Option<Event>,
+    last_infinity: Option<Event>,
+    /// The finger on the controls, kept between frames.
+    touch: Touch,
 }
 
 impl Face {
@@ -109,7 +136,13 @@ impl Face {
     /// the theme as the display reads it. The hops and the events already
     /// pushed carry over.
     pub fn start(&mut self, meter: Option<&str>) -> Result<(), String> {
-        let skin = intake::installed_skin_named(meter);
+        // A configuration that rotates names no meter of its own: the
+        // first of the rotation stands in until the player says which.
+        let name = meter.map(str::to_string).or_else(|| {
+            let rotation = intake::installed_rotation();
+            rotation.names.first().cloned()
+        });
+        let skin = intake::installed_skin_named(name.as_deref());
         if skin.theme_dir.is_empty() {
             return Err("the configuration names no theme".to_string());
         }
@@ -125,7 +158,13 @@ impl Face {
             .without_player()
             .with_hops(Box::new(self.hops.clone()))
             .with_skin(&skin);
-        for event in self.early.drain(..) {
+        for event in self
+            .last_state
+            .iter()
+            .chain(self.last_infinity.iter())
+            .cloned()
+            .chain(self.early.drain(..))
+        {
             source.push_event(event);
         }
         let rate = intake::installed_frame_rate();
@@ -135,8 +174,71 @@ impl Face {
             source,
             motion: Motion::new(1, Some(rate)),
             rate,
+            indicators: None,
+            metadata: Metadata::default(),
         });
+        self.touch = Touch::new();
         Ok(())
+    }
+
+    /// The meter before or after the one on show in the rotation, or in
+    /// the theme's order without one; the name now on show.
+    fn step_meter(&mut self, step: i32) -> Option<String> {
+        let rotation = intake::installed_rotation();
+        let names = if rotation.names.is_empty() {
+            intake::installed_meter_names()
+        } else {
+            rotation.names
+        };
+        if names.is_empty() {
+            return None;
+        }
+        let current = self.meter().to_string();
+        let at = names.iter().position(|n| *n == current).unwrap_or(0) as i32;
+        let next = (at + step).rem_euclid(names.len() as i32) as usize;
+        let name = names[next].clone();
+        self.start(Some(&name)).ok()?;
+        Some(self.meter().to_string())
+    }
+
+    /// A finger or a mouse on the canvas, in the frame's pixels: a tap on
+    /// a control, or a drag on a bar, as on the player's own screen; what
+    /// it asked for comes back for the page to carry out.
+    pub fn pointer(&mut self, event: Pointer) -> Vec<Happened> {
+        let acts = {
+            let Face { showing, touch, .. } = self;
+            let Some(showing) = showing.as_mut() else {
+                return Vec::new();
+            };
+            if !interactive_now(&showing.skin) {
+                return Vec::new();
+            }
+            let Some(indicators) = showing.indicators.as_ref() else {
+                return Vec::new();
+            };
+            let controls = controls_of(indicators, showing.assets.indicators.as_ref());
+            touch
+                .pointer(
+                    event,
+                    &controls,
+                    indicators.spec.touch_margin,
+                    &showing.metadata,
+                )
+                .acts
+        };
+        let mut out = Vec::new();
+        for act in acts {
+            match act {
+                Act::Command(command) => out.push(Happened::Command(command)),
+                Act::MeterStep(step) => {
+                    if let Some(name) = self.step_meter(step) {
+                        out.push(Happened::Meter(name));
+                    }
+                }
+                Act::Dismiss => out.push(Happened::Dismiss),
+            }
+        }
+        out
     }
 
     /// A frames datagram, as the daemon sends it.
@@ -150,6 +252,11 @@ impl Face {
         let Some(event) = decode_event(line) else {
             return false;
         };
+        match &event {
+            Event::State(_) => self.last_state = Some(event.clone()),
+            Event::Infinity(_) => self.last_infinity = Some(event.clone()),
+            _ => {}
+        }
         match self.showing.as_mut() {
             Some(showing) => showing.source.push_event(event),
             None => self.early.push(event),
@@ -180,9 +287,13 @@ impl Face {
     pub fn frame(&mut self, now_ms: u64) -> Option<&expose::Frame> {
         #[cfg(target_arch = "wasm32")]
         lead::set_clock_us(now_ms.saturating_mul(1000));
-        let showing = self.showing.as_mut()?;
+        let Face { showing, touch, .. } = self;
+        let showing = showing.as_mut()?;
         let input = showing.source.poll();
-        let scene = plot::step(&showing.skin, &input);
+        let mut scene = plot::step(&showing.skin, &input);
+        override_scene(touch.drag(), &mut scene);
+        showing.indicators = scene.indicators.clone();
+        showing.metadata = input.metadata;
         let assets = &showing.assets;
         let stack = Stack {
             screen: None,
@@ -399,6 +510,32 @@ mod exports {
         })
     }
 
+    /// A pointer event in the frame's pixels, `kind` 0 down, 1 move, 2 up;
+    /// the answer is what it asked for as JSON: `{"command":{"name","value"}}`,
+    /// `{"meter":"<name>"}` or `{"dismiss":true}` each, in an array.
+    #[no_mangle]
+    pub extern "C" fn pointer(kind: u32, x: i32, y: i32) -> i32 {
+        armed();
+        let kind = match kind {
+            0 => PointerKind::Down,
+            1 => PointerKind::Move,
+            _ => PointerKind::Up,
+        };
+        let happened = FACE.with(|face| face.borrow_mut().pointer(Pointer { kind, x, y }));
+        let items: Vec<serde_json::Value> = happened
+            .iter()
+            .map(|h| match h {
+                Happened::Command(c) => {
+                    serde_json::json!({ "command": { "name": c.name, "value": c.value } })
+                }
+                Happened::Meter(name) => serde_json::json!({ "meter": name }),
+                Happened::Dismiss => serde_json::json!({ "dismiss": true }),
+            })
+            .collect();
+        answer(serde_json::Value::Array(items).to_string());
+        happened.len() as i32
+    }
+
     #[no_mangle]
     pub extern "C" fn frame_rate() -> u32 {
         FACE.with(|face| face.borrow().frame_rate())
@@ -477,5 +614,73 @@ mod tests {
         let frame = face.frame(40).expect("a frame");
         assert_eq!(frame.rgba.len(), 480 * 320 * 4);
         assert!(frame.rgba.iter().any(|b| *b != 0), "something was painted");
+    }
+
+    /// A meter given a volume bar and the interactive word: a finger down
+    /// and up along the bar sends the volume where it lifted; the state
+    /// pushed before is still the meter's after a step to another meter.
+    #[test]
+    fn a_finger_on_a_bar_asks_for_the_volume_and_the_state_survives_a_step() {
+        let mut face = Face::new();
+        face.configure(&config_json()).expect("a plan");
+        let dir = repo_theme("480x320");
+        let mut meters = String::new();
+        for entry in std::fs::read_dir(&dir).expect("the test theme") {
+            let path = entry.expect("an entry").path();
+            if path.is_file() {
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                if name == "meters.txt" {
+                    meters = std::fs::read_to_string(&path).unwrap();
+                } else {
+                    face.put_file(
+                        &format!("templates/480x320/{name}"),
+                        std::fs::read(&path).unwrap(),
+                    );
+                }
+            }
+        }
+        let bar_at = meters.find("[bar]").expect("the bar meter");
+        let extended = "[bar]\nconfig.extend = True\ninteractive = True\nvolume.pos = 40,300\nvolume.dim = 200,4\nvolume.style = slider\n";
+        let meters = format!("{}{}{}", &meters[..bar_at], extended, &meters[bar_at + 5..]);
+        face.put_file("templates/480x320/meters.txt", meters.into_bytes());
+        assert!(face.event(
+            br#"{"kind":"state","state":{"status":"play","title":"A song","artist":"Someone","volume":30}}"#
+        ));
+        face.start(Some("bar")).expect("the bar on show");
+        assert_eq!(face.meter(), "bar");
+        face.frame(40).expect("a frame");
+        let down = face.pointer(Pointer {
+            kind: PointerKind::Down,
+            x: 60,
+            y: 301,
+        });
+        assert!(down.is_empty());
+        let up = face.pointer(Pointer {
+            kind: PointerKind::Up,
+            x: 140,
+            y: 301,
+        });
+        assert_eq!(
+            up,
+            vec![Happened::Command(intake::Command::with(
+                "volume",
+                serde_json::json!(50)
+            ))]
+        );
+        // Nothing under the finger: nothing asked.
+        let nothing = face.pointer(Pointer {
+            kind: PointerKind::Up,
+            x: 400,
+            y: 30,
+        });
+        assert!(nothing.is_empty());
+        // Another meter of the theme keeps the player's state.
+        let stepped = face.step_meter(1).expect("a next meter");
+        assert_ne!(stepped, "bar");
+        face.frame(80).expect("a frame");
+        assert_eq!(
+            face.showing.as_ref().map(|s| s.metadata.title.as_str()),
+            Some("A song")
+        );
     }
 }

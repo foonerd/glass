@@ -1,0 +1,48 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#000000">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="manifest" href="/anymote/manifest.json">
+<link rel="icon" href="/anymote/icon.svg" type="image/svg+xml">
+<title>Anymote</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; color: #9a9a9a; font: 13px -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; overflow: hidden; }
+  #face-stage { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; }
+  #face-canvas { display: block; touch-action: none; }
+  #btn-face-full { position: fixed; top: 12px; right: 12px; z-index: 2; background: rgba(0, 0, 0, .55); color: #ddd; border: 1px solid #444; border-radius: 8px; padding: 8px 12px; font: inherit; cursor: pointer; }
+  body.fullscreen #btn-face-full, body.fullscreen #face-state { display: none; }
+  #face-state { position: fixed; left: 12px; bottom: 8px; z-index: 2; font-size: 12px; text-shadow: 0 1px 2px #000; pointer-events: none; }
+</style>
+</head>
+<body>
+<!-- Anymote: the face on a page of its own, for any browser. The same
+     script as the manager's Face tab drives it; the manager's strings
+     name the button. -->
+<div id="face-stage"><canvas id="face-canvas" width="16" height="9"></canvas></div>
+<button id="btn-face-full">Full screen</button>
+<div id="face-state"></div>
+<script src="/face/face-page.js"></script>
+<script>
+(function () {
+  var strings = {};
+  var t = function (key) { return strings[key] || key; };
+  document.addEventListener('fullscreenchange', function () {
+    document.body.classList.toggle('fullscreen', !!document.fullscreenElement);
+  });
+  fetch('/api/i18n').then(function (res) { return res.json(); }).then(function (data) {
+    strings = data.strings || {};
+  }).catch(function () {}).then(function () {
+    document.getElementById('btn-face-full').textContent = t('MANAGER_FACE_FULL');
+    document.title = t('MANAGER_ANYMOTE_TITLE');
+    GlassFace.init({ t: t, version: function () { return ''; }, fit: true });
+    GlassFace.show();
+  });
+})();
+</script>
+</body>
+</html>

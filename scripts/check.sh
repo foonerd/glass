@@ -63,7 +63,7 @@ fi
 echo "check: page scripts"
 # The remote's settings page and the manager's page carry their script
 # inline; a browser runs all of it or none, so each must parse.
-python3 - bins/glass/src/remote/page.html plugin/manager/manage.html <<'PY'
+python3 - bins/glass/src/remote/page.html plugin/manager/manage.html plugin/manager/anymote.html <<'PY'
 import re, sys
 for path in sys.argv[1:]:
     text = open(path, encoding='utf-8').read()
@@ -72,7 +72,7 @@ for path in sys.argv[1:]:
         print(f"check: {path} has no script", file=sys.stderr); sys.exit(1)
     open(path + '.check.js', 'w', encoding='utf-8').write('\n'.join(blocks))
 PY
-for page in bins/glass/src/remote/page.html plugin/manager/manage.html; do
+for page in bins/glass/src/remote/page.html plugin/manager/manage.html plugin/manager/anymote.html; do
   if command -v node >/dev/null 2>&1; then
     node --check "$page.check.js" || { rm -f "$page.check.js"; echo "check: the script of $page does not parse" >&2; exit 1; }
   else
@@ -97,10 +97,10 @@ PY
 
 echo "check: plugin"
 if command -v node >/dev/null 2>&1; then
-  node --check plugin/index.js
+  node --check plugin/index.js plugin/manager/face-page.js plugin/manager/facefeed.js
   node --test plugin/manager/test/*.test.js
 elif command -v docker >/dev/null 2>&1; then
-  docker run --rm -v "$ROOT/plugin:/plugin:ro" -w /plugin node:20-slim sh -c 'node --check index.js && node --test manager/test/*.test.js'
+  docker run --rm -v "$ROOT/plugin:/plugin:ro" -w /plugin node:20-slim sh -c 'node --check index.js manager/face-page.js manager/facefeed.js && node --test manager/test/*.test.js'
 else
   echo "check: plugin: neither node nor docker found, skipped" >&2
 fi

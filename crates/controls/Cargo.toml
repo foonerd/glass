@@ -1,0 +1,17 @@
+[package]
+name = "controls"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "A meter's controls under a finger: regions, taps, drags, and what they ask of the player"
+
+[dependencies]
+lead = { path = "../lead" }
+plot = { path = "../plot" }
+expose = { path = "../expose" }
+intake = { path = "../intake" }
+serde_json = "1"
+
+[lints]
+workspace = true
