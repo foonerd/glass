@@ -29,7 +29,11 @@
     starting: null,
     restart: false,
     // Anymote: the canvas sized to the window, keeping the theme's shape.
-    fit: false
+    fit: false,
+    // The plugin's lines that came before the module was up, replayed to it.
+    earlyLines: [],
+    // The meter the player's own display shows, from its showing lines.
+    playerMeter: ''
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -152,6 +156,11 @@
       return WebAssembly.instantiate(bytes, {});
     }).then(function (result) {
       face.ex = result.instance.exports;
+      var kept = face.earlyLines;
+      face.earlyLines = [];
+      kept.forEach(function (line) {
+        try { guarded(function () { withString(line, function (ptr, len) { face.ex.event(ptr, len); }); }); } catch (err) { /* told at start */ }
+      });
     });
   }
 
@@ -176,7 +185,7 @@
         return bring(assets.concat(JSON.parse(planned.answer)));
       });
     }).then(function () {
-      start(face.wanted || config.meter || '');
+      start(face.wanted || face.playerMeter || config.meter || '');
     });
   }
 
@@ -276,7 +285,11 @@
       var line = e.data;
       var message = null;
       try { message = JSON.parse(line); } catch (err) { return; }
-      if (face.ex) { try { guarded(function () { withString(line, function (ptr, len) { face.ex.event(ptr, len); }); }); } catch (err) { say(face.t('MANAGER_FACE_FAILED') + ' ' + err.message, true); } }
+      if (message && message.kind === 'showing' && message.meter) face.playerMeter = message.meter;
+      // Before the module is up the lines are kept for it: the feed
+      // replays the player's state at once, ahead of the module's load.
+      if (!face.ex) { face.earlyLines.push(line); return; }
+      try { guarded(function () { withString(line, function (ptr, len) { face.ex.event(ptr, len); }); }); } catch (err) { say(face.t('MANAGER_FACE_FAILED') + ' ' + err.message, true); }
       if (!message) return;
       // The theme changed on the player: bring it again. The player's own
       // display moved to another meter: follow it.

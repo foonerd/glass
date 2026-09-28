@@ -20,6 +20,9 @@ class FaceFeed {
   constructor(opts) {
     this.socketPath = opts.socketPath;
     this.logger = opts.logger || { info() {}, warn() {} };
+    // What the plugin holds now, for a page that connects before any push:
+    // `{ state, infinity, showing }` as the channel keeps them.
+    this.current = typeof opts.current === 'function' ? opts.current : function () { return {}; };
     this.clients = new Set();
     this.upstream = null;
     this.upstreamLive = false;
@@ -41,8 +44,16 @@ class FaceFeed {
     });
     res.write('retry: 2000\n\n');
     self.clients.add(res);
+    var now = {};
+    try { now = self.current() || {}; } catch (e) { /* nothing held */ }
+    var opening = {
+      config: self.last.config,
+      state: self.last.state || (now.state ? JSON.stringify({ kind: 'state', state: now.state }) : null),
+      showing: self.last.showing || (now.showing ? JSON.stringify({ kind: 'showing', theme: now.showing.theme, meter: now.showing.meter }) : null),
+      infinity: self.last.infinity || (now.infinity !== undefined && now.infinity !== null ? JSON.stringify({ kind: 'infinity', on: !!now.infinity }) : null)
+    };
     ['config', 'state', 'showing', 'infinity'].forEach(function (kind) {
-      if (self.last[kind]) self.write(res, 'plugin', self.last[kind]);
+      if (opening[kind]) self.write(res, 'plugin', opening[kind]);
     });
     self.write(res, 'feed', JSON.stringify({ frames: self.upstreamLive }));
     req.on('close', function () {

@@ -397,6 +397,95 @@ Glass.prototype.recentLog = function (count) {
     return { lines: lines.slice(-wanted), total: lines.length };
 };
 
+// The status sheet's rows only the plugin knows: the player and its
+// addresses, the screen, the audio path, and the housekeeping. A support
+// question is answered from a copy of the sheet, so every row here is
+// one a triage needs and nothing about the wider network.
+Glass.prototype.sheetInfo = function () {
+    var self = this;
+    var state = self.lastState || {};
+    var release = {};
+    try {
+        fs.readFileSync('/etc/os-release', 'utf8').split('\n').forEach(function (line) {
+            var m = /^([A-Z_]+)="?([^"]*)"?$/.exec(line.trim());
+            if (m) { release[m[1]] = m[2]; }
+        });
+    } catch (e) {}
+    var addresses = [];
+    try {
+        var interfaces = os.networkInterfaces();
+        Object.keys(interfaces).forEach(function (name) {
+            (interfaces[name] || []).forEach(function (a) {
+                if (a.family === 'IPv4' && !a.internal) { addresses.push({ name: name, address: a.address }); }
+            });
+        });
+    } catch (e) {}
+    var build = null;
+    try { build = JSON.parse(fs.readFileSync(PluginPath + '/build.json', 'utf8')); } catch (e) {}
+    var tapInChain = false;
+    try { tapInChain = fs.readFileSync('/etc/asound.conf', 'utf8').indexOf('Glass section') !== -1; } catch (e) {}
+    var output = '';
+    try { output = String(self.commandRouter.sharedVars.get('alsa.outputdevicename') || self.commandRouter.sharedVars.get('alsa.outputdevice') || ''); } catch (e) {}
+    var problems = [];
+    try {
+        var log = self.recentLog(300);
+        problems = (log.lines || []).filter(function (l) { return /\b(warn|warning|error)\b/i.test(l); }).slice(-3);
+    } catch (e) {}
+    var newest = null;
+    try {
+        var backups = self.backupList() || [];
+        backups.forEach(function (b) {
+            var at = b.date || b.at || b.created || '';
+            if (!newest || String(at) > String(newest.at)) { newest = { name: b.name, at: at }; }
+        });
+    } catch (e) {}
+    var mouse = true;
+    try { mouse = String((meterConfig && meterConfig.sdl && meterConfig.sdl.env && meterConfig.sdl.env['mouse.enabled']) || 'True').toLowerCase() === 'true'; } catch (e) {}
+    return {
+        player: {
+            volumio: release.VOLUMIO_VERSION || '',
+            hardware: release.VOLUMIO_HARDWARE || '',
+            board: self.boardInfo().model,
+            backendUptimeS: Math.round(process.uptime()),
+            build: build
+        },
+        addresses: addresses,
+        screen: { size: self.screenSize(), mouse: mouse, since: self.displayStartedAt || null },
+        audio: {
+            tapInChain: tapInChain,
+            output: output,
+            service: state.service || '',
+            trackType: state.trackType || '',
+            samplerate: state.samplerate || '',
+            bitdepth: state.bitdepth || ''
+        },
+        housekeeping: { newestBackup: newest, problems: problems }
+    };
+};
+
+// The screen's size as the X server has it, asked at most once a minute;
+// empty without a screen or an X server.
+Glass.prototype.screenSize = function () {
+    var self = this;
+    var now = Date.now();
+    if (self.screenSizeAt && now - self.screenSizeAt < 60000) { return self.screenSizeKnown || ''; }
+    self.screenSizeAt = now;
+    self.screenSizeKnown = '';
+    var display = ':' + String(self.config.get('displayOutput') || '0').replace(/^:/, '');
+    var auth = '';
+    try {
+        var auths = fs.readdirSync('/tmp').filter(function (n) { return n.indexOf('serverauth.') === 0; }).map(function (n) { return '/tmp/' + n; });
+        auths.sort(function (a, b) { return fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs; });
+        auth = auths[0] || '';
+    } catch (e) {}
+    try {
+        var out = require('child_process').execFileSync('xrandr', ['--current'], { encoding: 'utf8', timeout: 3000, env: Object.assign({}, process.env, { DISPLAY: display }, auth ? { XAUTHORITY: auth } : {}) });
+        var m = /current\s+(\d+)\s*x\s*(\d+)/.exec(out);
+        if (m) { self.screenSizeKnown = m[1] + 'x' + m[2]; }
+    } catch (e) {}
+    return self.screenSizeKnown;
+};
+
 // The board this player is, for the performance profiles.
 Glass.prototype.boardInfo = function () {
     var model = '';
@@ -775,7 +864,9 @@ Glass.prototype.onStart = function () {
 
     // The feed behind the manager's Face tab: the frames from the daemon's
     // pages socket, and every line the displays hear, for browser pages.
-    self.face = new FaceFeed({ socketPath: faceSocketPath, logger: self.logger });
+    self.face = new FaceFeed({ socketPath: faceSocketPath, logger: self.logger, current: function () {
+        return self.channel ? { state: self.channel.state, infinity: self.channel.infinity, showing: self.channel.showing } : {};
+    } });
     self.channel.onPush = function (message) { self.face.push(message); };
 
     self.loadConfigs();
@@ -936,6 +1027,7 @@ Glass.prototype.onStart = function () {
                         });
                         child.startedAt = Date.now();
                         self.meterChild = child;
+                        self.displayStartedAt = new Date().toISOString();
                     };
                     self.Timeout = setInterval(function () {
                         startDisplayOnce();
@@ -4528,6 +4620,7 @@ Glass.prototype.statusInfo = function () {
         sharing: self.sharingInfo(),
         cardash: self.carDashInfo(),
         face: self.face ? self.face.status() : null,
+        sheet: self.sheetInfo(),
         interactive: self.interactiveMode(),
         artwork: { enabled: artwork.enabled, keyMode: artwork.keyMode, interval: artwork.interval, order: artwork.order, cachedArtists: cachedArtists },
         version: pluginVersion,

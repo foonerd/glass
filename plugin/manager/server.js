@@ -700,6 +700,8 @@ class Manager {
       rings: rings,
       diskFree: free,
       hostname: os.hostname(),
+      upgrade: { last: (this.updater.state && this.updater.state.last) || null, previous: this.updater.previous() },
+      themeSize: (function () { const m = SIZE_PREFIX.exec(String(info.activeTheme || '')); return m ? m[1] + 'x' + m[2] : ''; })(),
       jobs: this.jobs.filter(function (j) { return j.state !== 'done' && j.state !== 'failed'; }).length
     });
   }

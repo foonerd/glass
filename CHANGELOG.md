@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.43] - 2026-09-28
+
+The Status tab as a system sheet: sections for the player, the screen, the audio path, the themes, the network and remotes, the face and Anymote, and the housekeeping, with Volumio's version, the board, the build the zip carries, the screen's size beside the theme's, whether the tap heads the ALSA chain, the last upgrade, the newest backup and the last three warnings or errors from the journal, so a screenshot or its text answers a support question in one go. "Copy as text" puts the sheet on the clipboard; the addresses, with the manager's and Anymote's links in their address form, stay hidden until "Reveal addresses". The face keeps the player's state across a page refresh: lines that arrive before the module is up are kept for it, and a new page gets what the plugin holds even before any push; the face starts on the meter the player's own display shows.
+
 ## [0.7.42] - 2026-09-28
 
 The face takes a finger, and Anymote. A tap or a drag on the theme's controls in the browser acts on the player as on its own screen: the same regions, margins, taps and drags, moved out of the display binary into a crate the display, the remotes and the browser module share; the manager runs what the page sends. Anymote is the face on a page of its own, `/anymote` on the manager's port, filling the window with a full-screen button, and a web manifest so a phone or a tablet keeps it on the home screen as a full-screen app. A configuration that rotates puts its first meter on show until the player says which; the player's state carries across a change of meter.

@@ -75,6 +75,8 @@
   table.kv { width: 100%; border-collapse: collapse; }
   table.kv td { padding: 7px 8px; border-bottom: 1px solid #333; vertical-align: top; }
   table.kv td:first-child { color: var(--muted); width: 38%; }
+  table.kv tr.section td { background: var(--panel2); color: #fff; font-weight: 600; padding-top: 9px; padding-bottom: 9px; }
+  table.kv td { white-space: pre-wrap; }
   .list { display: flex; flex-direction: column; gap: 8px; }
   .item { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .item .grow { flex: 1; min-width: 160px; }
@@ -382,7 +384,7 @@
     <div class="panel">
       <div class="row" style="justify-content:space-between">
         <h2 id="st-title" style="margin:0"></h2>
-        <button class="small" id="btn-status-refresh"></button>
+        <div class="row"><button class="small" id="btn-status-reveal"></button><button class="small" id="btn-status-copy"></button><button class="small" id="btn-status-refresh"></button></div>
       </div>
       <table class="kv" id="st-table" style="margin-top:10px"></table>
     </div>
@@ -602,6 +604,8 @@
     $('perf-title').textContent = t('MANAGER_PERF_TITLE'); $('perf-help').textContent = t('MANAGER_PERF_HELP'); $('perf-profile-label').textContent = t('MANAGER_PERF_PROFILE'); $('btn-perf-apply').textContent = t('MANAGER_APPLY'); $('perf-governor-label').textContent = t('MANAGER_PERF_GOVERNOR'); $('perf-governor-help').textContent = t('MANAGER_PERF_GOVERNOR_DOC');
     $('log-title').textContent = t('MANAGER_LOG_TITLE'); $('log-help').textContent = t('MANAGER_LOG_HELP'); $('log-level-label').textContent = t('MANAGER_LOG_LEVEL'); $('log-targets-label').textContent = t('MANAGER_LOG_TARGETS'); $('btn-log-apply').textContent = t('MANAGER_APPLY'); $('btn-log-show').textContent = t('MANAGER_LOG_SHOW'); $('btn-log-download').querySelector('button').textContent = t('MANAGER_LOG_DOWNLOAD');
     $('btn-status-refresh').textContent = t('MANAGER_REFRESH');
+    $('btn-status-reveal').textContent = t('MANAGER_ST_REVEAL');
+    $('btn-status-copy').textContent = t('MANAGER_ST_COPY');
     $('upd-title').textContent = t('MANAGER_UPD_TITLE');
     $('btn-upd-check').textContent = t('MANAGER_UPD_CHECK');
     $('btn-upd-notes').textContent = t('MANAGER_UPD_NOTES');
@@ -1301,38 +1305,101 @@
     api('GET', '/api/status').then(function (s) {
       state.status = s;
       $('subtitle').textContent = (s.hostname || '') + ' · Glass ' + s.version;
-      var rows = [
-        ['MANAGER_ST_VERSION', s.version + ' (' + s.arch + (s.binary ? '' : ', ' + t('MANAGER_ST_NO_BINARY')) + ')'],
-        ['MANAGER_ST_DISPLAY', s.headless ? t('DISPLAY_OUTPUT_NONE') : (s.running ? t('MANAGER_ST_RUNNING') : t('MANAGER_ST_IDLE')) + ' · DISPLAY=:' + s.display + ' · ' + t('MANAGER_ST_TIMEOUT') + ' ' + s.timeout + ' s' + (s.running && s.showing && s.showing.rate && s.performance && s.showing.rate < s.performance.values.frameRate ? ' · ' + t('MANAGER_ST_GOVERNED') + ' ' + s.showing.rate + ' fps' : '')],
-        ['MANAGER_ST_THEME', s.activeTheme + ' · ' + ({ random: t('MANAGER_MODE_RANDOM'), list: t('MANAGER_MODE_LIST'), single: t('MANAGER_MODE_SINGLE') }[s.meter.mode] || s.meter.mode) + (s.meter.mode !== 'random' ? ': ' + s.meter.names.join(', ') : '') + (s.showing && s.showing.meter ? ' · ' + t('MANAGER_ST_SHOWING') + ' ' + s.showing.meter : '')],
-        ['MANAGER_ST_THEMES', !s.themes ? '-' : s.themes.meters + ' ' + t('MANAGER_ST_THEMES_IN') + ' ' + s.themes.meterBase + ' · ' + s.themes.spectrum + ' ' + t('MANAGER_ST_SPECTRUM_IN') + ' ' + s.themes.spectrumBase],
-        ['MANAGER_ST_FONTS', !s.fonts ? '-' : ['light', 'regular', 'bold', 'italic', 'digi'].map(function (style) {
+      var reveal = !!state.revealAddresses;
+      var addresses = s.sheet && s.sheet.addresses ? s.sheet.addresses : [];
+      var urlsOf = function (route) {
+        var out = [s.manager.url.replace(/\/$/, '') + route];
+        if (reveal) addresses.forEach(function (a) { out.push('http://' + a.address + ':' + s.manager.port + route); });
+        return out.join('  ·  ');
+      };
+      var up = function (seconds) { return seconds < 3600 ? Math.round(seconds / 60) + ' min' : (seconds / 3600).toFixed(1) + ' h'; };
+      var player = s.sheet && s.sheet.player ? s.sheet.player : null;
+      var screen = s.sheet && s.sheet.screen ? s.sheet.screen : null;
+      var audio = s.sheet && s.sheet.audio ? s.sheet.audio : null;
+      var house = s.sheet && s.sheet.housekeeping ? s.sheet.housekeeping : null;
+      var sections = [
+        ['MANAGER_ST_SECTION_PLAYER', [
+          ['MANAGER_ST_VERSION', s.version + ' (' + s.arch + (s.binary ? '' : ', ' + t('MANAGER_ST_NO_BINARY')) + ')' + (player && player.build && player.build.commit ? ' · ' + t('MANAGER_ST_BUILD') + ' ' + player.build.commit : '')],
+          ['MANAGER_ST_VOLUMIO', !player ? '-' : (player.volumio || '?') + (player.hardware ? ' · ' + player.hardware : '') + (player.board ? ' · ' + player.board : '') + ' · ' + t('MANAGER_ST_BACKEND_UP') + ' ' + up(player.backendUptimeS || 0)],
+          ['MANAGER_ST_ADDRESSES', !reveal ? t('MANAGER_ST_HIDDEN') : (s.hostname || '') + (addresses.length ? ' · ' + addresses.map(function (a) { return a.name + ' ' + a.address; }).join(' · ') : '')],
+          ['MANAGER_ST_MANAGER', urlsOf('/') + ' · ' + t('MANAGER_ST_UPTIME') + ' ' + Math.round(s.manager.uptimeS / 60) + ' min'],
+          ['MANAGER_ST_ANYMOTE', urlsOf('/anymote')],
+          ['MANAGER_ST_LEGACY', s.legacy ? t('MANAGER_ST_YES') : t('MANAGER_ST_NO')]
+        ]],
+        ['MANAGER_ST_SECTION_SCREEN', [
+          ['MANAGER_ST_DISPLAY', s.headless ? t('DISPLAY_OUTPUT_NONE') : (s.running ? t('MANAGER_ST_RUNNING') : t('MANAGER_ST_IDLE')) + ' · DISPLAY=:' + s.display + ' · ' + t('MANAGER_ST_TIMEOUT') + ' ' + s.timeout + ' s' + (s.running && s.showing && s.showing.rate && s.performance && s.showing.rate < s.performance.values.frameRate ? ' · ' + t('MANAGER_ST_GOVERNED') + ' ' + s.showing.rate + ' fps' : '')],
+          ['MANAGER_ST_SCREEN', !screen ? '-' : (screen.size ? t('MANAGER_ST_SCREEN_SIZE') + ' ' + screen.size : t('MANAGER_ST_NO_SCREEN')) + (s.themeSize ? ' · ' + t('MANAGER_ST_THEME_SIZE') + ' ' + s.themeSize : '') + ' · ' + (screen.mouse ? t('MANAGER_ST_MOUSE_ON') : t('MANAGER_ST_MOUSE_OFF')) + (s.running && screen.since ? ' · ' + t('MANAGER_ST_SINCE') + ' ' + fmtDate(screen.since) : '')],
+          ['MANAGER_TOUCH_TITLE', !s.interactive ? '-' : t('INTERACTIVE_' + String(s.interactive).toUpperCase())],
+          ['MANAGER_PERF_TITLE', !s.performance ? '-' : t('MANAGER_PERF_' + String(s.performance.profile || 'custom').toUpperCase()) + (s.performance.profile === 'auto' && s.performance.auto ? ' (' + t('MANAGER_PERF_' + String(s.performance.auto).toUpperCase()) + ')' : '') + ' · ' + s.performance.values.frameRate + ' fps · ' + t('MANAGER_ST_GOVERNOR') + ' ' + (s.performance.governor ? t('MANAGER_ST_ON') : t('MANAGER_ST_OFF')) + (s.performance.board && s.performance.board.model ? ' · ' + s.performance.board.model : '')]
+        ]],
+        ['MANAGER_ST_SECTION_AUDIO', [
+          ['MANAGER_ST_TAP', !audio ? '-' : (audio.tapInChain ? t('MANAGER_ST_TAP_IN') : t('MANAGER_ST_TAP_OUT')) + (audio.output ? ' · ' + t('MANAGER_ST_OUTPUT') + ' ' + audio.output : '')],
+          ['MANAGER_ST_PLAYER', (s.channel.status || '-') + (s.channel.service ? ' · ' + s.channel.service : '') + (s.channel.title ? ' · ' + (s.channel.artist ? s.channel.artist + ' - ' : '') + s.channel.title : '') +
+          (s.channel.status === 'play' ? ' · ' + (s.measured ? t('MANAGER_ST_MEASURED') : t('MANAGER_ST_NOT_MEASURED')) : '') + (audio && (audio.samplerate || audio.bitdepth || audio.trackType) ? ' · ' + [audio.trackType, audio.samplerate, audio.bitdepth].filter(Boolean).join(' ') : '')],
+          ['MANAGER_ST_RINGS', s.rings.length ? s.rings.map(function (r) { return r.name + ' (' + r.rate + ' Hz, ' + r.channels + ' ch, ' + (r.live ? t('MANAGER_ST_RING_LIVE') : t('MANAGER_ST_RING_QUIET') + (r.writtenAgoMs !== null ? ' ' + Math.round(r.writtenAgoMs / 1000) + ' s' : '')) + ')'; }).join('; ') : t('MANAGER_ST_NONE')],
+          ['MANAGER_ST_CHANNEL', s.channel.clients + ' ' + t('MANAGER_ST_CLIENTS')]
+        ]],
+        ['MANAGER_ST_SECTION_THEMES', [
+          ['MANAGER_ST_THEME', s.activeTheme + ' · ' + ({ random: t('MANAGER_MODE_RANDOM'), list: t('MANAGER_MODE_LIST'), single: t('MANAGER_MODE_SINGLE') }[s.meter.mode] || s.meter.mode) + (s.meter.mode !== 'random' ? ': ' + s.meter.names.join(', ') : '') + (s.showing && s.showing.meter ? ' · ' + t('MANAGER_ST_SHOWING') + ' ' + s.showing.meter : '')],
+          ['MANAGER_ST_THEMES', !s.themes ? '-' : s.themes.meters + ' ' + t('MANAGER_ST_THEMES_IN') + ' ' + s.themes.meterBase + ' · ' + s.themes.spectrum + ' ' + t('MANAGER_ST_SPECTRUM_IN') + ' ' + s.themes.spectrumBase],
+          ['MANAGER_ST_FONTS', !s.fonts ? '-' : ['light', 'regular', 'bold', 'italic', 'digi'].map(function (style) {
           var c = s.fonts.styles[style] || { kind: 'builtin' };
           var face = c.kind === 'builtin' ? t('MANAGER_FONTS_GROUP_BUILTIN') : c.value + (c.kind === 'custom' ? ' (' + t('MANAGER_FONTS_GROUP_CUSTOM').toLowerCase() + ')' : c.kind === 'player' ? ' (' + t('MANAGER_FONTS_GROUP_PLAYER').toLowerCase() + ')' : '');
           return t('MANAGER_FONTS_STYLE_' + style.toUpperCase()) + ': ' + face;
         }).join(' · ') + ' · ' + s.fonts.uploaded + ' ' + t('MANAGER_ST_FONTS_UPLOADED')],
-        ['MANAGER_ST_SHARE', !s.sharing ? '-' : (s.sharing.shared ? t('MANAGER_ST_SHARE_EDITABLE') : t('MANAGER_ST_SHARE_READONLY'))],
-        ['MANAGER_CD_TITLE', !s.cardash || !s.cardash.enabled ? t('MANAGER_ST_OFF') : ((s.cardash.period === 'day' ? t('MANAGER_CD_NOW_DAY') : t('MANAGER_CD_NOW_NIGHT')) + ' ' + (s.cardash.period === 'day' ? s.cardash.dayTheme : s.cardash.nightTheme) + (s.cardash.next ? ' · ' + t('MANAGER_CD_NEXT') + ' ' + new Date(s.cardash.next.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') + (s.cardash.mode === 'sun' ? ' · ' + t('MANAGER_CD_MODE_SUN').toLowerCase() : ''))],
-        ['MANAGER_TOUCH_TITLE', !s.interactive ? '-' : t('INTERACTIVE_' + String(s.interactive).toUpperCase())],
-        ['MANAGER_ARTWORK_TITLE', !s.artwork ? '-' : (s.artwork.enabled ? t('MANAGER_ST_ON') : t('MANAGER_ST_OFF')) + (s.artwork.enabled ? ' · ' + (s.artwork.keyMode === 'project' ? t('FANART_KEY_MODE_PROJECT') : t('FANART_KEY_MODE_PERSONAL')) + ' · ' + (s.artwork.interval > 0 ? t('MANAGER_ST_EVERY') + ' ' + s.artwork.interval + ' s' : t('MANAGER_ST_ON_TITLE_CHANGE')) : '') + ' · ' + s.artwork.cachedArtists + ' ' + t('MANAGER_ST_ARTISTS_CACHED')],
-        ['MANAGER_PERF_TITLE', !s.performance ? '-' : t('MANAGER_PERF_' + String(s.performance.profile || 'custom').toUpperCase()) + (s.performance.profile === 'auto' && s.performance.auto ? ' (' + t('MANAGER_PERF_' + String(s.performance.auto).toUpperCase()) + ')' : '') + ' · ' + s.performance.values.frameRate + ' fps · ' + t('MANAGER_ST_GOVERNOR') + ' ' + (s.performance.governor ? t('MANAGER_ST_ON') : t('MANAGER_ST_OFF')) + (s.performance.board && s.performance.board.model ? ' · ' + s.performance.board.model : '')],
-        ['MANAGER_ST_PLAYER', (s.channel.status || '-') + (s.channel.service ? ' · ' + s.channel.service : '') + (s.channel.title ? ' · ' + (s.channel.artist ? s.channel.artist + ' - ' : '') + s.channel.title : '') +
-          (s.channel.status === 'play' ? ' · ' + (s.measured ? t('MANAGER_ST_MEASURED') : t('MANAGER_ST_NOT_MEASURED')) : '')],
-        ['MANAGER_ST_CHANNEL', s.channel.clients + ' ' + t('MANAGER_ST_CLIENTS')],
-        ['MANAGER_ST_REMOTES', !s.remotes || !s.remotes.enabled ? t('MANAGER_RM_OFF') :
+          ['MANAGER_ST_SHARE', !s.sharing ? '-' : (s.sharing.shared ? t('MANAGER_ST_SHARE_EDITABLE') : t('MANAGER_ST_SHARE_READONLY'))],
+          ['MANAGER_CD_TITLE', !s.cardash || !s.cardash.enabled ? t('MANAGER_ST_OFF') : ((s.cardash.period === 'day' ? t('MANAGER_CD_NOW_DAY') : t('MANAGER_CD_NOW_NIGHT')) + ' ' + (s.cardash.period === 'day' ? s.cardash.dayTheme : s.cardash.nightTheme) + (s.cardash.next ? ' · ' + t('MANAGER_CD_NEXT') + ' ' + new Date(s.cardash.next.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') + (s.cardash.mode === 'sun' ? ' · ' + t('MANAGER_CD_MODE_SUN').toLowerCase() : ''))],
+          ['MANAGER_ARTWORK_TITLE', !s.artwork ? '-' : (s.artwork.enabled ? t('MANAGER_ST_ON') : t('MANAGER_ST_OFF')) + (s.artwork.enabled ? ' · ' + (s.artwork.keyMode === 'project' ? t('FANART_KEY_MODE_PROJECT') : t('FANART_KEY_MODE_PERSONAL')) + ' · ' + (s.artwork.interval > 0 ? t('MANAGER_ST_EVERY') + ' ' + s.artwork.interval + ' s' : t('MANAGER_ST_ON_TITLE_CHANGE')) : '') + ' · ' + s.artwork.cachedArtists + ' ' + t('MANAGER_ST_ARTISTS_CACHED')],
+          ['MANAGER_ST_CATALOG', s.catalog.count + ' ' + t('MANAGER_CATALOG_ENTRIES') + (s.catalog.updated ? ' · ' + t('MANAGER_CATALOG_UPDATED') + ' ' + fmtDate(s.catalog.updated) : '') + ' · ' + s.catalog.installed + ' ' + t('MANAGER_ST_INSTALLED_FROM')]
+        ]],
+        ['MANAGER_ST_SECTION_NETWORK', [
+          ['MANAGER_ST_REMOTES', !s.remotes || !s.remotes.enabled ? t('MANAGER_RM_OFF') :
           (s.remotes.serving ? t('MANAGER_RM_SERVING_UP') : t('MANAGER_RM_SERVING_DOWN')) + ' · ' + t('MANAGER_RM_FRAMES') + ' ' + s.remotes.ports.frames + ' · ' + t('MANAGER_RM_CHANNEL') + ' ' + s.remotes.ports.channel + ' · ' + t('MANAGER_RM_BEACON') + ' ' + s.remotes.ports.beacon +
-          ' · ' + s.remotes.receiving + ' ' + t('MANAGER_ST_RECEIVING') + (s.remotes.problem ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + s.remotes.problem : '')],
-        ['MANAGER_ST_FACE', !s.face ? '-' : s.face.pages + ' ' + t('MANAGER_ST_FACE_PAGES') + ' · ' + (s.face.frames ? t('MANAGER_ST_FACE_FRAMES') : t('MANAGER_ST_FACE_NO_FRAMES'))],
-        ['MANAGER_ST_RINGS', s.rings.length ? s.rings.map(function (r) { return r.name + ' (' + r.rate + ' Hz, ' + r.channels + ' ch, ' + (r.live ? t('MANAGER_ST_RING_LIVE') : t('MANAGER_ST_RING_QUIET') + (r.writtenAgoMs !== null ? ' ' + Math.round(r.writtenAgoMs / 1000) + ' s' : '')) + ')'; }).join('; ') : t('MANAGER_ST_NONE')],
-        ['MANAGER_ST_CATALOG', s.catalog.count + ' ' + t('MANAGER_CATALOG_ENTRIES') + (s.catalog.updated ? ' · ' + t('MANAGER_CATALOG_UPDATED') + ' ' + fmtDate(s.catalog.updated) : '') + ' · ' + s.catalog.installed + ' ' + t('MANAGER_ST_INSTALLED_FROM')],
-        ['MANAGER_ST_DISK', s.diskFree !== null ? fmtBytes(s.diskFree) + ' ' + t('MANAGER_ST_FREE') : '-'],
-        ['MANAGER_ST_MANAGER', s.manager.url + ' · ' + t('MANAGER_ST_UPTIME') + ' ' + Math.round(s.manager.uptimeS / 60) + ' min'],
-        ['MANAGER_ST_LEGACY', s.legacy ? t('MANAGER_ST_YES') : t('MANAGER_ST_NO')]
+          ' · ' + s.remotes.receiving + ' ' + t('MANAGER_ST_RECEIVING') + (s.remotes.problem ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + s.remotes.problem : '')]
+        ]],
+        ['MANAGER_ST_SECTION_FACE', [
+          ['MANAGER_ST_FACE', !s.face ? '-' : s.face.pages + ' ' + t('MANAGER_ST_FACE_PAGES') + ' · ' + (s.face.frames ? t('MANAGER_ST_FACE_FRAMES') : t('MANAGER_ST_FACE_NO_FRAMES'))]
+        ]],
+        ['MANAGER_ST_SECTION_HOUSE', [
+          ['MANAGER_ST_LOGGING', !s.logging ? '-' : String(s.logging.level || '') + (s.logging.targets && s.logging.targets.length ? ' · ' + s.logging.targets.join(', ') : '')],
+          ['MANAGER_ST_UPGRADE', !s.upgrade || !s.upgrade.last ? t('MANAGER_ST_NONE') : s.upgrade.last.from + ' · ' + s.upgrade.last.to + ' · ' + fmtDate(s.upgrade.last.at) + (s.upgrade.last.phase && s.upgrade.last.phase !== 'done' ? ' · ' + s.upgrade.last.phase : '')],
+          ['MANAGER_ST_BACKUP', !house || !house.newestBackup ? t('MANAGER_ST_NONE') : house.newestBackup.name + (house.newestBackup.at ? ' · ' + fmtDate(house.newestBackup.at) : '')],
+          ['MANAGER_ST_DISK', s.diskFree !== null ? fmtBytes(s.diskFree) + ' ' + t('MANAGER_ST_FREE') : '-'],
+          ['MANAGER_ST_PROBLEMS', !house || !house.problems || !house.problems.length ? t('MANAGER_ST_NO_PROBLEMS') : house.problems.join('\n')]
+        ]]
       ];
-      $('st-table').innerHTML = rows.map(function (r) { return '<tr><td>' + esc(t(r[0])) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
+      var html = '';
+      var text = [(s.hostname || '') + ' · Glass ' + s.version];
+      sections.forEach(function (section) {
+        html += '<tr class="section"><td colspan="2">' + esc(t(section[0])) + '</td></tr>';
+        text.push('', t(section[0]));
+        section[1].forEach(function (r) {
+          html += '<tr><td>' + esc(t(r[0])) + '</td><td>' + esc(r[1]) + '</td></tr>';
+          text.push('  ' + t(r[0]) + ': ' + String(r[1]).replace(/\n/g, '\n    '));
+        });
+      });
+      $('st-table').innerHTML = html;
+      state.statusText = text.join('\n') + '\n';
+      $('btn-status-reveal').textContent = reveal ? t('MANAGER_ST_HIDE') : t('MANAGER_ST_REVEAL');
     }).catch(function (e) { toast(errorText(e), 'error'); });
   }
   $('btn-status-refresh').onclick = function () { loadStatus(); };
+  $('btn-status-reveal').onclick = function () { state.revealAddresses = !state.revealAddresses; loadStatus(); };
+  // The sheet as text, for a forum post: the clipboard where the page may
+  // use it, else a selection copied the old way.
+  $('btn-status-copy').onclick = function () {
+    var button = $('btn-status-copy');
+    var done = function () { button.textContent = t('MANAGER_ST_COPIED'); setTimeout(function () { button.textContent = t('MANAGER_ST_COPY'); }, 1500); };
+    var text = state.statusText || '';
+    var fallback = function () {
+      var area = document.createElement('textarea');
+      area.value = text; area.style.position = 'fixed'; area.style.opacity = '0';
+      document.body.appendChild(area); area.select();
+      try { if (document.execCommand('copy')) done(); } catch (e) { /* not allowed here */ }
+      document.body.removeChild(area);
+    };
+    if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done, fallback); } else { fallback(); }
+  };
 
   // ---- the performance profile ------------------------------------------
   function loadSharing() {
