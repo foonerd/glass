@@ -21,6 +21,7 @@ const ini = require('ini');
 const pluginVersion = require('./package.json').version;
 const os = require('os');
 const { Manager, DEFAULT_PORT: MANAGER_DEFAULT_PORT } = require('./manager/server');
+const { FaceFeed } = require('./manager/facefeed');
 const { safeFolderName, sections: configSections } = require('./manager/zip');
 
 const id = 'glass: ';
@@ -53,6 +54,8 @@ const LEGACY_DATA = '/data/INTERNAL/' + LEGACY_PLUGIN;
 // state and the infinity flag last seen, then every change as it comes; it
 // sends commands for the player back.
 const channelPath = '/tmp/glass_channel';
+// The frames daemon's socket for browser pages, which the manager proxies.
+const faceSocketPath = '/tmp/glass_face.sock';
 const CHANNEL_PROTOCOL = 1;
 const CHANNEL_LINE_MAX = 65536;
 
@@ -128,6 +131,7 @@ Channel.prototype.attach = function (conn) {
                 self.clients.slice().forEach(function (c) {
                     if (c.remote) { self.tell(c, { kind: 'showing', theme: self.showing.theme, meter: self.showing.meter }); }
                 });
+                if (self.onPush) { self.onPush({ kind: 'showing', theme: self.showing.theme, meter: self.showing.meter }); }
             } else {
                 self.logger.warn(id + 'channel: not a command: ' + line.slice(0, 80));
             }
@@ -192,10 +196,11 @@ Channel.prototype.tell = function (conn, message) {
     try { conn.write(JSON.stringify(message) + '\n'); } catch (e) {}
 };
 
-// Every connected display hears this.
+// Every connected display hears this, and whoever mirrors the channel.
 Channel.prototype.push = function (message) {
     var self = this;
     self.clients.slice().forEach(function (conn) { self.tell(conn, message); });
+    if (self.onPush) { self.onPush(message); }
 };
 
 Channel.prototype.close = function () {
@@ -768,6 +773,11 @@ Glass.prototype.onStart = function () {
     });
     self.channel.listen(channelPath);
 
+    // The feed behind the manager's Face tab: the frames from the daemon's
+    // pages socket, and every line the displays hear, for browser pages.
+    self.face = new FaceFeed({ socketPath: faceSocketPath, logger: self.logger });
+    self.channel.onPush = function (message) { self.face.push(message); };
+
     self.loadConfigs();
     if (!meterConfig) {
         self.commandRouter.pushToastMessage('error', self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'), self.commandRouter.getI18nString('GLASS.NO_PEPPYCONFIG'));
@@ -791,8 +801,11 @@ Glass.prototype.onStart = function () {
             self.logger.error(id + 'audio path: ' + (e && e.message ? e.message : e));
         });
 
-    // Remote displays: the frames daemon, the channel over TCP, the beacon.
-    try { self.startRemotes(); } catch (e) {
+    // The frames daemon: for the browser pages always, and with remote
+    // displays served, the port, the channel over TCP and the beacon too.
+    try {
+        if (self.remotePorts().enabled) { self.startRemotes(); } else { self.startServe(); }
+    } catch (e) {
         self.logger.error(id + 'remotes: ' + (e && e.message ? e.message : e));
     }
 
@@ -1069,6 +1082,10 @@ Glass.prototype.onStop = function () {
         if (self.channel) {
             self.channel.close();
             self.channel = null;
+        }
+        if (self.face) {
+            self.face.stop();
+            self.face = null;
         }
         self.unwatchAlsaFile();
         self.stopRemotes();
@@ -3784,15 +3801,18 @@ Glass.prototype.setRemoteSettings = function (data) {
     if (!changed) { return Promise.resolve({ ok: true, changed: false }); }
     self.logger.info(id + 'remotes: settings ' + (enabled ? 'on' : 'off') + ' ' + frames + '/' + channel + '/' + beacon);
     return self.stopRemotes().then(function () {
-        if (enabled) { self.startRemotes(); }
+        if (enabled) { self.startRemotes(); } else { self.startServe(); }
         return { ok: true, changed: true };
     });
 };
 
-// The frames daemon, restarted a few seconds after it leaves.
+// The frames daemon, restarted a few seconds after it leaves. It serves
+// the browser pages on its socket always; the port only while remote
+// displays are served.
 Glass.prototype.startServe = function () {
     var self = this;
     var ports = self.remotePorts();
+    self.remotesStopping = false;
     var arch = self.volumioArch();
     var bin = PluginPath + '/bin/' + arch + '/glass-serve';
     if (!fs.existsSync(bin)) {
@@ -3802,7 +3822,8 @@ Glass.prototype.startServe = function () {
     var child;
     try {
         var log = self.logSettings();
-        child = spawn(bin, ['--port', String(ports.frames), '--rate', '60', '--status', REMOTE_SERVE_STATUS], { uid: 1000, gid: 1000, stdio: ['ignore', 'pipe', 'pipe'], env: Object.assign({}, process.env, { GLASS_LOG: log.level, GLASS_LOG_TARGETS: log.targets.join(',') }) });
+        var args = ['--rate', '60', '--status', REMOTE_SERVE_STATUS, '--face', faceSocketPath].concat(ports.enabled ? ['--port', String(ports.frames)] : ['--local']);
+        child = spawn(bin, args, { uid: 1000, gid: 1000, stdio: ['ignore', 'pipe', 'pipe'], env: Object.assign({}, process.env, { GLASS_LOG: log.level, GLASS_LOG_TARGETS: log.targets.join(',') }) });
     } catch (e) {
         self.logger.error(id + 'remotes: glass-serve: ' + (e && e.message ? e.message : e));
         return;
@@ -4506,6 +4527,7 @@ Glass.prototype.statusInfo = function () {
         themes: { meterBase: meterBase, meters: themeCount(meterBase, 'meters.txt'), spectrumBase: spectrumBase, spectrum: themeCount(spectrumBase, 'spectrum.txt') },
         sharing: self.sharingInfo(),
         cardash: self.carDashInfo(),
+        face: self.face ? self.face.status() : null,
         interactive: self.interactiveMode(),
         artwork: { enabled: artwork.enabled, keyMode: artwork.keyMode, interval: artwork.interval, order: artwork.order, cachedArtists: cachedArtists },
         version: pluginVersion,

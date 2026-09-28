@@ -13,6 +13,8 @@ dist/
 /remote/android/build/
 /remote/android/.gradle/
 /remote/android/local.properties
+# The browser module scripts/ship.sh builds into the plugin
+/plugin/face/glass-face.wasm
 # The PeppyFont weights fetched at packaging (scripts/package.sh); the italic is in git
 /plugin/fonts/PeppyFont-Light.ttf
 /plugin/fonts/PeppyFont-Regular.ttf

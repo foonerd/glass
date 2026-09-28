@@ -5,7 +5,10 @@
 //! subscribes with a JSON datagram to the same port every few seconds and
 //! is forgotten fifteen seconds after its last; no remote, no traffic.
 //! The subscribers and the ring's state go to a status file for the
-//! manager every two seconds.
+//! manager every two seconds. With `--face PATH` the same datagrams go to
+//! browser pages as an event stream on a local socket the manager
+//! proxies; with `--local` no port is opened and only the pages are
+//! served, for a player that does not serve remote displays.
 
 use std::collections::HashMap;
 use std::io::ErrorKind;
@@ -17,6 +20,8 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use tap::ring::{merge_hops, now_ns, Frame, LIVE_NS};
 use tap::wire;
+
+mod face;
 
 const DEFAULT_PORT: u16 = 5580;
 const DEFAULT_RATE: u32 = 60;
@@ -46,6 +51,10 @@ struct Args {
     port: u16,
     rate: u32,
     status: PathBuf,
+    /// The pages' socket, when they are served.
+    face: Option<PathBuf>,
+    /// No port: nothing leaves the player, only the pages are served.
+    local: bool,
 }
 
 fn parse_args() -> Result<Args, String> {
@@ -53,6 +62,8 @@ fn parse_args() -> Result<Args, String> {
         port: DEFAULT_PORT,
         rate: DEFAULT_RATE,
         status: PathBuf::from(DEFAULT_STATUS),
+        face: None,
+        local: false,
     };
     let mut it = std::env::args().skip(1);
     while let Some(arg) = it.next() {
@@ -76,10 +87,19 @@ fn parse_args() -> Result<Args, String> {
                     .map(PathBuf::from)
                     .ok_or("--status needs a path")?;
             }
+            "--face" => {
+                args.face = Some(
+                    it.next()
+                        .map(PathBuf::from)
+                        .ok_or("--face needs a socket path")?,
+                );
+            }
+            "--local" => args.local = true,
             "--help" => {
                 println!(
-                    "glass-serve [--port {DEFAULT_PORT}] [--rate {DEFAULT_RATE}] [--status {DEFAULT_STATUS}]\n\
-                     Sends the tap's frames to remote displays that subscribe on the port, at most --rate a second.\n\
+                    "glass-serve [--port {DEFAULT_PORT}] [--rate {DEFAULT_RATE}] [--status {DEFAULT_STATUS}] [--face SOCKET] [--local]\n\
+                     Sends the tap's frames to remote displays that subscribe on the port, at most --rate a second,\n\
+                     and as an event stream to browser pages on the socket; --local opens no port.\n\
                      Writes the subscribers and the ring's state to the status file every two seconds."
                 );
                 std::process::exit(0);
@@ -119,6 +139,7 @@ fn write_status(
     sent: u64,
     port: u16,
     rate: u32,
+    pages: usize,
 ) {
     let now = Instant::now();
     let subs: Vec<Value> = subscribers
@@ -156,6 +177,7 @@ fn write_status(
         "subscribers": subs,
         "ring": ring_value,
         "sent": sent,
+        "pages": pages,
         "at": std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_millis() as u64)
@@ -176,23 +198,47 @@ fn main() -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let socket = match UdpSocket::bind(("0.0.0.0", args.port)) {
-        Ok(socket) => socket,
-        Err(err) => {
-            eprintln!("glass-serve: port {}: {err}", args.port);
+    let socket = if args.local {
+        None
+    } else {
+        let socket = match UdpSocket::bind(("0.0.0.0", args.port)) {
+            Ok(socket) => socket,
+            Err(err) => {
+                eprintln!("glass-serve: port {}: {err}", args.port);
+                return ExitCode::from(1);
+            }
+        };
+        if let Err(err) = socket.set_nonblocking(true) {
+            eprintln!("glass-serve: socket: {err}");
             return ExitCode::from(1);
         }
+        Some(socket)
     };
-    if let Err(err) = socket.set_nonblocking(true) {
-        eprintln!("glass-serve: socket: {err}");
-        return ExitCode::from(1);
-    }
+    let pages = match args.face.as_deref() {
+        Some(path) => match face::Pages::serve(path) {
+            Ok(pages) => Some(pages),
+            Err(err) => {
+                eprintln!("glass-serve: pages: {err}");
+                return ExitCode::from(1);
+            }
+        },
+        None => None,
+    };
     println!(
-        "glass-serve: port {} rate {} status {}",
-        args.port,
+        "glass-serve: {} rate {} status {}{}",
+        if args.local {
+            "no port".to_string()
+        } else {
+            format!("port {}", args.port)
+        },
         args.rate,
-        args.status.display()
+        args.status.display(),
+        args.face
+            .as_deref()
+            .map(|p| format!(" pages {}", p.display()))
+            .unwrap_or_default()
     );
+    let port = if args.local { 0 } else { args.port };
 
     let interval = Duration::from_micros(1_000_000 / args.rate as u64);
     let dir = Path::new(tap::ring::DIR);
@@ -219,7 +265,7 @@ fn main() -> ExitCode {
         let now = Instant::now();
 
         // Subscriptions, as they come.
-        loop {
+        while let Some(socket) = socket.as_ref() {
             match socket.recv_from(&mut buffer) {
                 Ok((n, from)) => {
                     if let Some((id, name, release)) = parse_subscribe(&buffer[..n]) {
@@ -330,10 +376,15 @@ fn main() -> ExitCode {
         if let Some(bytes) = to_send {
             pending = None;
             last_sent_at = Some(now);
-            for (addr, s) in subscribers.iter_mut() {
-                if socket.send_to(&bytes, addr).is_ok() {
-                    s.sent += 1;
+            if let Some(socket) = socket.as_ref() {
+                for (addr, s) in subscribers.iter_mut() {
+                    if socket.send_to(&bytes, addr).is_ok() {
+                        s.sent += 1;
+                    }
                 }
+            }
+            if let Some(pages) = pages.as_ref() {
+                pages.send(&bytes);
             }
             sent += 1;
         }
@@ -345,8 +396,9 @@ fn main() -> ExitCode {
                 &subscribers,
                 ring.as_ref(),
                 sent,
-                args.port,
+                port,
                 args.rate,
+                pages.as_ref().map_or(0, face::Pages::count),
             );
             // A ring whose file is gone and stays gone is let go of, so the status says so.
             if ring.as_ref().is_some_and(|r| !r.path().exists())

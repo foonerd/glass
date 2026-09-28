@@ -12,14 +12,14 @@ use std::thread;
 use std::time::Instant;
 
 use expose::{
-    apply_circle, compose_base, fit_art, flip_x, raster_over, read_art, read_icon, read_png,
-    write_png, FolderPicture, Fonts, Frame, IndicatorAssets, Motion, Spans, SpectrumAssets, Stack,
+    apply_circle, fit_art, raster_over, read_art, read_icon, read_png, write_png, FolderPicture,
+    Frame, IndicatorAssets, MeterAssets, Motion, Stack,
 };
 use intake::{Overrides, Selector, Source, TapSource};
 use lead::{
     frame_period, should_mark_dismiss, ButtonAction, FolderLayerSpec, GaugeSpec, Input,
-    InteractiveMode, Metadata, MeterKind, SkinDesc, StateIndicator, StateLook, TypeMode,
-    DISMISS_FILE_VAR, RUN_FLAG,
+    InteractiveMode, Metadata, SkinDesc, StateIndicator, StateLook, TypeMode, DISMISS_FILE_VAR,
+    RUN_FLAG,
 };
 use pane::{publish, write_ppm, PointerKind, Shown, Surface, WindowMode, WindowOptions};
 use plot::{step, Scene};
@@ -58,122 +58,6 @@ fn dev_title(theme: &str, meter: &str, width: u32, height: u32) -> String {
 enum Outcome {
     Exit(ExitCode),
     Reload(&'static str),
-}
-
-fn load_theme(dir: &str, file: &str) -> Option<Frame> {
-    if dir.is_empty() || file.is_empty() {
-        return None;
-    }
-    read_png(std::path::Path::new(dir).join(file).as_path())
-}
-
-/// Everything decoded once per meter: its pictures, fonts and art mask.
-struct Assets {
-    front: Option<Spans>,
-    /// The indicator for the left or mono channel, mirrored when the meter flips it.
-    indicator: Option<Frame>,
-    /// The right channel's indicator when it differs from the left one.
-    indicator_right: Option<Frame>,
-    fonts: Fonts,
-    art_mask: Option<Frame>,
-    /// The spectrum's pictures when the meter shows one.
-    spectrum: Option<SpectrumAssets>,
-    /// The tonearm picture when the meter has one.
-    tonearm: Option<Frame>,
-    /// The theme's reel pictures; an album's reel is scaled to their size.
-    reels: (Option<Frame>, Option<Frame>),
-    /// The indicators' prepared states and pictures.
-    indicators: Option<IndicatorAssets>,
-    /// The screen picture and face composed once per meter; the pictures
-    /// themselves are not kept.
-    base: Frame,
-}
-
-impl Assets {
-    /// What the meter's pictures and fonts take, by store, in bytes.
-    fn memory(&self) -> Vec<(&'static str, usize)> {
-        vec![
-            ("base", self.base.bytes()),
-            ("front", self.front.as_ref().map_or(0, Spans::bytes)),
-            (
-                "needles",
-                expose::bytes_of([&self.indicator, &self.indicator_right]),
-            ),
-            ("tonearm", expose::bytes_of([&self.tonearm])),
-            ("reels", expose::bytes_of([&self.reels.0, &self.reels.1])),
-            ("mask", expose::bytes_of([&self.art_mask])),
-            (
-                "spectrum",
-                self.spectrum.as_ref().map_or(0, SpectrumAssets::bytes),
-            ),
-            (
-                "indicators",
-                self.indicators.as_ref().map_or(0, IndicatorAssets::bytes),
-            ),
-            ("fonts", self.fonts.bytes()),
-        ]
-    }
-
-    fn load(skin: &SkinDesc) -> Self {
-        let mut fonts = Fonts::load(&skin.fonts);
-        for field in [&skin.time, &skin.time_elapsed, &skin.time_total]
-            .into_iter()
-            .flatten()
-        {
-            fonts.add_file(&field.font_file);
-        }
-        let picture = load_theme(&skin.theme_dir, &skin.indicator);
-        let (flip_left, flip_right) = match (skin.meter.kind, &skin.meter.linear) {
-            (MeterKind::Linear, Some(linear)) => (linear.flip_left, linear.flip_right),
-            _ => (skin.meter.flip_left, skin.meter.flip_right),
-        };
-        let indicator_right = match (&picture, flip_left == flip_right) {
-            (Some(p), false) if flip_right => Some(flip_x(p)),
-            (Some(p), false) => Some(p.clone()),
-            _ => None,
-        };
-        let indicator = match picture {
-            Some(p) if flip_left => Some(flip_x(&p)),
-            other => other,
-        };
-        let background = load_theme(&skin.theme_dir, &skin.background);
-        let face = load_theme(&skin.theme_dir, &skin.face);
-        let base = compose_base(
-            skin.width.max(1),
-            skin.height.max(1),
-            background.as_ref(),
-            face.as_ref(),
-            skin.face_at,
-        );
-        Self {
-            base,
-            front: load_theme(&skin.theme_dir, &skin.front).map(Spans::new),
-            indicator,
-            indicator_right,
-            fonts,
-            art_mask: skin
-                .art
-                .as_ref()
-                .filter(|art| !art.mask.is_empty())
-                .and_then(|art| read_png(std::path::Path::new(&art.mask))),
-            spectrum: skin.spectrum.as_ref().map(SpectrumAssets::load),
-            tonearm: skin
-                .tonearm
-                .as_ref()
-                .and_then(|arm| read_png(std::path::Path::new(&arm.file))),
-            reels: (
-                skin.reels
-                    .as_ref()
-                    .and_then(|r| r.left.as_ref())
-                    .and_then(|r| read_png(std::path::Path::new(&r.theme_file))),
-                skin.reels
-                    .as_ref()
-                    .and_then(|r| r.right.as_ref())
-                    .and_then(|r| read_png(std::path::Path::new(&r.theme_file))),
-            ),
-            indicators: skin.indicators.as_ref().map(IndicatorAssets::load),
-        }
-    }
 }
 
 /// A picture decoded and fitted off the frame loop: the slot keeps showing
@@ -946,7 +830,7 @@ fn session(
         if adaptive.is_some() { " as needed" } else { "" },
         if governing { "on" } else { "off" }
     );
-    let mut assets = Assets::load(&skin);
+    let mut assets = MeterAssets::load(&skin);
     logline::say!(
         Info,
         "display",
@@ -1087,7 +971,7 @@ fn session(
             let name: String = $name;
             skin = intake::installed_skin_named(Some(&name));
             source.set_skin(&skin);
-            assets = Assets::load(&skin);
+            assets = MeterAssets::load(&skin);
             art_cache = None;
             icon_cache = None;
             folder_slots.clear();

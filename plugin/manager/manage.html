@@ -66,6 +66,10 @@
   .switch { display: flex; align-items: center; gap: 10px; cursor: pointer; color: var(--text); font-size: 15px; }
   .switch input { width: 18px; height: 18px; accent-color: var(--accent); }
   .help { color: var(--muted); font-size: 13px; }
+  #face-stage { background: #000; border-radius: 8px; overflow: hidden; }
+  #face-canvas { display: block; width: 100%; height: auto; image-rendering: auto; }
+  #face-stage:fullscreen { display: flex; align-items: center; justify-content: center; background: #000; border-radius: 0; }
+  #face-stage:fullscreen canvas { width: auto; height: auto; max-width: 100%; max-height: 100%; }
   .muted { color: var(--muted); }
   .empty { color: var(--muted); padding: 30px; text-align: center; border: 1px dashed var(--line); border-radius: 10px; }
   table.kv { width: 100%; border-collapse: collapse; }
@@ -119,6 +123,7 @@
 <div class="container">
   <div class="tabs" id="tabs">
     <button class="tab active" data-view="themes"></button>
+    <button class="tab" data-view="face"></button>
     <button class="tab" data-view="catalog"></button>
     <button class="tab" data-view="artwork"></button>
     <button class="tab" data-view="backups"></button>
@@ -172,6 +177,19 @@
         <div class="full help" id="cd-now"></div>
         <div class="full row"><button class="primary" id="btn-cd-save"></button></div>
       </div>
+    </div>
+  </section>
+
+  <!-- Face -->
+  <section class="view" id="view-face">
+    <div class="panel">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <h2 id="face-title" style="margin:0"></h2>
+        <button class="small" id="btn-face-full"></button>
+      </div>
+      <div class="help" id="face-help" style="margin:10px 0"></div>
+      <div id="face-stage"><canvas id="face-canvas" width="16" height="9"></canvas></div>
+      <div class="help" id="face-state" style="margin-top:8px"></div>
     </div>
   </section>
 
@@ -437,6 +455,7 @@
 <div class="lightbox" id="lightbox"><img id="lightbox-img" alt=""></div>
 <div class="toasts" id="toasts"></div>
 
+<script src="/face/face-page.js"></script>
 <script>
 (function () {
   'use strict';
@@ -504,7 +523,10 @@
     document.title = t('MANAGER_TITLE');
     $('title').textContent = t('MANAGER_TITLE');
     $('btn-close').textContent = t('MANAGER_CLOSE');
-    var tabs = { themes: 'MANAGER_TAB_THEMES', catalog: 'MANAGER_TAB_CATALOG', artwork: 'MANAGER_TAB_ARTWORK', backups: 'MANAGER_TAB_BACKUPS', system: 'MANAGER_TAB_SYSTEM', remotes: 'MANAGER_TAB_REMOTES', status: 'MANAGER_TAB_STATUS' };
+    var tabs = { themes: 'MANAGER_TAB_THEMES', face: 'MANAGER_TAB_FACE', catalog: 'MANAGER_TAB_CATALOG', artwork: 'MANAGER_TAB_ARTWORK', backups: 'MANAGER_TAB_BACKUPS', system: 'MANAGER_TAB_SYSTEM', remotes: 'MANAGER_TAB_REMOTES', status: 'MANAGER_TAB_STATUS' };
+    $('face-title').textContent = t('MANAGER_FACE_TITLE');
+    $('face-help').textContent = t('MANAGER_FACE_HELP');
+    $('btn-face-full').textContent = t('MANAGER_FACE_FULL');
     $('rm-title').textContent = t('MANAGER_RM_TITLE');
     $('rm-help').textContent = t('MANAGER_RM_HELP');
     $('btn-rm-refresh').textContent = t('MANAGER_REFRESH');
@@ -616,6 +638,7 @@
     if (name === 'status') { loadStatus(); }
     if (name === 'system') { loadUpdate(false); loadPerformance(); loadSharing(); loadTouch(); loadLogging(); }
     if (name === 'remotes') loadRemotes();
+    if (window.GlassFace) { if (name === 'face') { GlassFace.show(); } else { GlassFace.hide(); } }
   }
 
   // ---- remote displays -----------------------------------------------
@@ -1295,6 +1318,7 @@
         ['MANAGER_ST_REMOTES', !s.remotes || !s.remotes.enabled ? t('MANAGER_RM_OFF') :
           (s.remotes.serving ? t('MANAGER_RM_SERVING_UP') : t('MANAGER_RM_SERVING_DOWN')) + ' · ' + t('MANAGER_RM_FRAMES') + ' ' + s.remotes.ports.frames + ' · ' + t('MANAGER_RM_CHANNEL') + ' ' + s.remotes.ports.channel + ' · ' + t('MANAGER_RM_BEACON') + ' ' + s.remotes.ports.beacon +
           ' · ' + s.remotes.receiving + ' ' + t('MANAGER_ST_RECEIVING') + (s.remotes.problem ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + s.remotes.problem : '')],
+        ['MANAGER_ST_FACE', !s.face ? '-' : s.face.pages + ' ' + t('MANAGER_ST_FACE_PAGES') + ' · ' + (s.face.frames ? t('MANAGER_ST_FACE_FRAMES') : t('MANAGER_ST_FACE_NO_FRAMES'))],
         ['MANAGER_ST_RINGS', s.rings.length ? s.rings.map(function (r) { return r.name + ' (' + r.rate + ' Hz, ' + r.channels + ' ch, ' + (r.live ? t('MANAGER_ST_RING_LIVE') : t('MANAGER_ST_RING_QUIET') + (r.writtenAgoMs !== null ? ' ' + Math.round(r.writtenAgoMs / 1000) + ' s' : '')) + ')'; }).join('; ') : t('MANAGER_ST_NONE')],
         ['MANAGER_ST_CATALOG', s.catalog.count + ' ' + t('MANAGER_CATALOG_ENTRIES') + (s.catalog.updated ? ' · ' + t('MANAGER_CATALOG_UPDATED') + ' ' + fmtDate(s.catalog.updated) : '') + ' · ' + s.catalog.installed + ' ' + t('MANAGER_ST_INSTALLED_FROM')],
         ['MANAGER_ST_DISK', s.diskFree !== null ? fmtBytes(s.diskFree) + ' ' + t('MANAGER_ST_FREE') : '-'],
@@ -1534,6 +1558,7 @@
   }
   api('GET', '/api/i18n').then(function (data) { S = data.strings || {}; }).catch(function () {}).then(function () {
     applyStrings();
+    if (window.GlassFace) GlassFace.init({ t: t, version: function () { return state.status && state.status.version ? state.status.version : ''; } });
     loadThemes().then(loadSettings);
     loadStatus();
     api('GET', '/api/update').then(updateBadge).catch(function () {});

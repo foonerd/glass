@@ -40,79 +40,16 @@ pub struct Fonts {
     by_path: HashMap<String, Arc<Face>>,
 }
 
-/// Files the host hands over in place of a file system. A browser has no
-/// disk: the page puts the theme's pictures and fonts here under the paths
-/// the skin names, and every reader in this crate looks here when the file
-/// system has nothing. On a machine it stays empty and costs one lookup.
-pub mod vfs {
-    use std::collections::HashMap;
-    use std::sync::{Arc, Mutex, OnceLock};
+/// The files a host hands over in place of a file system, and the reader
+/// every picture and font here goes through: `lead`'s, shared with what
+/// reads the configuration and the theme.
+pub use lead::{read_file, vfs};
 
-    fn table() -> &'static Mutex<HashMap<String, Arc<[u8]>>> {
-        static TABLE: OnceLock<Mutex<HashMap<String, Arc<[u8]>>>> = OnceLock::new();
-        TABLE.get_or_init(|| Mutex::new(HashMap::new()))
-    }
-
-    /// Keep `bytes` as the file at `path`; a later put replaces it.
-    pub fn put(path: &str, bytes: Vec<u8>) {
-        if let Ok(mut table) = table().lock() {
-            table.insert(path.to_string(), Arc::from(bytes));
-        }
-    }
-
-    /// The bytes put under `path`, shared with whoever else holds them.
-    pub fn get(path: &str) -> Option<Arc<[u8]>> {
-        table().lock().ok()?.get(path).cloned()
-    }
-
-    /// Whether a file was put under `path`.
-    pub fn has(path: &str) -> bool {
-        table().lock().is_ok_and(|table| table.contains_key(path))
-    }
-
-    /// Forget every file.
-    pub fn clear() {
-        if let Ok(mut table) = table().lock() {
-            table.clear();
-        }
-    }
-}
-
-/// The bytes of a file: read from the file system, else what the host put
-/// in `vfs` under the same path.
-pub fn read_file(path: &Path) -> Option<Vec<u8>> {
-    #[cfg(not(target_arch = "wasm32"))]
-    if let Ok(bytes) = std::fs::read(path) {
-        return Some(bytes);
-    }
-    vfs::get(path.to_str()?).map(|bytes| bytes.to_vec())
-}
-
-/// Microseconds on a clock that only moves forward: the process's own on a
-/// machine; on a target without one, what the host last set.
-pub fn clock_us() -> u64 {
-    #[cfg(not(target_arch = "wasm32"))]
-    {
-        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
-        START
-            .get_or_init(std::time::Instant::now)
-            .elapsed()
-            .as_micros() as u64
-    }
-    #[cfg(target_arch = "wasm32")]
-    {
-        HOST_CLOCK_US.load(std::sync::atomic::Ordering::Relaxed)
-    }
-}
-
+/// The clock the stages and the painters are timed by: `lead`'s, the
+/// process's own or the host's where the target has none.
+pub use lead::clock_us;
 #[cfg(target_arch = "wasm32")]
-static HOST_CLOCK_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
-
-/// The host's clock, in microseconds, on a target without one of its own.
-#[cfg(target_arch = "wasm32")]
-pub fn set_clock_us(us: u64) {
-    HOST_CLOCK_US.store(us, std::sync::atomic::Ordering::Relaxed);
-}
+pub use lead::set_clock_us;
 
 /// A font file mapped into memory rather than read: the kernel brings in
 /// only the pages the glyphs touch, and shares them with any other process
@@ -4586,6 +4523,128 @@ fn plan_indicators<'a>(
             names,
             ops,
         );
+    }
+}
+
+/// A theme picture by file name under the theme's folder; none for an
+/// empty name or a file that is not there.
+pub fn load_theme(dir: &str, file: &str) -> Option<Frame> {
+    if dir.is_empty() || file.is_empty() {
+        return None;
+    }
+    read_png(Path::new(dir).join(file).as_path())
+}
+
+/// Everything decoded once per meter: its pictures, fonts and art mask,
+/// as the display and the browser module both prepare them.
+pub struct MeterAssets {
+    pub front: Option<Spans>,
+    /// The indicator for the left or mono channel, mirrored when the meter flips it.
+    pub indicator: Option<Frame>,
+    /// The right channel's indicator when it differs from the left one.
+    pub indicator_right: Option<Frame>,
+    pub fonts: Fonts,
+    pub art_mask: Option<Frame>,
+    /// The spectrum's pictures when the meter shows one.
+    pub spectrum: Option<SpectrumAssets>,
+    /// The tonearm picture when the meter has one.
+    pub tonearm: Option<Frame>,
+    /// The theme's reel pictures; an album's reel is scaled to their size.
+    pub reels: (Option<Frame>, Option<Frame>),
+    /// The indicators' prepared states and pictures.
+    pub indicators: Option<IndicatorAssets>,
+    /// The screen picture and face composed once per meter; the pictures
+    /// themselves are not kept.
+    pub base: Frame,
+}
+
+impl MeterAssets {
+    /// What the meter's pictures and fonts take, by store, in bytes.
+    pub fn memory(&self) -> Vec<(&'static str, usize)> {
+        vec![
+            ("base", self.base.bytes()),
+            ("front", self.front.as_ref().map_or(0, Spans::bytes)),
+            (
+                "needles",
+                bytes_of([&self.indicator, &self.indicator_right]),
+            ),
+            ("tonearm", bytes_of([&self.tonearm])),
+            ("reels", bytes_of([&self.reels.0, &self.reels.1])),
+            ("mask", bytes_of([&self.art_mask])),
+            (
+                "spectrum",
+                self.spectrum.as_ref().map_or(0, SpectrumAssets::bytes),
+            ),
+            (
+                "indicators",
+                self.indicators.as_ref().map_or(0, IndicatorAssets::bytes),
+            ),
+            ("fonts", self.fonts.bytes()),
+        ]
+    }
+
+    /// The meter's assets from its skin: the fonts, the indicator flipped
+    /// as the meter says, the base composed from the screen picture and
+    /// the face, and every other picture the meter names.
+    pub fn load(skin: &lead::SkinDesc) -> Self {
+        let mut fonts = Fonts::load(&skin.fonts);
+        for field in [&skin.time, &skin.time_elapsed, &skin.time_total]
+            .into_iter()
+            .flatten()
+        {
+            fonts.add_file(&field.font_file);
+        }
+        let picture = load_theme(&skin.theme_dir, &skin.indicator);
+        let (flip_left, flip_right) = match (skin.meter.kind, &skin.meter.linear) {
+            (MeterKind::Linear, Some(linear)) => (linear.flip_left, linear.flip_right),
+            _ => (skin.meter.flip_left, skin.meter.flip_right),
+        };
+        let indicator_right = match (&picture, flip_left == flip_right) {
+            (Some(p), false) if flip_right => Some(flip_x(p)),
+            (Some(p), false) => Some(p.clone()),
+            _ => None,
+        };
+        let indicator = match picture {
+            Some(p) if flip_left => Some(flip_x(&p)),
+            other => other,
+        };
+        let background = load_theme(&skin.theme_dir, &skin.background);
+        let face = load_theme(&skin.theme_dir, &skin.face);
+        let base = compose_base(
+            skin.width.max(1),
+            skin.height.max(1),
+            background.as_ref(),
+            face.as_ref(),
+            skin.face_at,
+        );
+        Self {
+            base,
+            front: load_theme(&skin.theme_dir, &skin.front).map(Spans::new),
+            indicator,
+            indicator_right,
+            fonts,
+            art_mask: skin
+                .art
+                .as_ref()
+                .filter(|art| !art.mask.is_empty())
+                .and_then(|art| read_png(Path::new(&art.mask))),
+            spectrum: skin.spectrum.as_ref().map(SpectrumAssets::load),
+            tonearm: skin
+                .tonearm
+                .as_ref()
+                .and_then(|arm| read_png(Path::new(&arm.file))),
+            reels: (
+                skin.reels
+                    .as_ref()
+                    .and_then(|r| r.left.as_ref())
+                    .and_then(|r| read_png(Path::new(&r.theme_file))),
+                skin.reels
+                    .as_ref()
+                    .and_then(|r| r.right.as_ref())
+                    .and_then(|r| read_png(Path::new(&r.theme_file))),
+            ),
+            indicators: skin.indicators.as_ref().map(IndicatorAssets::load),
+        }
     }
 }
 

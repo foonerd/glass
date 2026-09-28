@@ -12,7 +12,9 @@ use std::net::{TcpStream, ToSocketAddrs};
 use std::os::unix::net::UnixStream;
 #[cfg(unix)]
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use lead::Moment;
 
 use serde::Serialize;
 use serde_json::Value;
@@ -152,7 +154,7 @@ pub struct Channel {
     stream: Option<Link>,
     pending: Vec<u8>,
     queued: Vec<Event>,
-    tried_at: Option<Instant>,
+    tried_at: Option<Moment>,
     /// Said again after every connect, so the plugin knows the remote across reconnects.
     hello: Option<RemoteHello>,
 }
@@ -214,7 +216,7 @@ impl Channel {
     }
 
     fn connect(&mut self) -> bool {
-        self.tried_at = Some(Instant::now());
+        self.tried_at = Some(Moment::now());
         let link = match &self.target {
             #[cfg(unix)]
             Target::Path(path) => match UnixStream::connect(path) {
@@ -256,7 +258,7 @@ impl Channel {
     fn drop_stream(&mut self) {
         self.stream = None;
         self.pending.clear();
-        self.tried_at = Some(Instant::now());
+        self.tried_at = Some(Moment::now());
     }
 
     /// The events that arrived since the last poll. While the socket is
@@ -302,7 +304,7 @@ impl Channel {
     /// first frame is not painted from nothing. What arrives is kept for
     /// the next [`Channel::pump`].
     pub fn await_state(&mut self, limit: Duration) {
-        let started = Instant::now();
+        let started = Moment::now();
         while self.connected() && started.elapsed() < limit {
             let events = self.pump();
             let got_state = events.iter().any(|e| matches!(e, Event::State(_)));
@@ -347,7 +349,9 @@ impl Channel {
 
 /// One line from the plugin. Lines that are not JSON objects with a known
 /// `kind` are ignored, so a newer plugin may say more than this reads.
-fn decode(line: &[u8]) -> Option<Event> {
+/// One line of the plugin's, a JSON object with a `kind`, as an event;
+/// `None` for a line of another kind or none at all.
+pub fn decode(line: &[u8]) -> Option<Event> {
     let value: Value = serde_json::from_slice(line).ok()?;
     let text = |key: &str| {
         value
@@ -399,7 +403,7 @@ mod tests {
     }
 
     fn pump_until(channel: &mut Channel, count: usize) -> Vec<Event> {
-        let started = Instant::now();
+        let started = Moment::now();
         let mut events = Vec::new();
         while events.len() < count && started.elapsed() < Duration::from_secs(5) {
             events.extend(channel.pump());
@@ -470,7 +474,8 @@ mod tests {
         let listener = UnixListener::bind(&path).unwrap();
         assert!(channel.pump().is_empty(), "no try before the rest is over");
         assert!(!channel.connected());
-        channel.tried_at = Some(Instant::now() - RETRY);
+        // The rest is over: a moment never tried is due at once.
+        channel.tried_at = None;
         assert!(channel.pump().is_empty());
         assert!(channel.connected());
         drop(listener);
@@ -489,7 +494,7 @@ mod tests {
         let mut channel = Channel::at(&path);
         assert!(channel.connected());
         server.join().unwrap();
-        let started = Instant::now();
+        let started = Moment::now();
         while channel.connected() && started.elapsed() < Duration::from_secs(5) {
             channel.pump();
             thread::sleep(Duration::from_millis(5));

@@ -74,6 +74,12 @@ ship aarch64-unknown-linux-gnu armv8 aarch64-linux-gnu-strip
 # Volumio bookworm runs glibc 2.36 on every architecture. The cross
 # toolchain's sysroot is newer, and a symbol versioned above 2.36 (even a
 # weak one) makes the loader refuse the whole binary on the player.
+# The browser module: the pipeline for the manager's Face tab, one file
+# the plugin serves; it ships inside the plugin zip, not in bin/.
+echo "ship: browser module"
+cargo build --locked --profile face --target wasm32-unknown-unknown -p glass-face
+install -D -m 644 target/wasm32-unknown-unknown/face/glass_face.wasm plugin/face/glass-face.wasm
+
 echo "ship: glibc"
 glibc_max() {
   readelf -W --dyn-syms "$1" | grep -o 'GLIBC_2\.[0-9]*' | sort -t. -k2,2n -u | tail -n1

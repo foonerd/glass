@@ -12,9 +12,14 @@ use std::time::{Duration, Instant};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sha2::{Digest, Sha256};
-use tap::ring::{merge_hops, Frame};
 use tap::wire;
 
+pub use crate::bring::{
+    asset_plan, config_texts, custom_font_keys, encode, rewrite_config, theme_plan, Asset, Bring,
+    Choice, LocalThemes, RemoteAssets, RemoteConfig, RemoteFiles, Texts, ThemeFile, ThemeFiles,
+    ThemeTree,
+};
+use crate::hops::WireHops;
 use crate::{Hops, Taken};
 
 pub const DEFAULT_FRAMES_PORT: u16 = 5580;
@@ -24,36 +29,18 @@ pub const DEFAULT_BEACON_PORT: u16 = 5579;
 pub const DEFAULT_PLAYER_PORT: u16 = 3000;
 /// A subscribe goes to the player this often; it forgets a remote after fifteen seconds.
 const SUBSCRIBE_EVERY: Duration = Duration::from_secs(5);
-/// No frame for this long is silence, as a ring gone quiet is.
-const QUIET: Duration = Duration::from_millis(500);
-/// Stamps further apart than this are not in order, or a stream started
-/// again; the packet's own count stands in then.
-const MAX_GAP_NS: u64 = 2_000_000_000;
 const DATAGRAM_MAX: usize = 8192;
 
-/// The frames as they arrive from the player, merged between two looks.
+/// The frames as they arrive from the player over UDP, merged between
+/// two looks; the decoding, the ordering, the gain and the decay are
+/// [`WireHops`]'s.
 pub struct NetHops {
     socket: UdpSocket,
     server: SocketAddr,
     subscribe: Vec<u8>,
     subscribed_at: Option<Instant>,
-    last_seq: Option<u32>,
-    last_packet_at: Option<Instant>,
-    /// The player's stamp on the last packet: the next one's elapsed
-    /// frames are the time between them at the stream's rate.
-    last_time_ns: Option<u64>,
-    rate: u32,
     buffer: Vec<u8>,
-    /// Datagrams received and refused, for the log.
-    pub received: u64,
-    pub refused: u64,
-    /// The factor levels are scaled by on this remote, from a gain in decibels.
-    gain: f32,
-    /// The share of its height a spectrum bar may fall per frame at most;
-    /// 0 leaves the bars as the player sends them.
-    decay: f32,
-    /// The bars as last shown, for the decay.
-    last_spectrum: [Vec<f32>; 2],
+    wire: WireHops,
 }
 
 impl NetHops {
@@ -80,16 +67,8 @@ impl NetHops {
             server,
             subscribe,
             subscribed_at: None,
-            last_seq: None,
-            last_packet_at: None,
-            last_time_ns: None,
-            rate: 0,
             buffer: vec![0u8; DATAGRAM_MAX],
-            received: 0,
-            refused: 0,
-            gain: 1.0,
-            decay: 0.0,
-            last_spectrum: [Vec::new(), Vec::new()],
+            wire: WireHops::new(),
         })
     }
 
@@ -99,23 +78,14 @@ impl NetHops {
 
     /// Scale the levels by a gain in decibels, within plus or minus twelve.
     pub fn with_gain_db(mut self, db: f32) -> Self {
-        let db = if db.is_finite() {
-            db.clamp(-12.0, 12.0)
-        } else {
-            0.0
-        };
-        self.gain = 10f32.powf(db / 20.0);
+        self.wire = std::mem::take(&mut self.wire).with_gain_db(db);
         self
     }
 
     /// Let a spectrum bar fall by at most this share of its height per
     /// frame, 0.5 to 0.99 (Peppy Remote's decay rate); 0 turns it off.
     pub fn with_spectrum_decay(mut self, per_frame: f32) -> Self {
-        self.decay = if per_frame.is_finite() && per_frame >= 0.5 {
-            per_frame.min(0.99)
-        } else {
-            0.0
-        };
+        self.wire = std::mem::take(&mut self.wire).with_spectrum_decay(per_frame);
         self
     }
 
@@ -133,70 +103,11 @@ impl NetHops {
 impl Hops for NetHops {
     fn take(&mut self) -> Taken {
         self.subscribe_if_due();
-        let mut frames: Vec<Frame> = Vec::new();
-        let mut elapsed: u64 = 0;
         loop {
             match self.socket.recv_from(&mut self.buffer) {
                 Ok((n, from)) => {
-                    if from.ip() != self.server.ip() {
-                        continue;
-                    }
-                    self.received += 1;
-                    match wire::decode(&self.buffer[..n]) {
-                        Ok(packet) => {
-                            // Newer by the player's stamp, the count breaking a tie: a
-                            // daemon of an earlier release numbered its datagrams by the
-                            // ring, whose count starts again with every stream, while the
-                            // stamps go on.
-                            let by_seq = self
-                                .last_seq
-                                .is_none_or(|last| wire::Packet::is_after(packet.seq, last));
-                            let new = match self.last_time_ns {
-                                None => by_seq,
-                                Some(last) => {
-                                    packet.time_ns > last || (packet.time_ns == last && by_seq)
-                                }
-                            };
-                            if !new {
-                                continue;
-                            }
-                            self.last_seq = Some(packet.seq);
-                            // The frames elapsed since the last packet: the time between
-                            // the player's stamps at the stream's rate, which spans dropped
-                            // datagrams too; the packet's own count for the first one, or
-                            // when the stamps are not in order.
-                            let by_stamp = self
-                                .last_time_ns
-                                .map(|last| packet.time_ns.saturating_sub(last))
-                                .filter(|ns| (1..=MAX_GAP_NS).contains(ns))
-                                .map(|ns| {
-                                    ns.saturating_mul(u64::from(packet.rate)) / 1_000_000_000
-                                });
-                            let in_hop = by_stamp.unwrap_or(u64::from(packet.frames)).max(1);
-                            self.last_time_ns = Some(packet.time_ns);
-                            // A frame of silence, the daemon's word that the ring went quiet or a
-                            // hop with nothing in it: the levels fall the way they fall at a stop.
-                            let silent = packet.peak.iter().all(|p| *p <= 0.0)
-                                && packet.rms.iter().all(|r| *r <= 0.0)
-                                && packet.bins.iter().all(|b| *b == 0);
-                            if silent {
-                                self.last_packet_at = None;
-                                self.last_spectrum = [Vec::new(), Vec::new()];
-                                continue;
-                            }
-                            self.last_packet_at = Some(Instant::now());
-                            self.rate = packet.rate;
-                            elapsed += in_hop;
-                            let mut frame = packet.frame();
-                            if self.gain != 1.0 {
-                                scale_frame(&mut frame, self.gain);
-                            }
-                            if self.decay > 0.0 {
-                                decay_spectrum(&mut frame, &mut self.last_spectrum, self.decay);
-                            }
-                            frames.push(frame);
-                        }
-                        Err(_) => self.refused += 1,
+                    if from.ip() == self.server.ip() {
+                        self.wire.push(&self.buffer[..n]);
                     }
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => break,
@@ -204,45 +115,11 @@ impl Hops for NetHops {
                 Err(_) => break,
             }
         }
-        let quiet = self.last_packet_at.is_none_or(|at| at.elapsed() > QUIET);
-        let hop =
-            merge_hops(frames.into_iter()).map(|frame| (frame, self.rate.max(1), elapsed.max(1)));
-        Taken { hop, quiet }
+        self.wire.take()
     }
 
     fn stats(&self) -> (u64, u64) {
-        (self.received, self.refused)
-    }
-}
-
-/// Every level of a frame multiplied by `gain`, kept within full scale.
-fn scale_frame(frame: &mut Frame, gain: f32) {
-    for level in frame.peak.iter_mut().chain(frame.rms.iter_mut()) {
-        *level = (*level * gain).min(1.0);
-    }
-    for bin in frame
-        .spectrum
-        .iter_mut()
-        .flat_map(|channel| channel.iter_mut())
-    {
-        *bin = (*bin * gain).min(1.0);
-    }
-}
-
-/// Each spectrum bar no lower than the last one's height times `decay`:
-/// bars rise at once and fall by at most that share per frame. `last`
-/// keeps what was shown; a channel with a different number of bins
-/// starts afresh.
-fn decay_spectrum(frame: &mut Frame, last: &mut [Vec<f32>; 2], decay: f32) {
-    for (channel, kept) in frame.spectrum.iter_mut().zip(last.iter_mut()) {
-        if kept.len() != channel.len() {
-            kept.clear();
-            kept.resize(channel.len(), 0.0);
-        }
-        for (bin, held) in channel.iter_mut().zip(kept.iter_mut()) {
-            *bin = bin.max(*held * decay);
-            *held = *bin;
-        }
+        self.wire.stats()
     }
 }
 
@@ -439,32 +316,6 @@ pub fn frames_address(beacon: &Beacon) -> std::io::Result<SocketAddr> {
         })
 }
 
-/// What a remote wants of the player's configuration: the player's own
-/// theme and meter when nothing is set, or a theme of its choosing from
-/// the player's themes with a meter choice of its own.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct Choice {
-    /// A theme folder of the player's to bring instead of the one on show,
-    /// or, with `local` set, a theme folder under the local folders.
-    pub theme: Option<String>,
-    /// The `meter` value: a name, a comma list, or `random`.
-    pub meter: Option<String>,
-    /// Seconds between meters when they rotate, 15 to 1000.
-    pub interval_s: Option<u32>,
-    /// Whether a new title moves to the next meter.
-    pub on_title: Option<bool>,
-    /// Themes on the remote's own machine: the configuration is pointed
-    /// at these folders and no theme is brought from the player.
-    pub local: Option<LocalThemes>,
-}
-
-/// The folders themes are read from on the remote's own machine.
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct LocalThemes {
-    pub templates: PathBuf,
-    pub spectrum: PathBuf,
-}
-
 /// The address this host reaches `player` from: what the player sees as
 /// the remote's address, and what a browser on the same network reaches.
 pub fn own_address_towards(player: &str, port: u16) -> Option<IpAddr> {
@@ -562,70 +413,6 @@ pub struct Synced {
     pub meter: String,
     pub fetched: usize,
     pub kept: usize,
-}
-
-#[derive(Deserialize)]
-struct Asset {
-    name: String,
-    sha256: String,
-    #[serde(default)]
-    bytes: u64,
-}
-
-#[derive(Deserialize)]
-struct RemoteConfig {
-    version: String,
-    theme: String,
-    #[serde(default)]
-    meter: String,
-    files: RemoteFiles,
-    #[serde(default)]
-    assets: RemoteAssets,
-}
-
-#[derive(Deserialize)]
-struct RemoteFiles {
-    meter: String,
-    #[serde(default)]
-    spectrum: String,
-}
-
-#[derive(Deserialize, Default)]
-struct RemoteAssets {
-    #[serde(default)]
-    fonts: Vec<Asset>,
-    #[serde(default)]
-    icons: Vec<Asset>,
-    /// The player's web fonts, the ones its configuration's `font.path`
-    /// names; a player older than Glass 0.7.14 lists none.
-    #[serde(default)]
-    webfonts: Vec<Asset>,
-    /// Fonts the listener uploaded to the player, named by path in its
-    /// configuration; a player older than Glass 0.7.27 lists none.
-    #[serde(default)]
-    custom: Vec<Asset>,
-}
-
-#[derive(Deserialize)]
-struct ThemeFiles {
-    folder: String,
-    files: Vec<ThemeFile>,
-    #[serde(default)]
-    spectrum: Option<ThemeTree>,
-}
-
-#[derive(Deserialize)]
-struct ThemeTree {
-    folder: String,
-    files: Vec<ThemeFile>,
-}
-
-#[derive(Deserialize)]
-struct ThemeFile {
-    path: String,
-    sha256: String,
-    #[serde(default)]
-    bytes: u64,
 }
 
 /// What was fetched before, by path under the home, with its checksum.
@@ -752,101 +539,19 @@ impl Sync {
         let config: RemoteConfig =
             serde_json::from_str(&self.get_text(&format!("{}/api/remote/config", self.manager))?)
                 .map_err(|e| format!("remote config: {e}"))?;
-        let (templates, spectrum_templates) = match &choice.local {
-            Some(local) => (local.templates.clone(), local.spectrum.clone()),
-            None => (
-                self.home.join("templates"),
-                self.home.join("templates_spectrum"),
-            ),
-        };
-        let webfonts = self.home.join("webfonts");
-        let theme_wanted = choice
-            .theme
-            .as_deref()
-            .map(str::trim)
-            .filter(|t| !t.is_empty())
-            .unwrap_or(&config.theme)
-            .to_string();
-        let templates = templates.to_string_lossy().into_owned();
-        let webfonts = webfonts.to_string_lossy().into_owned();
-        let interval = choice.interval_s.map(|i| i.clamp(15, 1000).to_string());
-        let on_title = choice.on_title.map(|t| if t { "True" } else { "False" });
-        // A style set in an uploaded font names it by its path on the player;
-        // here it is the copy brought into this home.
-        let custom_dir = self.home.join("customfonts");
-        let custom_names: Vec<String> = config
-            .assets
-            .custom
-            .iter()
-            .map(|f| f.name.clone())
-            .collect();
-        let custom_keys = custom_font_keys(&config.files.meter, &custom_dir, &custom_names);
-        let mut keys: Vec<(&str, &str)> = vec![
-            ("base.folder", &templates),
-            ("font.path", &webfonts),
-            ("meter.folder", &theme_wanted),
-        ];
-        for (key, value) in &custom_keys {
-            keys.push((key.as_str(), value.as_str()));
-        }
-        if let Some(meter) = choice.meter.as_deref().filter(|m| !m.trim().is_empty()) {
-            keys.push(("meter", meter));
-        }
-        if let Some(interval) = interval.as_deref() {
-            keys.push(("random.meter.interval", interval));
-        }
-        if let Some(on_title) = on_title {
-            keys.push(("random.change.title", on_title));
-        }
-        let meter_text = rewrite_config(&config.files.meter, &keys);
-        let spectrum_templates = spectrum_templates.to_string_lossy().into_owned();
-        let spectrum_text = rewrite_config(
-            &config.files.spectrum,
-            &[
-                ("base.folder", &spectrum_templates),
-                ("spectrum.folder", &theme_wanted),
-            ],
-        );
-        std::fs::write(self.home.join("config/meter.txt"), meter_text)
+        let texts = config_texts(&config, &self.home, choice);
+        let theme_wanted = texts.theme.clone();
+        std::fs::write(self.home.join("config/meter.txt"), &texts.meter)
             .map_err(|e| format!("meter.txt: {e}"))?;
-        std::fs::write(self.home.join("config/spectrum.txt"), spectrum_text)
+        std::fs::write(self.home.join("config/spectrum.txt"), &texts.spectrum)
             .map_err(|e| format!("spectrum.txt: {e}"))?;
         let mut fetched = 0usize;
         let mut kept = 0usize;
         let mut count = |brought: bool| if brought { fetched += 1 } else { kept += 1 };
 
-        for font in &config.assets.fonts {
-            let url = format!(
-                "{}/api/remote/asset/font/{}",
-                self.manager,
-                encode(&font.name)
-            );
-            count(self.bring(&format!("fonts/{}", font.name), &url, &font.sha256)?);
-            let _ = font.bytes;
-        }
-        for icon in &config.assets.icons {
-            let url = format!(
-                "{}/api/remote/asset/icon/{}",
-                self.manager,
-                encode(&icon.name)
-            );
-            count(self.bring(&format!("format-icons/{}", icon.name), &url, &icon.sha256)?);
-        }
-        for font in &config.assets.webfonts {
-            let url = format!(
-                "{}/api/remote/asset/webfont/{}",
-                self.manager,
-                encode(&font.name)
-            );
-            count(self.bring(&format!("webfonts/{}", font.name), &url, &font.sha256)?);
-        }
-        for font in &config.assets.custom {
-            let url = format!(
-                "{}/api/remote/asset/custom/{}",
-                self.manager,
-                encode(&font.name)
-            );
-            count(self.bring(&format!("customfonts/{}", font.name), &url, &font.sha256)?);
+        for item in asset_plan(&config) {
+            let url = format!("{}{}", self.manager, item.url);
+            count(self.bring(&item.relative, &url, &item.sha256)?);
         }
         if config.assets.webfonts.is_empty() {
             self.log.push(
@@ -875,34 +580,9 @@ impl Sync {
                 encode(&theme_wanted)
             ))?)
             .map_err(|e| format!("theme files: {e}"))?;
-            for file in &theme.files {
-                let url = format!(
-                    "{}/api/themes/{}/file?tree=templates&path={}",
-                    self.manager,
-                    encode(&theme.folder),
-                    encode(&file.path)
-                );
-                count(self.bring(
-                    &format!("templates/{}/{}", theme.folder, file.path),
-                    &url,
-                    &file.sha256,
-                )?);
-                let _ = file.bytes;
-            }
-            if let Some(spectrum) = &theme.spectrum {
-                for file in &spectrum.files {
-                    let url = format!(
-                        "{}/api/themes/{}/file?tree=templates_spectrum&path={}",
-                        self.manager,
-                        encode(&spectrum.folder),
-                        encode(&file.path)
-                    );
-                    count(self.bring(
-                        &format!("templates_spectrum/{}/{}", spectrum.folder, file.path),
-                        &url,
-                        &file.sha256,
-                    )?);
-                }
+            for item in theme_plan(&theme) {
+                let url = format!("{}{}", self.manager, item.url);
+                count(self.bring(&item.relative, &url, &item.sha256)?);
             }
         }
         self.ledger.version = config.version.clone();
@@ -920,81 +600,6 @@ impl Sync {
             kept,
         })
     }
-}
-
-/// `key = value` lines at the top level of a configuration, the given keys
-/// given new values; a key not there is added under `[current]`.
-/// The `font.<style>` keys whose value names an uploaded font by path,
-/// each with the path of that font's copy under `dir`, by file name.
-pub fn custom_font_keys(text: &str, dir: &Path, names: &[String]) -> Vec<(String, String)> {
-    [
-        "font.light",
-        "font.regular",
-        "font.bold",
-        "font.italic",
-        "font.digi",
-    ]
-    .iter()
-    .filter_map(|key| {
-        let value = lead::current_value(text, key)?;
-        let value = value.trim();
-        let name = Path::new(value).file_name()?.to_str()?;
-        if value.starts_with('/') && names.iter().any(|n| n == name) {
-            Some((
-                (*key).to_string(),
-                dir.join(name).to_string_lossy().into_owned(),
-            ))
-        } else {
-            None
-        }
-    })
-    .collect()
-}
-
-pub fn rewrite_config(text: &str, keys: &[(&str, &str)]) -> String {
-    let mut out: Vec<String> = Vec::new();
-    let mut seen: Vec<&str> = Vec::new();
-    for line in text.lines() {
-        let trimmed = line.trim();
-        let mut replaced = None;
-        for (key, value) in keys {
-            if let Some(rest) = trimmed.strip_prefix(key) {
-                if rest.trim_start().starts_with('=') {
-                    replaced = Some(format!("{key} = {value}"));
-                    seen.push(key);
-                    break;
-                }
-            }
-        }
-        out.push(replaced.unwrap_or_else(|| line.to_string()));
-    }
-    for (key, value) in keys {
-        if !seen.contains(key) {
-            let at = out
-                .iter()
-                .position(|l| l.trim().eq_ignore_ascii_case("[current]"))
-                .map(|i| i + 1)
-                .unwrap_or(out.len());
-            out.insert(at, format!("{key} = {value}"));
-        }
-    }
-    let mut joined = out.join("\n");
-    joined.push('\n');
-    joined
-}
-
-/// Percent-encoding for a path segment or a query value.
-pub fn encode(text: &str) -> String {
-    let mut out = String::with_capacity(text.len());
-    for byte in text.bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                out.push(byte as char)
-            }
-            _ => out.push_str(&format!("%{byte:02X}")),
-        }
-    }
-    out
 }
 
 /// A stable id for this display: the host name, or a random one kept in the cache.
@@ -1026,51 +631,9 @@ pub fn remote_id(cache: &Path) -> String {
 
 #[cfg(test)]
 mod tests {
-    #[test]
-    fn a_decay_lets_bars_rise_at_once_and_fall_by_a_share_per_frame() {
-        let mut last = [Vec::new(), Vec::new()];
-        let mut frame = Frame {
-            frames: 0,
-            seq: 0,
-            time_ns: 0,
-            peak: [0.0; 2],
-            rms: [0.0; 2],
-            spectrum: [vec![1.0, 0.5], vec![0.2, 0.0]],
-        };
-        decay_spectrum(&mut frame, &mut last, 0.9);
-        assert_eq!(
-            frame.spectrum,
-            [vec![1.0, 0.5], vec![0.2, 0.0]],
-            "the first frame shows as sent"
-        );
-        let mut next = Frame {
-            frames: 0,
-            seq: 0,
-            time_ns: 0,
-            peak: [0.0; 2],
-            rms: [0.0; 2],
-            spectrum: [vec![0.0, 0.6], vec![0.0, 0.0]],
-        };
-        decay_spectrum(&mut next, &mut last, 0.9);
-        assert!((next.spectrum[0][0] - 0.9).abs() < 1e-6, "fell by a tenth");
-        assert_eq!(next.spectrum[0][1], 0.6, "rose at once");
-        assert!((next.spectrum[1][0] - 0.18).abs() < 1e-6);
-        let mut other_size = Frame {
-            frames: 0,
-            seq: 0,
-            time_ns: 0,
-            peak: [0.0; 2],
-            rms: [0.0; 2],
-            spectrum: [vec![0.1, 0.1, 0.1], vec![0.1]],
-        };
-        decay_spectrum(&mut other_size, &mut last, 0.9);
-        assert_eq!(
-            other_size.spectrum[0],
-            vec![0.1, 0.1, 0.1],
-            "a new bin count starts afresh"
-        );
-    }
-
+    use super::*;
+    use std::thread;
+    use tap::ring::Frame;
     #[test]
     fn an_uploaded_font_named_by_path_points_at_the_copy_brought_here() {
         let text = "[current]\nfont.path = /volumio/fonts\nfont.light = /Lato-Light.ttf\nfont.bold = /data/INTERNAL/glass/fonts/Mine.ttf\nfont.italic = builtin\n";
@@ -1110,8 +673,6 @@ mod tests {
         assert!(config.assets.webfonts.is_empty());
     }
 
-    use super::*;
-
     #[test]
     fn the_hosts_addresses_are_read_from_a_routing_trie() {
         let trie = "Main:\n  +-- 0.0.0.0/0 3 0 5\n     |-- 0.0.0.0\n        /0 universe UNICAST\n     +-- 127.0.0.0/8 2 0 2\n        +-- 127.0.0.0/31 1 0 0\n           |-- 127.0.0.0\n              /32 link BROADCAST\n              /8 host LOCAL\n           |-- 127.0.0.1\n              /32 host LOCAL\n     +-- 192.168.1.0/24 2 0 2\n        |-- 192.168.1.0\n           /32 link BROADCAST\n           /24 link UNICAST\n        |-- 192.168.1.10\n           /32 host LOCAL\n        |-- 192.168.1.255\n           /32 link BROADCAST\nLocal:\n  +-- 192.168.1.0/24 2 0 2\n        |-- 192.168.1.10\n           /32 host LOCAL\n";
@@ -1121,32 +682,6 @@ mod tests {
             vec!["192.168.1.10".parse::<std::net::Ipv4Addr>().unwrap()]
         );
     }
-
-    #[test]
-    fn a_gain_scales_every_level_within_full_scale() {
-        let mut frame = Frame {
-            seq: 1,
-            time_ns: 0,
-            frames: 1,
-            peak: [0.5, 0.9],
-            rms: [0.25, 0.8],
-            spectrum: [vec![0.5, 1.0], vec![0.1, 0.9]],
-        };
-        scale_frame(&mut frame, 2.0);
-        assert_eq!(frame.peak, [1.0, 1.0]);
-        assert_eq!(frame.rms, [0.5, 1.0]);
-        assert_eq!(frame.spectrum[0], vec![1.0, 1.0]);
-        assert_eq!(frame.spectrum[1], vec![0.2, 1.0]);
-        let hops = NetHops::new("127.0.0.1:1".parse().unwrap(), "id", "name", "0")
-            .unwrap()
-            .with_gain_db(-6.0);
-        assert!((hops.gain - 0.5012).abs() < 0.001);
-        let clamped = NetHops::new("127.0.0.1:1".parse().unwrap(), "id", "name", "0")
-            .unwrap()
-            .with_gain_db(40.0);
-        assert!((clamped.gain - 10f32.powf(0.6)).abs() < 0.001);
-    }
-    use std::thread;
 
     #[test]
     fn frames_arrive_over_the_wire_and_merge_between_looks() {
@@ -1195,8 +730,7 @@ mod tests {
         assert_eq!(elapsed, 960, "the frames of both hops");
         assert_eq!(frame.seq, 11);
         assert_eq!(frame.peak, [0.5, 0.9], "the highest of the two");
-        assert_eq!(hops.refused, 1);
-        assert_eq!(hops.received, 4);
+        assert_eq!(hops.stats(), (4, 1));
         thread::sleep(Duration::from_millis(600));
         assert!(hops.take().quiet, "no frame for half a second is silence");
     }
