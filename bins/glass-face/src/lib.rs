@@ -291,7 +291,7 @@ impl Face {
         let showing = showing.as_mut()?;
         let input = showing.source.poll();
         let mut scene = plot::step(&showing.skin, &input);
-        override_scene(touch.drag(), &mut scene);
+        override_scene(touch, &mut scene);
         showing.indicators = scene.indicators.clone();
         showing.metadata = input.metadata;
         let assets = &showing.assets;

@@ -145,6 +145,10 @@ pub struct Indicators {
     pub repeat_state: usize,
     pub play_state: usize,
     pub progress: u32,
+    /// One per button of the spec: whether it shows its active picture,
+    /// by its action and the player's state; a finger on it counts too.
+    #[serde(default)]
+    pub buttons_active: Vec<bool>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -539,6 +543,19 @@ fn indicators(spec: &IndicatorsSpec, meta: &Metadata, progress_pct: f32) -> Indi
         } else {
             0
         },
+        buttons_active: spec
+            .buttons
+            .iter()
+            .map(|b| match b.action {
+                lead::ButtonAction::Play | lead::ButtonAction::Toggle => meta.status == "play",
+                lead::ButtonAction::Pause => meta.status == "pause",
+                lead::ButtonAction::Stop => meta.status != "play" && meta.status != "pause",
+                lead::ButtonAction::Mute => meta.mute,
+                lead::ButtonAction::Random => meta.random,
+                lead::ButtonAction::Repeat => meta.repeat || meta.repeat_single,
+                _ => false,
+            })
+            .collect(),
         play_state: match meta.status.as_str() {
             "play" => 2,
             "pause" => 1,
@@ -572,6 +589,26 @@ fn progress(meta: &Metadata) -> (f32, Option<f32>) {
 
 #[cfg(test)]
 mod tests {
+    /// A button is active by what its action means in the player's state:
+    /// play while playing, mute while muted, a momentary one never on its own.
+    #[test]
+    fn a_button_is_active_by_its_action_and_the_players_state() {
+        let spec = lead::meter_indicators(
+            "[m]\nconfig.extend = True\nbutton.play.pos = 1,1\nbutton.play.size = 4,4\nbutton.play.action = play\nbutton.mute.pos = 9,1\nbutton.mute.size = 4,4\nbutton.mute.action = mute\nbutton.next.pos = 20,1\nbutton.next.size = 4,4\nbutton.next.action = next\n",
+            "m",
+            "/t",
+        )
+        .expect("extended");
+        let meta = Metadata {
+            status: "play".into(),
+            mute: true,
+            ..Metadata::default()
+        };
+        let got = indicators(&spec, &meta, 0.0);
+        // Buttons come sorted by name: mute, next, play.
+        assert_eq!(got.buttons_active, vec![true, false, true]);
+    }
+
     use super::*;
     use lead::{Bins, Input, Levels, SkinDesc};
 

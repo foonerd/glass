@@ -831,7 +831,7 @@ fn session(
             }
         }
         let mut scene = step(&skin, &input);
-        override_scene(touch.drag(), &mut scene);
+        override_scene(&touch, &mut scene);
         let stepped_at = Instant::now();
         let mut rastered_at = stepped_at;
         if let Some(path) = record {

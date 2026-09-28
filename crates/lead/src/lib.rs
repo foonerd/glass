@@ -1407,6 +1407,10 @@ pub struct ButtonSpec {
     pub h: u32,
     /// The picture drawn at the position, or empty for a bare region.
     pub image: String,
+    /// The picture drawn while the button is active, the second of
+    /// `button.<name>.image`'s list; empty draws `image` throughout.
+    #[serde(default)]
+    pub image_active: String,
     pub action: ButtonAction,
 }
 
@@ -1723,15 +1727,24 @@ pub fn meter_indicators(meters_txt: &str, meter: &str, theme_dir: &str) -> Optio
             continue;
         };
         let (w, h) = upair(&format!("button.{name}.size")).unwrap_or((0, 0));
+        // `image = rest.png, active.png`: the second picture shows while
+        // the button is active.
+        let mut pictures = get(&format!("button.{name}.image"))
+            .unwrap_or_default()
+            .split(',')
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+            .map(path);
+        let image = pictures.next().unwrap_or_default();
+        let image_active = pictures.next().unwrap_or_default();
         buttons.push(ButtonSpec {
             name: name.clone(),
             x,
             y,
             w,
             h,
-            image: get(&format!("button.{name}.image"))
-                .map(path)
-                .unwrap_or_default(),
+            image,
+            image_active,
             action,
         });
     }
@@ -4299,13 +4312,19 @@ mod interactive_tests {
 
     #[test]
     fn a_meter_names_its_buttons_and_says_whether_it_is_for_fingers() {
-        let text = "[dash]\nmeter.type = linear\nconfig.extend = True\ninteractive = True\nbutton.play.pos = 10,20\nbutton.play.size = 40,40\nbutton.play.action = toggle\nbutton.nextmeter.pos = 60,20\nbutton.nextmeter.image = next.png\nbutton.nextmeter.action = meter.next\nbutton.bad.pos = 1,1\n";
+        let text = "[dash]\nmeter.type = linear\nconfig.extend = True\ninteractive = True\nbutton.play.pos = 10,20\nbutton.play.size = 40,40\nbutton.play.action = toggle\nbutton.nextmeter.pos = 60,20\nbutton.nextmeter.image = next.png\nbutton.nextmeter.action = meter.next\nbutton.bad.pos = 1,1\nbutton.zmute.pos = 1,2\nbutton.zmute.image = m_off.png, m_on.png\nbutton.zmute.action = mute\n";
         let spec = meter_indicators(text, "dash", "/t").expect("extended");
         assert!(spec.interactive);
         assert_eq!(
             spec.buttons.len(),
-            2,
+            3,
             "a button without an action is no button"
+        );
+        let mute = &spec.buttons[2];
+        assert_eq!(
+            (mute.image.as_str(), mute.image_active.as_str()),
+            ("/t/m_off.png", "/t/m_on.png"),
+            "the second picture of the list is the active one"
         );
         let next = &spec.buttons[0];
         assert_eq!(

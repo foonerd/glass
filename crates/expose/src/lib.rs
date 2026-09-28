@@ -3941,8 +3941,10 @@ pub struct IndicatorAssets {
     pub playstate: Vec<Option<Frame>>,
     pub volume: GaugeAssets,
     pub progress: GaugeAssets,
-    /// One picture per button, when it has one.
+    /// One picture per button, when it has one, and the picture it shows
+    /// while active, when the theme gives one.
     pub buttons: Vec<Option<Frame>>,
+    pub buttons_active: Vec<Option<Frame>>,
 }
 
 #[derive(Default)]
@@ -3966,6 +3968,7 @@ impl IndicatorAssets {
             + gauge(&self.volume)
             + gauge(&self.progress)
             + bytes_of(&self.buttons)
+            + bytes_of(&self.buttons_active)
     }
 
     pub fn load(spec: &lead::IndicatorsSpec) -> Self {
@@ -4071,6 +4074,17 @@ impl IndicatorAssets {
                         None
                     } else {
                         read_png(Path::new(&b.image))
+                    }
+                })
+                .collect(),
+            buttons_active: spec
+                .buttons
+                .iter()
+                .map(|b| {
+                    if b.image_active.is_empty() {
+                        None
+                    } else {
+                        read_png(Path::new(&b.image_active))
                     }
                 })
                 .collect(),
@@ -4498,9 +4512,26 @@ fn plan_indicators<'a>(
         &assets.playstate,
         indicators.play_state,
     );
-    // The theme's buttons, drawn where they are tapped.
-    for (button, picture) in indicators.spec.buttons.iter().zip(assets.buttons.iter()) {
-        if let Some(picture) = picture {
+    // The theme's buttons, drawn where they are tapped: the active
+    // picture while the button is active and the theme gives one.
+    for (i, (button, picture)) in indicators
+        .spec
+        .buttons
+        .iter()
+        .zip(assets.buttons.iter())
+        .enumerate()
+    {
+        let active = indicators.buttons_active.get(i).copied().unwrap_or(false);
+        let shown = if active {
+            assets
+                .buttons_active
+                .get(i)
+                .and_then(|p| p.as_ref())
+                .or(picture.as_ref())
+        } else {
+            picture.as_ref()
+        };
+        if let Some(picture) = shown {
             ops.push(blit_op(picture, (button.x, button.y)));
         }
     }
