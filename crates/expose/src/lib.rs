@@ -430,6 +430,7 @@ pub fn raster_over<'m>(
     let Motion {
         text,
         spectrum,
+        analyser,
         vinyl,
         tonearm,
         reels,
@@ -551,6 +552,10 @@ pub fn raster_over<'m>(
         .iter()
         .map(|t| text.advance(t, stack.fonts, now_ms))
         .collect();
+    let analyser_picture = scene
+        .analyser
+        .as_ref()
+        .map(|a| (a.x, a.y, analyser.advance(a, now_ms)));
     let spectrum_plan = match (&scene.spectrum, stack.spectrum) {
         (Some(spec), Some(_)) => Some(spectrum.advance(spec, &scene.bar_heights)),
         _ => None,
@@ -716,6 +721,9 @@ pub fn raster_over<'m>(
         (&scene.spectrum, stack.spectrum, &spectrum_plan)
     {
         plan_spectrum(spec, assets, plan, &mut ops);
+    }
+    if let Some((x, y, picture)) = analyser_picture {
+        ops.push(blit_op(picture, (x, y)));
     }
     // A scene without a theme shows plain meter columns and spectrum bars.
     if stack.base.is_none() && stack.screen.is_none() && stack.face.is_none() {
@@ -2341,10 +2349,10 @@ pub fn read_icon(path: &Path, w: u32, h: u32, tint: Option<[u8; 3]>) -> Option<F
         let scale = (w as f32 / sw).min(h as f32 / sh);
         let pw = ((sw * scale).round() as u32).clamp(1, w);
         let ph = ((sh * scale).round() as u32).clamp(1, h);
-        let mut pixmap = resvg::tiny_skia::Pixmap::new(pw, ph)?;
+        let mut pixmap = tiny_skia::Pixmap::new(pw, ph)?;
         resvg::render(
             &tree,
-            resvg::tiny_skia::Transform::from_scale(scale, scale),
+            tiny_skia::Transform::from_scale(scale, scale),
             &mut pixmap.as_mut(),
         );
         let mut rgba = Vec::with_capacity((pw * ph * 4) as usize);
@@ -3313,6 +3321,8 @@ fn draw_bar(
 pub struct Motion {
     pub text: TextMotion,
     pub spectrum: SpectrumMotion,
+    /// The analyser's bars and peaks between frames, and its picture.
+    pub analyser: AnalyserMotion,
     pub vinyl: VinylMotion,
     pub tonearm: TonearmMotion,
     pub reels: (ReelMotion, ReelMotion),
@@ -3784,6 +3794,615 @@ impl<'a> Stages<'a> {
             sink.push((name, now.saturating_sub(self.last)));
             self.last = now;
         }
+    }
+}
+
+/// A peak marker: where it stands on the bar scale, since when it has
+/// been held there, how fast it falls, and how far it has faded.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+struct Peak {
+    level: f32,
+    held_since_ms: u64,
+    velocity: f32,
+    fade: f32,
+}
+
+/// The analyser's motion between frames: the bars' smoothed levels, the
+/// peaks with their hold, fall and fade, and the picture drawn last. The
+/// picture alternates between two buffers so its key differs every frame
+/// and the box is painted anew.
+#[derive(Default)]
+pub struct AnalyserMotion {
+    smoothed: [Vec<f32>; 2],
+    peaks: [Vec<Peak>; 2],
+    last_ms: Option<u64>,
+    pictures: [Frame; 2],
+    which: usize,
+}
+
+impl AnalyserMotion {
+    /// Advance the bars and the peaks to `now_ms` and draw the box.
+    pub fn advance(&mut self, a: &plot::Analyser, now_ms: u64) -> &Frame {
+        let dt = self
+            .last_ms
+            .map(|last| (now_ms.saturating_sub(last) as f32 / 1000.0).clamp(0.0, 0.1))
+            .unwrap_or(0.0);
+        self.last_ms = Some(now_ms);
+        let look = &a.look;
+        let height = a.h.max(1) as f32;
+        for ch in 0..2 {
+            let levels = &a.levels[ch];
+            if self.smoothed[ch].len() != levels.len() {
+                self.smoothed[ch] = levels.clone();
+                self.peaks[ch] = vec![Peak::default(); levels.len()];
+            }
+            for (i, &level) in levels.iter().enumerate() {
+                let s = &mut self.smoothed[ch][i];
+                *s = look.smoothing * *s + (1.0 - look.smoothing) * level;
+                let bar = *s;
+                let peak = &mut self.peaks[ch][i];
+                if bar >= peak.level {
+                    *peak = Peak {
+                        level: bar,
+                        held_since_ms: now_ms,
+                        velocity: 0.0,
+                        fade: 0.0,
+                    };
+                } else if now_ms.saturating_sub(peak.held_since_ms) >= u64::from(look.peak_hold_ms)
+                {
+                    match look.peak_fade_ms {
+                        Some(fade_ms) => {
+                            peak.fade += dt * 1000.0 / fade_ms.max(1) as f32;
+                            if peak.fade >= 1.0 {
+                                peak.level = bar;
+                                peak.fade = 0.0;
+                                peak.held_since_ms = now_ms;
+                            }
+                        }
+                        None => {
+                            // Thousands of pixels a second squared, on the box.
+                            peak.velocity += look.gravity * 1000.0 * dt;
+                            peak.level -= peak.velocity * dt / height;
+                            if peak.level <= bar {
+                                peak.level = bar;
+                                peak.velocity = 0.0;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        self.which = 1 - self.which;
+        let picture = &mut self.pictures[self.which];
+        render_analyser(a, &self.smoothed, &self.peaks, picture);
+        picture
+    }
+
+    /// The bytes the two pictures hold.
+    pub fn bytes(&self) -> usize {
+        self.pictures.iter().map(Frame::bytes).sum()
+    }
+}
+
+/// The bars' area of one channel inside the box, and which way they grow.
+struct Area {
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    /// Bars grow downwards from the top of the area.
+    hanging: bool,
+    /// The bands run right to left.
+    reversed: bool,
+}
+
+/// The paint for a channel's bars: the palette, along the area or across it.
+fn palette_shader<'a>(
+    palette: &lead::Palette,
+    area: &Area,
+    horizontal: bool,
+    alpha: f32,
+) -> Option<tiny_skia::Shader<'a>> {
+    use tiny_skia::{Color, GradientStop, LinearGradient, Point, SpreadMode, Transform};
+    let n = palette.stops.len();
+    if n == 0 {
+        return None;
+    }
+    let colour =
+        |c: [u8; 4]| Color::from_rgba8(c[0], c[1], c[2], (c[3] as f32 * alpha).round() as u8);
+    if n == 1 {
+        return Some(tiny_skia::Shader::SolidColor(colour(
+            palette.stops[0].color,
+        )));
+    }
+    let stops: Vec<GradientStop> = (0..n)
+        .map(|i| {
+            let pos = palette.stops[i]
+                .pos
+                .unwrap_or(i as f32 / (n - 1) as f32)
+                .clamp(0.0, 1.0);
+            GradientStop::new(pos, colour(palette.stops[i].color))
+        })
+        .collect();
+    let (start, end) = if horizontal {
+        let (a, b) = (
+            Point::from_xy(area.x, area.y),
+            Point::from_xy(area.x + area.w, area.y),
+        );
+        if area.reversed {
+            (b, a)
+        } else {
+            (a, b)
+        }
+    } else if area.hanging {
+        (
+            Point::from_xy(area.x, area.y),
+            Point::from_xy(area.x, area.y + area.h),
+        )
+    } else {
+        (
+            Point::from_xy(area.x, area.y + area.h),
+            Point::from_xy(area.x, area.y),
+        )
+    };
+    LinearGradient::new(start, end, stops, SpreadMode::Pad, Transform::identity())
+}
+
+/// One channel's bars, peaks and LEDs into the pixmap. `span` is the
+/// area the palette runs over, the bars' own area unless a split palette
+/// spans both channels.
+fn draw_channel(
+    pixmap: &mut tiny_skia::Pixmap,
+    look: &lead::Look,
+    palette: &lead::Palette,
+    area: &Area,
+    span: &Area,
+    levels: &[f32],
+    peaks: &[Peak],
+    alpha: f32,
+) {
+    use tiny_skia::{Color, FillRule, Mask, Paint, PathBuilder, Rect, Stroke, Transform};
+    let n = levels.len();
+    if n == 0 || area.w < 1.0 || area.h < 1.0 {
+        return;
+    }
+    let pitch = area.w / n as f32;
+    let space = if look.bar_space < 1.0 {
+        pitch * look.bar_space
+    } else {
+        look.bar_space
+    }
+    .clamp(0.0, (pitch - 1.0).max(0.0));
+    let bar_w = (pitch - space).max(1.0);
+    let colour =
+        |c: [u8; 4], a: f32| Color::from_rgba8(c[0], c[1], c[2], (c[3] as f32 * a).round() as u8);
+    // Everything a channel draws is clipped to its area.
+    let clip = Rect::from_xywh(area.x, area.y, area.w, area.h).and_then(|r| {
+        let mut mask = Mask::new(pixmap.width(), pixmap.height())?;
+        mask.fill_path(
+            &PathBuilder::from_rect(r),
+            FillRule::Winding,
+            true,
+            Transform::identity(),
+        );
+        Some(mask)
+    });
+    // The paint of a bar at `alpha`: the palette along the span, one
+    // colour by the bar's place, or one by its level.
+    let bar_paint = |i: usize, level: f32, a: f32| -> Paint<'static> {
+        let mut paint = Paint {
+            anti_alias: true,
+            ..Paint::default()
+        };
+        match look.color_mode {
+            lead::ColorMode::Gradient => {
+                if let Some(shader) = palette_shader(palette, span, look.palette_horizontal, a) {
+                    paint.shader = shader;
+                }
+            }
+            lead::ColorMode::Index => {
+                let t = if n > 1 {
+                    i as f32 / (n - 1) as f32
+                } else {
+                    0.0
+                };
+                paint.set_color(colour(palette.at(t), a));
+            }
+            lead::ColorMode::Level => paint.set_color(colour(palette.for_level(level), a)),
+        }
+        paint
+    };
+    // LEDs: the cells a bar is cut into.
+    let led_cells = if look.led {
+        let wanted = if look.led_max > 0 {
+            look.led_max as f32
+        } else {
+            (area.h / (bar_w * (1.0 + look.led_space.0)).max(1.0)).round()
+        };
+        wanted.clamp(1.0, area.h.max(1.0)) as u32
+    } else {
+        0
+    };
+    for (i, raw) in levels.iter().enumerate() {
+        let level = raw.clamp(0.0, 1.0);
+        let slot = if area.reversed { n - 1 - i } else { i };
+        let x = area.x + slot as f32 * pitch + space / 2.0;
+        let bar_alpha = if look.lumi {
+            alpha * level
+        } else if look.alpha_bars {
+            alpha * look.fill_alpha * level
+        } else {
+            alpha * look.fill_alpha
+        };
+        let bar_h = if look.lumi { area.h } else { level * area.h };
+        let top = if area.hanging {
+            area.y
+        } else {
+            area.y + area.h - bar_h
+        };
+        let mut body = PathBuilder::new();
+        if look.led && led_cells > 0 {
+            let cell = area.h / led_cells as f32;
+            let gap = (cell * look.led_space.0).min(cell * 0.9);
+            let lit = ((level * led_cells as f32).round() as u32).min(led_cells);
+            let inset = if look.led_space.1 < 1.0 {
+                bar_w * look.led_space.1 / 2.0
+            } else {
+                look.led_space.1 / 2.0
+            }
+            .clamp(0.0, (bar_w / 2.0 - 0.5).max(0.0));
+            for k in 0..lit {
+                let (cy0, cy1) = if area.hanging {
+                    (
+                        area.y + k as f32 * cell,
+                        area.y + (k + 1) as f32 * cell - gap,
+                    )
+                } else {
+                    (
+                        area.y + area.h - (k + 1) as f32 * cell + gap,
+                        area.y + area.h - k as f32 * cell,
+                    )
+                };
+                let Some(r) = Rect::from_ltrb(x + inset, cy0, x + bar_w - inset, cy1) else {
+                    continue;
+                };
+                if look.led_true {
+                    // Each cell in the colour of its own height, as a
+                    // column of coloured lamps.
+                    let t = (k as f32 + 0.5) / led_cells as f32;
+                    let mut lamp = Paint {
+                        anti_alias: true,
+                        ..Paint::default()
+                    };
+                    lamp.set_color(colour(palette.at(t), bar_alpha));
+                    pixmap.fill_rect(r, &lamp, Transform::identity(), clip.as_ref());
+                } else {
+                    body.push_rect(r);
+                }
+            }
+        } else if bar_h >= 0.5 {
+            if look.round {
+                // The outer corners rounded, the base overshooting the
+                // area by the radius so only the top shows the rounding.
+                let radius = (bar_w / 2.0).min(bar_h).max(0.5);
+                let (l, r) = (x, x + bar_w);
+                let mut pb = PathBuilder::new();
+                if area.hanging {
+                    let (t, b) = (top - radius, top + bar_h);
+                    pb.move_to(l, t);
+                    pb.line_to(r, t);
+                    pb.line_to(r, b - radius);
+                    pb.quad_to(r, b, r - radius, b);
+                    pb.line_to(l + radius, b);
+                    pb.quad_to(l, b, l, b - radius);
+                } else {
+                    let (t, b) = (top, top + bar_h + radius);
+                    pb.move_to(l, b);
+                    pb.line_to(l, t + radius);
+                    pb.quad_to(l, t, l + radius, t);
+                    pb.line_to(r - radius, t);
+                    pb.quad_to(r, t, r, t + radius);
+                    pb.line_to(r, b);
+                }
+                pb.close();
+                if let Some(path) = pb.finish() {
+                    body.push_path(&path);
+                }
+            } else if let Some(r) = Rect::from_xywh(x, top, bar_w, bar_h) {
+                body.push_rect(r);
+            }
+        }
+        if let Some(path) = body.finish() {
+            let fill = bar_paint(i, level, bar_alpha);
+            if look.outline {
+                let stroke = Stroke {
+                    width: look.line_width.max(1.0),
+                    ..Stroke::default()
+                };
+                if look.fill_alpha > 0.0 {
+                    pixmap.fill_path(
+                        &path,
+                        &fill,
+                        FillRule::Winding,
+                        Transform::identity(),
+                        clip.as_ref(),
+                    );
+                }
+                let line = bar_paint(i, level, alpha);
+                pixmap.stroke_path(&path, &line, &stroke, Transform::identity(), clip.as_ref());
+            } else {
+                pixmap.fill_path(
+                    &path,
+                    &fill,
+                    FillRule::Winding,
+                    Transform::identity(),
+                    clip.as_ref(),
+                );
+            }
+        }
+        // The peak: a thin mark at the peak's height, fading if it fades.
+        if look.peaks && !look.lumi {
+            let peak = peaks.get(i).copied().unwrap_or_default();
+            if peak.level > level + 0.002 {
+                let ph = (peak.level.clamp(0.0, 1.0) * area.h).max(2.0);
+                let py = if area.hanging {
+                    area.y + ph - 2.0
+                } else {
+                    area.y + area.h - ph
+                };
+                let mark_alpha = alpha * (1.0 - peak.fade).clamp(0.0, 1.0);
+                let mut mark = Paint {
+                    anti_alias: true,
+                    ..Paint::default()
+                };
+                let c = match look.color_mode {
+                    lead::ColorMode::Gradient => palette.at(peak.level.clamp(0.0, 1.0)),
+                    lead::ColorMode::Index => palette.at(if n > 1 {
+                        i as f32 / (n - 1) as f32
+                    } else {
+                        0.0
+                    }),
+                    lead::ColorMode::Level => palette.for_level(peak.level),
+                };
+                mark.set_color(colour(c, mark_alpha));
+                if let Some(r) = Rect::from_xywh(x, py, bar_w, 2.0) {
+                    pixmap.fill_rect(r, &mark, Transform::identity(), clip.as_ref());
+                }
+            }
+        }
+    }
+}
+
+/// A channel's area into `areas`, whole or as two halves mirrored: the
+/// bands one way and their mirror image, meeting in the middle.
+#[allow(clippy::too_many_arguments)]
+fn push_areas<'p>(
+    areas: &mut Vec<(usize, Area, &'p lead::Palette, f32)>,
+    mirror: i8,
+    ch: usize,
+    x: f32,
+    y: f32,
+    aw: f32,
+    ah: f32,
+    hanging: bool,
+    palette: &'p lead::Palette,
+    alpha: f32,
+) {
+    if mirror == 0 {
+        areas.push((
+            ch,
+            Area {
+                x,
+                y,
+                w: aw,
+                h: ah,
+                hanging,
+                reversed: false,
+            },
+            palette,
+            alpha,
+        ));
+        return;
+    }
+    let first = mirror == 1;
+    areas.push((
+        ch,
+        Area {
+            x,
+            y,
+            w: aw / 2.0,
+            h: ah,
+            hanging,
+            reversed: !first,
+        },
+        palette,
+        alpha,
+    ));
+    areas.push((
+        ch,
+        Area {
+            x: x + aw / 2.0,
+            y,
+            w: aw / 2.0,
+            h: ah,
+            hanging,
+            reversed: first,
+        },
+        palette,
+        alpha,
+    ));
+}
+
+/// The analyser's box drawn into `out`: the background at its alpha, the
+/// channels laid out as the look says, mirrored and reflected as asked.
+fn render_analyser(
+    a: &plot::Analyser,
+    smoothed: &[Vec<f32>; 2],
+    peaks: &[Vec<Peak>; 2],
+    out: &mut Frame,
+) {
+    use tiny_skia::{Color, Pixmap, PixmapPaint, Transform};
+    let (w, h) = (a.w.max(1), a.h.max(1));
+    let Some(mut pixmap) = Pixmap::new(w, h) else {
+        return;
+    };
+    let look = &a.look;
+    pixmap.fill(
+        Color::from_rgba(0.0, 0.0, 0.0, look.bgr_alpha.clamp(0.0, 1.0)).unwrap_or(Color::BLACK),
+    );
+    let (fw, fh) = (w as f32, h as f32);
+    // The reflection takes the bottom share of the box.
+    let bars_h = if look.reflex > 0.0 {
+        fh * (1.0 - look.reflex)
+    } else {
+        fh
+    };
+    let stereo = a.stereo && !a.levels[1].is_empty();
+    let left = look.palette_left.as_ref().unwrap_or(&look.palette);
+    let right = look.palette_right.as_ref().unwrap_or(&look.palette);
+    // Where each channel draws, by the layout; a mono bank draws once.
+    let mut areas: Vec<(usize, Area, &lead::Palette, f32)> = Vec::new();
+    let half_w = fw / 2.0;
+    let mirror = look.mirror;
+    match (look.layout, stereo) {
+        (lead::Layout::DualVertical, true) => {
+            push_areas(
+                &mut areas,
+                mirror,
+                0,
+                0.0,
+                0.0,
+                fw,
+                bars_h / 2.0,
+                false,
+                left,
+                1.0,
+            );
+            push_areas(
+                &mut areas,
+                mirror,
+                1,
+                0.0,
+                bars_h / 2.0,
+                fw,
+                bars_h / 2.0,
+                true,
+                right,
+                1.0,
+            );
+        }
+        (lead::Layout::DualHorizontal, true) => {
+            push_areas(
+                &mut areas, mirror, 0, 0.0, 0.0, half_w, bars_h, false, left, 1.0,
+            );
+            push_areas(
+                &mut areas, mirror, 1, half_w, 0.0, half_w, bars_h, false, right, 1.0,
+            );
+        }
+        (lead::Layout::DualCombined, true) => {
+            push_areas(
+                &mut areas, mirror, 0, 0.0, 0.0, fw, bars_h, false, left, 1.0,
+            );
+            push_areas(
+                &mut areas, mirror, 1, 0.0, 0.0, fw, bars_h, false, right, 0.5,
+            );
+        }
+        _ => push_areas(
+            &mut areas,
+            mirror,
+            0,
+            0.0,
+            0.0,
+            fw,
+            bars_h,
+            false,
+            &look.palette,
+            1.0,
+        ),
+    }
+    // With a split palette in a vertical pair, the palette runs over both
+    // halves: the top channel shows its upper colours, the hanging one its
+    // lower.
+    let split = look.palette_split && matches!(look.layout, lead::Layout::DualVertical) && stereo;
+    for (ch, area, palette, alpha) in &areas {
+        let span = if split {
+            Area {
+                x: area.x,
+                y: 0.0,
+                w: area.w,
+                h: bars_h,
+                hanging: false,
+                reversed: area.reversed,
+            }
+        } else {
+            Area {
+                x: area.x,
+                y: area.y,
+                w: area.w,
+                h: area.h,
+                hanging: area.hanging,
+                reversed: area.reversed,
+            }
+        };
+        draw_channel(
+            &mut pixmap,
+            look,
+            palette,
+            area,
+            &span,
+            &smoothed[*ch],
+            &peaks[*ch],
+            *alpha,
+        );
+    }
+    if look.reflex > 0.0 {
+        // The bars' picture flipped under them, dimmed and faded.
+        let reflex_h = fh - bars_h;
+        if let Some(mut source) = Pixmap::new(w, bars_h.max(1.0) as u32) {
+            source.fill(Color::TRANSPARENT);
+            let paint = PixmapPaint {
+                opacity: 1.0,
+                ..PixmapPaint::default()
+            };
+            source.draw_pixmap(0, 0, pixmap.as_ref(), &paint, Transform::identity(), None);
+            // Brightness: multiply the colours.
+            if (look.reflex_bright - 1.0).abs() > 1e-3 {
+                let k = look.reflex_bright.clamp(0.0, 4.0);
+                for px in source.pixels_mut() {
+                    let c = px.demultiply();
+                    let m = |v: u8| ((v as f32 * k).round().clamp(0.0, 255.0)) as u8;
+                    *px = tiny_skia::ColorU8::from_rgba(
+                        m(c.red()),
+                        m(c.green()),
+                        m(c.blue()),
+                        c.alpha(),
+                    )
+                    .premultiply();
+                }
+            }
+            let scale_y = if look.reflex_fit {
+                reflex_h / bars_h.max(1.0)
+            } else {
+                1.0
+            };
+            let transform =
+                Transform::from_scale(1.0, -scale_y).post_translate(0.0, bars_h + reflex_h);
+            let paint = PixmapPaint {
+                opacity: look.reflex_alpha.clamp(0.0, 1.0),
+                quality: tiny_skia::FilterQuality::Bilinear,
+                ..PixmapPaint::default()
+            };
+            pixmap.draw_pixmap(0, 0, source.as_ref(), &paint, transform, None);
+        }
+    }
+    out.width = w;
+    out.height = h;
+    out.rgba.clear();
+    out.rgba.reserve((w * h * 4) as usize);
+    for px in pixmap.pixels() {
+        let c = px.demultiply();
+        out.rgba
+            .extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
     }
 }
 
@@ -5585,6 +6204,7 @@ mod tests {
             topping: Some((1, 1)),
             foreground: Default::default(),
             demand: None,
+            look: None,
         };
         let assets = SpectrumAssets::load(&spec);
         let mut motion = SpectrumMotion::default();
@@ -6534,5 +7154,193 @@ mod tests {
         let layer = sprite(1, 1, [200, 100, 0, 128]);
         blit_op(&layer, (1, 1)).paint(&mut Band::over(&mut rgba, 4, 4));
         assert_eq!(at(&rgba, 4, 1, 1), [100, 50, 0]);
+    }
+}
+
+#[cfg(test)]
+mod analyser_tests {
+    use super::*;
+    use lead::{Layout, Look};
+
+    fn analyser(look: Look, w: u32, h: u32, left: Vec<f32>, right: Vec<f32>) -> plot::Analyser {
+        let n = left.len();
+        let stereo = left != right;
+        plot::Analyser {
+            look,
+            x: 0,
+            y: 0,
+            w,
+            h,
+            edges: vec![(20.0, 20.0); n],
+            levels: [left, right],
+            hold: [vec![1.0; n], vec![1.0; n]],
+            stereo,
+            onsets: 0,
+        }
+    }
+
+    fn pixel(frame: &Frame, x: u32, y: u32) -> [u8; 4] {
+        let at = ((y * frame.width + x) * 4) as usize;
+        [
+            frame.rgba[at],
+            frame.rgba[at + 1],
+            frame.rgba[at + 2],
+            frame.rgba[at + 3],
+        ]
+    }
+
+    #[test]
+    fn bars_rise_from_the_base_in_the_palette_over_the_background_at_its_alpha() {
+        let look = Look {
+            smoothing: 0.0,
+            peaks: false,
+            bar_space: 0.0,
+            ..Look::default()
+        };
+        let a = analyser(
+            look,
+            100,
+            50,
+            vec![1.0, 0.5, 0.0, 0.25],
+            vec![1.0, 0.5, 0.0, 0.25],
+        );
+        let mut motion = AnalyserMotion::default();
+        let picture = motion.advance(&a, 0);
+        assert_eq!((picture.width, picture.height), (100, 50));
+        // The first bar is full: coloured at the top and the bottom.
+        let top = pixel(picture, 12, 2);
+        let bottom = pixel(picture, 12, 47);
+        assert!(
+            top[3] == 255 && top[0] > 150,
+            "a full bar's top is the palette's end: {top:?}"
+        );
+        assert!(
+            bottom[3] == 255 && bottom[1] > 150,
+            "its base the palette's start: {bottom:?}"
+        );
+        // The third bar is empty: the background at 70 percent black.
+        let empty = pixel(picture, 62, 47);
+        assert_eq!(empty[..3], [0, 0, 0]);
+        assert!(
+            (empty[3] as i32 - 179).abs() <= 2,
+            "the background's alpha: {}",
+            empty[3]
+        );
+        // The second bar reaches half way.
+        let half = pixel(picture, 37, 40);
+        assert!(
+            half[3] == 255 && half[..3] != [0, 0, 0],
+            "half way up: {half:?}"
+        );
+        assert_eq!(pixel(picture, 37, 10)[..3], [0, 0, 0]);
+        assert_eq!(motion.bytes(), 100 * 50 * 4, "one picture after one frame");
+        motion.advance(&a, 16);
+        assert_eq!(
+            motion.bytes(),
+            100 * 50 * 4 * 2,
+            "two pictures kept, one per frame in turn"
+        );
+    }
+
+    #[test]
+    fn a_peak_holds_then_falls_with_gravity() {
+        let look = Look {
+            smoothing: 0.0,
+            bar_space: 0.0,
+            peak_hold_ms: 200,
+            gravity: 1.0,
+            ..Look::default()
+        };
+        let loud = analyser(look.clone(), 10, 100, vec![1.0], vec![1.0]);
+        let quiet = analyser(look, 10, 100, vec![0.0], vec![0.0]);
+        let mut motion = AnalyserMotion::default();
+        motion.advance(&loud, 0);
+        // Held: the mark stays at the top while the bar is gone.
+        let picture = motion.advance(&quiet, 100);
+        assert!(
+            pixel(picture, 5, 1)[3] == 255,
+            "the peak mark at the top while held"
+        );
+        assert_eq!(pixel(picture, 5, 50)[..3], [0, 0, 0], "no bar under it");
+        // After the hold it falls: a tenth of a second on, a few pixels
+        // down and still there; a second on, it has reached the base and
+        // rests on the empty bar, out of sight.
+        let mut t = 200;
+        while t <= 300 {
+            motion.advance(&quiet, t);
+            t += 20;
+        }
+        let picture = motion.advance(&quiet, 320);
+        assert_eq!(
+            pixel(picture, 5, 1)[..3],
+            [0, 0, 0],
+            "the mark has left the top"
+        );
+        let mut found = None;
+        for y in 2..100 {
+            if pixel(picture, 5, y)[3] == 255 && pixel(picture, 5, y)[..3] != [0, 0, 0] {
+                found = Some(y);
+                break;
+            }
+        }
+        let y = found.expect("the mark on its way down");
+        assert!((3..60).contains(&y), "some pixels down: {y}");
+        while t <= 1500 {
+            motion.advance(&quiet, t);
+            t += 20;
+        }
+        let picture = motion.advance(&quiet, 1520);
+        assert!(
+            (0..100).all(|y| pixel(picture, 5, y)[..3] == [0, 0, 0]),
+            "the mark rests on the empty bar"
+        );
+    }
+
+    #[test]
+    fn a_mirror_is_symmetric_and_a_vertical_pair_hangs_the_right_channel() {
+        let look = Look {
+            smoothing: 0.0,
+            peaks: false,
+            bar_space: 0.0,
+            mirror: 1,
+            ..Look::default()
+        };
+        let a = analyser(look, 80, 40, vec![1.0, 0.5], vec![1.0, 0.5]);
+        let mut motion = AnalyserMotion::default();
+        let picture = motion.advance(&a, 0);
+        for y in [5u32, 20, 38] {
+            for x in 0..40u32 {
+                assert_eq!(
+                    pixel(picture, x, y),
+                    pixel(picture, 79 - x, y),
+                    "mirror at {x},{y}"
+                );
+            }
+        }
+        let look = Look {
+            smoothing: 0.0,
+            peaks: false,
+            bar_space: 0.0,
+            layout: Layout::DualVertical,
+            ..Look::default()
+        };
+        let a = analyser(look, 40, 100, vec![1.0], vec![0.5]);
+        let mut motion = AnalyserMotion::default();
+        let picture = motion.advance(&a, 0);
+        assert_eq!(
+            pixel(picture, 20, 2)[3],
+            255,
+            "the left channel reaches the top"
+        );
+        assert_eq!(
+            pixel(picture, 20, 60)[3],
+            255,
+            "the right channel hangs from the middle"
+        );
+        assert_eq!(
+            pixel(picture, 20, 90)[..3],
+            [0, 0, 0],
+            "and stops half way down"
+        );
     }
 }
