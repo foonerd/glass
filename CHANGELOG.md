@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.46] - 2026-09-28
+
+The face draws the pictures: the album art, the artist fanart with its slideshow, and the pictures a theme takes from the track's folder, the record and the reels included. The module lists what it wants, the page fetches each picture through the manager and hands it in, or says the manager has none, and the manager fetches only what the player itself reports for the playing track. Underneath, every picture a scene names is decoded and kept by one type in the raster crate, shared by the display and the module, so the two cannot drift again. The SVG icons are drawn without the text engine, which the format icons never used: the display, the remotes and the browser module are smaller for it.
+
 ## [0.7.45] - 2026-09-28
 
 The face draws the track's type icon. The browser module brought the icons and found the right one, then painted the label in its place: the display's icon decoding was in the display binary alone. It is now a type in the raster crate the display and the module share, so the Face tab and Anymote show the same icon the player's screen does, in the theme's colour.

@@ -367,6 +367,41 @@ class Manager {
       res.json({ ok: true, name });
     }));
 
+    // A picture the face wants: the album art the player reports for the
+    // playing track, or a fanart picture, fetched from the player itself.
+    // Only the player's own albumart route and the very address the player
+    // reports are fetched; anything else is not found.
+    app.get('/api/face/picture', function (req, res) {
+      const at = String(req.query.at || '');
+      const state = (self.plugin.channel && self.plugin.channel.state) || {};
+      let target = null;
+      if (at.startsWith('/albumart')) target = 'http://127.0.0.1:3000' + at;
+      else if (/^https?:\/\//.test(at) && at === String(state.albumart || '')) target = at;
+      if (!target) return res.status(404).json({ error: 'not-found' });
+      const lib = target.startsWith('https') ? require('https') : require('http');
+      const request = lib.get(target, { timeout: 8000 }, function (upstream) {
+        const kind = String(upstream.headers['content-type'] || '');
+        const length = parseInt(upstream.headers['content-length'], 10) || 0;
+        if (upstream.statusCode !== 200 || kind.indexOf('image') === -1 || length > MAX_TRACK_FILE_BYTES) {
+          upstream.resume();
+          return res.status(404).json({ error: 'not-found' });
+        }
+        res.setHeader('Content-Type', kind);
+        res.setHeader('Cache-Control', 'no-cache');
+        upstream.pipe(res);
+      });
+      request.on('timeout', function () { request.destroy(new Error('timeout')); });
+      request.on('error', function () { if (!res.headersSent) res.status(502).json({ error: 'unreachable' }); });
+    });
+
+    // The artist's fanart set for the face, as the display asks the plugin
+    // for it: the pictures in order and the slideshow settings.
+    app.get('/api/face/fanart', wrap(async function (req, res) {
+      const artist = String(req.query.artist || '').slice(0, 512);
+      const uri = String(req.query.uri || '').slice(0, 2048);
+      res.json(await self.plugin.getArtistFanart({ artist, uri }));
+    }));
+
     // Anymote: the face on a page of its own, for any browser, with a
     // manifest so a phone keeps it on the home screen as a full-screen app.
     app.get('/anymote', function (req, res) {
