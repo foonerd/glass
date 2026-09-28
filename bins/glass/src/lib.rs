@@ -13,12 +13,12 @@ use std::time::Instant;
 
 use controls::{controls_of, interactive_now, override_scene, Act, Pointer, Touch};
 use expose::{
-    apply_circle, fit_art, raster_over, read_art, read_icon, read_png, write_png, FolderPicture,
-    Frame, MeterAssets, Motion, Stack,
+    apply_circle, fit_art, raster_over, read_art, read_png, write_png, FolderPicture, Frame,
+    MeterAssets, Motion, Stack, TypeIcon,
 };
 use intake::{Overrides, Selector, Source, TapSource};
 use lead::{
-    frame_period, should_mark_dismiss, FolderLayerSpec, Input, InteractiveMode, SkinDesc, TypeMode,
+    frame_period, should_mark_dismiss, FolderLayerSpec, Input, InteractiveMode, SkinDesc,
     DISMISS_FILE_VAR, RUN_FLAG,
 };
 use pane::{publish, write_ppm, PointerKind, Shown, Surface, WindowMode, WindowOptions};
@@ -592,7 +592,7 @@ fn session(
     // the theme's mask when it has one.
     let mut art_cache: Option<(plot::Art, Frame)> = None;
     // The type icon, decoded once per file, box and tint.
-    let mut icon_cache: Option<((String, u32, u32, Option<[u8; 3]>), Frame)> = None;
+    let mut icon_cache = TypeIcon::default();
     // Folder layer pictures, decoded once per file and box, one slot per layer.
     let mut folder_slots: Vec<PictureSlot> = Vec::new();
     // The fanart on show and the one it replaces during a transition.
@@ -681,7 +681,7 @@ fn session(
             source.set_skin(&skin);
             assets = MeterAssets::load(&skin);
             art_cache = None;
-            icon_cache = None;
+            icon_cache.clear();
             folder_slots.clear();
             fanart_slots = Default::default();
             vinyl_slot = PlainSlot::default();
@@ -881,29 +881,7 @@ fn session(
                 }
                 None => art_cache = None,
             }
-            match scene.type_area.as_ref().filter(|a| !a.icon.is_empty()) {
-                Some(area) => {
-                    let (w, h) = area.box_size.unwrap_or((1, 1));
-                    let (fw, fh) = if area.mode == TypeMode::Both {
-                        let side = w.min(h).max(1);
-                        (side, side)
-                    } else {
-                        (w, h)
-                    };
-                    let tint = if area.icon.to_ascii_lowercase().ends_with(".svg") {
-                        Some(area.color)
-                    } else {
-                        None
-                    };
-                    let key = (area.icon.clone(), fw, fh, tint);
-                    let stale = icon_cache.as_ref().is_none_or(|(known, _)| *known != key);
-                    if stale {
-                        icon_cache = read_icon(std::path::Path::new(&area.icon), fw, fh, tint)
-                            .map(|frame| (key, frame));
-                    }
-                }
-                None => icon_cache = None,
-            }
+            icon_cache.follow(scene.type_area.as_ref());
             if folder_slots.len() != scene.folder_layers.len() {
                 folder_slots = scene
                     .folder_layers
@@ -991,7 +969,7 @@ fn session(
                     face_at: skin.face_at,
                     fonts: Some(&assets.fonts),
                     art: art_cache.as_ref().map(|(_, frame)| frame),
-                    icon: icon_cache.as_ref().map(|(_, frame)| frame),
+                    icon: icon_cache.frame(),
                     spectrum: assets.spectrum.as_ref(),
                     folder_pictures: &folder_pictures,
                     fanart: (
@@ -1164,7 +1142,7 @@ fn session(
                             face_at: skin.face_at,
                             fonts: Some(&assets.fonts),
                             art: art_cache.as_ref().map(|(_, frame)| frame),
-                            icon: icon_cache.as_ref().map(|(_, frame)| frame),
+                            icon: icon_cache.frame(),
                             spectrum: assets.spectrum.as_ref(),
                             folder_pictures: &folder_pictures,
                             fanart: (
@@ -1226,7 +1204,7 @@ fn session(
                     .into_iter()
                     .chain([
                         ("art", art_cache.as_ref().map_or(0, |(_, f)| f.bytes())),
-                        ("icon", icon_cache.as_ref().map_or(0, |(_, f)| f.bytes())),
+                        ("icon", icon_cache.bytes()),
                         (
                             "layers",
                             folder_pictures

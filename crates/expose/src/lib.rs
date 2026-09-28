@@ -1892,6 +1892,60 @@ pub fn draw_type_area(
     paint_onto(&mut Band::whole(frame), &ops);
 }
 
+/// The type icon between frames: decoded once per file, box and tint, and
+/// kept until one of them changes. The display and the browser module each
+/// keep one and hand its frame to `Stack::icon`.
+#[derive(Default)]
+pub struct TypeIcon {
+    kept: Option<((String, u32, u32, Option<[u8; 3]>), Frame)>,
+}
+
+impl TypeIcon {
+    /// Follow the scene's type area: decode the icon when the file, the box
+    /// or the tint changed, drop it when the area names none. In `Both`
+    /// mode the icon takes a square of the box's shorter side, the label the
+    /// rest; an SVG takes the area's colour, a PNG keeps its own.
+    pub fn follow(&mut self, area: Option<&TypeArea>) {
+        let Some(area) = area.filter(|a| !a.icon.is_empty()) else {
+            self.kept = None;
+            return;
+        };
+        let (w, h) = area.box_size.unwrap_or((1, 1));
+        let (fw, fh) = if area.mode == TypeMode::Both {
+            let side = w.min(h).max(1);
+            (side, side)
+        } else {
+            (w, h)
+        };
+        let tint = if area.icon.to_ascii_lowercase().ends_with(".svg") {
+            Some(area.color)
+        } else {
+            None
+        };
+        let key = (area.icon.clone(), fw, fh, tint);
+        let stale = self.kept.as_ref().is_none_or(|(known, _)| *known != key);
+        if stale {
+            self.kept = read_icon(Path::new(&area.icon), fw, fh, tint).map(|frame| (key, frame));
+        }
+    }
+
+    /// The icon as decoded, `None` without one or when the file could not
+    /// be read.
+    pub fn frame(&self) -> Option<&Frame> {
+        self.kept.as_ref().map(|(_, frame)| frame)
+    }
+
+    /// Forget the icon, for a change of meter.
+    pub fn clear(&mut self) {
+        self.kept = None;
+    }
+
+    /// Bytes the kept icon holds.
+    pub fn bytes(&self) -> usize {
+        self.frame().map_or(0, Frame::bytes)
+    }
+}
+
 /// Decode a type icon fitted inside `w` by `h`, keeping its aspect. An SVG
 /// is rendered at that size and every visible pixel takes `tint`; a PNG keeps
 /// its own colours. A picture smaller than the box is enlarged to it.
