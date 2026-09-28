@@ -90,3 +90,16 @@ test('without the daemon the page still gets the plugin, and frames come when it
   assert.ok(p.res.ended);
   d.close();
 });
+
+test('a page that connects before any push gets what the plugin holds now', async () => {
+  const socketPath = path.join(os.tmpdir(), 'glass-face-test-now-' + process.pid + '.sock');
+  const feed = new FaceFeed({ socketPath, current: () => ({ state: { status: 'pause', title: 'Held' }, infinity: true, showing: { theme: 'T', meter: 'm2' } }) });
+  const p = page();
+  feed.attach(p.req, p.res);
+  const plugin = p.events().filter(e => e.event === 'plugin').map(e => JSON.parse(e.data));
+  assert.deepEqual(plugin.map(m => m.kind), ['state', 'showing', 'infinity']);
+  assert.equal(plugin[0].state.title, 'Held');
+  assert.equal(plugin[1].meter, 'm2');
+  assert.equal(plugin[2].on, true);
+  feed.stop();
+});

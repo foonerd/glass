@@ -14,6 +14,11 @@ rm -f "$STAGE/README.md"
 # The plugin version follows the workspace version.
 sed -i "s/\"version\": \"[^\"]*\"/\"version\": \"$VERSION\"/" "$STAGE/package.json"
 
+# The build the zip carries, for the Status sheet: the commit and the time.
+printf '{ "commit": "%s", "built": "%s" }\n' \
+  "$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)" \
+  "$(date -u +%Y-%m-%dT%H:%M:%SZ)" > "$STAGE/build.json"
+
 # Display binaries, the tap's dump tool and the tap library, one set per
 # Volumio architecture name.
 for arch in arm armv7 armv8 x64; do
