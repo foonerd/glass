@@ -163,6 +163,19 @@ impl Selector {
             Some(name)
         }
     }
+
+    /// The meter before the one on show in a list rotation; in a random
+    /// rotation another meter, since the order has none.
+    pub fn previous(&mut self) -> Option<String> {
+        if self.rotation.names.is_empty() {
+            return None;
+        }
+        if !self.rotation.random {
+            let len = self.rotation.names.len();
+            self.index = (self.index + 2 * len - 2) % len;
+        }
+        self.next()
+    }
 }
 
 /// The theme folder the configuration names, or `None` without one.

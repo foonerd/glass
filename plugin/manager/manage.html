@@ -300,6 +300,14 @@
       </div>
       <div class="row" style="margin-top:10px"><button class="primary" id="btn-perf-apply"></button></div>
     </div>
+    <div class="panel" id="touch-panel">
+      <h2 id="touch-title" style="margin:0 0 10px"></h2>
+      <div class="help" id="touch-help" style="margin-bottom:10px"></div>
+      <div class="form">
+        <div><label id="touch-mode-label"></label><select id="touch-mode"><option value="theme"></option><option value="on"></option><option value="off"></option></select></div>
+        <div class="full row"><button class="primary" id="btn-touch-apply"></button></div>
+      </div>
+    </div>
     <div class="panel" id="share-panel">
       <h2 id="share-title" style="margin:0 0 10px"></h2>
       <div class="help" id="share-help" style="margin-bottom:10px"></div>
@@ -528,6 +536,8 @@
     $('share-on-label').textContent = t('MANAGER_SHARE_ON');
     $('share-on-doc').textContent = t('MANAGER_SHARE_ON_DOC');
     $('btn-share-apply').textContent = t('MANAGER_APPLY');
+    $('touch-title').textContent = t('MANAGER_TOUCH_TITLE'); $('touch-help').textContent = t('MANAGER_TOUCH_HELP'); $('touch-mode-label').textContent = t('MANAGER_TOUCH_MODE'); $('btn-touch-apply').textContent = t('MANAGER_SAVE');
+    $('touch-mode').options[0].textContent = t('INTERACTIVE_THEME'); $('touch-mode').options[1].textContent = t('INTERACTIVE_ON'); $('touch-mode').options[2].textContent = t('INTERACTIVE_OFF');
     $('cd-title').textContent = t('MANAGER_CD_TITLE'); $('cd-help').textContent = t('MANAGER_CD_HELP'); $('cd-on-label').textContent = t('MANAGER_CD_ON');
     $('cd-day-theme-label').textContent = t('MANAGER_CD_DAY_THEME'); $('cd-night-theme-label').textContent = t('MANAGER_CD_NIGHT_THEME');
     $('cd-day-at-label').textContent = t('MANAGER_CD_DAY_AT'); $('cd-night-at-label').textContent = t('MANAGER_CD_NIGHT_AT'); $('btn-cd-save').textContent = t('MANAGER_SAVE');
@@ -604,7 +614,7 @@
     if (name === 'artwork') loadArtwork(); loadFonts();
     if (name === 'backups') loadBackups();
     if (name === 'status') { loadStatus(); }
-    if (name === 'system') { loadUpdate(false); loadPerformance(); loadSharing(); loadLogging(); }
+    if (name === 'system') { loadUpdate(false); loadPerformance(); loadSharing(); loadTouch(); loadLogging(); }
     if (name === 'remotes') loadRemotes();
   }
 
@@ -1275,6 +1285,8 @@
           return t('MANAGER_FONTS_STYLE_' + style.toUpperCase()) + ': ' + face;
         }).join(' · ') + ' · ' + s.fonts.uploaded + ' ' + t('MANAGER_ST_FONTS_UPLOADED')],
         ['MANAGER_ST_SHARE', !s.sharing ? '-' : (s.sharing.shared ? t('MANAGER_ST_SHARE_EDITABLE') : t('MANAGER_ST_SHARE_READONLY'))],
+        ['MANAGER_CD_TITLE', !s.cardash || !s.cardash.enabled ? t('MANAGER_ST_OFF') : ((s.cardash.period === 'day' ? t('MANAGER_CD_NOW_DAY') : t('MANAGER_CD_NOW_NIGHT')) + ' ' + (s.cardash.period === 'day' ? s.cardash.dayTheme : s.cardash.nightTheme) + (s.cardash.next ? ' · ' + t('MANAGER_CD_NEXT') + ' ' + new Date(s.cardash.next.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') + (s.cardash.mode === 'sun' ? ' · ' + t('MANAGER_CD_MODE_SUN').toLowerCase() : ''))],
+        ['MANAGER_TOUCH_TITLE', !s.interactive ? '-' : t('INTERACTIVE_' + String(s.interactive).toUpperCase())],
         ['MANAGER_ARTWORK_TITLE', !s.artwork ? '-' : (s.artwork.enabled ? t('MANAGER_ST_ON') : t('MANAGER_ST_OFF')) + (s.artwork.enabled ? ' · ' + (s.artwork.keyMode === 'project' ? t('FANART_KEY_MODE_PROJECT') : t('FANART_KEY_MODE_PERSONAL')) + ' · ' + (s.artwork.interval > 0 ? t('MANAGER_ST_EVERY') + ' ' + s.artwork.interval + ' s' : t('MANAGER_ST_ON_TITLE_CHANGE')) : '') + ' · ' + s.artwork.cachedArtists + ' ' + t('MANAGER_ST_ARTISTS_CACHED')],
         ['MANAGER_PERF_TITLE', !s.performance ? '-' : t('MANAGER_PERF_' + String(s.performance.profile || 'custom').toUpperCase()) + (s.performance.profile === 'auto' && s.performance.auto ? ' (' + t('MANAGER_PERF_' + String(s.performance.auto).toUpperCase()) + ')' : '') + ' · ' + s.performance.values.frameRate + ' fps · ' + t('MANAGER_ST_GOVERNOR') + ' ' + (s.performance.governor ? t('MANAGER_ST_ON') : t('MANAGER_ST_OFF')) + (s.performance.board && s.performance.board.model ? ' · ' + s.performance.board.model : '')],
         ['MANAGER_ST_PLAYER', (s.channel.status || '-') + (s.channel.service ? ' · ' + s.channel.service : '') + (s.channel.title ? ' · ' + (s.channel.artist ? s.channel.artist + ' - ' : '') + s.channel.title : '') +
@@ -1301,6 +1313,12 @@
       $('share-roots').textContent = (sh.roots || []).join(' · ');
     }).catch(function (e) { toast(errorText(e), 'error'); });
   }
+  function loadTouch() {
+    return api('GET', '/api/touch').then(function (tc) { $('touch-mode').value = tc.interactive || 'theme'; }).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  $('btn-touch-apply').onclick = function () {
+    api('POST', '/api/touch', { interactive: $('touch-mode').value }).then(function (tc) { $('touch-mode').value = tc.interactive; toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
   $('btn-share-apply').onclick = function () {
     api('POST', '/api/sharing', { shared: $('share-on').checked }).then(function (sh) { $('share-on').checked = !!sh.shared; toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); });
   };

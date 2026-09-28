@@ -1181,6 +1181,97 @@ pub struct IndicatorsSpec {
     pub repeat: Option<StateIndicator>,
     pub playstate: Option<StateIndicator>,
     pub progress: Option<GaugeSpec>,
+    /// Buttons the theme draws and wires to actions: `button.<name>.*`.
+    #[serde(default)]
+    pub buttons: Vec<ButtonSpec>,
+    /// `interactive = True`: the meter is meant for fingers, its indicators
+    /// and buttons act. The player's `touch.interactive` setting may
+    /// override it either way.
+    #[serde(default)]
+    pub interactive: bool,
+}
+
+/// A button a theme draws: a picture at a position, or a bare region with
+/// a size, wired to one action.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ButtonSpec {
+    pub name: String,
+    pub x: i32,
+    pub y: i32,
+    /// The region's size; zero takes the picture's size.
+    pub w: u32,
+    pub h: u32,
+    /// The picture drawn at the position, or empty for a bare region.
+    pub image: String,
+    pub action: ButtonAction,
+}
+
+/// What a button does when tapped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ButtonAction {
+    /// Play or pause.
+    Toggle,
+    Play,
+    Pause,
+    Stop,
+    /// The next or the previous track.
+    Next,
+    Previous,
+    /// The next or the previous meter of the theme's rotation.
+    MeterNext,
+    MeterPrevious,
+    Mute,
+    Random,
+    /// Off, all, single, round again.
+    Repeat,
+    /// What a touch does with `exit.on.touch`: the display leaves.
+    Dismiss,
+}
+
+impl ButtonAction {
+    /// The action a theme names: `toggle` (also `playpause`), `play`,
+    /// `pause`, `stop`, `next`, `previous` (also `prev`), `meter.next`,
+    /// `meter.previous`, `mute`, `random` (also `shuffle`), `repeat`, `dismiss`.
+    pub fn parse(word: &str) -> Option<ButtonAction> {
+        Some(match word.trim().to_ascii_lowercase().as_str() {
+            "toggle" | "playpause" | "play.pause" => ButtonAction::Toggle,
+            "play" => ButtonAction::Play,
+            "pause" => ButtonAction::Pause,
+            "stop" => ButtonAction::Stop,
+            "next" => ButtonAction::Next,
+            "previous" | "prev" => ButtonAction::Previous,
+            "meter.next" => ButtonAction::MeterNext,
+            "meter.previous" | "meter.prev" => ButtonAction::MeterPrevious,
+            "mute" => ButtonAction::Mute,
+            "random" | "shuffle" => ButtonAction::Random,
+            "repeat" => ButtonAction::Repeat,
+            "dismiss" | "exit" => ButtonAction::Dismiss,
+            _ => return None,
+        })
+    }
+}
+
+/// Whether the controls of a theme act: as the theme says of each meter,
+/// on for every theme, or off for every theme; `touch.interactive` in
+/// the display's configuration.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum InteractiveMode {
+    #[default]
+    Theme,
+    On,
+    Off,
+}
+
+impl InteractiveMode {
+    pub fn parse(word: Option<&str>) -> InteractiveMode {
+        match word.map(|w| w.trim().to_ascii_lowercase()).as_deref() {
+            Some("on") | Some("true") | Some("yes") | Some("all") => InteractiveMode::On,
+            Some("off") | Some("false") | Some("no") | Some("none") => InteractiveMode::Off,
+            _ => InteractiveMode::Theme,
+        }
+    }
 }
 
 impl IndicatorsSpec {
@@ -1191,6 +1282,7 @@ impl IndicatorsSpec {
             && self.repeat.is_none()
             && self.playstate.is_none()
             && self.progress.is_none()
+            && self.buttons.is_empty()
     }
 }
 
@@ -1408,7 +1500,40 @@ pub fn meter_indicators(meters_txt: &str, meter: &str, theme_dir: &str) -> Optio
             head_offset: ipair(&format!("{name}.head.offset")).unwrap_or((0, 0)),
         })
     };
+    // Buttons: `button.<name>.pos`, an `action`, and a `size` or an `image`.
+    let mut names: Vec<String> = values
+        .iter()
+        .filter_map(|(k, _)| k.strip_prefix("button."))
+        .filter_map(|rest| rest.split('.').next())
+        .map(str::to_string)
+        .collect();
+    names.sort();
+    names.dedup();
+    let mut buttons = Vec::new();
+    for name in names {
+        let Some((x, y)) = ipair(&format!("button.{name}.pos")) else {
+            continue;
+        };
+        let Some(action) = get(&format!("button.{name}.action")).and_then(ButtonAction::parse)
+        else {
+            continue;
+        };
+        let (w, h) = upair(&format!("button.{name}.size")).unwrap_or((0, 0));
+        buttons.push(ButtonSpec {
+            name: name.clone(),
+            x,
+            y,
+            w,
+            h,
+            image: get(&format!("button.{name}.image"))
+                .map(path)
+                .unwrap_or_default(),
+            action,
+        });
+    }
     let spec = IndicatorsSpec {
+        buttons,
+        interactive: truthy(get("interactive")),
         volume: gauge(
             "volume",
             GaugeStyle::Numeric,
@@ -1493,6 +1618,9 @@ pub fn transition_settings(text: &str) -> TransitionSettings {
 pub struct RunSettings {
     /// `exit.on.touch` or `stop.display.on.touch`: a touch or click ends the player.
     pub exit_on_touch: bool,
+    /// `touch.interactive`: whether a theme's controls act.
+    #[serde(default)]
+    pub interactive: InteractiveMode,
     /// `position.type`: `center` (default) centres the frame; anything else
     /// puts its top left at `position.x`, `position.y`.
     pub centered: bool,
@@ -1504,6 +1632,7 @@ impl Default for RunSettings {
     fn default() -> Self {
         Self {
             exit_on_touch: false,
+            interactive: InteractiveMode::Theme,
             centered: true,
             x: 0,
             y: 0,
@@ -1515,6 +1644,7 @@ pub fn run_settings(text: &str) -> RunSettings {
     RunSettings {
         exit_on_touch: truthy(current_value(text, "exit.on.touch").as_deref())
             || truthy(current_value(text, "stop.display.on.touch").as_deref()),
+        interactive: InteractiveMode::parse(current_value(text, "touch.interactive").as_deref()),
         centered: current_value(text, "position.type")
             .is_none_or(|v| v.eq_ignore_ascii_case("center")),
         x: current_value(text, "position.x")
@@ -3709,6 +3839,7 @@ mod tests {
         assert_eq!(
             s,
             RunSettings {
+                interactive: InteractiveMode::Theme,
                 exit_on_touch: true,
                 centered: false,
                 x: 10,
@@ -3952,5 +4083,66 @@ mod tests {
         assert_eq!(older.light, at("PeppyFont-Light.ttf"));
         assert_eq!(older.regular, at("PeppyFont-Regular.ttf"));
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod interactive_tests {
+    use super::*;
+
+    #[test]
+    fn a_meter_names_its_buttons_and_says_whether_it_is_for_fingers() {
+        let text = "[dash]\nmeter.type = linear\nconfig.extend = True\ninteractive = True\nbutton.play.pos = 10,20\nbutton.play.size = 40,40\nbutton.play.action = toggle\nbutton.nextmeter.pos = 60,20\nbutton.nextmeter.image = next.png\nbutton.nextmeter.action = meter.next\nbutton.bad.pos = 1,1\n";
+        let spec = meter_indicators(text, "dash", "/t").expect("extended");
+        assert!(spec.interactive);
+        assert_eq!(
+            spec.buttons.len(),
+            2,
+            "a button without an action is no button"
+        );
+        let next = &spec.buttons[0];
+        assert_eq!(
+            (next.name.as_str(), next.x, next.y, next.w, next.h),
+            ("nextmeter", 60, 20, 0, 0)
+        );
+        assert_eq!(next.image, "/t/next.png");
+        assert_eq!(next.action, ButtonAction::MeterNext);
+        let play = &spec.buttons[1];
+        assert_eq!(
+            (play.w, play.h, play.action),
+            (40, 40, ButtonAction::Toggle)
+        );
+        assert!(play.image.is_empty());
+        let plain = meter_indicators(
+            "[m]\nconfig.extend = True\nvolume.pos = 1,1\nvolume.size = 10,10\n",
+            "m",
+            "/t",
+        )
+        .expect("extended");
+        assert!(!plain.interactive);
+        assert!(plain.buttons.is_empty());
+        assert_eq!(ButtonAction::parse("Prev"), Some(ButtonAction::Previous));
+        assert_eq!(ButtonAction::parse("shuffle"), Some(ButtonAction::Random));
+        assert_eq!(ButtonAction::parse("fly"), None);
+    }
+
+    #[test]
+    fn the_display_setting_says_theme_on_or_off() {
+        assert_eq!(
+            run_settings("[current]\n").interactive,
+            InteractiveMode::Theme
+        );
+        assert_eq!(
+            run_settings("[current]\ntouch.interactive = on\n").interactive,
+            InteractiveMode::On
+        );
+        assert_eq!(
+            run_settings("[current]\ntouch.interactive = Off\n").interactive,
+            InteractiveMode::Off
+        );
+        assert_eq!(
+            run_settings("[current]\ntouch.interactive = theme\n").interactive,
+            InteractiveMode::Theme
+        );
     }
 }

@@ -3895,6 +3895,8 @@ pub struct IndicatorAssets {
     pub playstate: Vec<Option<Frame>>,
     pub volume: GaugeAssets,
     pub progress: GaugeAssets,
+    /// One picture per button, when it has one.
+    pub buttons: Vec<Option<Frame>>,
 }
 
 #[derive(Default)]
@@ -3917,6 +3919,7 @@ impl IndicatorAssets {
             + bytes_of(&self.playstate)
             + gauge(&self.volume)
             + gauge(&self.progress)
+            + bytes_of(&self.buttons)
     }
 
     pub fn load(spec: &lead::IndicatorsSpec) -> Self {
@@ -4014,6 +4017,17 @@ impl IndicatorAssets {
             playstate: states(&spec.playstate),
             volume: gauge(&spec.volume),
             progress: gauge(&spec.progress),
+            buttons: spec
+                .buttons
+                .iter()
+                .map(|b| {
+                    if b.image.is_empty() {
+                        None
+                    } else {
+                        read_png(Path::new(&b.image))
+                    }
+                })
+                .collect(),
         }
     }
 }
@@ -4438,6 +4452,12 @@ fn plan_indicators<'a>(
         &assets.playstate,
         indicators.play_state,
     );
+    // The theme's buttons, drawn where they are tapped.
+    for (button, picture) in indicators.spec.buttons.iter().zip(assets.buttons.iter()) {
+        if let Some(picture) = picture {
+            ops.push(blit_op(picture, (button.x, button.y)));
+        }
+    }
     if let (Some(volume), Some(names)) = (&indicators.spec.volume, &names.volume) {
         plan_gauge(
             volume,

@@ -123,6 +123,7 @@
           "position_x",
           "position_y",
           "mouseEnabled",
+          "interactiveMode",
           "displayOutput",
           "formatTypeMode"
         ]
@@ -228,6 +229,30 @@
           "doc": "TRANSLATE.GLASS.MOUSE_DOC",
           "label": "TRANSLATE.GLASS.MOUSE",
           "value": true
+        },
+        {
+          "id": "interactiveMode",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.INTERACTIVE_DOC",
+          "label": "TRANSLATE.GLASS.INTERACTIVE",
+          "value": {
+            "value": "theme",
+            "label": "TRANSLATE.GLASS.INTERACTIVE_THEME"
+          },
+          "options": [
+            {
+              "value": "theme",
+              "label": "TRANSLATE.GLASS.INTERACTIVE_THEME"
+            },
+            {
+              "value": "on",
+              "label": "TRANSLATE.GLASS.INTERACTIVE_ON"
+            },
+            {
+              "value": "off",
+              "label": "TRANSLATE.GLASS.INTERACTIVE_OFF"
+            }
+          ]
         },
         {
           "id": "displayOutput",

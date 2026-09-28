@@ -1164,6 +1164,34 @@ Glass.prototype.disableLegacyAndStart = function () {
 // configuration when it is installed, and the meter configuration keys the
 // display reads. Without an installed plugin, the newest named backup the
 // installer adopted is restored instead.
+// ---- Interactive controls: whether a theme's buttons and indicators act --
+
+// `theme`, `on` or `off` from any spelling; `theme` for anything else.
+Glass.prototype.interactiveModeOf = function (value) {
+    var v = String(value === undefined || value === null ? 'theme' : value).trim().toLowerCase();
+    return v === 'on' || v === 'true' ? 'on' : (v === 'off' || v === 'false' ? 'off' : 'theme');
+};
+
+Glass.prototype.interactiveMode = function () {
+    var current = (meterConfig && meterConfig.current) || {};
+    return this.interactiveModeOf(current['touch.interactive']);
+};
+
+Glass.prototype.setInteractiveMode = function (value) {
+    var self = this;
+    self.loadConfigs();
+    if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return { error: 'GLASS.NO_PEPPYCONFIG' }; }
+    var wanted = self.interactiveModeOf(value);
+    if (self.interactiveMode() === wanted && meterConfig.current['touch.interactive'] !== undefined) { return { changed: false, interactive: wanted }; }
+    meterConfig.current['touch.interactive'] = wanted;
+    fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+    try { self.updateConfigVersion(); } catch (e) {}
+    if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+    self.pushRemoteConfig();
+    self.logger.info(id + 'interactive controls: ' + wanted);
+    return { changed: true, interactive: wanted };
+};
+
 // ---- Car Dash: a day theme and a night theme by the clock ---------------
 
 // The place Car Dash reckons the sun from: the coordinates set by hand,
@@ -1488,6 +1516,8 @@ Glass.prototype.getUIConfig = function () {
             minmax[2] = [C('position_y').attributes[2].min, C('position_y').attributes[3].max, C('position_y').attributes[0].placeholder];
             var mouseSupport = String(meterConfig.sdl.env['mouse.enabled'] || 'True').toLowerCase() == 'true';
             C('mouseEnabled').value = mouseSupport;
+            var interactiveMode = self.interactiveMode();
+            C('interactiveMode').value = { value: interactiveMode, label: self.commandRouter.getI18nString('GLASS.INTERACTIVE_' + interactiveMode.toUpperCase()) };
             if (self.config.get('headless') === true) {
                 C('displayOutput').value.value = 'none';
                 C('displayOutput').value.label = self.commandRouter.getI18nString('GLASS.DISPLAY_OUTPUT_NONE');
@@ -1726,6 +1756,13 @@ Glass.prototype.saveDisplayConf = function (confData) {
     var mouseSupport = confData.mouseEnabled? 'True' : 'False';
     if (meterConfig.sdl.env['mouse.enabled'] != mouseSupport) {
         meterConfig.sdl.env['mouse.enabled'] = mouseSupport;
+        noChanges = false;
+    }
+
+    // write the interactive controls setting
+    var wantedInteractive = self.interactiveModeOf(confData.interactiveMode && confData.interactiveMode.value);
+    if (self.interactiveMode() !== wantedInteractive) {
+        meterConfig.current['touch.interactive'] = wantedInteractive;
         noChanges = false;
     }
 
@@ -4468,6 +4505,8 @@ Glass.prototype.statusInfo = function () {
         fonts: self.fontsSummary(),
         themes: { meterBase: meterBase, meters: themeCount(meterBase, 'meters.txt'), spectrumBase: spectrumBase, spectrum: themeCount(spectrumBase, 'spectrum.txt') },
         sharing: self.sharingInfo(),
+        cardash: self.carDashInfo(),
+        interactive: self.interactiveMode(),
         artwork: { enabled: artwork.enabled, keyMode: artwork.keyMode, interval: artwork.interval, order: artwork.order, cachedArtists: cachedArtists },
         version: pluginVersion,
         arch: arch,

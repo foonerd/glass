@@ -13,14 +13,15 @@ use std::time::Instant;
 
 use expose::{
     apply_circle, compose_base, fit_art, flip_x, raster_over, read_art, read_icon, read_png,
-    write_png, FolderPicture, Fonts, IndicatorAssets, Motion, Spans, SpectrumAssets, Stack,
+    write_png, FolderPicture, Fonts, Frame, IndicatorAssets, Motion, Spans, SpectrumAssets, Stack,
 };
 use intake::{Overrides, Selector, Source, TapSource};
 use lead::{
-    frame_period, should_mark_dismiss, FolderLayerSpec, Input, MeterKind, SkinDesc, TypeMode,
+    frame_period, should_mark_dismiss, ButtonAction, FolderLayerSpec, GaugeSpec, Input,
+    InteractiveMode, Metadata, MeterKind, SkinDesc, StateIndicator, StateLook, TypeMode,
     DISMISS_FILE_VAR, RUN_FLAG,
 };
-use pane::{publish, write_ppm, Shown, Surface, WindowMode, WindowOptions};
+use pane::{publish, write_ppm, PointerKind, Shown, Surface, WindowMode, WindowOptions};
 use plot::{step, Scene};
 use std::time::Duration;
 
@@ -59,7 +60,7 @@ enum Outcome {
     Reload(&'static str),
 }
 
-fn load_theme(dir: &str, file: &str) -> Option<expose::Frame> {
+fn load_theme(dir: &str, file: &str) -> Option<Frame> {
     if dir.is_empty() || file.is_empty() {
         return None;
     }
@@ -70,22 +71,22 @@ fn load_theme(dir: &str, file: &str) -> Option<expose::Frame> {
 struct Assets {
     front: Option<Spans>,
     /// The indicator for the left or mono channel, mirrored when the meter flips it.
-    indicator: Option<expose::Frame>,
+    indicator: Option<Frame>,
     /// The right channel's indicator when it differs from the left one.
-    indicator_right: Option<expose::Frame>,
+    indicator_right: Option<Frame>,
     fonts: Fonts,
-    art_mask: Option<expose::Frame>,
+    art_mask: Option<Frame>,
     /// The spectrum's pictures when the meter shows one.
     spectrum: Option<SpectrumAssets>,
     /// The tonearm picture when the meter has one.
-    tonearm: Option<expose::Frame>,
+    tonearm: Option<Frame>,
     /// The theme's reel pictures; an album's reel is scaled to their size.
-    reels: (Option<expose::Frame>, Option<expose::Frame>),
+    reels: (Option<Frame>, Option<Frame>),
     /// The indicators' prepared states and pictures.
     indicators: Option<IndicatorAssets>,
     /// The screen picture and face composed once per meter; the pictures
     /// themselves are not kept.
-    base: expose::Frame,
+    base: Frame,
 }
 
 impl Assets {
@@ -233,11 +234,8 @@ impl PictureSlot {
 #[derive(Default)]
 struct PlainSlot {
     key: (String, Option<(u32, u32)>),
-    frame: Option<expose::Frame>,
-    pending: Option<(
-        (String, Option<(u32, u32)>),
-        mpsc::Receiver<Option<expose::Frame>>,
-    )>,
+    frame: Option<Frame>,
+    pending: Option<((String, Option<(u32, u32)>), mpsc::Receiver<Option<Frame>>)>,
 }
 
 impl PlainSlot {
@@ -533,6 +531,157 @@ pub fn run(args: Vec<String>) -> ExitCode {
 /// the window closes, the player says stop, or (on a remote) the theme or
 /// the settings change and a session starts again. A remote's window is
 /// handed in and kept between sessions.
+/// What a tap on one of a theme's controls asks for.
+enum Tapped {
+    Command(intake::Command),
+    MeterNext,
+    MeterPrevious,
+    Dismiss,
+}
+
+/// Whether the controls act for this meter: the display's setting, and
+/// with "as the theme says" the meter's own word or its having buttons.
+fn interactive_now(skin: &SkinDesc) -> bool {
+    match skin.run.interactive {
+        InteractiveMode::On => true,
+        InteractiveMode::Off => false,
+        InteractiveMode::Theme => skin
+            .indicators
+            .as_ref()
+            .is_some_and(|i| i.interactive || !i.buttons.is_empty()),
+    }
+}
+
+fn inside(x: i32, y: i32, at: (i32, i32), size: (u32, u32)) -> bool {
+    x >= at.0 && y >= at.1 && x < at.0 + size.0 as i32 && y < at.1 + size.1 as i32
+}
+
+/// Where along a gauge a point lies, 0 to 1: left to right along a wide
+/// one, bottom to top along a tall one.
+fn gauge_fraction(gauge: &GaugeSpec, x: i32, y: i32) -> f32 {
+    let f = if gauge.w >= gauge.h {
+        (x - gauge.x) as f32 / gauge.w.max(1) as f32
+    } else {
+        1.0 - (y - gauge.y) as f32 / gauge.h.max(1) as f32
+    };
+    f.clamp(0.0, 1.0)
+}
+
+/// The repeat that follows the player's: off, all, single, round again.
+fn next_repeat(meta: &Metadata) -> &'static str {
+    match (meta.repeat, meta.repeat_single) {
+        (false, _) => "all",
+        (true, false) => "single",
+        (true, true) => "off",
+    }
+}
+
+/// The control under a tap at (x, y) in theme pixels and what it asks:
+/// the theme's buttons first, then the play state, mute, shuffle and
+/// repeat indicators, then the volume and progress gauges, whose tap
+/// sets the volume or seeks by where along them it lands.
+fn tapped(
+    indicators: &plot::Indicators,
+    assets: Option<&IndicatorAssets>,
+    meta: &Metadata,
+    x: i32,
+    y: i32,
+) -> Option<Tapped> {
+    let spec = &indicators.spec;
+    let command = |name: &str| Tapped::Command(intake::Command::new(name));
+    let with =
+        |name: &str, value: serde_json::Value| Tapped::Command(intake::Command::with(name, value));
+    for (i, button) in spec.buttons.iter().enumerate() {
+        let picture = assets
+            .and_then(|a| a.buttons.get(i))
+            .and_then(|p| p.as_ref());
+        let size = if button.w > 0 && button.h > 0 {
+            (button.w, button.h)
+        } else {
+            picture.map(|p| (p.width, p.height)).unwrap_or((0, 0))
+        };
+        if !inside(x, y, (button.x, button.y), size) {
+            continue;
+        }
+        return Some(match button.action {
+            ButtonAction::Toggle => command("toggle"),
+            ButtonAction::Play => command("play"),
+            ButtonAction::Pause => command("pause"),
+            ButtonAction::Stop => command("stop"),
+            ButtonAction::Next => command("next"),
+            ButtonAction::Previous => command("previous"),
+            ButtonAction::MeterNext => Tapped::MeterNext,
+            ButtonAction::MeterPrevious => Tapped::MeterPrevious,
+            ButtonAction::Mute => with("volume", serde_json::json!("toggle")),
+            ButtonAction::Random => with("random", serde_json::json!(!meta.random)),
+            ButtonAction::Repeat => with("repeat", serde_json::json!(next_repeat(meta))),
+            ButtonAction::Dismiss => Tapped::Dismiss,
+        });
+    }
+    // An indicator's box: a LED's own size, a picture's size in its state.
+    let state_box = |indicator: &Option<StateIndicator>,
+                     frames: Option<&Vec<Option<Frame>>>,
+                     state: usize|
+     -> Option<((i32, i32), (u32, u32))> {
+        let indicator = indicator.as_ref()?;
+        let size = match &indicator.look {
+            StateLook::Led { w, h, .. } => (*w, *h),
+            StateLook::Icons { .. } => frames
+                .and_then(|f| {
+                    f.get(state)
+                        .and_then(|p| p.as_ref())
+                        .or_else(|| f.iter().flatten().next())
+                })
+                .map(|p| (p.width, p.height))
+                .unwrap_or((48, 48)),
+        };
+        Some(((indicator.x, indicator.y), size))
+    };
+    let hit =
+        |b: Option<((i32, i32), (u32, u32))>| b.is_some_and(|(at, size)| inside(x, y, at, size));
+    if hit(state_box(
+        &spec.playstate,
+        assets.map(|a| &a.playstate),
+        indicators.play_state,
+    )) {
+        return Some(command("toggle"));
+    }
+    if hit(state_box(
+        &spec.mute,
+        assets.map(|a| &a.mute),
+        indicators.mute_state,
+    )) {
+        return Some(with("volume", serde_json::json!("toggle")));
+    }
+    if hit(state_box(
+        &spec.shuffle,
+        assets.map(|a| &a.shuffle),
+        indicators.shuffle_state,
+    )) {
+        return Some(with("random", serde_json::json!(!meta.random)));
+    }
+    if hit(state_box(
+        &spec.repeat,
+        assets.map(|a| &a.repeat),
+        indicators.repeat_state,
+    )) {
+        return Some(with("repeat", serde_json::json!(next_repeat(meta))));
+    }
+    if let Some(gauge) = &spec.volume {
+        if inside(x, y, (gauge.x, gauge.y), (gauge.w, gauge.h)) {
+            let level = (gauge_fraction(gauge, x, y) * 100.0).round() as u32;
+            return Some(with("volume", serde_json::json!(level)));
+        }
+    }
+    if let Some(gauge) = &spec.progress {
+        if inside(x, y, (gauge.x, gauge.y), (gauge.w, gauge.h)) && meta.duration > 0.0 {
+            let seconds = (gauge_fraction(gauge, x, y) * meta.duration).round() as u32;
+            return Some(with("seek", serde_json::json!(seconds)));
+        }
+    }
+    None
+}
+
 fn session(
     run: &Run,
     mut remote: Option<&mut RemoteSession>,
@@ -577,7 +726,7 @@ fn session(
         }
     }
     let mut snapshot_index = 0usize;
-    let mut snapshot_last: Option<expose::Frame> = None;
+    let mut snapshot_last: Option<Frame> = None;
     let settle = Duration::from_secs_f32(settle_s);
     // A theme in random or list mode moves to its next meter on the timer,
     // or with the next title when the player says so.
@@ -658,6 +807,17 @@ fn session(
     );
     let mut assets = Assets::load(&skin);
     logline::say!(
+        Info,
+        "display",
+        "interactive controls {}",
+        match (skin.run.interactive, interactive_now(&skin)) {
+            (InteractiveMode::On, _) => "on for every theme",
+            (InteractiveMode::Off, _) => "off for every theme",
+            (InteractiveMode::Theme, true) => "on, as the theme says",
+            (InteractiveMode::Theme, false) => "off, as the theme says",
+        }
+    );
+    logline::say!(
         Verbose,
         "display",
         "fonts loaded {} of 5",
@@ -697,9 +857,9 @@ fn session(
     let mut profile_window = Instant::now();
     // The art picture, decoded and stretched once per file and box, cut with
     // the theme's mask when it has one.
-    let mut art_cache: Option<(plot::Art, expose::Frame)> = None;
+    let mut art_cache: Option<(plot::Art, Frame)> = None;
     // The type icon, decoded once per file, box and tint.
-    let mut icon_cache: Option<((String, u32, u32, Option<[u8; 3]>), expose::Frame)> = None;
+    let mut icon_cache: Option<((String, u32, u32, Option<[u8; 3]>), Frame)> = None;
     // Folder layer pictures, decoded once per file and box, one slot per layer.
     let mut folder_slots: Vec<PictureSlot> = Vec::new();
     // The fanart on show and the one it replaces during a transition.
@@ -826,8 +986,20 @@ fn session(
         }};
     }
 
+    // A step to another meter asked for by a tap; taken at the top of a frame.
+    let mut meter_step: Option<i8> = None;
     loop {
         let frame_started = Instant::now();
+        if let Some(step) = meter_step.take() {
+            let name = if step > 0 {
+                selector.next()
+            } else {
+                selector.previous()
+            };
+            if let Some(name) = name {
+                switch_meter!(name);
+            }
+        }
         let input = source.poll();
         let polled_at = Instant::now();
         // On a remote: the player's theme changed and this one follows it,
@@ -949,7 +1121,7 @@ fn session(
             );
         }
         let mut folder_pictures: Vec<Option<FolderPicture>> = Vec::new();
-        let mut reel_pictures: (Option<expose::Frame>, Option<expose::Frame>) = (None, None);
+        let mut reel_pictures: (Option<Frame>, Option<Frame>) = (None, None);
         if surface.is_some() || write_file {
             match &scene.art {
                 Some(art) => {
@@ -1042,8 +1214,8 @@ fn session(
                     let side = |slot: &mut PlainSlot,
                                 file: &str,
                                 spec: Option<&lead::ReelSpec>,
-                                theme: Option<&expose::Frame>|
-                     -> Option<expose::Frame> {
+                                theme: Option<&Frame>|
+                     -> Option<Frame> {
                         let spec = spec?;
                         if file.is_empty() || file == spec.theme_file {
                             slot.want("", None);
@@ -1121,10 +1293,60 @@ fn session(
                         }
                     }
                     Ok(Shown::Touched) => {
-                        if let Some(remote) = remote.as_deref() {
+                        // A tap on one of the theme's controls acts; any other
+                        // tap does what the touch rules say.
+                        let mut acted = false;
+                        let mut dismiss = false;
+                        if interactive_now(&skin) {
+                            let tap = window
+                                .take_pointer()
+                                .into_iter()
+                                .rev()
+                                .find(|p| p.kind == PointerKind::Up);
+                            if let (Some(tap), Some(indicators)) = (tap, scene.indicators.as_ref())
+                            {
+                                match tapped(
+                                    indicators,
+                                    assets.indicators.as_ref(),
+                                    &input.metadata,
+                                    tap.x,
+                                    tap.y,
+                                ) {
+                                    Some(Tapped::Command(command)) => {
+                                        acted = true;
+                                        logline::say!(
+                                            Verbose,
+                                            "display",
+                                            "tap at {},{}: {}",
+                                            tap.x,
+                                            tap.y,
+                                            command.name
+                                        );
+                                        source.command(&command);
+                                    }
+                                    Some(Tapped::MeterNext) => {
+                                        acted = true;
+                                        meter_step = Some(1);
+                                    }
+                                    Some(Tapped::MeterPrevious) => {
+                                        acted = true;
+                                        meter_step = Some(-1);
+                                    }
+                                    Some(Tapped::Dismiss) => dismiss = true,
+                                    None => {}
+                                }
+                            }
+                        } else {
+                            window.take_pointer();
+                        }
+                        if acted {
+                            // Done above.
+                        } else if remote.is_some() && !dismiss {
                             // A touch on a remote plays or pauses the player.
-                            remote.touched(&mut source);
-                        } else if skin.run.exit_on_touch {
+                            if let Some(remote) = remote.as_deref() {
+                                remote.touched(&mut source);
+                            }
+                        } else if skin.run.exit_on_touch || dismiss {
                             let marker = env::var(DISMISS_FILE_VAR).ok();
                             if should_mark_dismiss(
                                 marker.as_deref(),
@@ -1271,10 +1493,7 @@ fn session(
                                 .map(|p| p.frame.bytes())
                                 .sum(),
                         ),
-                        (
-                            "vinyl",
-                            vinyl_slot.frame.as_ref().map_or(0, expose::Frame::bytes),
-                        ),
+                        ("vinyl", vinyl_slot.frame.as_ref().map_or(0, Frame::bytes)),
                         (
                             "reels",
                             expose::bytes_of([&reel_pictures.0, &reel_pictures.1]),
