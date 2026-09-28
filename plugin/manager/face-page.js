@@ -33,7 +33,10 @@
     // The plugin's lines that came before the module was up, replayed to it.
     earlyLines: [],
     // The meter the player's own display shows, from its showing lines.
-    playerMeter: ''
+    playerMeter: '',
+    // On a page of its own the first tap takes the screen, unless the
+    // screen was given back on purpose.
+    leftFullscreen: false
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -259,7 +262,10 @@
       if (e.pointerType === 'mouse' && e.buttons === 0) return;
       send(1, e);
     });
-    canvas.addEventListener('pointerup', function (e) { send(2, e); });
+    canvas.addEventListener('pointerup', function (e) {
+      send(2, e);
+      if (face.fit && !document.fullscreenElement && !face.leftFullscreen) fullScreen();
+    });
     canvas.addEventListener('pointercancel', function (e) { send(2, e); });
   }
 
@@ -377,7 +383,11 @@
       if (button) button.addEventListener('click', fullScreen);
       if (face.fit) {
         window.addEventListener('resize', fitted);
-        document.addEventListener('fullscreenchange', fitted);
+        document.addEventListener('fullscreenchange', function () {
+          fitted();
+          if (!document.fullscreenElement && face.wasFullscreen) face.leftFullscreen = true;
+          face.wasFullscreen = !!document.fullscreenElement;
+        });
       }
     },
     show: show,

@@ -107,7 +107,11 @@ pub struct Control {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ControlKind {
-    Button(ButtonAction),
+    /// A theme's button, `index` its place among the meter's buttons.
+    Button {
+        action: ButtonAction,
+        index: usize,
+    },
     PlayState,
     Mute,
     Shuffle,
@@ -167,7 +171,7 @@ impl Control {
             Tapped::Command(intake::Command::with(name, value))
         };
         match &self.kind {
-            ControlKind::Button(action) => match action {
+            ControlKind::Button { action, .. } => match action {
                 ButtonAction::Toggle => command("toggle"),
                 ButtonAction::Play => command("play"),
                 ButtonAction::Pause => command("pause"),
@@ -219,7 +223,10 @@ pub fn controls_of(indicators: &Indicators, assets: Option<&IndicatorAssets>) ->
             controls.push(Control {
                 at: (button.x, button.y),
                 size,
-                kind: ControlKind::Button(button.action),
+                kind: ControlKind::Button {
+                    action: button.action,
+                    index: i,
+                },
             });
         }
     }
@@ -349,6 +356,8 @@ pub struct Reaction {
 #[derive(Clone, Debug, Default)]
 pub struct Touch {
     drag: Option<Drag>,
+    /// The button the finger is on, from its coming down to its lift.
+    pressed: Option<usize>,
 }
 
 impl Touch {
@@ -359,6 +368,11 @@ impl Touch {
     /// The bar being dragged, if any: its value stands over the scene's.
     pub fn drag(&self) -> Option<&Drag> {
         self.drag.as_ref()
+    }
+
+    /// The button the finger is on, by its place among the meter's buttons.
+    pub fn pressed(&self) -> Option<usize> {
+        self.pressed
     }
 
     /// One pointer event against the meter's controls, `margin` the
@@ -374,6 +388,10 @@ impl Touch {
         let hit = control_at(controls, event.x, event.y, margin);
         match event.kind {
             PointerKind::Down => {
+                self.pressed = match hit.map(|c| &c.kind) {
+                    Some(ControlKind::Button { index, .. }) => Some(*index),
+                    _ => None,
+                };
                 if let Some((which, gauge)) = hit.and_then(Control::gauge) {
                     self.drag = Some(Drag {
                         which,
@@ -396,6 +414,7 @@ impl Touch {
                 }
             }
             PointerKind::Up => {
+                self.pressed = None;
                 if let Some(mut d) = self.drag.take() {
                     d.value = gauge_fraction(&d.gauge, event.x, event.y);
                     reaction.acts.push(Act::Command(d.command(meta)));
@@ -424,14 +443,23 @@ impl Touch {
     }
 }
 
-/// The dragged bar's value over the scene's, so the knob follows the
-/// finger before the player has answered.
-pub fn override_scene(drag: Option<&Drag>, scene: &mut Scene) {
-    if let (Some(d), Some(indicators)) = (drag, scene.indicators.as_mut()) {
+/// The finger over the scene: a dragged bar's value stands over the
+/// scene's, so the knob follows the finger before the player has
+/// answered, and a button under the finger shows its active picture.
+pub fn override_scene(touch: &Touch, scene: &mut Scene) {
+    let Some(indicators) = scene.indicators.as_mut() else {
+        return;
+    };
+    if let Some(d) = touch.drag() {
         let value = (d.value * 100.0).round() as u32;
         match d.which {
             Which::Volume => indicators.volume = value,
             Which::Progress => indicators.progress = value,
+        }
+    }
+    if let Some(i) = touch.pressed() {
+        if let Some(active) = indicators.buttons_active.get_mut(i) {
+            *active = true;
         }
     }
 }
@@ -539,10 +567,11 @@ mod tests {
                 repeat_state: 0,
                 play_state: 0,
                 progress: 0,
+                buttons_active: Vec::new(),
             }),
             ..Scene::default()
         };
-        override_scene(touch.drag(), &mut scene);
+        override_scene(&touch, &mut scene);
         assert_eq!(scene.indicators.as_ref().map(|i| i.volume), Some(60));
         let up = touch.pointer(at(PointerKind::Up, 150, 301), &controls, 24, &meta);
         assert_eq!(
@@ -562,7 +591,14 @@ mod tests {
     #[test]
     fn a_tap_commands_and_a_lift_on_nothing_is_left_to_the_touch_rules() {
         let (_, mut controls) = volume_bar();
-        controls.push(led(300, 100, ControlKind::Button(ButtonAction::Dismiss)));
+        controls.push(led(
+            300,
+            100,
+            ControlKind::Button {
+                action: ButtonAction::Dismiss,
+                index: 0,
+            },
+        ));
         let meta = Metadata {
             random: false,
             ..Metadata::default()
@@ -582,5 +618,43 @@ mod tests {
         let dismiss = touch.pointer(at(PointerKind::Up, 305, 105), &controls, 24, &meta);
         assert_eq!(dismiss.acts, vec![Act::Dismiss]);
         assert!(!dismiss.taken);
+    }
+
+    /// A finger down on a button shows its active picture until the lift.
+    #[test]
+    fn a_finger_on_a_button_shows_it_active_until_it_lifts() {
+        let spec = lead::meter_indicators(
+            "[m]\nconfig.extend = True\nbutton.next.pos = 300,100\nbutton.next.size = 10,10\nbutton.next.action = next\n",
+            "m",
+            "/t",
+        )
+        .expect("extended");
+        let indicators = Indicators {
+            spec: spec.clone(),
+            volume: 0,
+            mute_state: 0,
+            shuffle_state: 0,
+            repeat_state: 0,
+            play_state: 0,
+            progress: 0,
+            buttons_active: vec![false],
+        };
+        let controls = controls_of(&indicators, None);
+        let meta = Metadata::default();
+        let mut touch = Touch::new();
+        touch.pointer(at(PointerKind::Down, 305, 105), &controls, 24, &meta);
+        assert_eq!(touch.pressed(), Some(0));
+        let mut scene = Scene {
+            indicators: Some(indicators.clone()),
+            ..Scene::default()
+        };
+        override_scene(&touch, &mut scene);
+        assert_eq!(
+            scene.indicators.as_ref().map(|i| i.buttons_active.clone()),
+            Some(vec![true])
+        );
+        let up = touch.pointer(at(PointerKind::Up, 305, 105), &controls, 24, &meta);
+        assert_eq!(up.acts, vec![Act::Command(intake::Command::new("next"))]);
+        assert_eq!(touch.pressed(), None);
     }
 }
