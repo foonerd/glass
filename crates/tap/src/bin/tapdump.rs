@@ -16,13 +16,16 @@ fn main() {
     };
     let info = reader.info();
     println!(
-        "ring {} pid {} rate {} channels {} fft {} bins {} hop {} slots {}",
+        "ring {} pid {} rate {} channels {} window {} bands {} scale {} hop {} slots {}",
         reader.path().display(),
         info.pid,
         info.rate,
         info.channels,
         info.fft_size,
         info.bins,
+        tap::Scale::from_byte(info.scale as u8)
+            .unwrap_or_default()
+            .name(),
         info.hop,
         info.slots
     );
@@ -32,6 +35,8 @@ fn main() {
         if let Some(frame) = reader.latest() {
             if frame.seq != last_seq {
                 last_seq = frame.seq;
+                // The bands are spaced by the scale: thirds of them are the
+                // low, the middle and the high of the range.
                 let bins = frame.spectrum[0].len();
                 let loud = |from: usize, to: usize| -> f32 {
                     frame.spectrum[0][from.min(bins)..to.min(bins)]
@@ -39,17 +44,20 @@ fn main() {
                         .cloned()
                         .fold(0.0, f32::max)
                 };
+                let hold = frame.hold[0].iter().cloned().fold(0.0, f32::max);
                 println!(
-                    "seq {:6} frames {:9} peak {:.3} {:.3} rms {:.3} {:.3} low {:.3} mid {:.3} high {:.3}",
+                    "seq {:6} frames {:9} peak {:.3} {:.3} rms {:.3} {:.3} low {:.3} mid {:.3} high {:.3} hold {:.3} onsets {:04b}",
                     frame.seq,
                     frame.frames,
                     frame.peak[0],
                     frame.peak[1],
                     frame.rms[0],
                     frame.rms[1],
-                    loud(1, bins / 32),
-                    loud(bins / 32, bins / 4),
-                    loud(bins / 4, bins)
+                    loud(0, bins / 3),
+                    loud(bins / 3, bins * 2 / 3),
+                    loud(bins * 2 / 3, bins),
+                    hold,
+                    frame.onsets & 0x0f
                 );
             }
         }

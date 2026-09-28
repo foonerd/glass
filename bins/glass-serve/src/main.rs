@@ -245,6 +245,9 @@ fn main() -> ExitCode {
     let mut subscribers: HashMap<SocketAddr, Subscriber> = HashMap::new();
     let mut ring: Option<tap::Reader> = None;
     let mut ring_looked_at: Option<Instant> = None;
+    // For a tap of the previous kind still running: its raw spectrum
+    // projected onto the default bank before it goes on the wire.
+    let mut projector: Option<((u32, u32), bank::Projector)> = None;
     let mut last_seq: u64 = 0;
     let mut pending: Option<Frame> = None;
     let mut pending_hops: Vec<Frame> = Vec::new();
@@ -356,6 +359,19 @@ fn main() -> ExitCode {
         if let (Some(frame), true) = (pending.as_ref(), due) {
             let info = ring.as_ref().map(|r| r.info()).unwrap_or_default();
             let mut on_wire = frame.clone();
+            if on_wire.raw {
+                let key = (info.rate, on_wire.window);
+                if projector.as_ref().map(|(k, _)| *k) != Some(key) {
+                    let fft = on_wire.window as usize;
+                    projector = Some((
+                        key,
+                        bank::Projector::new(info.rate, fft, fft / 2, bank::Demand::default()),
+                    ));
+                }
+                if let Some((_, p)) = projector.as_mut() {
+                    tap::legacy::project_raw(&mut on_wire, p);
+                }
+            }
             on_wire.frames = frame.frames.saturating_sub(last_sent_frames).max(1);
             last_sent_frames = frame.frames;
             wire_seq = wire_seq.wrapping_add(1).max(1);
@@ -364,10 +380,20 @@ fn main() -> ExitCode {
         } else if quiet && !silence_sent && ring.is_some() {
             let info = ring.as_ref().map(|r| r.info()).unwrap_or_default();
             wire_seq = wire_seq.wrapping_add(1).max(1);
+            // The bank's shape, or the default bank's for a ring of the
+            // previous version, whose raw bins are not what goes on the wire.
+            let bands = if info.version >= 2 {
+                info.bins as usize
+            } else {
+                bank::Demand::default().bins
+            };
             let silence = Frame {
                 seq: u64::from(wire_seq),
                 time_ns: now_ns(),
-                spectrum: [vec![0.0; info.bins as usize], vec![0.0; info.bins as usize]],
+                spectrum: [vec![0.0; bands], vec![0.0; bands]],
+                hold: [vec![0.0; bands], vec![0.0; bands]],
+                scale: tap::Scale::from_byte(info.scale as u8).unwrap_or_default(),
+                window: info.fft_size,
                 ..Default::default()
             };
             to_send = Some(wire::encode(&silence, info.rate, info.channels, 0));

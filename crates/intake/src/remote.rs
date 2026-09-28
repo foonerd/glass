@@ -753,6 +753,7 @@ mod tests {
             peak: [0.5, 0.5],
             rms: [0.3, 0.3],
             spectrum: [vec![0.5; 4], vec![0.5; 4]],
+            ..Frame::default()
         };
         server
             .send_to(&wire::encode(&one, 48000, 2, 0), client)
@@ -799,6 +800,7 @@ mod tests {
             peak: [0.5, 0.5],
             rms: [0.3, 0.3],
             spectrum: [vec![0.5; 4], vec![0.5; 4]],
+            ..Frame::default()
         };
         server
             .send_to(&wire::encode(&one, 48000, 2, 0), client)
@@ -851,16 +853,19 @@ mod tests {
     fn a_beacon_is_parsed_and_the_rest_ignored() {
         let ip: IpAddr = "192.168.1.5".parse().unwrap();
         let beacon = Beacon::parse(
-            br#"{"glass":"player","protocol":1,"name":"player","host":"player.local","frames_port":5580,"channel_port":5581,"manager_port":5582,"release":"0.7.0","config":"abcd1234","theme":"1280x720_x","meter":"random"}"#,
+            br#"{"glass":"player","protocol":2,"name":"player","host":"player.local","frames_port":5580,"channel_port":5581,"manager_port":5582,"release":"0.7.0","config":"abcd1234","theme":"1280x720_x","meter":"random"}"#,
             ip,
         )
         .unwrap();
         assert_eq!(beacon.name, "player");
         assert_eq!(beacon.address(), "192.168.1.5");
         assert_eq!(beacon.manager_url(), "http://192.168.1.5:5582");
-        assert!(Beacon::parse(br#"{"glass":"player","protocol":2}"#, ip).is_none());
+        assert!(
+            Beacon::parse(br#"{"glass":"player","protocol":1}"#, ip).is_none(),
+            "a player of the earlier wire is not for this remote"
+        );
         assert!(Beacon::parse(br#"{"service":"peppy_level_server"}"#, ip).is_none());
-        let bare = Beacon::parse(br#"{"glass":"player","protocol":1,"name":"x"}"#, ip).unwrap();
+        let bare = Beacon::parse(br#"{"glass":"player","protocol":2,"name":"x"}"#, ip).unwrap();
         assert_eq!(bare.frames_port, DEFAULT_FRAMES_PORT);
         assert_eq!(Beacon::named("player.local").address(), "player.local");
     }

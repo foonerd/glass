@@ -6,7 +6,7 @@
 //! publishes into the ring: peak, RMS and the spectrum of linear audio,
 //! the density level of one-bit audio.
 //!
-//! Configuration keys beside `slave`: `ring`, `fft_size`, `hop`, `slots`,
+//! Configuration keys beside `slave`: `ring`, `hop`, `slots`,
 //! as for the scope.
 
 use std::collections::VecDeque;
@@ -356,7 +356,6 @@ fn run(shared: Arc<Shared>, settings: Settings) {
         tap::ring::DIR,
         measure::Settings {
             ring: settings.ring.clone(),
-            fft_size: settings.fft_size,
             hop: settings.hop,
             slots: settings.slots,
         },

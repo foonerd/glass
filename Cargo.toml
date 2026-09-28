@@ -9,6 +9,7 @@ members = [
     "crates/controls",
     "crates/pane",
     "crates/tap",
+    "crates/bank",
     "bins/glass",
     "bins/glasstap",
     "bins/glass-remote",
@@ -25,7 +26,7 @@ codegen-units = 1
 panic = "abort"
 
 [workspace.package]
-version = "0.7.46"
+version = "0.7.47"
 edition = "2021"
 license = "MIT"
 publish = false

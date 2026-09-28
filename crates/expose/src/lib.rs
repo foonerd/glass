@@ -5584,6 +5584,7 @@ mod tests {
             reflection_gap: 1,
             topping: Some((1, 1)),
             foreground: Default::default(),
+            demand: None,
         };
         let assets = SpectrumAssets::load(&spec);
         let mut motion = SpectrumMotion::default();

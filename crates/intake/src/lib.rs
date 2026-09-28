@@ -1435,11 +1435,19 @@ pub struct TapSource {
     showing_seen: Option<(String, String)>,
     /// The meter's fall, as the old scope shaped it, on the pipe scale.
     decay: tap::legacy::Meter,
-    /// The theme's bins from the raw spectrum, on the old logarithmic mapping.
-    bins_mapper: tap::legacy::Spectrum,
+    /// The theme's bars from the bank, on the old logarithmic mapping.
+    bins_mapper: tap::legacy::Regroup,
     spectrum_max: u32,
     spectrum_bins: usize,
     spectrum_held: Vec<f32>,
+    /// For a tap of the previous kind still running: its raw spectrum
+    /// projected onto the default bank, one projector per rate and FFT.
+    projector: Option<((u32, u32), bank::Projector)>,
+    /// The bank and its hold as they last arrived, for the scene.
+    bank_held: [Vec<f32>; 2],
+    hold_held: [Vec<f32>; 2],
+    scale_held: bank::Scale,
+    onsets_held: u8,
     levels_held: Levels,
     metadata_held: lead::Metadata,
     metadata_at: Option<Moment>,
@@ -1578,7 +1586,7 @@ impl TapSource {
             config_seen: None,
             showing_seen: None,
             decay: tap::legacy::Meter::new(METER_DECAY_MS, meter_max.max(1.0) as u32),
-            bins_mapper: tap::legacy::Spectrum::new(
+            bins_mapper: tap::legacy::Regroup::new(
                 bins,
                 lead::DEFAULT_SPECTRUM_MAX as u32,
                 true,
@@ -1588,6 +1596,11 @@ impl TapSource {
             spectrum_max: lead::DEFAULT_SPECTRUM_MAX as u32,
             spectrum_bins: bins,
             spectrum_held: Vec::new(),
+            projector: None,
+            bank_held: [Vec::new(), Vec::new()],
+            hold_held: [Vec::new(), Vec::new()],
+            scale_held: bank::Scale::default(),
+            onsets_held: 0,
             levels_held: Levels::default(),
             metadata_held: lead::Metadata::default(),
             metadata_at: None,
@@ -1836,7 +1849,7 @@ impl TapSource {
                 self.spectrum_bins = bins;
                 self.spectrum_max = spectrum_max;
                 self.bins_mapper =
-                    tap::legacy::Spectrum::new(bins, spectrum_max, true, true, SPECTRUM_SMOOTHING);
+                    tap::legacy::Regroup::new(bins, spectrum_max, true, true, SPECTRUM_SMOOTHING);
                 self.spectrum_held.clear();
             }
         }
@@ -1859,14 +1872,27 @@ impl Source for TapSource {
     fn poll(&mut self) -> Input {
         // The latest hop, or silence when the stream is gone or has gone quiet.
         let Taken { hop, quiet } = self.hops.take();
-        if let Some((frame, rate, elapsed)) = hop {
+        if let Some((mut frame, rate, elapsed)) = hop {
+            if frame.raw {
+                let key = (rate, frame.window);
+                if self.projector.as_ref().map(|(k, _)| *k) != Some(key) {
+                    let fft = frame.window as usize;
+                    self.projector = Some((
+                        key,
+                        bank::Projector::new(rate, fft, fft / 2, bank::Demand::default()),
+                    ));
+                }
+                if let Some((_, projector)) = self.projector.as_mut() {
+                    tap::legacy::project_raw(&mut frame, projector);
+                }
+            }
             let raw = [
                 (frame.peak[0] * 32767.0) as i32,
                 (frame.peak[1] * 32767.0) as i32,
             ];
             let (left, right) = self.decay.update(raw, elapsed, rate);
             self.levels_held = self.conditioner.condition(left, right);
-            // The old scope measured the two channels' average; so do the bins.
+            // The old scope measured the two channels' average; so do the bars.
             let mixed: Vec<f32> = frame.spectrum[0]
                 .iter()
                 .zip(frame.spectrum[1].iter())
@@ -1874,22 +1900,33 @@ impl Source for TapSource {
                 .collect();
             self.spectrum_held = self
                 .bins_mapper
-                .update(&mixed)
+                .update(&mixed, frame.scale, rate)
                 .into_iter()
                 .map(|v| v as f32)
                 .collect();
+            self.scale_held = frame.scale;
+            self.onsets_held = frame.onsets;
+            self.bank_held = frame.spectrum;
+            self.hold_held = frame.hold;
         } else if quiet {
             let (left, right) = self.decay.update([0, 0], 1024, 48_000);
             self.levels_held = self.conditioner.condition(left, right);
             if self.spectrum_held.iter().any(|v| *v > 0.0) {
-                let zeros = vec![0.0f32; 1024];
+                let zeros = vec![0.0f32; self.bank_held[0].len().max(1)];
                 self.spectrum_held = self
                     .bins_mapper
-                    .update(&zeros)
+                    .update(&zeros, self.scale_held, 48_000)
                     .into_iter()
                     .map(|v| v as f32)
                     .collect();
             }
+            for channel in self.bank_held.iter_mut() {
+                channel.fill(0.0);
+            }
+            for channel in self.hold_held.iter_mut() {
+                channel.fill(0.0);
+            }
+            self.onsets_held = 0;
         }
 
         // The player's state: pushed by the plugin's channel as it changes,
@@ -2029,6 +2066,10 @@ impl Source for TapSource {
             levels: self.levels_held,
             bins: Bins {
                 values: self.spectrum_held.clone(),
+                bank: self.bank_held.clone(),
+                hold: self.hold_held.clone(),
+                scale: self.scale_held,
+                onsets: self.onsets_held,
             },
             metadata,
         }
@@ -2298,7 +2339,10 @@ pub fn input_from_records(
     let bins = decode_spectrum(spectrum, spectrum_bins).unwrap_or_default();
     Input {
         levels,
-        bins: Bins { values: bins },
+        bins: Bins {
+            values: bins,
+            ..Bins::default()
+        },
         metadata: lead::Metadata::default(),
     }
 }
@@ -2382,6 +2426,7 @@ mod tests {
             peak: [peak, peak / 2.0],
             rms: [peak / 2.0, peak / 4.0],
             spectrum: [vec![bin, 0.1], vec![0.0, bin]],
+            ..tap::Frame::default()
         };
         let merged =
             merge_hops([hop(5, 0.2, 0.5), hop(6, 0.9, 0.1), hop(7, 0.4, 0.3)].into_iter()).unwrap();

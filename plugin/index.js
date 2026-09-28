@@ -42,6 +42,9 @@ const MeterConfigFile = ConfigDir + '/meter.txt';
 const SpectrumConfigFile = ConfigDir + '/spectrum.txt';
 const meterFolderStr = 'meter.folder';
 const SpectrumFolderStr = 'spectrum.folder';
+// What the tap measures to: the bank the spectrum theme on show asks for,
+// written beside the rings for the tap to follow (tap::demand).
+const SpectrumDemandFile = '/dev/shm/glasstap.demand';
 
 // The plugin Glass replaces. Only one of the two may be enabled at a time.
 const LEGACY_PLUGIN = 'peppy_screensaver';
@@ -779,6 +782,64 @@ Glass.prototype.loadConfigs = function () {
         spectrum_config = ini.parse(fs.readFileSync(SpectrumConfigFile, 'utf-8'));
         base_folder_S = (spectrum_config.current['base.folder'] || '') + '/';
         if (base_folder_S === '/') { base_folder_S = DATA_DIR + '/templates_spectrum/'; }
+    }
+    this.writeSpectrumDemand();
+};
+
+// The bank count a theme of the previous engine is measured at: its bar
+// count rounded up to the next of 32, 64, 128 and 256.
+function binsForLegacy(size) {
+    var n = parseInt(size, 10) || 20;
+    var steps = [32, 64, 128, 256];
+    for (var i = 0; i < steps.length; i++) { if (steps[i] >= n) { return steps[i]; } }
+    return 256;
+}
+
+// What the spectrum theme on show asks of the tap: over every section of
+// its spectrum.txt, the most bands, two channels when any asks or none
+// says, the first scale named, the longest window named; a theme that
+// names nothing is measured at its bar count rounded up, on the log scale.
+Glass.prototype.spectrumDemand = function () {
+    var current = (spectrum_config && spectrum_config.current) || {};
+    var folder = String(current[SpectrumFolderStr] || '').trim();
+    var sections = {};
+    try {
+        if (folder) { sections = ini.parse(fs.readFileSync(base_folder_S + folder + '/spectrum.txt', 'utf-8')); }
+    } catch (e) { sections = {}; }
+    var bins = 0, channels = 0, scale = '', window = 0, named = false;
+    Object.keys(sections).forEach(function (name) {
+        var section = sections[name];
+        if (!section || typeof section !== 'object' || name === 'current') { return; }
+        var b = parseInt(section.bins, 10), c = parseInt(section.channels, 10), w = parseInt(section.window, 10);
+        var sc = String(section.scale || '').trim().toLowerCase();
+        if (b > 0) { bins = Math.max(bins, b); named = true; }
+        if (c === 1 || c === 2) { channels = Math.max(channels, c); named = true; }
+        if (!scale && (sc === 'log' || sc === 'mel' || sc === 'linear')) { scale = sc; named = true; }
+        if (w > 0) { window = Math.max(window, w); named = true; }
+    });
+    if (!named) { bins = binsForLegacy(current.size); }
+    return {
+        bins: Math.min(256, Math.max(1, bins || 256)),
+        channels: channels || 2,
+        scale: scale || 'log',
+        window: window || 0
+    };
+};
+
+// Write the demand beside the rings when it changed; the tap picks it up
+// within a second and measures anew.
+Glass.prototype.writeSpectrumDemand = function () {
+    var self = this;
+    var text;
+    try { text = JSON.stringify(self.spectrumDemand()); } catch (e) { return; }
+    if (self.lastSpectrumDemand === text) { return; }
+    try {
+        fs.writeFileSync(SpectrumDemandFile + '.part', text);
+        fs.renameSync(SpectrumDemandFile + '.part', SpectrumDemandFile);
+        self.lastSpectrumDemand = text;
+        if (self.logger) { self.logger.info(id + 'spectrum demand ' + text); }
+    } catch (e) {
+        if (self.logger) { self.logger.warn(id + 'spectrum demand not written: ' + (e && e.message ? e.message : e)); }
     }
 };
 
@@ -3791,7 +3852,7 @@ Glass.prototype.backupDelete = function (name) {
 const REMOTE_DEFAULTS = { remotesEnabled: true, remoteFramesPort: 5580, remoteChannelPort: 5581, remoteBeaconPort: 5579 };
 const REMOTE_BEACON_EVERY_MS = 5000;
 const REMOTE_SERVE_STATUS = '/tmp/glass_serve.json';
-const REMOTE_PROTOCOL = 1;
+const REMOTE_PROTOCOL = 2;
 
 Glass.prototype.remotePorts = function () {
     var self = this;

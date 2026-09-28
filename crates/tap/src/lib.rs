@@ -15,6 +15,7 @@
 //! the two can run side by side while the switch is made.
 
 pub mod analysis;
+pub mod demand;
 pub mod dop;
 pub mod dsd;
 #[cfg(unix)]
@@ -29,6 +30,7 @@ pub mod sample;
 pub mod wire;
 
 pub use analysis::Analyser;
+pub use bank::{Demand, Scale};
 pub use ring::{Frame, MAX_CHANNELS};
 #[cfg(unix)]
 pub use ring::{Reader, Writer};

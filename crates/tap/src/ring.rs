@@ -65,7 +65,7 @@ pub fn sweep(dir: &Path) -> usize {
 }
 
 pub const MAGIC: &[u8; 8] = b"GLASSTAP";
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 pub const DIR: &str = "/dev/shm";
 pub const PREFIX: &str = "glasstap.";
 pub const MAX_CHANNELS: usize = 2;
@@ -74,8 +74,10 @@ pub const HEADER_BYTES: usize = 256;
 pub const LIVE_NS: u64 = 3_000_000_000;
 
 /// One hop's measurements. Peak and RMS are linear, 1.0 being full scale;
-/// the spectrum is the amplitude at each FFT bin, a full-scale sine reading
-/// 1.0 at its bin, from 0 Hz up to just under half the sample rate.
+/// the spectrum is the bank per channel, a full-scale sine reading 1.0 in
+/// its band, on `scale` from a `window` samples long FFT; a one-channel
+/// bank fills both. The hold is the bank's peak hold in the same layout,
+/// and the onsets are its four groups' bits.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Frame {
     pub seq: u64,
@@ -84,6 +86,14 @@ pub struct Frame {
     pub peak: [f32; MAX_CHANNELS],
     pub rms: [f32; MAX_CHANNELS],
     pub spectrum: [Vec<f32>; MAX_CHANNELS],
+    pub hold: [Vec<f32>; MAX_CHANNELS],
+    pub onsets: u8,
+    pub scale: bank::Scale,
+    pub window: u32,
+    /// From a ring of version 1: the spectrum is the raw amplitude at
+    /// each FFT bin from 0 Hz to half the rate, not a bank, and the hold
+    /// is empty. A reader projects it onto a bank (`legacy::project_raw`).
+    pub raw: bool,
 }
 
 /// The hops that arrived between two looks at the ring, as one: the peaks,
@@ -101,7 +111,14 @@ pub fn merge_hops(hops: impl Iterator<Item = Frame>) -> Option<Frame> {
                     for (a, b) in m.spectrum[ch].iter_mut().zip(frame.spectrum[ch].iter()) {
                         *a = a.max(*b);
                     }
+                    for (a, b) in m.hold[ch].iter_mut().zip(frame.hold[ch].iter()) {
+                        *a = a.max(*b);
+                    }
                 }
+                m.onsets |= frame.onsets;
+                m.scale = frame.scale;
+                m.window = frame.window;
+                m.raw = frame.raw;
                 m.frames = frame.frames;
                 m.seq = frame.seq;
                 m.time_ns = frame.time_ns;
@@ -124,6 +141,10 @@ pub struct Info {
     pub hop: u32,
     pub seq: u64,
     pub written_ns: u64,
+    /// The bank's scale, as `bank::Scale::byte` gives it.
+    pub scale: u32,
+    /// The ring's version: 2 carries the bank, 1 the raw spectrum.
+    pub version: u32,
 }
 
 #[cfg(unix)]
@@ -152,6 +173,8 @@ const H_HOP: usize = 44;
 const H_SEQ: usize = 48;
 #[cfg(unix)]
 const H_WRITTEN: usize = 56;
+#[cfg(unix)]
+const H_SCALE: usize = 64;
 
 #[cfg(unix)]
 const S_SEQ: usize = 0;
@@ -166,10 +189,30 @@ const S_RMS: usize = 32;
 #[cfg(unix)]
 const S_SPECTRUM: usize = 40;
 
+/// The bytes of a slot: the head, the peaks and RMS, the bank per channel,
+/// the hold per channel, and the tail sequence.
 #[cfg(unix)]
 fn slot_bytes(bins: usize) -> usize {
+    let raw = S_SPECTRUM + bins * MAX_CHANNELS * 4 * 2 + 8;
+    raw.div_ceil(64) * 64
+}
+
+/// Where a slot's tail sequence sits.
+#[cfg(unix)]
+fn tail_at(bins: usize) -> usize {
+    S_SPECTRUM + bins * MAX_CHANNELS * 4 * 2
+}
+
+/// A version 1 slot: the raw spectrum per channel and no hold.
+#[cfg(unix)]
+fn slot_bytes_v1(bins: usize) -> usize {
     let raw = S_SPECTRUM + bins * MAX_CHANNELS * 4 + 8;
     raw.div_ceil(64) * 64
+}
+
+#[cfg(unix)]
+fn tail_at_v1(bins: usize) -> usize {
+    S_SPECTRUM + bins * MAX_CHANNELS * 4
 }
 
 /// Nanoseconds of the monotonic clock.
@@ -288,19 +331,21 @@ pub struct Writer {
 
 #[cfg(unix)]
 impl Writer {
-    /// Create the ring for a stream. `slots` is how many hops are kept; the
-    /// reader takes the latest, a history view can take more.
+    /// Create the ring for a stream measured as `demand` asks. `slots` is
+    /// how many hops are kept; the reader takes the latest, a history view
+    /// can take more.
     pub fn create(
         dir: &Path,
         tag: &str,
         rate: u32,
         channels: u32,
-        fft_size: u32,
+        demand: bank::Demand,
         hop: u32,
         slots: usize,
     ) -> io::Result<Self> {
         sweep(dir);
-        let bins = (fft_size / 2) as usize;
+        let demand = demand.clean();
+        let bins = demand.bins;
         let slots = slots.max(2);
         let slot_bytes = slot_bytes(bins);
         let len = HEADER_BYTES + slots * slot_bytes;
@@ -336,12 +381,13 @@ impl Writer {
             put_u32(bytes, H_HEADER_BYTES, HEADER_BYTES as u32);
             put_u32(bytes, H_RATE, rate);
             put_u32(bytes, H_CHANNELS, channels.min(MAX_CHANNELS as u32));
-            put_u32(bytes, H_FFT, fft_size);
+            put_u32(bytes, H_FFT, demand.window as u32);
             put_u32(bytes, H_BINS, bins as u32);
             put_u32(bytes, H_SLOTS, slots as u32);
             put_u32(bytes, H_SLOT_BYTES, slot_bytes as u32);
             put_u32(bytes, H_PID, std::process::id());
             put_u32(bytes, H_HOP, hop);
+            put_u32(bytes, H_SCALE, u32::from(demand.scale.byte()));
         }
         Ok(Self {
             map,
@@ -375,12 +421,17 @@ impl Writer {
                 put_f32(slot, S_PEAK + ch * 4, frame.peak[ch]);
                 put_f32(slot, S_RMS + ch * 4, frame.rms[ch]);
                 let base = S_SPECTRUM + ch * bins * 4;
-                for (k, v) in frame.spectrum[ch].iter().take(bins).enumerate() {
-                    put_f32(slot, base + k * 4, *v);
+                for k in 0..bins {
+                    let v = frame.spectrum[ch].get(k).copied().unwrap_or(0.0);
+                    put_f32(slot, base + k * 4, v);
+                }
+                let base = S_SPECTRUM + (MAX_CHANNELS + ch) * bins * 4;
+                for k in 0..bins {
+                    let v = frame.hold[ch].get(k).copied().unwrap_or(0.0);
+                    put_f32(slot, base + k * 4, v);
                 }
             }
-            let tail = S_SPECTRUM + bins * MAX_CHANNELS * 4;
-            put_u64(slot, tail, seq);
+            put_u64(slot, tail_at(bins), seq);
             put_u64(slot, S_SEQ, seq);
         }
         self.map
@@ -424,7 +475,11 @@ impl Reader {
         unsafe { libc::close(fd) };
         let map = map?;
         let bytes = map.bytes();
-        if &bytes[H_MAGIC..H_MAGIC + 8] != MAGIC || get_u32(bytes, H_VERSION) != VERSION {
+        let version = get_u32(bytes, H_VERSION);
+        // A ring of version 1, from a tap that measured before the bank,
+        // is read too: an audio process keeps the tap it loaded until it
+        // restarts, and its raw spectrum is projected onto a bank.
+        if &bytes[H_MAGIC..H_MAGIC + 8] != MAGIC || !(1..=VERSION).contains(&version) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "not a glasstap ring",
@@ -435,18 +490,26 @@ impl Reader {
             channels: get_u32(bytes, H_CHANNELS),
             fft_size: get_u32(bytes, H_FFT),
             bins: get_u32(bytes, H_BINS),
+            scale: if version >= 2 {
+                get_u32(bytes, H_SCALE)
+            } else {
+                0
+            },
             slots: get_u32(bytes, H_SLOTS),
             slot_bytes: get_u32(bytes, H_SLOT_BYTES),
             pid: get_u32(bytes, H_PID),
             hop: get_u32(bytes, H_HOP),
             seq: 0,
             written_ns: 0,
+            version,
+        };
+        let expected = if version >= 2 {
+            slot_bytes(info.bins as usize)
+        } else {
+            slot_bytes_v1(info.bins as usize)
         };
         let needed = HEADER_BYTES + info.slots as usize * info.slot_bytes as usize;
-        if info.slots == 0
-            || info.slot_bytes as usize != slot_bytes(info.bins as usize)
-            || len < needed
-        {
+        if info.slots == 0 || info.slot_bytes as usize != expected || len < needed {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "ring header disagrees with its size",
@@ -519,13 +582,15 @@ impl Reader {
             return None;
         }
         let bins = self.info.bins as usize;
+        let raw = self.info.version < 2;
+        let tail_offset = if raw { tail_at_v1(bins) } else { tail_at(bins) };
         let at = HEADER_BYTES
             + ((seq as usize) % self.info.slots as usize) * self.info.slot_bytes as usize;
         for _ in 0..3 {
             let bytes = self.map.bytes();
             let slot = &bytes[at..at + self.info.slot_bytes as usize];
             let head = get_u64(slot, S_SEQ);
-            let tail = get_u64(slot, S_SPECTRUM + bins * MAX_CHANNELS * 4);
+            let tail = get_u64(slot, tail_offset);
             if head != seq || tail != seq {
                 std::hint::spin_loop();
                 continue;
@@ -534,6 +599,9 @@ impl Reader {
                 seq,
                 time_ns: get_u64(slot, S_TIME),
                 frames: get_u64(slot, S_FRAMES),
+                scale: bank::Scale::from_byte(self.info.scale as u8).unwrap_or_default(),
+                window: self.info.fft_size,
+                raw,
                 ..Frame::default()
             };
             for ch in 0..MAX_CHANNELS {
@@ -541,6 +609,10 @@ impl Reader {
                 frame.rms[ch] = get_f32(slot, S_RMS + ch * 4);
                 let base = S_SPECTRUM + ch * bins * 4;
                 frame.spectrum[ch] = (0..bins).map(|k| get_f32(slot, base + k * 4)).collect();
+                if !raw {
+                    let base = S_SPECTRUM + (MAX_CHANNELS + ch) * bins * 4;
+                    frame.hold[ch] = (0..bins).map(|k| get_f32(slot, base + k * 4)).collect();
+                }
             }
             // The head is written last; if it still matches, the copy is whole.
             if get_u64(slot, S_SEQ) == seq {
@@ -580,16 +652,66 @@ mod tests {
         assert!(live.exists() && other.exists());
         // A new writer sweeps on its way in.
         fs::write(&dead, b"x").unwrap();
-        let writer = Writer::create(&dir, "test", 48_000, 2, 256, 128, 4).unwrap();
+        let writer =
+            Writer::create(&dir, "test", 48_000, 2, bank::Demand::default(), 128, 4).unwrap();
         assert!(!dead.exists());
         assert!(writer.path().exists());
         let _ = fs::remove_dir_all(&dir);
     }
 
     #[test]
+    fn a_ring_of_the_previous_version_reads_as_a_raw_spectrum() {
+        // A directory of its own: the other tests write rings in theirs.
+        let dir = std::env::temp_dir().join(format!("glasstap-old-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join(format!("{PREFIX}old.{}.9", std::process::id()));
+        let (bins, slots) = (8usize, 2usize);
+        let slot_len = slot_bytes_v1(bins);
+        let mut bytes = vec![0u8; HEADER_BYTES + slots * slot_len];
+        bytes[H_MAGIC..H_MAGIC + 8].copy_from_slice(MAGIC);
+        put_u32(&mut bytes, H_VERSION, 1);
+        put_u32(&mut bytes, H_HEADER_BYTES, HEADER_BYTES as u32);
+        put_u32(&mut bytes, H_RATE, 44_100);
+        put_u32(&mut bytes, H_CHANNELS, 2);
+        put_u32(&mut bytes, H_FFT, 16);
+        put_u32(&mut bytes, H_BINS, bins as u32);
+        put_u32(&mut bytes, H_SLOTS, slots as u32);
+        put_u32(&mut bytes, H_SLOT_BYTES, slot_len as u32);
+        put_u32(&mut bytes, H_PID, std::process::id());
+        put_u32(&mut bytes, H_HOP, 8);
+        let at = HEADER_BYTES + (1 % slots) * slot_len;
+        {
+            let slot = &mut bytes[at..at + slot_len];
+            put_u64(slot, S_SEQ, 1);
+            put_u64(slot, S_TIME, 5);
+            put_u64(slot, S_FRAMES, 16);
+            put_f32(slot, S_PEAK, 0.5);
+            put_f32(slot, S_RMS, 0.25);
+            for k in 0..bins {
+                put_f32(slot, S_SPECTRUM + k * 4, k as f32 / 8.0);
+            }
+            put_u64(slot, tail_at_v1(bins), 1);
+        }
+        put_u64(&mut bytes, H_SEQ, 1);
+        put_u64(&mut bytes, H_WRITTEN, now_ns());
+        fs::write(&path, &bytes).unwrap();
+        let reader = Reader::open(&path).expect("the old ring is read");
+        assert_eq!(reader.info().version, 1);
+        let frame = reader.latest().expect("its frame");
+        assert!(frame.raw, "the spectrum is raw");
+        assert_eq!(frame.window, 16);
+        assert_eq!(frame.spectrum[0][4], 0.5);
+        assert!(frame.hold[0].is_empty());
+        assert_eq!(frame.peak[0], 0.5);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn a_frame_published_is_the_frame_read() {
         let dir = temp_dir();
-        let mut writer = Writer::create(&dir, "test", 48_000, 2, 64, 32, 4).unwrap();
+        let demand = bank::Demand::new(32, 2, bank::Scale::Mel);
+        let mut writer = Writer::create(&dir, "test", 48_000, 2, demand, 1024, 4).unwrap();
         let reader = Reader::open(writer.path()).unwrap();
         assert_eq!(reader.latest(), None, "nothing before the first publish");
         let frame = Frame {
@@ -600,6 +722,13 @@ mod tests {
                 (0..32).map(|k| k as f32 / 32.0).collect(),
                 (0..32).map(|k| 1.0 - k as f32 / 32.0).collect(),
             ],
+            hold: [
+                (0..32).map(|k| k as f32 / 16.0).collect(),
+                (0..32).map(|k| 1.0 - k as f32 / 64.0).collect(),
+            ],
+            onsets: 0b0011,
+            scale: bank::Scale::Mel,
+            window: 4096,
             ..Frame::default()
         };
         writer.publish(&frame);
@@ -609,6 +738,9 @@ mod tests {
         assert_eq!(read.peak, frame.peak);
         assert_eq!(read.rms, frame.rms);
         assert_eq!(read.spectrum, frame.spectrum);
+        assert_eq!(read.hold, frame.hold, "the hold travels through the ring");
+        assert_eq!((read.scale, read.window), (bank::Scale::Mel, 4096));
+        assert!(!read.raw);
         assert!(read.time_ns > 0);
         let info = reader.info();
         assert_eq!(
@@ -618,9 +750,10 @@ mod tests {
                 info.fft_size,
                 info.bins,
                 info.hop,
-                info.slots
+                info.slots,
+                info.scale
             ),
-            (48_000, 2, 64, 32, 32, 4)
+            (48_000, 2, 4096, 32, 1024, 4, 1)
         );
         assert!(reader.is_live());
         // The ring keeps the last `slots` hops and no more.

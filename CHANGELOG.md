@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.47] - 2026-09-28
+
+The spectrum measured as a bank, stereo from the tap to every display. The tap runs an overlapped FFT, a window of up to 16384 samples every 1024, and projects it onto the bands a theme asks for, up to 256 per channel over 20 Hz to 20 kHz on a log, mel or linear scale, with a peak hold per band and an onset per band group; the analyser is the `bank` crate, a port of the evo framework's terminus analyser under its own Apache-2.0 licence. A spectrum theme says what it wants with `bins`, `channels`, `scale` and `window` in its sections; the plugin writes the demand of the theme on show beside the rings and the tap follows it within a second. Themes of the previous engine keep their look: their bars are regrouped from the bank on the old logarithmic mapping. The ring is version 2 and the wire protocol 2, carrying the bank per channel and its hold in place of the raw spectrum of the channels' average; remotes upgrade together with their player. An audio process that still runs the previous tap keeps its meters: its ring is read and its raw spectrum projected onto the bank until the process restarts. The ALSA key `fft_size` is accepted and no longer read.
+
 ## [0.7.46] - 2026-09-28
 
 The face draws the pictures: the album art, the artist fanart with its slideshow, and the pictures a theme takes from the track's folder, the record and the reels included. The module lists what it wants, the page fetches each picture through the manager and hands it in, or says the manager has none, and the manager fetches only what the player itself reports for the playing track. Underneath, every picture a scene names is decoded and kept by one type in the raster crate, shared by the display and the module, so the two cannot drift again. The SVG icons are drawn without the text engine, which the format icons never used: the display, the remotes and the browser module are smaller for it.

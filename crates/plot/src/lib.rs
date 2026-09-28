@@ -672,6 +672,7 @@ mod tests {
             },
             bins: Bins {
                 values: vec![100.0, 0.0],
+                ..Bins::default()
             },
             metadata: Metadata::default(),
         };
