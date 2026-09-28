@@ -1,6 +1,6 @@
 # Glass
 
-VU meters, spectrum analysers, turntables and cassette decks on a Volumio player's screen, moving with the music. Glass is a Volumio plugin with a native display, written in Rust: the theme format of PeppyMeter Screensaver, painted with about half the processor time and a tenth of the memory; an audio tap that measures every source, files, radio, streaming, AirPlay and Spotify alike, without touching the sound; a manager page for themes, the catalog, artwork, backups and upgrades; and remote displays on other screens over the network.
+VU meters, spectrum analysers, turntables and cassette decks on a Volumio player's screen, moving with the music. Glass is a Volumio plugin with a native display, written in Rust: the theme format of PeppyMeter Screensaver, painted with about half the processor time and a tenth of the memory; an audio tap that measures every source, files, radio, streaming, AirPlay and Spotify alike, without touching the sound; a manager page for themes, the catalog, artwork and fonts, backups and upgrades, a day and night schedule and touch controls on the themes that offer them; and remote displays on other screens over the network, on Linux, Windows and Android.
 
 <p align="center"><img src="https://raw.githubusercontent.com/wiki/foonerd/glass/images/display-turntable.png" width="720" alt="Glass on a player's screen"></p>
 
@@ -45,7 +45,7 @@ flowchart LR
 | `intake` | `crates/intake` | The sources of a frame: the tap's ring or the wire, the player's state over the channel, album art, fanart, the meter rotation, the remote's sync. |
 | `plot` | `crates/plot` | Pure: from a skin and one input to a scene, the geometry of everything drawn. Replayable in tests without a display. |
 | `expose` | `crates/expose` | Rasters a scene: pictures, fonts, needles, bars, turning pictures, fades; only the boxes that changed. |
-| `pane` | `crates/pane` | The window: SDL2, full screen or windowed, a streaming texture, touch. |
+| `pane` | `crates/pane` | The window: SDL2, full screen or windowed on a chosen screen, a streaming texture, the keys and the pointer in the frame's pixels. |
 | `tap` and `glasstap` | `crates/tap`, `bins/glasstap` | The ALSA PCM plugin that heads the player's chain, passes every stream through byte for byte, PCM, DoP and native DSD, and measures it on its own thread into the ring. |
 | `glass` | `bins/glass` | The display: reads the ring and the player's state, draws at the frame rate, uploads when `DISPLAY` is set. As `glass --remote`, the same display on another machine, with its own settings page. |
 | `glass-serve` | `bins/glass-serve` | Sends the ring's frames to subscribed remotes over UDP. |
@@ -59,7 +59,7 @@ flowchart LR
 
 ## Building
 
-`scripts/check.sh` runs what CI runs: formatting, clippy with warnings denied, the tests, the documentation, the ALSA templates, and the plugin's tests. `scripts/ship.sh` cross builds the display, the daemon, `tapdump` and the tap for `x64`, `armv7` and `armv8` into `bin/<arch>` and `lib/<arch>` (not committed), against Volumio's glibc, and refuses a binary that needs a newer one. `scripts/package.sh` assembles the plugin zip Volumio installs. `scripts/tap_exact.sh` proves the tap passes every format through byte for byte. The toolchain is pinned in `rust-toolchain.toml`. Every version tag publishes the plugin zip and per-architecture archives, each with the remote installer, as release assets.
+`scripts/check.sh` runs what CI runs: formatting, clippy with warnings denied, the tests, the documentation, the ALSA templates, the shell scripts and the plugin's JSON parsed, the inline scripts of the two pages parsed, the Windows installer's check mode, and the plugin's tests. `scripts/ship.sh` cross builds the display, the daemon, `tapdump` and the tap for `x64`, `armv7` and `armv8` into `bin/<arch>` and `lib/<arch>` (not committed), against Volumio's glibc, and refuses a binary that needs a newer one. `scripts/package.sh` assembles the plugin zip Volumio installs. `scripts/tap_exact.sh` proves the tap passes every format through byte for byte. The toolchain is pinned in `rust-toolchain.toml`. Every version tag publishes the plugin zip and per-architecture archives, each with the remote installer, as release assets.
 
 ## Standards
 
