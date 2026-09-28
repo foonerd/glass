@@ -1791,9 +1791,9 @@ fn align_x(box_x: u32, box_w: u32, item_w: u32, align: TypeAlign) -> u32 {
 }
 
 /// The type area's steps. Inside a real box the icon or label is clipped to
-/// the box, placed by `align`, and centred vertically. `both` puts the icon
-/// on the left and the label three pixels to its right. Text mode without a
-/// box draws the label at the position.
+/// the box, placed by `align`, and centred vertically. `both` puts the label
+/// three pixels to the icon's right and places the two as one by `align`.
+/// Text mode without a box draws the label at the position.
 fn plan_type_area<'a>(
     area: &TypeArea,
     icon: Option<&'a Frame>,
@@ -1834,39 +1834,33 @@ fn plan_type_area<'a>(
         TypeMode::Both => match (icon, label) {
             (None, None) => {}
             (None, Some(label)) => place(ops, label),
-            (Some(icon), None) => {
-                let (iw, ih) = fitted(icon);
-                let y = area.y + h.saturating_sub(ih) / 2;
-                ops.push(Op::Blit {
-                    src: icon,
-                    at: (area.x as i32, y as i32),
-                    part: (0, 0, iw, ih),
-                    clip: None,
-                    alpha: 255,
-                });
-            }
+            (Some(icon), None) => place(ops, icon),
             (Some(icon), Some(label)) => {
                 let (iw, ih) = fitted(icon);
+                let text_x = iw + GAP;
+                if text_x >= w {
+                    place(ops, icon);
+                    return;
+                }
+                let (lw, lh) = (label.width.min(w - text_x), label.height.min(h));
+                // The icon and the label as one, placed by the alignment.
+                let x0 = align_x(area.x, w, text_x + lw, area.align);
                 let iy = area.y + h.saturating_sub(ih) / 2;
                 ops.push(Op::Blit {
                     src: icon,
-                    at: (area.x as i32, iy as i32),
+                    at: (x0 as i32, iy as i32),
                     part: (0, 0, iw, ih),
                     clip: None,
                     alpha: 255,
                 });
-                let text_x = iw + GAP;
-                if text_x < w {
-                    let (lw, lh) = (label.width.min(w - text_x), label.height.min(h));
-                    let ty = area.y + h.saturating_sub(lh) / 2;
-                    ops.push(Op::Blit {
-                        src: label,
-                        at: ((area.x + text_x) as i32, ty as i32),
-                        part: (0, 0, lw, lh),
-                        clip: None,
-                        alpha: 255,
-                    });
-                }
+                let ty = area.y + h.saturating_sub(lh) / 2;
+                ops.push(Op::Blit {
+                    src: label,
+                    at: ((x0 + text_x) as i32, ty as i32),
+                    part: (0, 0, lw, lh),
+                    clip: None,
+                    alpha: 255,
+                });
             }
         },
     }
@@ -4916,6 +4910,28 @@ impl FolderPicture {
                 Self {
                     frame: fit_art(&picture, nw, nh),
                     at: (layer.x + (bw - nw) / 2, layer.y + (bh - nh) / 2),
+                }
+            }
+            Scale::Cover => {
+                // Scaled to cover the box, then the middle of it cut out.
+                let ratio =
+                    (bw as f32 / picture.width as f32).max(bh as f32 / picture.height as f32);
+                let nw = ((picture.width as f32 * ratio).ceil() as u32).max(bw);
+                let nh = ((picture.height as f32 * ratio).ceil() as u32).max(bh);
+                let scaled = fit_art(&picture, nw, nh);
+                let (ox, oy) = ((nw - bw) / 2, (nh - bh) / 2);
+                let mut rgba = Vec::with_capacity((bw * bh * 4) as usize);
+                for y in 0..bh {
+                    let from = (((oy + y) * nw + ox) * 4) as usize;
+                    rgba.extend_from_slice(&scaled.rgba[from..from + (bw * 4) as usize]);
+                }
+                Self {
+                    frame: Frame {
+                        width: bw,
+                        height: bh,
+                        rgba,
+                    },
+                    at: (layer.x, layer.y),
                 }
             }
         })

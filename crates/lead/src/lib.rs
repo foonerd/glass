@@ -505,6 +505,19 @@ pub struct TypeSpec {
     pub color: [u8; 3],
     pub font_size: u32,
     pub font_style: TextStyle,
+    /// `playinfo.type.label`: what the label says beside or in place of
+    /// the icon, the format's name or the sample rate line.
+    #[serde(default)]
+    pub label: TypeLabel,
+}
+
+/// What the type area's label says.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum TypeLabel {
+    #[default]
+    Format,
+    SampleRate,
 }
 
 /// Volumio's own icon set.
@@ -1708,6 +1721,8 @@ pub enum Scale {
     #[default]
     Fit,
     Stretch,
+    /// Fill the box keeping the picture's proportion, cropped centred.
+    Cover,
 }
 
 /// Where a decorative layer sits: under the meters, or over everything but
@@ -1790,6 +1805,7 @@ pub fn meter_folder_layers(meters_txt: &str, meter: &str) -> Vec<FolderLayerSpec
                     .as_deref()
                 {
                     Some("stretch") => Scale::Stretch,
+                    Some("cover") => Scale::Cover,
                     _ => Scale::Fit,
                 },
                 zorder: match get(&format!("{prefix}.zorder"))
@@ -1890,6 +1906,7 @@ pub fn meter_fanart(meters_txt: &str, meter: &str) -> Option<FanartSpec> {
             .as_deref()
         {
             Some("stretch") => Scale::Stretch,
+            Some("cover") => Scale::Cover,
             _ => Scale::Fit,
         },
         zorder: match get("fanart.zorder")
@@ -3690,6 +3707,13 @@ pub fn meter_type(meters_txt: &str, meter: &str, default_mode: Option<&str>) -> 
         .and_then(|v| v.parse::<u32>().ok())
         .filter(|n| *n > 0)
         .unwrap_or_else(|| type_font_size(sample_size, box_size.map(|(_, h)| h)));
+    let label = match get("playinfo.type.label")
+        .map(|w| w.trim().to_ascii_lowercase())
+        .as_deref()
+    {
+        Some("samplerate") | Some("sample") | Some("rate") => TypeLabel::SampleRate,
+        _ => TypeLabel::Format,
+    };
     Some(TypeSpec {
         x,
         y,
@@ -3699,6 +3723,7 @@ pub fn meter_type(meters_txt: &str, meter: &str, default_mode: Option<&str>) -> 
         color,
         font_size,
         font_style: sample_style,
+        label,
     })
 }
 

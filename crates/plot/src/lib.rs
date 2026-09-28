@@ -258,7 +258,17 @@ pub fn type_area(skin: &SkinDesc, meta: &Metadata) -> Option<TypeArea> {
         color: spec.color,
         font_size: spec.font_size,
         font_style: spec.font_style,
-        label: format_label(&key),
+        label: match spec.label {
+            lead::TypeLabel::SampleRate => {
+                let line = sample_line(meta);
+                if line.is_empty() {
+                    format_label(&key)
+                } else {
+                    line
+                }
+            }
+            lead::TypeLabel::Format => format_label(&key),
+        },
         icon: meta.type_icon.clone(),
     })
 }
@@ -352,6 +362,18 @@ fn analyser(spec: &SpectrumSpec, input: &Input) -> Option<Analyser> {
         stereo,
         onsets: input.bins.onsets,
     })
+}
+
+/// The sample rate line: samplerate and bit depth when the player sends
+/// them, else the bitrate, else nothing.
+pub fn sample_line(meta: &Metadata) -> String {
+    let line = format!("{} {}", meta.samplerate, meta.bitdepth);
+    let line = line.trim();
+    if line.is_empty() {
+        meta.bitrate.trim().to_string()
+    } else {
+        line.to_string()
+    }
 }
 
 /// Final ten seconds of a track, as the player colours them.
@@ -473,17 +495,9 @@ pub fn texts(skin: &SkinDesc, meta: &Metadata) -> Vec<Text> {
         }
     }
     if let Some(spec) = &skin.sample {
-        // Samplerate and bit depth when the player sends them, else the
-        // bitrate, else nothing.
-        let line = format!("{} {}", meta.samplerate, meta.bitdepth);
-        let line = line.trim();
-        let line = if line.is_empty() {
-            meta.bitrate.trim()
-        } else {
-            line
-        };
+        let line = sample_line(meta);
         if !line.is_empty() {
-            out.push(text(spec, line.to_string(), spec.color));
+            out.push(text(spec, line, spec.color));
         }
     }
     if let Some(spec) = &skin.volume_value {
@@ -977,6 +991,7 @@ mod tests {
             color: [204, 176, 97],
             font_size: 20,
             font_style: TextStyle::Regular,
+            label: lead::TypeLabel::Format,
         });
         skin.sample = Some(spec(TextStyle::Regular, [9, 9, 9]));
         let meta = Metadata {
