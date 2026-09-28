@@ -15,8 +15,6 @@ ab_glyph = "0.2.32"
 # Paths and shapes only: the format icons carry no text and no raster
 # pictures, and the text engine alone is the bulk of the crate.
 resvg = { version = "0.48.1", default-features = false }
-# The analyser's box: anti-aliased shapes, gradients and alpha.
-tiny-skia = "0.12"
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 memmap2 = "0.9"

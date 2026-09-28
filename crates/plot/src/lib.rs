@@ -486,6 +486,9 @@ pub fn texts(skin: &SkinDesc, meta: &Metadata) -> Vec<Text> {
             out.push(text(spec, line.to_string(), spec.color));
         }
     }
+    if let Some(spec) = &skin.volume_value {
+        out.push(text(spec, meta.volume.to_string(), spec.color));
+    }
     if let Some(spec) = &skin.time {
         // While the display persists after a pause in countdown mode, the
         // remaining field counts the persist period down in orange.
@@ -1041,10 +1044,10 @@ mod analyser_tests {
     fn a_band_lands_on_the_bar_scale_by_decibels_or_by_amplitude() {
         let look = Look::default();
         assert_eq!(bar_level(&look, 1.0, 0.0), 1.0, "0 dB is over the top");
-        let half = 10f32.powf(-55.0 / 20.0);
+        let half = 10f32.powf(-30.0 / 20.0);
         assert!(
             (bar_level(&look, half, 0.0) - 0.5).abs() < 0.01,
-            "-55 dB is half way"
+            "-30 dB is half way"
         );
         assert_eq!(bar_level(&look, 0.0, 0.0), 0.0);
         assert!(
@@ -1079,8 +1082,8 @@ mod analyser_tests {
         let mut left = vec![0.0f32; bands];
         let mut right = vec![0.0f32; bands];
         left[16] = 1.0;
-        // Minus 55 dB: half way up the default decibel range.
-        right[16] = 10f32.powf(-55.0 / 20.0);
+        // Minus 30 dB: half way up the default decibel range.
+        right[16] = 10f32.powf(-30.0 / 20.0);
         let input = Input {
             levels: Levels::default(),
             bins: Bins {
