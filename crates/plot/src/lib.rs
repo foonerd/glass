@@ -348,8 +348,30 @@ fn analyser(spec: &SpectrumSpec, input: &Input) -> Option<Analyser> {
             .collect()
     };
     let stereo = input.bins.bank[0] != input.bins.bank[1];
-    let levels = [map(&input.bins.bank[0]), map(&input.bins.bank[1])];
-    let hold = [map(&input.bins.hold[0]), map(&input.bins.hold[1])];
+    // One channel asked of a stereo bank: the mean of the two, band by
+    // band, before the bar scale, as a one-channel bank would read.
+    let mean = |a: &[f32], b: &[f32]| -> Vec<f32> {
+        a.iter().zip(b.iter()).map(|(l, r)| (l + r) / 2.0).collect()
+    };
+    let (levels, hold, stereo) = if stereo && matches!(look.layout, lead::Layout::Single) {
+        (
+            [
+                map(&mean(&input.bins.bank[0], &input.bins.bank[1])),
+                Vec::new(),
+            ],
+            [
+                map(&mean(&input.bins.hold[0], &input.bins.hold[1])),
+                Vec::new(),
+            ],
+            false,
+        )
+    } else {
+        (
+            [map(&input.bins.bank[0]), map(&input.bins.bank[1])],
+            [map(&input.bins.hold[0]), map(&input.bins.hold[1])],
+            stereo,
+        )
+    };
     Some(Analyser {
         look,
         x: spec.x,
@@ -1083,6 +1105,7 @@ mod analyser_tests {
         let mut skin = SkinDesc::default();
         let look = Look {
             range: (100.0, 10_000.0),
+            layout: lead::Layout::DualVertical,
             ..Look::default()
         };
         skin.spectrum = Some(SpectrumSpec {
@@ -1136,5 +1159,51 @@ mod analyser_tests {
         // Without a look there is no analyser; without a bank an empty one.
         skin.spectrum.as_mut().unwrap().look = None;
         assert!(step(&skin, &input).analyser.is_none());
+    }
+
+    /// A `single` layout asked of a stereo bank draws one channel: the
+    /// mean of the two, band by band, as a one-channel bank would read.
+    #[test]
+    fn a_single_layout_over_a_stereo_bank_draws_the_mean() {
+        let skin = SkinDesc {
+            spectrum: Some(SpectrumSpec {
+                x: 0,
+                y: 0,
+                w: 100,
+                h: 50,
+                look: Some(Look {
+                    layout: lead::Layout::Single,
+                    ..Look::default()
+                }),
+                ..SpectrumSpec::default()
+            }),
+            ..SkinDesc::default()
+        };
+        let bands = 8;
+        let mut left = vec![0.0f32; bands];
+        left[3] = 1.0;
+        let right = vec![0.0f32; bands];
+        let input = Input {
+            levels: Levels::default(),
+            bins: Bins {
+                values: Vec::new(),
+                bank: [left, right],
+                hold: [vec![1.0; bands], vec![0.0; bands]],
+                scale: bank::Scale::Log,
+                onsets: 0,
+            },
+            metadata: Metadata::default(),
+        };
+        let a = step(&skin, &input).analyser.expect("an analyser");
+        assert!(!a.stereo, "one channel drawn");
+        assert!(a.levels[1].is_empty() && a.hold[1].is_empty());
+        assert_eq!(a.levels[0].len(), bands);
+        let want = bar_level(&Look::default(), 0.5, 0.0);
+        assert!(
+            (a.levels[0][3] - want).abs() < 1e-6,
+            "the mean amplitude on the bar scale: {} against {want}",
+            a.levels[0][3]
+        );
+        assert!((a.hold[0][3] - want).abs() < 1e-6, "the hold's mean too");
     }
 }

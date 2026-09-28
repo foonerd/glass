@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.51] - 2026-09-28
+
+The analyser's rounded and outlined bars cost what plain bars do: the straight body of a bar is drawn as rectangles and only the rows the corners and the end lines touch are drawn one by one, on the same whole-pixel edges, so a meter of outlined bars that took a whole core of a Raspberry Pi 5 at 60 frames a second takes a fraction of it. A button with three pictures or more shows one per state of its action, in the order its indicator uses: repeat off, all, single and infinity; mute off, muted and zero; random off and on; play, pause, stop and toggle by the play state, stop, pause, play. Two pictures keep their meaning, rest and active. The onset bits the bank works out reach the ring and the wire, and one-bit audio is flagged on the wire, as the contract says. `volume.value.font` is loaded and used. A `single` layout over a stereo bank draws the mean of the two channels. The manager serves a track's pictures only from the folder of the track the player reports.
+
 ## [0.7.50] - 2026-09-28
 
 Two keys for a theme's strip: `playinfo.type.label = samplerate` puts the sample rate line beside the format's icon as one centred unit, and `fanart.scale = cover` (`folderlayer.N.scale` too) fills a box keeping the picture's shape, the middle cut out.

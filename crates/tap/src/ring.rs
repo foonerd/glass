@@ -94,6 +94,9 @@ pub struct Frame {
     /// each FFT bin from 0 Hz to half the rate, not a bank, and the hold
     /// is empty. A reader projects it onto a bank (`legacy::project_raw`).
     pub raw: bool,
+    /// One-bit audio (DSD, DoP): the peak and RMS are density levels and
+    /// the bank is empty.
+    pub one_bit: bool,
 }
 
 /// The hops that arrived between two looks at the ring, as one: the peaks,
@@ -116,6 +119,7 @@ pub fn merge_hops(hops: impl Iterator<Item = Frame>) -> Option<Frame> {
                     }
                 }
                 m.onsets |= frame.onsets;
+                m.one_bit |= frame.one_bit;
                 m.scale = frame.scale;
                 m.window = frame.window;
                 m.raw = frame.raw;
@@ -189,11 +193,19 @@ const S_RMS: usize = 32;
 #[cfg(unix)]
 const S_SPECTRUM: usize = 40;
 
+/// After the tail sequence: the frame's flags, the onset bits in the low
+/// nibble and bit 4 for one-bit audio. A slot of an earlier writer has
+/// zeros there, or no room, which reads as none.
+#[cfg(unix)]
+const S_FLAGS_AFTER_TAIL: usize = 8;
+#[cfg(unix)]
+const FLAG_ONE_BIT: u32 = 1 << 4;
+
 /// The bytes of a slot: the head, the peaks and RMS, the bank per channel,
-/// the hold per channel, and the tail sequence.
+/// the hold per channel, the tail sequence and the flags.
 #[cfg(unix)]
 fn slot_bytes(bins: usize) -> usize {
-    let raw = S_SPECTRUM + bins * MAX_CHANNELS * 4 * 2 + 8;
+    let raw = S_SPECTRUM + bins * MAX_CHANNELS * 4 * 2 + 8 + 4;
     raw.div_ceil(64) * 64
 }
 
@@ -432,6 +444,11 @@ impl Writer {
                 }
             }
             put_u64(slot, tail_at(bins), seq);
+            let flags_at = tail_at(bins) + S_FLAGS_AFTER_TAIL;
+            if flags_at + 4 <= self.slot_bytes {
+                let one_bit = if frame.one_bit { FLAG_ONE_BIT } else { 0 };
+                put_u32(slot, flags_at, u32::from(frame.onsets & 0x0f) | one_bit);
+            }
             put_u64(slot, S_SEQ, seq);
         }
         self.map
@@ -595,10 +612,18 @@ impl Reader {
                 std::hint::spin_loop();
                 continue;
             }
+            let flags_at = tail_offset + S_FLAGS_AFTER_TAIL;
+            let flags = if !raw && flags_at + 4 <= self.info.slot_bytes as usize {
+                get_u32(slot, flags_at)
+            } else {
+                0
+            };
             let mut frame = Frame {
                 seq,
                 time_ns: get_u64(slot, S_TIME),
                 frames: get_u64(slot, S_FRAMES),
+                onsets: (flags & 0x0f) as u8,
+                one_bit: flags & FLAG_ONE_BIT != 0,
                 scale: bank::Scale::from_byte(self.info.scale as u8).unwrap_or_default(),
                 window: self.info.fft_size,
                 raw,
@@ -740,8 +765,16 @@ mod tests {
         assert_eq!(read.spectrum, frame.spectrum);
         assert_eq!(read.hold, frame.hold, "the hold travels through the ring");
         assert_eq!((read.scale, read.window), (bank::Scale::Mel, 4096));
-        assert!(!read.raw);
+        assert_eq!(read.onsets, 0b0011, "the onsets travel through the ring");
+        assert!(!read.one_bit && !read.raw);
         assert!(read.time_ns > 0);
+        writer.publish(&Frame {
+            one_bit: true,
+            ..frame.clone()
+        });
+        let read = reader.latest().expect("a one-bit frame");
+        assert!(read.one_bit, "one-bit audio is marked in the slot");
+        assert_eq!(read.onsets, 0b0011);
         let info = reader.info();
         assert_eq!(
             (
@@ -756,14 +789,14 @@ mod tests {
             (48_000, 2, 4096, 32, 1024, 4, 1)
         );
         assert!(reader.is_live());
-        // The ring keeps the last `slots` hops and no more.
+        // The ring keeps the last `slots` hops and no more (two published above).
         for _ in 0..5 {
             writer.publish(&frame);
         }
-        assert_eq!(reader.info().seq, 6);
-        assert!(reader.slot(6).is_some());
-        assert!(reader.slot(3).is_some());
-        assert!(reader.slot(2).is_none(), "overwritten");
+        assert_eq!(reader.info().seq, 7);
+        assert!(reader.slot(7).is_some());
+        assert!(reader.slot(4).is_some());
+        assert!(reader.slot(3).is_none(), "overwritten");
         assert_eq!(Reader::find(&dir).len(), 1);
         assert!(Reader::open_live(&dir).is_some());
         let path = writer.path().to_path_buf();

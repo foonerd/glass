@@ -4334,17 +4334,52 @@ fn draw_channel(
                 (area.y + area.h - bar_h, area.y + area.h)
             };
             let (y0, y1) = (top.round() as i32, bottom.round() as i32);
+            if !look.round && !look.outline {
+                fill_rect(out, clip, xa, top, xb, bottom, &ink, bar_alpha);
+                continue;
+            }
+            // A rounded or outlined bar: the straight body as rectangles,
+            // and only the rows the corners or the end lines touch one by
+            // one, all on the same whole-pixel edges so the two meet
+            // without a seam. The corners round over `radius` rows at the
+            // cap; an outline's lines are `lw` rows at both ends.
             let radius = if look.round {
                 (bar_w / 2.0).min(bar_h).max(0.5)
             } else {
                 0.0
             };
-            if !look.round && !look.outline {
-                fill_rect(out, clip, xa, top, xb, bottom, &ink, bar_alpha);
-                continue;
+            let lw = if look.outline {
+                look.line_width.max(1.0).round()
+            } else {
+                0.0
+            };
+            let sxa = xa.round();
+            let sxb = xb.round().max(sxa + 1.0);
+            let rows = y1 - y0;
+            let cap_rows = (radius.ceil() as i32).max(lw as i32);
+            let base_rows = lw as i32;
+            let (body_y0, body_y1) = if area.hanging {
+                (y0 + base_rows, y1 - cap_rows)
+            } else {
+                (y0 + cap_rows, y1 - base_rows)
+            };
+            if body_y1 > body_y0 {
+                let (bt, bb) = (body_y0 as f32, body_y1 as f32);
+                if look.outline {
+                    if look.fill_alpha > 0.0 && sxb - sxa > 2.0 * lw {
+                        fill_rect(out, clip, sxa + lw, bt, sxb - lw, bb, &ink, bar_alpha);
+                    }
+                    fill_rect(out, clip, sxa, bt, (sxa + lw).min(sxb), bb, &ink, alpha);
+                    fill_rect(out, clip, (sxb - lw).max(sxa), bt, sxb, bb, &ink, alpha);
+                } else {
+                    fill_rect(out, clip, sxa, bt, sxb, bb, &ink, bar_alpha);
+                }
             }
             for y in y0.max(clip.1)..y1.min(clip.3) {
-                // The outer corners rounded: the top rows narrow by the circle.
+                if y >= body_y0 && y < body_y1 {
+                    continue;
+                }
+                // The outer corners rounded: the cap rows narrow by the circle.
                 let from_cap = if area.hanging {
                     (y1 - 1 - y) as f32 + 0.5
                 } else {
@@ -4357,33 +4392,26 @@ fn draw_channel(
                     0.0
                 };
                 if look.outline {
-                    let lw = look.line_width.max(1.0);
-                    let edge = from_cap < lw
-                        || (if area.hanging {
-                            (y - y0) as f32
-                        } else {
-                            (y1 - 1 - y) as f32
-                        } + 0.5)
-                            < lw;
-                    if edge {
-                        fill_span(out, clip, y, xa + inset, xb - inset, &ink, alpha);
+                    let from_base = rows as f32 - from_cap;
+                    if from_cap < lw || from_base < lw {
+                        fill_span(out, clip, y, sxa + inset, sxb - inset, &ink, alpha);
                     } else {
                         if look.fill_alpha > 0.0 {
                             fill_span(
                                 out,
                                 clip,
                                 y,
-                                xa + inset + lw,
-                                xb - inset - lw,
+                                sxa + inset + lw,
+                                sxb - inset - lw,
                                 &ink,
                                 bar_alpha,
                             );
                         }
-                        fill_span(out, clip, y, xa + inset, xa + inset + lw, &ink, alpha);
-                        fill_span(out, clip, y, xb - inset - lw, xb - inset, &ink, alpha);
+                        fill_span(out, clip, y, sxa + inset, sxa + inset + lw, &ink, alpha);
+                        fill_span(out, clip, y, sxb - inset - lw, sxb - inset, &ink, alpha);
                     }
                 } else {
-                    fill_span(out, clip, y, xa + inset, xb - inset, &ink, bar_alpha);
+                    fill_span(out, clip, y, sxa + inset, sxb - inset, &ink, bar_alpha);
                 }
             }
         }
@@ -5248,10 +5276,10 @@ pub struct IndicatorAssets {
     pub playstate: Vec<Option<Frame>>,
     pub volume: GaugeAssets,
     pub progress: GaugeAssets,
-    /// One picture per button, when it has one, and the picture it shows
-    /// while active, when the theme gives one.
+    /// One picture per button, when it has one, and the whole list the
+    /// theme gives it: rest and active, or one per state with three or more.
     pub buttons: Vec<Option<Frame>>,
-    pub buttons_active: Vec<Option<Frame>>,
+    pub buttons_pictures: Vec<Vec<Option<Frame>>>,
 }
 
 #[derive(Default)]
@@ -5275,7 +5303,7 @@ impl IndicatorAssets {
             + gauge(&self.volume)
             + gauge(&self.progress)
             + bytes_of(&self.buttons)
-            + bytes_of(&self.buttons_active)
+            + self.buttons_pictures.iter().map(bytes_of).sum::<usize>()
     }
 
     pub fn load(spec: &lead::IndicatorsSpec) -> Self {
@@ -5384,15 +5412,20 @@ impl IndicatorAssets {
                     }
                 })
                 .collect(),
-            buttons_active: spec
+            buttons_pictures: spec
                 .buttons
                 .iter()
                 .map(|b| {
-                    if b.image_active.is_empty() {
-                        None
-                    } else {
-                        read_png(Path::new(&b.image_active))
-                    }
+                    b.images
+                        .iter()
+                        .map(|p| {
+                            if p.is_empty() {
+                                None
+                            } else {
+                                read_png(Path::new(p))
+                            }
+                        })
+                        .collect()
                 })
                 .collect(),
         }
@@ -5820,7 +5853,9 @@ fn plan_indicators<'a>(
         indicators.play_state,
     );
     // The theme's buttons, drawn where they are tapped: the active
-    // picture while the button is active and the theme gives one.
+    // picture while the button is active and the theme gives one, or,
+    // with three pictures or more, the one for the state of the action's
+    // indicator.
     for (i, (button, picture)) in indicators
         .spec
         .buttons
@@ -5829,15 +5864,30 @@ fn plan_indicators<'a>(
         .enumerate()
     {
         let active = indicators.buttons_active.get(i).copied().unwrap_or(false);
-        let shown = if active {
-            assets
-                .buttons_active
-                .get(i)
-                .and_then(|p| p.as_ref())
-                .or(picture.as_ref())
+        let pictures = assets
+            .buttons_pictures
+            .get(i)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]);
+        let index = if pictures.len() >= 3 {
+            let state = match button.action {
+                lead::ButtonAction::Repeat => indicators.repeat_state,
+                lead::ButtonAction::Random => indicators.shuffle_state,
+                lead::ButtonAction::Mute => indicators.mute_state,
+                lead::ButtonAction::Play
+                | lead::ButtonAction::Pause
+                | lead::ButtonAction::Stop
+                | lead::ButtonAction::Toggle => indicators.play_state,
+                _ => usize::from(active),
+            };
+            state.min(pictures.len() - 1)
         } else {
-            picture.as_ref()
+            usize::from(active)
         };
+        let shown = pictures
+            .get(index)
+            .and_then(|p| p.as_ref())
+            .or(picture.as_ref());
         if let Some(picture) = shown {
             ops.push(blit_op(picture, (button.x, button.y)));
         }
@@ -5926,9 +5976,14 @@ impl MeterAssets {
     /// the face, and every other picture the meter names.
     pub fn load(skin: &lead::SkinDesc) -> Self {
         let mut fonts = Fonts::load(&skin.fonts);
-        for field in [&skin.time, &skin.time_elapsed, &skin.time_total]
-            .into_iter()
-            .flatten()
+        for field in [
+            &skin.time,
+            &skin.time_elapsed,
+            &skin.time_total,
+            &skin.volume_value,
+        ]
+        .into_iter()
+        .flatten()
         {
             fonts.add_file(&field.font_file);
         }
@@ -7581,6 +7636,92 @@ mod analyser_tests {
         eprintln!("a dense luminance frame: {per_frame:.2} ms");
         let bound = if cfg!(debug_assertions) { 100.0 } else { 8.0 };
         assert!(per_frame < bound, "a frame took {per_frame:.1} ms");
+    }
+
+    /// Outlined and rounded bars are drawn row by row only where the
+    /// corners and the end lines are; the body is rectangles. A frame of
+    /// outlined bars, the dearest look, must cost what the luminance one does.
+    #[test]
+    fn a_dense_outlined_frame_costs_milliseconds() {
+        let look = Look {
+            outline: true,
+            round: true,
+            line_width: 1.5,
+            fill_alpha: 0.15,
+            bar_space: 0.35,
+            layout: Layout::DualCombined,
+            color_mode: lead::ColorMode::Index,
+            smoothing: 0.6,
+            peaks: true,
+            ..Look::default()
+        };
+        let left: Vec<f32> = (0..96).map(|i| ((i * 37) % 100) as f32 / 100.0).collect();
+        let right: Vec<f32> = (0..96).map(|i| ((i * 53) % 100) as f32 / 100.0).collect();
+        let a = analyser(look, 1200, 420, left, right);
+        let mut motion = AnalyserMotion::default();
+        motion.advance(&a, 0);
+        let started = std::time::Instant::now();
+        let frames = 60;
+        for i in 1..=frames {
+            motion.advance(&a, i * 16);
+        }
+        let per_frame = started.elapsed().as_secs_f64() * 1000.0 / frames as f64;
+        eprintln!("a dense outlined frame: {per_frame:.2} ms");
+        let bound = if cfg!(debug_assertions) { 100.0 } else { 8.0 };
+        assert!(per_frame < bound, "a frame took {per_frame:.1} ms");
+    }
+
+    /// One outlined bar filling its box: full ink on its lines, the
+    /// fill's alpha inside, and every body row alike; one rounded bar:
+    /// the corner left to the background, the body straight.
+    #[test]
+    fn a_rounded_or_outlined_bar_keeps_a_straight_body_between_its_ends() {
+        let outlined = Look {
+            smoothing: 0.0,
+            peaks: false,
+            bar_space: 0.0,
+            outline: true,
+            line_width: 2.0,
+            fill_alpha: 0.2,
+            bgr_alpha: 1.0,
+            color_mode: lead::ColorMode::Index,
+            ..Look::default()
+        };
+        let a = analyser(outlined, 20, 40, vec![1.0], vec![1.0]);
+        let mut motion = AnalyserMotion::default();
+        let picture = motion.advance(&a, 0);
+        let sum = |p: [u8; 4]| p[0] as u32 + p[1] as u32 + p[2] as u32;
+        let line = pixel(picture, 0, 20);
+        let inside = pixel(picture, 10, 20);
+        let top = pixel(picture, 10, 0);
+        assert!(sum(line) > 100, "the side line is the ink: {line:?}");
+        assert_eq!(sum(top), sum(line), "the end line is the ink too");
+        assert!(
+            sum(inside) * 3 < sum(line) && sum(inside) > 0,
+            "inside, the fill's fifth: {inside:?} against {line:?}"
+        );
+        for y in 2..38 {
+            assert_eq!(pixel(picture, 10, y), inside, "body row {y} inside");
+            assert_eq!(pixel(picture, 1, y), line, "body row {y} on the line");
+        }
+        let rounded = Look {
+            smoothing: 0.0,
+            peaks: false,
+            bar_space: 0.0,
+            round: true,
+            bgr_alpha: 1.0,
+            color_mode: lead::ColorMode::Index,
+            ..Look::default()
+        };
+        let a = analyser(rounded, 20, 40, vec![1.0], vec![1.0]);
+        let mut motion = AnalyserMotion::default();
+        let picture = motion.advance(&a, 0);
+        assert_eq!(pixel(picture, 0, 0)[..3], [0, 0, 0], "the corner is cut");
+        let body = pixel(picture, 0, 20);
+        assert!(sum(body) > 100, "the body reaches the edge: {body:?}");
+        for y in 10..40 {
+            assert_eq!(pixel(picture, 0, y), body, "body row {y}");
+        }
     }
 
     #[test]

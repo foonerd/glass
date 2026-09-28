@@ -33,4 +33,12 @@ function trackFilePath(uri, name) {
   return full;
 }
 
-module.exports = { trackFolder, trackFilePath, EXTENSIONS };
+// The picture only from the playing track's folder: the location asked
+// for and the one the player reports must name the same folder.
+function trackFileFor(uri, name, playingUri) {
+  const folder = trackFolder(uri);
+  if (!folder || folder !== trackFolder(playingUri)) return null;
+  return trackFilePath(uri, name);
+}
+
+module.exports = { trackFolder, trackFilePath, trackFileFor, EXTENSIONS };

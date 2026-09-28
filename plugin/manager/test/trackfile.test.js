@@ -2,7 +2,15 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { trackFolder, trackFilePath } = require('../trackfile');
+const { trackFolder, trackFilePath, trackFileFor } = require('../trackfile');
+
+test('a picture is served only from the folder of the track the player reports', () => {
+  const playing = 'music-library/INTERNAL/Queen/Opera/01.flac';
+  assert.strictEqual(trackFileFor('mnt/INTERNAL/Queen/Opera/02.flac', 'back.png', playing), '/mnt/INTERNAL/Queen/Opera/back.png');
+  assert.strictEqual(trackFileFor('music-library/INTERNAL/Queen/Jazz/01.flac', 'back.png', playing), null);
+  assert.strictEqual(trackFileFor(playing, 'back.png', ''), null);
+  assert.strictEqual(trackFileFor(playing, 'back.png', 'http://stream.example/radio'), null);
+});
 
 test('a track location becomes its folder under /mnt', () => {
   assert.strictEqual(trackFolder('music-library/INTERNAL/Queen/Opera/01.flac'), '/mnt/INTERNAL/Queen/Opera');
