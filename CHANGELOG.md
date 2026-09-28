@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.45] - 2026-09-28
+
+The face draws the track's type icon. The browser module brought the icons and found the right one, then painted the label in its place: the display's icon decoding was in the display binary alone. It is now a type in the raster crate the display and the module share, so the Face tab and Anymote show the same icon the player's screen does, in the theme's colour.
+
 ## [0.7.44] - 2026-09-28
 
 A button with an active look, asked for by a theme author: `button.<name>.image = rest.png, active.png` draws the second picture while the button is active, which its action decides (play, pause and stop by the player's state, toggle while playing, mute, random and repeat while on) or while a finger is on it (next, previous, meter.next, meter.previous, dismiss), on the player's screen, on remotes and in the browser alike. On Anymote the first tap anywhere takes the screen, and Escape is respected. Anymote introduces itself as any remote, a remote from anywhere.

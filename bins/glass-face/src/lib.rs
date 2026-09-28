@@ -25,7 +25,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use controls::{controls_of, interactive_now, override_scene, Act, Pointer, Touch};
-use expose::{raster_over, MeterAssets, Motion, Stack};
+use expose::{raster_over, MeterAssets, Motion, Stack, TypeIcon};
 use intake::bring::{
     asset_plan, config_texts, theme_plan, Bring, Choice, RemoteConfig, ThemeFiles,
 };
@@ -64,6 +64,8 @@ struct Showing {
     /// The last frame's indicators and metadata, for a finger on them.
     indicators: Option<Indicators>,
     metadata: Metadata,
+    /// The track's type icon, decoded once per file, box and tint.
+    icon: TypeIcon,
 }
 
 /// What a pointer event asked of the page.
@@ -176,6 +178,7 @@ impl Face {
             rate,
             indicators: None,
             metadata: Metadata::default(),
+            icon: TypeIcon::default(),
         });
         self.touch = Touch::new();
         Ok(())
@@ -294,6 +297,7 @@ impl Face {
         override_scene(touch, &mut scene);
         showing.indicators = scene.indicators.clone();
         showing.metadata = input.metadata;
+        showing.icon.follow(scene.type_area.as_ref());
         let assets = &showing.assets;
         let stack = Stack {
             screen: None,
@@ -304,7 +308,7 @@ impl Face {
             face_at: showing.skin.face_at,
             fonts: Some(&assets.fonts),
             art: None,
-            icon: None,
+            icon: showing.icon.frame(),
             spectrum: assets.spectrum.as_ref(),
             folder_pictures: &[],
             fanart: (None, None),
@@ -573,6 +577,31 @@ mod tests {
             .join(name)
     }
 
+    /// The table under the home is one for the process: the tests that
+    /// fill it take turns.
+    fn serial() -> std::sync::MutexGuard<'static, ()> {
+        static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+        LOCK.lock().unwrap_or_else(|poisoned| poisoned.into_inner())
+    }
+
+    /// The repository's theme into the table; its `meters.txt` comes back
+    /// for a test to extend.
+    fn theme_into_table(face: &Face, name: &str) -> String {
+        let mut meters = String::new();
+        for entry in std::fs::read_dir(repo_theme(name)).expect("the test theme") {
+            let path = entry.expect("an entry").path();
+            if path.is_file() {
+                let file = path.file_name().unwrap().to_string_lossy().into_owned();
+                let bytes = std::fs::read(&path).unwrap();
+                if file == "meters.txt" {
+                    meters = String::from_utf8_lossy(&bytes).into_owned();
+                }
+                face.put_file(&format!("templates/{name}/{file}"), bytes);
+            }
+        }
+        meters
+    }
+
     #[test]
     fn the_plans_place_every_file_under_the_home() {
         let mut face = Face::new();
@@ -591,19 +620,10 @@ mod tests {
 
     #[test]
     fn a_theme_from_the_table_paints_a_frame() {
+        let _serial = serial();
         let mut face = Face::new();
         face.configure(&config_json()).expect("a plan");
-        let dir = repo_theme("480x320");
-        for entry in std::fs::read_dir(&dir).expect("the test theme") {
-            let path = entry.expect("an entry").path();
-            if path.is_file() {
-                let name = path.file_name().unwrap().to_string_lossy().into_owned();
-                face.put_file(
-                    &format!("templates/480x320/{name}"),
-                    std::fs::read(&path).unwrap(),
-                );
-            }
-        }
+        theme_into_table(&face, "480x320");
         face.start(None).expect("the meter on show");
         assert_eq!((face.width(), face.height()), (480, 320));
         assert!(!face.meter().is_empty());
@@ -621,24 +641,10 @@ mod tests {
     /// pushed before is still the meter's after a step to another meter.
     #[test]
     fn a_finger_on_a_bar_asks_for_the_volume_and_the_state_survives_a_step() {
+        let _serial = serial();
         let mut face = Face::new();
         face.configure(&config_json()).expect("a plan");
-        let dir = repo_theme("480x320");
-        let mut meters = String::new();
-        for entry in std::fs::read_dir(&dir).expect("the test theme") {
-            let path = entry.expect("an entry").path();
-            if path.is_file() {
-                let name = path.file_name().unwrap().to_string_lossy().into_owned();
-                if name == "meters.txt" {
-                    meters = std::fs::read_to_string(&path).unwrap();
-                } else {
-                    face.put_file(
-                        &format!("templates/480x320/{name}"),
-                        std::fs::read(&path).unwrap(),
-                    );
-                }
-            }
-        }
+        let meters = theme_into_table(&face, "480x320");
         let bar_at = meters.find("[bar]").expect("the bar meter");
         let extended = "[bar]\nconfig.extend = True\ninteractive = True\nvolume.pos = 40,300\nvolume.dim = 200,4\nvolume.style = slider\n";
         let meters = format!("{}{}{}", &meters[..bar_at], extended, &meters[bar_at + 5..]);
@@ -681,6 +687,46 @@ mod tests {
         assert_eq!(
             face.showing.as_ref().map(|s| s.metadata.title.as_str()),
             Some("A song")
+        );
+    }
+
+    /// A meter given a type area: the track's type names an icon the page
+    /// brought under the home; the icon is found there and painted in the
+    /// area's colour, rather than the label standing in for it.
+    #[test]
+    fn the_type_icon_is_found_under_the_home_and_painted() {
+        let _serial = serial();
+        let mut face = Face::new();
+        face.configure(&config_json()).expect("a plan");
+        let meters = theme_into_table(&face, "480x320");
+        let bar_at = meters.find("[bar]").expect("the bar meter");
+        let extended = "[bar]\nconfig.extend = True\nplayinfo.type.pos = 400,20\nplayinfo.type.dimension = 60,40\nplayinfo.type.mode = icon\nplayinfo.type.color = 255,0,0\n";
+        let meters = format!("{}{}{}", &meters[..bar_at], extended, &meters[bar_at + 5..]);
+        face.put_file("templates/480x320/meters.txt", meters.into_bytes());
+        let shipped = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../plugin/format-icons/cd.svg");
+        face.put_file(
+            "format-icons/cd.svg",
+            std::fs::read(shipped).expect("the shipped icon"),
+        );
+        assert!(face.event(
+            br#"{"kind":"state","state":{"status":"play","title":"A song","trackType":"cd"}}"#
+        ));
+        face.start(Some("bar")).expect("the bar on show");
+        let frame = face.frame(40).expect("a frame");
+        let painted_red = (20..60).any(|y| {
+            (400..460).any(|x| {
+                let at = (y * 480 + x) * 4;
+                let px = &frame.rgba[at..at + 3];
+                px[0] > 200 && px[1] < 60 && px[2] < 60
+            })
+        });
+        assert!(painted_red, "the icon is painted in the area's colour");
+        let showing = face.showing.as_ref().expect("the meter on show");
+        assert_eq!(showing.metadata.type_icon, "/glass/format-icons/cd.svg");
+        assert!(
+            showing.icon.frame().is_some(),
+            "the icon is kept between frames"
         );
     }
 }
