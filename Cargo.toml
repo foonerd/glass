@@ -13,10 +13,18 @@ members = [
     "bins/glass-remote",
     "bins/glass-android",
     "bins/glass-serve",
+    "bins/glass-face",
 ]
 
+# The browser module: one unit, linked whole, so the page loads the least.
+[profile.face]
+inherits = "release"
+lto = true
+codegen-units = 1
+panic = "abort"
+
 [workspace.package]
-version = "0.7.40"
+version = "0.7.41"
 edition = "2021"
 license = "MIT"
 publish = false

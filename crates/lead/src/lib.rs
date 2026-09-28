@@ -29,11 +29,206 @@ pub const METER_CONFIG: &str = "config/meter.txt";
 /// The spectrum configuration beside it.
 pub const SPECTRUM_CONFIG: &str = "config/spectrum.txt";
 
-/// The plugin's home directory: `GLASS_HOME`, or the default.
+/// The plugin's home directory: what `set_home` named, else `GLASS_HOME`,
+/// else the default.
 pub fn home() -> std::path::PathBuf {
+    if let Some(home) = HOME.lock().ok().and_then(|slot| slot.clone()) {
+        return home;
+    }
     std::env::var_os(HOME_VAR)
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| std::path::PathBuf::from(DEFAULT_HOME))
+}
+
+static HOME: std::sync::Mutex<Option<std::path::PathBuf>> = std::sync::Mutex::new(None);
+
+/// Name the home for this process, over the environment: a host without
+/// an environment, such as a browser, says where it put the files.
+pub fn set_home(path: impl Into<std::path::PathBuf>) {
+    if let Ok(mut slot) = HOME.lock() {
+        *slot = Some(path.into());
+    }
+}
+
+/// Microseconds on a clock that only moves forward: the process's own on a
+/// machine; on a target without one, what the host last set.
+pub fn clock_us() -> u64 {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        START
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_micros() as u64
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        HOST_CLOCK_US.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+static HOST_CLOCK_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The host's clock, in microseconds, on a target without one of its own.
+#[cfg(target_arch = "wasm32")]
+pub fn set_clock_us(us: u64) {
+    HOST_CLOCK_US.store(us, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// A moment on the clock every target has, [`clock_us`] as a stand-in
+/// for `std::time::Instant`: timing code written against it runs the same
+/// on a player, a remote and in a browser, where the standard clock has
+/// no source and stops the program.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct Moment(u64);
+
+impl Moment {
+    pub fn now() -> Self {
+        Self(clock_us())
+    }
+
+    /// The time since this moment.
+    pub fn elapsed(&self) -> std::time::Duration {
+        std::time::Duration::from_micros(clock_us().saturating_sub(self.0))
+    }
+
+    /// The time from `earlier` to this moment, zero when it is not earlier.
+    pub fn duration_since(&self, earlier: Self) -> std::time::Duration {
+        std::time::Duration::from_micros(self.0.saturating_sub(earlier.0))
+    }
+
+    /// Microseconds on the clock.
+    pub fn as_micros(&self) -> u64 {
+        self.0
+    }
+}
+
+impl std::ops::Sub<std::time::Duration> for Moment {
+    type Output = Self;
+    fn sub(self, earlier_by: std::time::Duration) -> Self {
+        Self(self.0.saturating_sub(earlier_by.as_micros() as u64))
+    }
+}
+
+impl std::ops::Add<std::time::Duration> for Moment {
+    type Output = Self;
+    fn add(self, later_by: std::time::Duration) -> Self {
+        Self(self.0.saturating_add(later_by.as_micros() as u64))
+    }
+}
+
+/// Nanoseconds since the epoch on the wall clock, for seeds and stamps;
+/// on a target without a wall clock, the monotonic clock stands in.
+pub fn epoch_nanos() -> u64 {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos() as u64)
+            .unwrap_or(0)
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        clock_us().saturating_mul(1000)
+    }
+}
+
+/// Files the host hands over in place of a file system. A browser has no
+/// disk: the page puts the configuration, the theme's pictures and the
+/// fonts here under the paths the configuration names, and every reader
+/// below looks here when the file system has nothing. On a machine it
+/// stays empty and costs one lookup.
+pub mod vfs {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn table() -> &'static Mutex<HashMap<String, Arc<[u8]>>> {
+        static TABLE: OnceLock<Mutex<HashMap<String, Arc<[u8]>>>> = OnceLock::new();
+        TABLE.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    /// Keep `bytes` as the file at `path`; a later put replaces it.
+    pub fn put(path: &str, bytes: Vec<u8>) {
+        if let Ok(mut table) = table().lock() {
+            table.insert(path.to_string(), Arc::from(bytes));
+        }
+    }
+
+    /// The bytes put under `path`, shared with whoever else holds them.
+    pub fn get(path: &str) -> Option<Arc<[u8]>> {
+        table().lock().ok()?.get(path).cloned()
+    }
+
+    /// Whether a file was put under `path`.
+    pub fn has(path: &str) -> bool {
+        table().lock().is_ok_and(|table| table.contains_key(path))
+    }
+
+    /// The names directly under `dir` among the files put: a file's own
+    /// name, or the folder's for a file further down, each once, sorted.
+    pub fn entries(dir: &str) -> Vec<String> {
+        let prefix = format!("{}/", dir.trim_end_matches('/'));
+        let mut names: Vec<String> = table()
+            .lock()
+            .map(|table| {
+                table
+                    .keys()
+                    .filter_map(|key| key.strip_prefix(&prefix))
+                    .map(|rest| rest.split('/').next().unwrap_or(rest).to_string())
+                    .collect()
+            })
+            .unwrap_or_default();
+        names.sort();
+        names.dedup();
+        names
+    }
+
+    /// Forget every file.
+    pub fn clear() {
+        if let Ok(mut table) = table().lock() {
+            table.clear();
+        }
+    }
+}
+
+/// The bytes of a file: read from the file system, else what the host put
+/// in [`vfs`] under the same path.
+pub fn read_file(path: &Path) -> Option<Vec<u8>> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Ok(bytes) = std::fs::read(path) {
+        return Some(bytes);
+    }
+    vfs::get(path.to_str()?).map(|bytes| bytes.to_vec())
+}
+
+/// The text of a file, the same way.
+pub fn read_to_string(path: &Path) -> Option<String> {
+    String::from_utf8(read_file(path)?).ok()
+}
+
+/// Whether a file is there, on the file system or in [`vfs`].
+pub fn is_file(path: &Path) -> bool {
+    #[cfg(not(target_arch = "wasm32"))]
+    if path.is_file() {
+        return true;
+    }
+    path.to_str().is_some_and(vfs::has)
+}
+
+/// What sits directly under a directory: the file system's entries when it
+/// has the directory, else the names [`vfs`] holds under it, as paths.
+pub fn dir_entries(path: &Path) -> Vec<std::path::PathBuf> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Ok(entries) = std::fs::read_dir(path) {
+        return entries.flatten().map(|entry| entry.path()).collect();
+    }
+    path.to_str()
+        .map(vfs::entries)
+        .unwrap_or_default()
+        .into_iter()
+        .map(|name| path.join(name))
+        .collect()
 }
 
 use serde::{Deserialize, Serialize};
@@ -2391,7 +2586,7 @@ pub fn fonts_from_config(text: &str, plugin_fonts: &Path) -> FontFiles {
     let base = base.trim().trim_end_matches('/').to_string();
     let shipped = |name: &str| -> String {
         let path = plugin_fonts.join(name);
-        if path.is_file() {
+        if is_file(&path) {
             path.to_string_lossy().into_owned()
         } else {
             String::new()
@@ -2403,10 +2598,10 @@ pub fn fonts_from_config(text: &str, plugin_fonts: &Path) -> FontFiles {
         let value = current_value(text, key).unwrap_or_default();
         let value = value.trim();
         let builtin = value.is_empty() || value.eq_ignore_ascii_case("builtin");
-        if builtin || force_builtin && !Path::new(value).is_file() {
+        if builtin || force_builtin && !is_file(Path::new(value)) {
             return shipped(face);
         }
-        if value.starts_with('/') && Path::new(value).is_file() {
+        if value.starts_with('/') && is_file(Path::new(value)) {
             return value.to_string();
         }
         if base.is_empty() {

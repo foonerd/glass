@@ -6,7 +6,9 @@ use std::net::TcpStream;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+
+use lead::Moment;
 
 use std::collections::{HashMap, VecDeque};
 
@@ -25,9 +27,12 @@ use lead::{
     STOCK_ICONS,
 };
 
+pub mod bring;
 mod channel;
+pub mod hops;
+#[cfg(not(target_arch = "wasm32"))]
 pub mod remote;
-pub use channel::{Channel, Command, Event, RemoteHello};
+pub use channel::{decode as decode_event, Channel, Command, Event, RemoteHello};
 
 use std::net::ToSocketAddrs;
 use std::sync::RwLock;
@@ -102,10 +107,10 @@ pub struct Selector {
 
 impl Selector {
     pub fn new(rotation: Rotation) -> Self {
-        let seed = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map(|d| d.as_nanos() as u64)
-            .unwrap_or(0x9E37_79B9_7F4A_7C15);
+        let seed = match lead::epoch_nanos() {
+            0 => 0x9E37_79B9_7F4A_7C15,
+            nanos => nanos,
+        };
         Self::seeded(rotation, seed)
     }
 
@@ -290,7 +295,7 @@ fn with_current(text: &str, key: &str, value: &str) -> String {
 
 /// The installed configuration's text with the overrides applied.
 fn config_text() -> Option<String> {
-    let mut text = std::fs::read_to_string(config_path()).ok()?;
+    let mut text = lead::read_to_string(Path::new(&config_path()))?;
     let overrides = OVERRIDES.lock().ok().and_then(|slot| slot.clone());
     if let Some(overrides) = overrides {
         if let Some(theme) = &overrides.theme {
@@ -322,17 +327,18 @@ pub fn installed_themes() -> Vec<(String, Vec<String>)> {
         .map(PathBuf::from)
         .or_else(|| Path::new(&path).parent().map(Path::to_path_buf))
         .unwrap_or_else(|| PathBuf::from("."));
-    let Ok(entries) = std::fs::read_dir(&base) else {
-        return Vec::new();
-    };
-    let mut themes: Vec<(String, Vec<String>)> = entries
-        .flatten()
-        .filter(|e| e.path().join("meters.txt").is_file())
-        .map(|e| {
-            let sections = std::fs::read_to_string(e.path().join("meters.txt"))
+    let mut themes: Vec<(String, Vec<String>)> = lead::dir_entries(&base)
+        .into_iter()
+        .filter(|dir| lead::is_file(&dir.join("meters.txt")))
+        .map(|dir| {
+            let sections = lead::read_to_string(&dir.join("meters.txt"))
                 .map(|m| meter_sections(&m))
                 .unwrap_or_default();
-            (e.file_name().to_string_lossy().into_owned(), sections)
+            let name = dir
+                .file_name()
+                .map(|n| n.to_string_lossy().into_owned())
+                .unwrap_or_default();
+            (name, sections)
         })
         .collect();
     themes.sort();
@@ -345,7 +351,7 @@ pub fn installed_meter_names() -> Vec<String> {
         return Vec::new();
     };
     theme_dir_from(&text, &config_path())
-        .and_then(|dir| std::fs::read_to_string(dir.join("meters.txt")).ok())
+        .and_then(|dir| lead::read_to_string(&dir.join("meters.txt")))
         .map(|meters| meter_sections(&meters))
         .unwrap_or_default()
 }
@@ -360,7 +366,7 @@ pub fn installed_rotation() -> Rotation {
         Selection::List(names) => (names, false),
         Selection::Random => {
             let sections = theme_dir_from(&text, &path)
-                .and_then(|dir| std::fs::read_to_string(dir.join("meters.txt")).ok())
+                .and_then(|dir| lead::read_to_string(&dir.join("meters.txt")))
                 .map(|meters| meter_sections(&meters))
                 .unwrap_or_default();
             (sections, true)
@@ -395,7 +401,15 @@ pub struct FanartAnswer {
     pub order: String,
 }
 
+/// In a browser the player is not asked: the slideshow is left to the
+/// player's own display.
+#[cfg(target_arch = "wasm32")]
+fn fanart_list(_artist: &str, _uri: &str) -> FanartAnswer {
+    FanartAnswer::default()
+}
+
 /// Ask the player for an artist's fanart set and the slideshow settings.
+#[cfg(not(target_arch = "wasm32"))]
 fn fanart_list(artist: &str, uri: &str) -> FanartAnswer {
     #[derive(serde::Deserialize)]
     struct Outer {
@@ -482,13 +496,13 @@ pub struct Slideshow {
     transition: String,
     transition_ms: u64,
     order: String,
-    last_advance: Option<Instant>,
+    last_advance: Option<Moment>,
     file: String,
     prev_file: String,
-    transition_started: Option<Instant>,
+    transition_started: Option<Moment>,
     pending: Option<(Why, mpsc::Receiver<FanartAnswer>)>,
     /// Position and last advance per artist and picture set.
-    memory: HashMap<String, (usize, Option<Instant>)>,
+    memory: HashMap<String, (usize, Option<Moment>)>,
     seed: u64,
 }
 
@@ -512,7 +526,7 @@ impl Slideshow {
     fn begin_transition(&mut self) {
         if matches!(self.transition.as_str(), "fade" | "merge") {
             self.prev_file = std::mem::take(&mut self.file);
-            self.transition_started = Some(Instant::now());
+            self.transition_started = Some(Moment::now());
         } else {
             self.prev_file.clear();
             self.transition_started = None;
@@ -569,7 +583,7 @@ impl Slideshow {
         } else {
             (self.index + 1) % n
         };
-        self.last_advance = Some(Instant::now());
+        self.last_advance = Some(Moment::now());
         self.show(next);
     }
 
@@ -611,10 +625,10 @@ impl Slideshow {
                     return;
                 }
                 let remembered = self.memory.get(&self.memory_key()).map(|(_, at)| *at);
-                self.last_advance = remembered.unwrap_or(Some(Instant::now()));
+                self.last_advance = remembered.unwrap_or(Some(Moment::now()));
                 self.prev_file.clear();
                 self.transition_started =
-                    matches!(self.transition.as_str(), "fade" | "merge").then(Instant::now);
+                    matches!(self.transition.as_str(), "fade" | "merge").then(Moment::now);
                 let start = self.start_index();
                 self.show(start);
                 if self.refs.len() > 1 && self.interval_elapsed() {
@@ -631,7 +645,7 @@ impl Slideshow {
                         self.index = 0;
                         return;
                     }
-                    self.last_advance = Some(Instant::now());
+                    self.last_advance = Some(Moment::now());
                     if !self.file.is_empty() {
                         self.begin_transition();
                     }
@@ -725,7 +739,7 @@ pub struct Conditioner {
     spec: DataSourceSpec,
     gain_mult: f32,
     source_mult: f32,
-    source_at: Option<Instant>,
+    source_at: Option<Moment>,
     previous: Levels,
     window: VecDeque<Levels>,
 }
@@ -756,7 +770,7 @@ impl Conditioner {
         {
             return;
         }
-        self.source_at = Some(Instant::now());
+        self.source_at = Some(Moment::now());
         self.source_mult = std::fs::read_to_string(&self.spec.gain_source)
             .ok()
             .and_then(|t| t.trim().parse::<f32>().ok())
@@ -928,19 +942,15 @@ pub fn existing_icon_file(dir: &str, basename: &str) -> Option<PathBuf> {
         return None;
     }
     let exact = Path::new(dir).join(basename);
-    if exact.is_file() {
+    if lead::is_file(&exact) {
         return Some(exact);
     }
     let wanted = basename.to_ascii_lowercase();
-    std::fs::read_dir(dir)
-        .ok()?
-        .flatten()
-        .map(|entry| entry.path())
-        .find(|path| {
-            path.file_name()
-                .and_then(|n| n.to_str())
-                .is_some_and(|n| n.to_ascii_lowercase() == wanted)
-        })
+    lead::dir_entries(Path::new(dir)).into_iter().find(|path| {
+        path.file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.to_ascii_lowercase() == wanted)
+    })
 }
 
 /// The icon for a key: the skin's `format-icons` (`.png` then `.svg`), the
@@ -972,6 +982,7 @@ pub fn art_url(reported: &str) -> String {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn fnv1a(text: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in text.bytes() {
@@ -984,6 +995,12 @@ fn fnv1a(text: &str) -> u64 {
 /// Fetch one picture into the art cache under the temp dir. `None` when the
 /// player does not answer, the answer is not an image, or the file cannot be
 /// written. A picture fetched earlier for the same location is reused.
+#[cfg(target_arch = "wasm32")]
+fn fetch_art(_reported: &str) -> Option<PathBuf> {
+    None
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn fetch_art(reported: &str) -> Option<PathBuf> {
     let dir = std::env::temp_dir().join("glass-art");
     std::fs::create_dir_all(&dir).ok()?;
@@ -1057,6 +1074,17 @@ impl RemoteFolder {
 
 /// For each group, the first candidate the player serves from the track's
 /// folder, landed under `<home>/track/<folder hash>/`, else empty.
+#[cfg(target_arch = "wasm32")]
+fn fetch_folder_files(
+    _manager: &str,
+    _home: &str,
+    _uri: &str,
+    groups: &[Vec<String>],
+) -> Vec<String> {
+    vec![String::new(); groups.len()]
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn fetch_folder_files(manager: &str, home: &str, uri: &str, groups: &[Vec<String>]) -> Vec<String> {
     use sha2::{Digest, Sha256};
     let folder = uri.rfind('/').map(|i| &uri[..i]).unwrap_or(uri);
@@ -1189,7 +1217,7 @@ pub trait Hops {
 #[derive(Default)]
 pub struct RingHops {
     ring: Option<tap::Reader>,
-    ring_looked_at: Option<Instant>,
+    ring_looked_at: Option<Moment>,
     last_seq: u64,
     last_frames: u64,
 }
@@ -1205,7 +1233,7 @@ impl RingHops {
             .ring_looked_at
             .is_none_or(|at| at.elapsed() >= Duration::from_secs(1));
         if due {
-            self.ring_looked_at = Some(Instant::now());
+            self.ring_looked_at = Some(Moment::now());
             self.ring = tap::Reader::open_live(Path::new(tap::ring::DIR));
             self.last_seq = 0;
             self.last_frames = 0;
@@ -1268,7 +1296,7 @@ pub struct TapSource {
     spectrum_held: Vec<f32>,
     levels_held: Levels,
     metadata_held: lead::Metadata,
-    metadata_at: Option<Instant>,
+    metadata_at: Option<Moment>,
     /// How often the player is asked for now-playing text. `None` never asks.
     metadata_every: Option<Duration>,
     /// Position the player reported at `metadata_at`, in seconds.
@@ -1304,11 +1332,14 @@ pub struct TapSource {
     /// Queue mode: the queue's track lengths, read every ten seconds.
     queue_mode: bool,
     queue_lengths: Vec<f32>,
-    queue_read_at: Option<Instant>,
+    queue_read_at: Option<Moment>,
     /// The plugin's channel, when the player runs under it: the state
     /// arrives as it changes and the player is not asked.
     channel: Option<Channel>,
     channel_was_live: bool,
+    /// Events a host handed over itself, read at the next poll before the
+    /// channel's: a browser page's, whose state comes through the manager.
+    pushed: Vec<Event>,
     /// Infinity playback, which only the channel reports.
     infinity_held: bool,
     /// The last state, and whether the skin's needs are to be derived from
@@ -1439,6 +1470,7 @@ impl TapSource {
             queue_read_at: None,
             channel: Some(channel),
             channel_was_live: false,
+            pushed: Vec::new(),
             infinity_held: false,
             playing_held: NowPlaying::default(),
             rederive: false,
@@ -1451,11 +1483,19 @@ impl TapSource {
     }
 
     /// Never ask the player for now-playing text, nor listen for it. For
-    /// tests and recordings on a host without Volumio.
+    /// tests and recordings on a host without Volumio, and for a host that
+    /// hands the plugin's events over itself with `push_event`.
     pub fn without_player(mut self) -> Self {
         self.metadata_every = None;
         self.channel = None;
         self
+    }
+
+    /// An event of the plugin's, as the channel would have carried it,
+    /// handed over by a host that reads the plugin itself; taken at the
+    /// next poll.
+    pub fn push_event(&mut self, event: Event) {
+        self.pushed.push(event);
     }
 
     /// What the skin needs from the player beyond the state: icon
@@ -1551,7 +1591,7 @@ impl TapSource {
             .is_none_or(|at| at.elapsed() >= Duration::from_secs(10))
         {
             self.queue_lengths = queue_lengths();
-            self.queue_read_at = Some(Instant::now());
+            self.queue_read_at = Some(Moment::now());
         }
         let total: f32 = self.queue_lengths.iter().sum();
         if self.queue_lengths.is_empty() || total <= 0.0 {
@@ -1632,13 +1672,16 @@ impl TapSource {
         self.queue_mode = skin.rotation.queue_mode;
         self.queue_lengths.clear();
         self.queue_read_at = None;
-        self.fanart = skin.fanart.as_ref().map(|_| Slideshow {
-            seed: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_nanos() as u64)
-                .unwrap_or(1),
-            ..Slideshow::default()
-        });
+        // The slideshow asks the player on a thread of its own, which a
+        // browser has none of: there the player's own display runs it.
+        self.fanart = if cfg!(target_arch = "wasm32") {
+            None
+        } else {
+            skin.fanart.as_ref().map(|_| Slideshow {
+                seed: lead::epoch_nanos().max(1),
+                ..Slideshow::default()
+            })
+        };
         let spectrum_max = skin.spectrum_max.max(1.0) as u32;
         if let Some(bins) = skin.spectrum.as_ref().map(|s| s.bins.max(1)) {
             if bins != self.spectrum_bins || spectrum_max != self.spectrum_max {
@@ -1704,20 +1747,24 @@ impl Source for TapSource {
         // The player's state: pushed by the plugin's channel as it changes,
         // or asked of the player once a second while there is no channel.
         let mut arrived: Option<NowPlaying> = None;
+        let mut events = std::mem::take(&mut self.pushed);
         if let Some(channel) = self.channel.as_mut() {
-            for event in channel.pump() {
-                match event {
-                    Event::State(state) => arrived = Some(NowPlaying::from_value(&state)),
-                    Event::Infinity(on) => self.infinity_held = on,
-                    Event::Config {
-                        version,
-                        theme,
-                        meter,
-                    } => self.config_seen = Some((version, theme, meter)),
-                    Event::Showing { theme, meter } => self.showing_seen = Some((theme, meter)),
-                    Event::Hello { .. } => {}
-                }
+            events.extend(channel.pump());
+        }
+        for event in events {
+            match event {
+                Event::State(state) => arrived = Some(NowPlaying::from_value(&state)),
+                Event::Infinity(on) => self.infinity_held = on,
+                Event::Config {
+                    version,
+                    theme,
+                    meter,
+                } => self.config_seen = Some((version, theme, meter)),
+                Event::Showing { theme, meter } => self.showing_seen = Some((theme, meter)),
+                Event::Hello { .. } => {}
             }
+        }
+        if let Some(channel) = self.channel.as_mut() {
             let live = channel.connected();
             if live != self.channel_was_live {
                 self.channel_was_live = live;
@@ -1738,7 +1785,7 @@ impl Source for TapSource {
         }
         if let Some(playing) = arrived {
             self.seek_polled = playing.seek;
-            self.metadata_at = Some(Instant::now());
+            self.metadata_at = Some(Moment::now());
             self.playing_held = playing;
             self.rederive = true;
         }
@@ -1814,10 +1861,7 @@ impl Source for TapSource {
         }
         if self.metadata_every.is_some() {
             metadata.art_file = self.art.file();
-            let now_epoch_ms = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map(|d| d.as_millis() as u64)
-                .unwrap_or(0);
+            let now_epoch_ms = lead::epoch_nanos() / 1_000_000;
             let (mode, left) = persist_state(PERSIST_FILE, now_epoch_ms);
             metadata.persist_mode = mode;
             metadata.persist_left = left;
@@ -1885,7 +1929,7 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         return skin;
     };
     skin.theme_dir = theme.to_string_lossy().into_owned();
-    if let Ok(meters) = std::fs::read_to_string(theme.join("meters.txt")) {
+    if let Some(meters) = lead::read_to_string(&theme.join("meters.txt")) {
         if let Some(file) = meter_background(&meters, &skin.name) {
             skin.background = file;
         }
@@ -1958,11 +2002,10 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
     skin.meter_max = skin.data_source.max_ui;
     // The spectrum configuration sits beside the meter configuration; the
     // meter names which of the theme's spectra it shows and how big.
-    let placed = std::fs::read_to_string(theme.join("meters.txt"))
-        .ok()
+    let placed = lead::read_to_string(&theme.join("meters.txt"))
         .and_then(|meters| meter_spectrum(&meters, &skin.name));
     if let Some((name, w, h)) = placed {
-        if let Ok(config) = std::fs::read_to_string(spectrum_config_path()) {
+        if let Some(config) = lead::read_to_string(&spectrum_config_path()) {
             let settings = spectrum_settings(&config);
             // The spectrum theme carries the meter theme's folder name; the
             // player keeps `spectrum.folder` in step with `meter.folder`, and
@@ -1972,9 +2015,9 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
             let by_theme = theme
                 .file_name()
                 .map(|name| base.join(name))
-                .filter(|dir| dir.join("spectrum.txt").is_file());
+                .filter(|dir| lead::is_file(&dir.join("spectrum.txt")));
             let folder = by_theme.unwrap_or_else(|| base.join(&settings.folder));
-            if let Ok(spectra) = std::fs::read_to_string(folder.join("spectrum.txt")) {
+            if let Some(spectra) = lead::read_to_string(&folder.join("spectrum.txt")) {
                 skin.spectrum = spectrum_from_theme(
                     &spectra,
                     &name,

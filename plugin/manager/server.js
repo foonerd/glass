@@ -341,6 +341,21 @@ class Manager {
       res.json(Object.assign({ ok: true }, result));
     }));
 
+    // The Face tab: the feed behind it, the module and the page's script.
+    app.get('/api/face/events', function (req, res) {
+      if (!self.plugin.face) return res.status(503).json({ error: 'no-face' });
+      self.plugin.face.attach(req, res);
+    });
+    app.get('/face/glass-face.wasm', function (req, res) {
+      const file = path.join(self.paths.pluginPath, 'face', 'glass-face.wasm');
+      if (!fs.existsSync(file)) return res.status(404).json({ error: 'no-module' });
+      res.type('application/wasm');
+      res.sendFile(file, { maxAge: 0 });
+    });
+    app.get('/face/face-page.js', function (req, res) {
+      res.sendFile(path.join(__dirname, 'face-page.js'), { maxAge: 0 });
+    });
+
     // Car Dash: a day theme and a night theme by the clock.
     app.get('/api/cardash', function (req, res) {
       res.json(self.plugin.carDashInfo());

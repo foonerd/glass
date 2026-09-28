@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.41] - 2026-09-28
+
+The face in a browser, the first cut. The Manager's Face tab draws the player's meters live: the display's pipeline compiled to WebAssembly, fed the same configuration, theme, fonts and icons a remote display brings and the same frames the remotes receive, so a phone or a tablet on the network watches what the player's screen shows, following the theme and the meter as they change, full screen on a button. The theme is kept in the browser by checksum and fetched again only when it changes. The frames daemon serves its datagrams to browser pages as an event stream on a local socket and runs whenever the plugin does, the port only while remote displays are served; the manager proxies the stream and adds the player's state. Underneath, the input crates read files and the clock through the host where a target has none, and the remote's hop conditioning and configuration rewriting are shared with the module.
+
 ## [0.7.40] - 2026-09-28
 
 Controls under a finger. Every control's touch region is at least 48 pixels on each axis, centred on what is drawn, so a thin bar or a small light answers to a finger a little off it; a tap is tested against the drawn boxes first, then the nearest grown one, and a bar reaches half a margin past both ends so 0 and 100 can be hit; `touch.margin` in a meter tunes it, 0 keeps the drawn boxes. A finger down on the volume or progress bar drags it: the knob follows the finger, the volume goes to the player as it moves and the seek when the finger lifts.

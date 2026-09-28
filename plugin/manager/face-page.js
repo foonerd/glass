@@ -1,0 +1,309 @@
+// The Face tab: the display's pipeline in the browser. The module is the
+// same code the player draws with, compiled to WebAssembly; this script is
+// the page's side of its contract (bins/glass-face/src/lib.rs): fetch what
+// the module asks for, put it in, feed it the frames and the plugin's
+// lines from the manager's event stream, and blit a frame at the theme's
+// rate. Files are kept in the browser by checksum, so a second visit
+// fetches only what changed on the player.
+(function () {
+  'use strict';
+
+  var face = {
+    t: function (key) { return key; },
+    version: function () { return ''; },
+    shown: false,
+    ex: null,
+    ready: false,
+    theme: '',
+    meter: '',
+    wanted: '',
+    rate: 30,
+    width: 0,
+    height: 0,
+    ctx: null,
+    image: null,
+    stream: null,
+    frameAt: 0,
+    loop: null,
+    frames: false,
+    starting: null,
+    restart: false
+  };
+
+  var $ = function (id) { return document.getElementById(id); };
+  var encoder = new TextEncoder();
+  var decoder = new TextDecoder();
+
+  function say(text, problem) {
+    var el = $('face-state');
+    if (!el) return;
+    el.textContent = text || '';
+    el.style.color = problem ? 'var(--danger)' : '';
+  }
+
+  // ---- the module's memory ----------------------------------------------
+  function memory() { return new Uint8Array(face.ex.memory.buffer); }
+  function putBytes(bytes) {
+    var ptr = face.ex.alloc(bytes.length);
+    memory().set(bytes, ptr);
+    return ptr;
+  }
+  function withBytes(bytes, fn) {
+    var ptr = putBytes(bytes);
+    try { return fn(ptr, bytes.length); } finally { face.ex.free(ptr, bytes.length); }
+  }
+  function withString(text, fn) { return withBytes(encoder.encode(text), fn); }
+  function answer() {
+    var ptr = face.ex.answer_ptr(), len = face.ex.answer_len();
+    return decoder.decode(memory().subarray(ptr, ptr + len));
+  }
+  // A trap in the module (a panic) leaves its reason as the answer.
+  function guarded(fn) {
+    try { return fn(); } catch (e) {
+      if (e instanceof WebAssembly.RuntimeError) {
+        var why = '';
+        try { why = answer(); } catch (e2) { /* the memory is gone */ }
+        face.ready = false;
+        throw new Error(why || e.message);
+      }
+      throw e;
+    }
+  }
+  // A call that answers: the code and the answer text.
+  function ask(name, text) {
+    return guarded(function () {
+      return withString(text, function (ptr, len) {
+        var code = face.ex[name](ptr, len);
+        return { code: code, answer: answer() };
+      });
+    });
+  }
+
+  // ---- files kept by checksum --------------------------------------------
+  var db = null;
+  function openDb() {
+    if (db) return Promise.resolve(db);
+    return new Promise(function (resolve) {
+      var request;
+      try { request = indexedDB.open('glass-face', 1); } catch (e) { return resolve(null); }
+      request.onupgradeneeded = function () { request.result.createObjectStore('files'); };
+      request.onsuccess = function () { db = request.result; resolve(db); };
+      request.onerror = function () { resolve(null); };
+      request.onblocked = function () { resolve(null); };
+    });
+  }
+  function cached(sha) {
+    return openDb().then(function (db) {
+      if (!db || !sha) return null;
+      return new Promise(function (resolve) {
+        var tx = db.transaction('files', 'readonly').objectStore('files').get(sha);
+        tx.onsuccess = function () { resolve(tx.result ? new Uint8Array(tx.result) : null); };
+        tx.onerror = function () { resolve(null); };
+      });
+    });
+  }
+  function keep(sha, bytes) {
+    return openDb().then(function (db) {
+      if (!db || !sha) return;
+      try { db.transaction('files', 'readwrite').objectStore('files').put(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), sha); } catch (e) { /* the browser refused: fetched next time */ }
+    });
+  }
+
+  // Every file of a plan into the module, from the cache or the manager.
+  function bring(plan) {
+    var fetched = 0, kept = 0;
+    var next = function (i) {
+      if (i >= plan.length) return Promise.resolve({ fetched: fetched, kept: kept });
+      var item = plan[i];
+      return cached(item.sha256).then(function (bytes) {
+        if (bytes) { kept++; return bytes; }
+        return fetch(item.url).then(function (res) {
+          if (!res.ok) throw new Error(item.path + ': ' + res.status);
+          return res.arrayBuffer();
+        }).then(function (buffer) {
+          var got = new Uint8Array(buffer);
+          fetched++;
+          keep(item.sha256, got);
+          return got;
+        });
+      }).then(function (bytes) {
+        guarded(function () {
+          withString(item.path, function (pp, pl) {
+            withBytes(bytes, function (dp, dl) { face.ex.put_file(pp, pl, dp, dl); });
+          });
+        });
+        if ((i & 7) === 7) say(face.t('MANAGER_FACE_LOADING') + ' ' + (i + 1) + '/' + plan.length);
+        return next(i + 1);
+      });
+    };
+    return next(0);
+  }
+
+  // ---- the module and the theme -------------------------------------------
+  function loadModule() {
+    if (face.ex) return Promise.resolve();
+    return fetch('/face/glass-face.wasm?v=' + encodeURIComponent(face.version())).then(function (res) {
+      if (res.status === 404) throw new Error(face.t('MANAGER_FACE_NO_MODULE'));
+      if (!res.ok) throw new Error('module: ' + res.status);
+      return res.arrayBuffer();
+    }).then(function (bytes) {
+      return WebAssembly.instantiate(bytes, {});
+    }).then(function (result) {
+      face.ex = result.instance.exports;
+    });
+  }
+
+  // The theme on show, as a remote brings it: the configuration, the fonts
+  // and icons, the theme's files; then the meter on show.
+  function bringTheme() {
+    say(face.t('MANAGER_FACE_LOADING'));
+    face.ready = false;
+    var config;
+    return fetch('/api/remote/config').then(function (res) { return res.json(); }).then(function (data) {
+      config = data;
+      var configured = ask('configure', JSON.stringify(config));
+      if (configured.code) throw new Error(configured.answer);
+      face.theme = config.theme;
+      var assets = JSON.parse(configured.answer);
+      return fetch('/api/themes/' + encodeURIComponent(config.theme) + '/files').then(function (res) {
+        if (!res.ok) throw new Error('theme files: ' + res.status);
+        return res.json();
+      }).then(function (files) {
+        var planned = ask('theme_files', JSON.stringify(files));
+        if (planned.code) throw new Error(planned.answer);
+        return bring(assets.concat(JSON.parse(planned.answer)));
+      });
+    }).then(function () {
+      start(face.wanted || config.meter || '');
+    });
+  }
+
+  // Put a meter on show: the configuration's own for an empty name.
+  function start(meter) {
+    var started = ask('start', meter === 'random' ? '' : meter);
+    if (started.code) throw new Error(started.answer);
+    face.meter = started.answer;
+    face.rate = face.ex.frame_rate() || 30;
+    face.width = face.ex.frame_width();
+    face.height = face.ex.frame_height();
+    var canvas = $('face-canvas');
+    canvas.width = face.width;
+    canvas.height = face.height;
+    face.ctx = canvas.getContext('2d');
+    face.image = face.ctx.createImageData(face.width, face.height);
+    face.ready = true;
+    showing();
+  }
+
+  function showing() {
+    var text = face.theme + ' · ' + face.meter + ' · ' + face.width + '×' + face.height + ' · ' + face.rate + ' fps';
+    if (!face.frames) text += ' · ' + face.t('MANAGER_FACE_NO_FRAMES');
+    say(text);
+  }
+
+  // ---- the manager's stream: frames and the plugin's lines -----------------
+  function connect() {
+    if (face.stream) return;
+    var stream = new EventSource('/api/face/events');
+    face.stream = stream;
+    stream.addEventListener('hop', function (e) {
+      if (!face.ex || !face.ready) return;
+      var text = atob(e.data);
+      var bytes = new Uint8Array(text.length);
+      for (var i = 0; i < text.length; i++) bytes[i] = text.charCodeAt(i);
+      try { guarded(function () { withBytes(bytes, function (ptr, len) { face.ex.hop(ptr, len); }); }); } catch (err) { say(face.t('MANAGER_FACE_FAILED') + ' ' + err.message, true); }
+    });
+    stream.addEventListener('plugin', function (e) {
+      var line = e.data;
+      var message = null;
+      try { message = JSON.parse(line); } catch (err) { return; }
+      if (face.ex) { try { guarded(function () { withString(line, function (ptr, len) { face.ex.event(ptr, len); }); }); } catch (err) { say(face.t('MANAGER_FACE_FAILED') + ' ' + err.message, true); } }
+      if (!message) return;
+      // The theme changed on the player: bring it again. The player's own
+      // display moved to another meter: follow it.
+      if (message.kind === 'config' && face.ready && message.theme && message.theme !== face.theme) {
+        face.wanted = '';
+        restart();
+      } else if (message.kind === 'showing' && face.ready && message.meter && message.meter !== face.meter && !face.wanted) {
+        try { start(message.meter); } catch (err) { say(String(err.message || err), true); }
+      }
+    });
+    stream.addEventListener('feed', function (e) {
+      try { face.frames = !!JSON.parse(e.data).frames; } catch (err) { /* not for us */ }
+      if (face.ready) showing();
+    });
+    stream.onerror = function () {
+      if (face.ready) say(face.t('MANAGER_FACE_WAITING'));
+    };
+  }
+
+  function disconnect() {
+    if (face.stream) { face.stream.close(); face.stream = null; }
+  }
+
+  function restart() {
+    if (face.starting) { face.restart = true; return; }
+    face.starting = bringTheme().catch(function (err) {
+      say(face.t('MANAGER_FACE_FAILED') + ' ' + String(err.message || err), true);
+    }).then(function () {
+      face.starting = null;
+      if (face.restart) { face.restart = false; restart(); }
+    });
+  }
+
+  // ---- frames at the theme's rate -----------------------------------------
+  function tick(now) {
+    if (!face.shown) return;
+    face.loop = requestAnimationFrame(tick);
+    if (!face.ready || document.hidden) return;
+    var period = 1000 / face.rate;
+    if (now - face.frameAt < period * 0.9) return;
+    face.frameAt = now;
+    var ptr;
+    try { ptr = guarded(function () { return face.ex.frame(BigInt(Math.round(now))); }); } catch (err) { say(face.t('MANAGER_FACE_FAILED') + ' ' + err.message, true); return; }
+    if (!ptr) return;
+    var size = face.width * face.height * 4;
+    face.image.data.set(memory().subarray(ptr, ptr + size));
+    face.ctx.putImageData(face.image, 0, 0);
+  }
+
+  // ---- the tab -------------------------------------------------------------
+  function show() {
+    if (face.shown) return;
+    face.shown = true;
+    connect();
+    face.loop = requestAnimationFrame(tick);
+    if (face.ready) { showing(); return; }
+    face.starting = loadModule().then(bringTheme).catch(function (err) {
+      say(face.t('MANAGER_FACE_FAILED') + ' ' + String(err.message || err), true);
+    }).then(function () {
+      face.starting = null;
+      if (face.restart) { face.restart = false; restart(); }
+    });
+  }
+
+  function hide() {
+    if (!face.shown) return;
+    face.shown = false;
+    if (face.loop) { cancelAnimationFrame(face.loop); face.loop = null; }
+    disconnect();
+  }
+
+  function fullScreen() {
+    var stage = $('face-stage');
+    if (!stage) return;
+    if (document.fullscreenElement) { document.exitFullscreen(); return; }
+    if (stage.requestFullscreen) stage.requestFullscreen().catch(function () {});
+  }
+
+  window.GlassFace = {
+    init: function (options) {
+      face.t = options.t || face.t;
+      face.version = options.version || face.version;
+      var button = $('btn-face-full');
+      if (button) button.addEventListener('click', fullScreen);
+    },
+    show: show,
+    hide: hide
+  };
+})();
