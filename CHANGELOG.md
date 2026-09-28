@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.50] - 2026-09-28
+
+Two keys for a theme's strip: `playinfo.type.label = samplerate` puts the sample rate line beside the format's icon as one centred unit, and `fanart.scale = cover` (`folderlayer.N.scale` too) fills a box keeping the picture's shape, the middle cut out.
+
 ## [0.7.49] - 2026-09-28
 
 The analyser draws its bars straight into the frame from a palette lookup, forty times cheaper than the shapes of 0.7.48: a dense look of 256 bands on two channels costs a couple of milliseconds a frame instead of a whole core. Its level range now defaults to -60 to 0 dB, the bank's own scale, where a full-scale sine reads 0 dB in its band. A theme may write the volume as a number beside its gauge with `volume.value.pos`.
