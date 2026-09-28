@@ -40,27 +40,132 @@ pub struct Fonts {
     by_path: HashMap<String, Arc<Face>>,
 }
 
+/// Files the host hands over in place of a file system. A browser has no
+/// disk: the page puts the theme's pictures and fonts here under the paths
+/// the skin names, and every reader in this crate looks here when the file
+/// system has nothing. On a machine it stays empty and costs one lookup.
+pub mod vfs {
+    use std::collections::HashMap;
+    use std::sync::{Arc, Mutex, OnceLock};
+
+    fn table() -> &'static Mutex<HashMap<String, Arc<[u8]>>> {
+        static TABLE: OnceLock<Mutex<HashMap<String, Arc<[u8]>>>> = OnceLock::new();
+        TABLE.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    /// Keep `bytes` as the file at `path`; a later put replaces it.
+    pub fn put(path: &str, bytes: Vec<u8>) {
+        if let Ok(mut table) = table().lock() {
+            table.insert(path.to_string(), Arc::from(bytes));
+        }
+    }
+
+    /// The bytes put under `path`, shared with whoever else holds them.
+    pub fn get(path: &str) -> Option<Arc<[u8]>> {
+        table().lock().ok()?.get(path).cloned()
+    }
+
+    /// Whether a file was put under `path`.
+    pub fn has(path: &str) -> bool {
+        table().lock().is_ok_and(|table| table.contains_key(path))
+    }
+
+    /// Forget every file.
+    pub fn clear() {
+        if let Ok(mut table) = table().lock() {
+            table.clear();
+        }
+    }
+}
+
+/// The bytes of a file: read from the file system, else what the host put
+/// in `vfs` under the same path.
+pub fn read_file(path: &Path) -> Option<Vec<u8>> {
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Ok(bytes) = std::fs::read(path) {
+        return Some(bytes);
+    }
+    vfs::get(path.to_str()?).map(|bytes| bytes.to_vec())
+}
+
+/// Microseconds on a clock that only moves forward: the process's own on a
+/// machine; on a target without one, what the host last set.
+pub fn clock_us() -> u64 {
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        static START: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+        START
+            .get_or_init(std::time::Instant::now)
+            .elapsed()
+            .as_micros() as u64
+    }
+    #[cfg(target_arch = "wasm32")]
+    {
+        HOST_CLOCK_US.load(std::sync::atomic::Ordering::Relaxed)
+    }
+}
+
+#[cfg(target_arch = "wasm32")]
+static HOST_CLOCK_US: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// The host's clock, in microseconds, on a target without one of its own.
+#[cfg(target_arch = "wasm32")]
+pub fn set_clock_us(us: u64) {
+    HOST_CLOCK_US.store(us, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// A font file mapped into memory rather than read: the kernel brings in
 /// only the pages the glyphs touch, and shares them with any other process
-/// that maps the file. A 16 MB face costs the tables it uses.
+/// that maps the file. A 16 MB face costs the tables it uses. Where the
+/// host hands the file over instead (`vfs`), the bytes are held as they came.
 pub struct Face {
     font: FontRef<'static>,
     /// Holds the bytes `font` reads; dropped after it.
-    _map: memmap2::Mmap,
+    _keep: Keep,
+}
+
+enum Keep {
+    #[cfg(not(target_arch = "wasm32"))]
+    Map(memmap2::Mmap),
+    Shared(Arc<[u8]>),
+}
+
+impl Keep {
+    fn len(&self) -> usize {
+        match self {
+            #[cfg(not(target_arch = "wasm32"))]
+            Keep::Map(map) => map.len(),
+            Keep::Shared(bytes) => bytes.len(),
+        }
+    }
 }
 
 fn open_face(path: &str) -> Option<Arc<Face>> {
     if path.is_empty() {
         return None;
     }
-    let file = std::fs::File::open(path).ok()?;
-    // The theme's font files are not written while a meter shows them.
-    let map = unsafe { memmap2::Mmap::map(&file) }.ok()?;
-    // The font borrows the map for as long as the face lives, and the face
-    // keeps the map; nothing hands the font out past the face.
-    let bytes: &'static [u8] = unsafe { std::slice::from_raw_parts(map.as_ptr(), map.len()) };
+    #[cfg(not(target_arch = "wasm32"))]
+    if let Ok(file) = std::fs::File::open(path) {
+        // The theme's font files are not written while a meter shows them.
+        let map = unsafe { memmap2::Mmap::map(&file) }.ok()?;
+        // The font borrows the map for as long as the face lives, and the face
+        // keeps the map; nothing hands the font out past the face.
+        let bytes: &'static [u8] = unsafe { std::slice::from_raw_parts(map.as_ptr(), map.len()) };
+        let font = FontRef::try_from_slice(bytes).ok()?;
+        return Some(Arc::new(Face {
+            font,
+            _keep: Keep::Map(map),
+        }));
+    }
+    let held = vfs::get(path)?;
+    // As with the map: the shared buffer stays where it is for as long as
+    // the face holds it, and the face is the last to let go.
+    let bytes: &'static [u8] = unsafe { std::slice::from_raw_parts(held.as_ptr(), held.len()) };
     let font = FontRef::try_from_slice(bytes).ok()?;
-    Some(Arc::new(Face { font, _map: map }))
+    Some(Arc::new(Face {
+        font,
+        _keep: Keep::Shared(held),
+    }))
 }
 
 impl Fonts {
@@ -125,9 +230,9 @@ impl Fonts {
         self.get(style)
     }
 
-    /// The bytes the mapped font files span; only the pages touched are resident.
+    /// The bytes the font files span; of a mapped file only the pages touched are resident.
     pub fn bytes(&self) -> usize {
-        self.by_path.values().map(|f| f._map.len()).sum()
+        self.by_path.values().map(|f| f._keep.len()).sum()
     }
 
     /// How many of the five styles have a font file of their own.
@@ -279,8 +384,7 @@ pub fn raster(scene: &Scene) -> Frame {
 /// Decode a picture by its content and stretch it to `w` by `h`, as the
 /// player's engine does with album art, then cut it with `mask` if given.
 pub fn read_art(path: &Path, w: u32, h: u32, mask: Option<&Frame>) -> Option<Frame> {
-    let image = image::ImageReader::open(path)
-        .ok()?
+    let image = image::ImageReader::new(std::io::Cursor::new(read_file(path)?))
         .with_guessed_format()
         .ok()?
         .decode()
@@ -765,12 +869,12 @@ pub fn raster_over<'m>(
     canvas.width = width;
     canvas.height = height;
     canvas.rgba.resize((width * height * 4) as usize, 0);
-    let painting = std::time::Instant::now();
+    let painting = clock_us();
     paint(canvas, base, &ops, &rects, painters.active);
     if let Some(delay) = bench_delay {
         std::thread::sleep(*delay);
     }
-    painters.settle(painting.elapsed().as_micros() as u64, now_ms);
+    painters.settle(clock_us().saturating_sub(painting), now_ms);
     *damage = rects;
     stages.mark("paint");
     *profile = taken;
@@ -1860,7 +1964,7 @@ pub fn read_icon(path: &Path, w: u32, h: u32, tint: Option<[u8; 3]>) -> Option<F
         .extension()
         .is_some_and(|e| e.eq_ignore_ascii_case("svg"));
     let mut frame = if is_svg {
-        let bytes = std::fs::read(path).ok()?;
+        let bytes = read_file(path)?;
         let tree = resvg::usvg::Tree::from_data(&bytes, &resvg::usvg::Options::default()).ok()?;
         let size = tree.size();
         let (sw, sh) = (size.width(), size.height());
@@ -2953,7 +3057,12 @@ impl Default for Painters {
 
 impl Painters {
     fn new(most: usize, frame_rate: Option<u32>) -> Self {
-        let most = most.max(1);
+        // A browser paints on the one thread it has.
+        let most = if cfg!(target_arch = "wasm32") {
+            1
+        } else {
+            most.max(1)
+        };
         let period_us = frame_rate
             .filter(|&fps| fps > 0)
             .map_or(0.0, |fps| 1_000_000.0 / fps as f64);
@@ -3291,21 +3400,21 @@ impl Spans {
 /// A stopwatch for the raster's stages, silent unless profiling is on.
 struct Stages<'a> {
     sink: Option<&'a mut Vec<(&'static str, u64)>>,
-    last: std::time::Instant,
+    last: u64,
 }
 
 impl<'a> Stages<'a> {
     fn new(sink: Option<&'a mut Vec<(&'static str, u64)>>) -> Self {
         Self {
             sink,
-            last: std::time::Instant::now(),
+            last: clock_us(),
         }
     }
 
     fn mark(&mut self, name: &'static str) {
         if let Some(sink) = self.sink.as_deref_mut() {
-            let now = std::time::Instant::now();
-            sink.push((name, now.duration_since(self.last).as_micros() as u64));
+            let now = clock_us();
+            sink.push((name, now.saturating_sub(self.last)));
             self.last = now;
         }
     }
@@ -4557,8 +4666,7 @@ pub fn write_png(path: &Path, frame: &Frame) -> Result<(), String> {
 pub fn read_png(path: &Path) -> Option<Frame> {
     // The format is read from the bytes, not the name: a remote keeps the
     // pictures it fetches under hashed names with no telling extension.
-    let image = image::ImageReader::open(path)
-        .ok()?
+    let image = image::ImageReader::new(std::io::Cursor::new(read_file(path)?))
         .with_guessed_format()
         .ok()?
         .decode()
