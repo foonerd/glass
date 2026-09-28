@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.40] - 2026-09-28
+
+Controls under a finger. Every control's touch region is at least 48 pixels on each axis, centred on what is drawn, so a thin bar or a small light answers to a finger a little off it; a tap is tested against the drawn boxes first, then the nearest grown one, and a bar reaches half a margin past both ends so 0 and 100 can be hit; `touch.margin` in a meter tunes it, 0 keeps the drawn boxes. A finger down on the volume or progress bar drags it: the knob follows the finger, the volume goes to the player as it moves and the seek when the finger lifts.
+
 ## [0.7.39] - 2026-09-28
 
 Interactive controls, the first step of the face. A tap on a theme's play state, mute, shuffle or repeat indicator acts on the player, a tap on its volume or progress bar sets the volume or seeks to where the tap lands, and a theme draws buttons of its own with `button.<name>.pos`, `size` or `image`, and `action` (toggle, play, pause, stop, next, previous, meter.next, meter.previous, mute, random, repeat, dismiss). A meter says it is meant for fingers with `interactive = True`, or has buttons; the display's setting, on the settings page and the Manager's System tab, takes the theme's word, or turns the controls on or off for every theme. A tap outside a control does what the touch settings say, as before. Remotes act the same way through the channel; their settings follow the player's.
