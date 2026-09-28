@@ -1166,19 +1166,48 @@ Glass.prototype.disableLegacyAndStart = function () {
 // installer adopted is restored instead.
 // ---- Car Dash: a day theme and a night theme by the clock ---------------
 
+// The place Car Dash reckons the sun from: the coordinates set by hand,
+// else the reference point of the player's time zone from the system's
+// zone table, else none.
+Glass.prototype.carDashLocation = function () {
+    var self = this;
+    var lat = parseFloat(self.config.get('carDashLat'));
+    var lon = parseFloat(self.config.get('carDashLon'));
+    var zone = cardash.zoneLocation(fs);
+    if (isFinite(lat) && isFinite(lon)) { return { lat: lat, lon: lon, source: 'manual', zone: zone ? zone.zone : '' }; }
+    if (zone && zone.lat !== null) { return { lat: zone.lat, lon: zone.lon, source: 'zone', zone: zone.zone }; }
+    return { lat: null, lon: null, source: 'none', zone: zone ? zone.zone : '' };
+};
+
 Glass.prototype.carDashInfo = function () {
     var self = this;
     self.loadConfigs();
     var info = {
         enabled: self.config.get('carDashEnabled') === true,
+        mode: String(self.config.get('carDashMode') || 'clock') === 'sun' ? 'sun' : 'clock',
         dayTheme: String(self.config.get('carDashDayTheme') || ''),
         nightTheme: String(self.config.get('carDashNightTheme') || ''),
         dayAt: String(self.config.get('carDashDayAt') || '07:00'),
-        nightAt: String(self.config.get('carDashNightAt') || '20:00')
+        nightAt: String(self.config.get('carDashNightAt') || '20:00'),
+        offsetMin: parseInt(self.config.get('carDashOffsetMin'), 10) || 0,
+        lat: String(self.config.get('carDashLat') || ''),
+        lon: String(self.config.get('carDashLon') || '')
     };
+    info.location = self.carDashLocation();
     var now = new Date();
-    info.period = cardash.periodAt(now, info.dayAt, info.nightAt);
-    var next = cardash.nextSwitch(now, info.dayAt, info.nightAt);
+    // By the sun when asked and possible today; the clock times stand in
+    // on a day the sun neither rises nor sets, or with no place known.
+    var sun = info.mode === 'sun' && info.location.lat !== null ? cardash.sunSwitches(now, info.location.lat, info.location.lon, info.offsetMin) : null;
+    info.sun = sun ? { rise: sun.rise.toISOString(), set: sun.set.toISOString() } : null;
+    info.bySun = !!sun;
+    var next;
+    if (sun) {
+        info.period = cardash.periodBySun(now, info.location.lat, info.location.lon, info.offsetMin);
+        next = cardash.nextSwitchBySun(now, info.location.lat, info.location.lon, info.offsetMin);
+    } else {
+        info.period = cardash.periodAt(now, info.dayAt, info.nightAt);
+        next = cardash.nextSwitch(now, info.dayAt, info.nightAt);
+    }
     info.next = next ? { at: next.at.toISOString(), period: next.period } : null;
     info.active = self.activeTheme();
     return info;
@@ -1199,12 +1228,29 @@ Glass.prototype.setCarDash = function (data) {
     var exists = function (folder) { return safeFolderName(folder) && fs.existsSync(base_folder_P + folder + '/meters.txt'); };
     if ((enabled || dayTheme) && !exists(dayTheme)) { return { error: 'bad-theme' }; }
     if ((enabled || nightTheme) && !exists(nightTheme)) { return { error: 'bad-theme' }; }
+    var mode = String(data.mode || 'clock') === 'sun' ? 'sun' : 'clock';
+    var latText = String(data.lat === undefined || data.lat === null ? '' : data.lat).trim();
+    var lonText = String(data.lon === undefined || data.lon === null ? '' : data.lon).trim();
+    if ((latText === '') !== (lonText === '')) { return { error: 'bad-location' }; }
+    if (latText !== '') {
+        var lat = parseFloat(latText), lon = parseFloat(lonText);
+        if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180) { return { error: 'bad-location' }; }
+        latText = String(lat); lonText = String(lon);
+    }
+    var offset = parseInt(data.offsetMin, 10);
+    if (!isFinite(offset)) { offset = 0; }
+    if (Math.abs(offset) > 180) { return { error: 'bad-offset' }; }
+    self.config.set('carDashLat', latText);
+    self.config.set('carDashLon', lonText);
+    if (mode === 'sun' && self.carDashLocation().lat === null) { return { error: 'no-location' }; }
     self.config.set('carDashEnabled', enabled);
+    self.config.set('carDashMode', mode);
     self.config.set('carDashDayTheme', dayTheme);
     self.config.set('carDashNightTheme', nightTheme);
     self.config.set('carDashDayAt', dayAt);
     self.config.set('carDashNightAt', nightAt);
-    self.logger.info(id + 'car dash: ' + (enabled ? 'on, day ' + dayTheme + ' from ' + dayAt + ', night ' + nightTheme + ' from ' + nightAt : 'off'));
+    self.config.set('carDashOffsetMin', offset);
+    self.logger.info(id + 'car dash: ' + (enabled ? 'on, day ' + dayTheme + ', night ' + nightTheme + (mode === 'sun' ? ', by the sun' + (offset ? ' with ' + offset + ' min' : '') : ', from ' + dayAt + ' and ' + nightAt) : 'off'));
     self.armCarDash();
     return { changed: true };
 };
@@ -1219,11 +1265,11 @@ Glass.prototype.armCarDash = function () {
     var wanted = info.period === 'day' ? info.dayTheme : info.nightTheme;
     if (wanted && wanted !== info.active) {
         var result = self.activateTheme(wanted);
-        self.logger.info(id + 'car dash: the ' + info.period + ' theme ' + wanted + (result.error ? ' was not put on show: ' + result.error : ' is on show'));
+        self.logger.info(id + 'car dash: the ' + info.period + ' theme ' + wanted + (info.bySun ? ' (by the sun)' : '') + (result.error ? ' was not put on show: ' + result.error : ' is on show'));
     }
-    var next = cardash.nextSwitch(new Date(), info.dayAt, info.nightAt);
-    if (!next) { return; }
-    var wait = Math.min(Math.max(next.at.getTime() - Date.now(), 1000), 24 * 3600 * 1000) + 500;
+    if (!info.next) { return; }
+    // At most a day at a time: the sun's times are reckoned afresh each day.
+    var wait = Math.min(Math.max(Date.parse(info.next.at) - Date.now(), 1000), 24 * 3600 * 1000) + 500;
     self.carDashTimer = setTimeout(function () { self.carDashTimer = null; self.armCarDash(); }, wait);
 };
 

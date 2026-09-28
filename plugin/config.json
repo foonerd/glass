@@ -118,5 +118,21 @@
   "carDashNightAt": {
     "value": "20:00",
     "type": "string"
+  },
+  "carDashMode": {
+    "value": "clock",
+    "type": "string"
+  },
+  "carDashLat": {
+    "value": "",
+    "type": "string"
+  },
+  "carDashLon": {
+    "value": "",
+    "type": "string"
+  },
+  "carDashOffsetMin": {
+    "value": 0,
+    "type": "number"
   }
 }
