@@ -30,6 +30,22 @@ pub enum Shown {
     EnterFullscreen,
 }
 
+/// A pointer event, in the frame's own pixels: a finger or a mouse
+/// button going down, moving while down, or lifting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Pointer {
+    pub kind: PointerKind,
+    pub x: i32,
+    pub y: i32,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PointerKind {
+    Down,
+    Move,
+    Up,
+}
+
 /// How the window sits on the screen.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum WindowMode {
@@ -87,6 +103,11 @@ pub struct Surface {
     keys: bool,
     /// The frame size the window was made or fitted for.
     frame_size: (u32, u32),
+    /// Pointer events since the last take, in frame pixels.
+    pointer: Vec<Pointer>,
+    /// Where the frame's top left sat in the window at the last show,
+    /// for mapping window pixels to frame pixels when not fitted.
+    last_offset: (i32, i32),
 }
 
 impl Surface {
@@ -120,6 +141,24 @@ impl Surface {
             }
         }
         Ok(())
+    }
+
+    /// Keep a pointer event in frame pixels: a fitted window's events are
+    /// already scaled to the frame; otherwise the frame's offset comes off.
+    fn push_pointer(&mut self, kind: PointerKind, x: i32, y: i32) {
+        let (x, y) = if self.fit {
+            (x, y)
+        } else {
+            (x - self.last_offset.0, y - self.last_offset.1)
+        };
+        if self.pointer.len() < 256 {
+            self.pointer.push(Pointer { kind, x, y });
+        }
+    }
+
+    /// The pointer events since the last take.
+    pub fn take_pointer(&mut self) -> Vec<Pointer> {
+        std::mem::take(&mut self.pointer)
     }
 
     /// The screens this machine has, by index: name, width and height.
@@ -203,6 +242,8 @@ impl Surface {
             fit: options.fit,
             keys: options.keys,
             frame_size: (width, height),
+            pointer: Vec::new(),
+            last_offset: (0, 0),
         })
     }
 
@@ -246,6 +287,7 @@ impl Surface {
     /// holds the rest, and say what the window saw meanwhile.
     pub fn show(&mut self, frame: &Frame, changed: &[Rect]) -> Result<Shown, String> {
         let mut touched = false;
+        let mut raw: Vec<(PointerKind, i32, i32)> = Vec::new();
         for event in self.pump.poll_iter() {
             match event {
                 Event::Quit { .. } => return Ok(Shown::Closed),
@@ -261,9 +303,22 @@ impl Surface {
                     keycode: Some(Keycode::F),
                     ..
                 } if self.keys => return Ok(Shown::EnterFullscreen),
-                Event::MouseButtonUp { .. } | Event::FingerUp { .. } => touched = true,
+                // A finger arrives as a mouse too; the mouse events carry the
+                // position, scaled to the frame when it is fitted.
+                Event::MouseButtonDown { x, y, .. } => raw.push((PointerKind::Down, x, y)),
+                Event::MouseButtonUp { x, y, .. } => {
+                    raw.push((PointerKind::Up, x, y));
+                    touched = true;
+                }
+                Event::MouseMotion {
+                    x, y, mousestate, ..
+                } if mousestate.left() => raw.push((PointerKind::Move, x, y)),
+                Event::FingerUp { .. } => touched = true,
                 _ => {}
             }
+        }
+        for (kind, x, y) in raw {
+            self.push_pointer(kind, x, y);
         }
         let fits = self.texture.as_ref().is_some_and(|t| {
             let q = t.query();
@@ -320,6 +375,7 @@ impl Surface {
                 (window_w as i32 - frame.width as i32) / 2,
                 (window_h as i32 - frame.height as i32) / 2,
             ));
+            self.last_offset = (x, y);
             let dest = sdl2::rect::Rect::new(x, y, frame.width, frame.height);
             self.canvas
                 .copy(texture, None, dest)

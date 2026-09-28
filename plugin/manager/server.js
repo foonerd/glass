@@ -330,6 +330,17 @@ class Manager {
       res.json(Object.assign({ ok: true, changed: !!result.changed }, self.plugin.sharingInfo()));
     }));
 
+    // Interactive controls: as the theme says, on, or off.
+    app.get('/api/touch', function (req, res) {
+      res.json({ interactive: self.plugin.interactiveMode() });
+    });
+
+    app.post('/api/touch', wrap(async function (req, res) {
+      const result = self.plugin.setInteractiveMode((req.body || {}).interactive);
+      if (result.error) return res.status(400).json(result);
+      res.json(Object.assign({ ok: true }, result));
+    }));
+
     // Car Dash: a day theme and a night theme by the clock.
     app.get('/api/cardash', function (req, res) {
       res.json(self.plugin.carDashInfo());

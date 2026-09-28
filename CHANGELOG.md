@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.39] - 2026-09-28
+
+Interactive controls, the first step of the face. A tap on a theme's play state, mute, shuffle or repeat indicator acts on the player, a tap on its volume or progress bar sets the volume or seeks to where the tap lands, and a theme draws buttons of its own with `button.<name>.pos`, `size` or `image`, and `action` (toggle, play, pause, stop, next, previous, meter.next, meter.previous, mute, random, repeat, dismiss). A meter says it is meant for fingers with `interactive = True`, or has buttons; the display's setting, on the settings page and the Manager's System tab, takes the theme's word, or turns the controls on or off for every theme. A tap outside a control does what the touch settings say, as before. Remotes act the same way through the channel; their settings follow the player's.
+
 ## [0.7.38] - 2026-09-28
 
 Car Dash by the sun. Beside the two times, the switch can follow sunrise and sunset, reckoned by the player itself for the place of its time zone, read from the system's zone table, or for a latitude and longitude of your own; minutes after sunset and before sunrise on top, and the two times standing in on a day without either. Nothing is fetched from the network.
