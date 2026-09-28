@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.38] - 2026-09-28
+
+Car Dash by the sun. Beside the two times, the switch can follow sunrise and sunset, reckoned by the player itself for the place of its time zone, read from the system's zone table, or for a latitude and longitude of your own; minutes after sunset and before sunrise on top, and the two times standing in on a day without either. Nothing is fetched from the network.
+
 ## [0.7.37] - 2026-09-28
 
 Car Dash: two themes by the clock. On the Manager's Themes tab, a day theme from one time and a night theme from another; the player puts the right one on show at those times and after a start, from its own clock, with no scheduler outside the plugin. Remotes that follow the player follow the switch. For a screen in a car, or a dark theme for the evening in a room.
