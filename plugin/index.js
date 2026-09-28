@@ -284,6 +284,7 @@ const BackupsPath = DATA_DIR + '/backups';
 // Fonts the listener uploads live under DATA_DIR too, and reach the remotes.
 const CustomFontsPath = DATA_DIR + '/fonts';
 const fontFiles = require('./manager/fonts');
+const cardash = require('./manager/cardash');
 const BackupSchemaVersion = 1;
 const BackupNameRegex = /^[A-Za-z0-9 _.\-]{1,64}$/;
 const BackupMinFreeBytes = 10 * 1024 * 1024;
@@ -799,6 +800,7 @@ Glass.prototype.onStart = function () {
     // first; then the manager, the web application on its own port.
     self.adoptLegacyThemes().then(function () {
         if (self.config.get('smbShareAccess') === true) { self.normalizeTemplatePermissions(true); }
+        try { self.armCarDash(); } catch (e) { self.logger.warn(id + 'car dash: ' + (e && e.message ? e.message : e)); }
         return self.startManager();
     }).catch(function () {
         self.commandRouter.pushToastMessage('error', self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'),
@@ -1040,6 +1042,7 @@ Glass.prototype.checkAlsaChain = function () {
 
 Glass.prototype.onStop = function () {
     var self = this;
+    if (self.carDashTimer) { clearTimeout(self.carDashTimer); self.carDashTimer = null; }
 
     self.commandRouter.stateMachine.stop().then(function () {
         if (self.Timeout) {
@@ -1161,6 +1164,69 @@ Glass.prototype.disableLegacyAndStart = function () {
 // configuration when it is installed, and the meter configuration keys the
 // display reads. Without an installed plugin, the newest named backup the
 // installer adopted is restored instead.
+// ---- Car Dash: a day theme and a night theme by the clock ---------------
+
+Glass.prototype.carDashInfo = function () {
+    var self = this;
+    self.loadConfigs();
+    var info = {
+        enabled: self.config.get('carDashEnabled') === true,
+        dayTheme: String(self.config.get('carDashDayTheme') || ''),
+        nightTheme: String(self.config.get('carDashNightTheme') || ''),
+        dayAt: String(self.config.get('carDashDayAt') || '07:00'),
+        nightAt: String(self.config.get('carDashNightAt') || '20:00')
+    };
+    var now = new Date();
+    info.period = cardash.periodAt(now, info.dayAt, info.nightAt);
+    var next = cardash.nextSwitch(now, info.dayAt, info.nightAt);
+    info.next = next ? { at: next.at.toISOString(), period: next.period } : null;
+    info.active = self.activeTheme();
+    return info;
+};
+
+// Keep the settings and apply them: `{ enabled, dayTheme, nightTheme, dayAt, nightAt }`.
+Glass.prototype.setCarDash = function (data) {
+    var self = this;
+    self.loadConfigs();
+    data = data || {};
+    var enabled = data.enabled === true || data.enabled === 'true';
+    var dayAt = String(data.dayAt || '07:00').trim();
+    var nightAt = String(data.nightAt || '20:00').trim();
+    if (cardash.minutesOf(dayAt) === null || cardash.minutesOf(nightAt) === null) { return { error: 'bad-time' }; }
+    if (cardash.minutesOf(dayAt) === cardash.minutesOf(nightAt)) { return { error: 'same-time' }; }
+    var dayTheme = String(data.dayTheme || '').trim();
+    var nightTheme = String(data.nightTheme || '').trim();
+    var exists = function (folder) { return safeFolderName(folder) && fs.existsSync(base_folder_P + folder + '/meters.txt'); };
+    if ((enabled || dayTheme) && !exists(dayTheme)) { return { error: 'bad-theme' }; }
+    if ((enabled || nightTheme) && !exists(nightTheme)) { return { error: 'bad-theme' }; }
+    self.config.set('carDashEnabled', enabled);
+    self.config.set('carDashDayTheme', dayTheme);
+    self.config.set('carDashNightTheme', nightTheme);
+    self.config.set('carDashDayAt', dayAt);
+    self.config.set('carDashNightAt', nightAt);
+    self.logger.info(id + 'car dash: ' + (enabled ? 'on, day ' + dayTheme + ' from ' + dayAt + ', night ' + nightTheme + ' from ' + nightAt : 'off'));
+    self.armCarDash();
+    return { changed: true };
+};
+
+// Put the period's theme on show when it is not, and set the timer for
+// the next switch; called at start, after every change, and by the timer.
+Glass.prototype.armCarDash = function () {
+    var self = this;
+    if (self.carDashTimer) { clearTimeout(self.carDashTimer); self.carDashTimer = null; }
+    var info = self.carDashInfo();
+    if (!info.enabled || !info.period) { return; }
+    var wanted = info.period === 'day' ? info.dayTheme : info.nightTheme;
+    if (wanted && wanted !== info.active) {
+        var result = self.activateTheme(wanted);
+        self.logger.info(id + 'car dash: the ' + info.period + ' theme ' + wanted + (result.error ? ' was not put on show: ' + result.error : ' is on show'));
+    }
+    var next = cardash.nextSwitch(new Date(), info.dayAt, info.nightAt);
+    if (!next) { return; }
+    var wait = Math.min(Math.max(next.at.getTime() - Date.now(), 1000), 24 * 3600 * 1000) + 500;
+    self.carDashTimer = setTimeout(function () { self.carDashTimer = null; self.armCarDash(); }, wait);
+};
+
 // Kilobytes under a folder, and free on the filesystem holding a path.
 function folderKb(dir) {
     var total = 0;

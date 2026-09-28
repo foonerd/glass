@@ -98,5 +98,25 @@
   "headless": {
     "type": "boolean",
     "value": false
+  },
+  "carDashEnabled": {
+    "value": false,
+    "type": "boolean"
+  },
+  "carDashDayTheme": {
+    "value": "",
+    "type": "string"
+  },
+  "carDashNightTheme": {
+    "value": "",
+    "type": "string"
+  },
+  "carDashDayAt": {
+    "value": "07:00",
+    "type": "string"
+  },
+  "carDashNightAt": {
+    "value": "20:00",
+    "type": "string"
   }
 }
