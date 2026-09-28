@@ -140,7 +140,7 @@ pub fn epoch_nanos() -> u64 {
 /// below looks here when the file system has nothing. On a machine it
 /// stays empty and costs one lookup.
 pub mod vfs {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, Mutex, OnceLock};
 
     fn table() -> &'static Mutex<HashMap<String, Arc<[u8]>>> {
@@ -148,11 +148,32 @@ pub mod vfs {
         TABLE.get_or_init(|| Mutex::new(HashMap::new()))
     }
 
-    /// Keep `bytes` as the file at `path`; a later put replaces it.
+    fn missing() -> &'static Mutex<HashSet<String>> {
+        static MISSING: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+        MISSING.get_or_init(|| Mutex::new(HashSet::new()))
+    }
+
+    /// Keep `bytes` as the file at `path`; a later put replaces it, and a
+    /// file put is no longer missing.
     pub fn put(path: &str, bytes: Vec<u8>) {
         if let Ok(mut table) = table().lock() {
             table.insert(path.to_string(), Arc::from(bytes));
         }
+        if let Ok(mut missing) = missing().lock() {
+            missing.remove(path);
+        }
+    }
+
+    /// The host has no file for `path`: whoever wanted it stops asking.
+    pub fn mark_missing(path: &str) {
+        if let Ok(mut missing) = missing().lock() {
+            missing.insert(path.to_string());
+        }
+    }
+
+    /// Whether the host said there is no file at `path`.
+    pub fn is_missing(path: &str) -> bool {
+        missing().lock().is_ok_and(|missing| missing.contains(path))
     }
 
     /// The bytes put under `path`, shared with whoever else holds them.
@@ -184,10 +205,13 @@ pub mod vfs {
         names
     }
 
-    /// Forget every file.
+    /// Forget every file, and every file said to be missing.
     pub fn clear() {
         if let Ok(mut table) = table().lock() {
             table.clear();
+        }
+        if let Ok(mut missing) = missing().lock() {
+            missing.clear();
         }
     }
 }

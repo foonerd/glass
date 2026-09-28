@@ -343,6 +343,62 @@
     var size = face.width * face.height * 4;
     face.image.data.set(memory().subarray(ptr, ptr + size));
     face.ctx.putImageData(face.image, 0, 0);
+    serve(now);
+  }
+
+  // ---- what the meter wants ----------------------------------------------
+  // Pictures the module cannot fetch for itself: the album art, the fanart
+  // and the pictures of the track's folder. Each want is fetched through
+  // the manager once: a file lands with put_file, one the manager has not
+  // got is marked missing, and a fanart set is answered as the manager's
+  // JSON. A fetch that fails is tried again after a while; the module
+  // keeps listing what it still wants.
+  var wanting = {};
+  var wantedAt = 0;
+  function serve(now) {
+    if (!face.ex || typeof face.ex.wants !== 'function' || now - wantedAt < 250) return;
+    wantedAt = now;
+    var list;
+    try { list = guarded(function () { face.ex.wants(); return JSON.parse(answer() || '[]'); }); } catch (e) { return; }
+    list.forEach(function (want) {
+      var key = want.kind === 'file' ? 'file:' + want.path : 'fanart:' + want.artist + '\n' + want.uri;
+      if (wanting[key]) return;
+      wanting[key] = true;
+      var done = function () { delete wanting[key]; };
+      var later = function () { setTimeout(done, 10000); };
+      if (want.kind === 'file') {
+        fetch(want.url).then(function (res) {
+          if (res.status === 404) {
+            guarded(function () { withString(want.path, function (p, l) { face.ex.missing(p, l); }); });
+            done();
+            return null;
+          }
+          if (!res.ok) throw new Error(String(res.status));
+          return res.arrayBuffer().then(function (buffer) {
+            var bytes = new Uint8Array(buffer);
+            guarded(function () {
+              withString(want.path, function (pp, pl) {
+                withBytes(bytes, function (dp, dl) { face.ex.put_file(pp, pl, dp, dl); });
+              });
+            });
+            done();
+          });
+        }).catch(later);
+      } else if (want.kind === 'fanart') {
+        fetch('/api/face/fanart?artist=' + encodeURIComponent(want.artist) + '&uri=' + encodeURIComponent(want.uri)).then(function (res) {
+          if (!res.ok) throw new Error(String(res.status));
+          return res.text();
+        }).catch(function () {
+          // No answer is an empty set: the meter asks again with the next track.
+          return '{"success":false}';
+        }).then(function (text) {
+          guarded(function () { withString(text, function (p, l) { face.ex.fanart_answer(p, l); }); });
+          done();
+        });
+      } else {
+        done();
+      }
+    });
   }
 
   // ---- the tab -------------------------------------------------------------

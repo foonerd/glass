@@ -7,19 +7,14 @@
 
 use std::env;
 use std::process::ExitCode;
-use std::sync::mpsc;
 use std::thread;
 use std::time::Instant;
 
 use controls::{controls_of, interactive_now, override_scene, Act, Pointer, Touch};
-use expose::{
-    apply_circle, fit_art, raster_over, read_art, read_png, write_png, FolderPicture, Frame,
-    MeterAssets, Motion, Stack, TypeIcon,
-};
+use expose::{fit_art, raster_over, write_png, Frame, MeterAssets, Motion, Pictures, Stack};
 use intake::{Overrides, Selector, Source, TapSource};
 use lead::{
-    frame_period, should_mark_dismiss, FolderLayerSpec, Input, InteractiveMode, SkinDesc,
-    DISMISS_FILE_VAR, RUN_FLAG,
+    frame_period, should_mark_dismiss, Input, InteractiveMode, SkinDesc, DISMISS_FILE_VAR, RUN_FLAG,
 };
 use pane::{publish, write_ppm, PointerKind, Shown, Surface, WindowMode, WindowOptions};
 use plot::{step, Scene};
@@ -58,109 +53,6 @@ fn dev_title(theme: &str, meter: &str, width: u32, height: u32) -> String {
 enum Outcome {
     Exit(ExitCode),
     Reload(&'static str),
-}
-
-/// A picture decoded and fitted off the frame loop: the slot keeps showing
-/// what it has until the next file is ready.
-#[derive(Default)]
-struct PictureSlot {
-    file: String,
-    picture: Option<FolderPicture>,
-    pending: Option<(String, mpsc::Receiver<Option<FolderPicture>>)>,
-}
-
-impl PictureSlot {
-    /// Ask for `file` in this box; `ready` is a picture of that file already
-    /// decoded elsewhere, taken over without decoding again.
-    fn want(&mut self, file: &str, spec: &FolderLayerSpec, ready: Option<&FolderPicture>) {
-        if let Some((wanted, rx)) = &self.pending {
-            match rx.try_recv() {
-                Ok(picture) => {
-                    self.file = wanted.clone();
-                    self.picture = picture;
-                    self.pending = None;
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
-                Err(mpsc::TryRecvError::Disconnected) => self.pending = None,
-            }
-        }
-        if file == self.file
-            || self
-                .pending
-                .as_ref()
-                .is_some_and(|(wanted, _)| wanted == file)
-        {
-            return;
-        }
-        if file.is_empty() {
-            self.file.clear();
-            self.picture = None;
-            self.pending = None;
-            return;
-        }
-        if let Some(picture) = ready {
-            self.file = file.to_string();
-            self.picture = Some(picture.clone());
-            self.pending = None;
-            return;
-        }
-        let (tx, rx) = mpsc::channel();
-        let (path, spec) = (file.to_string(), spec.clone());
-        thread::spawn(move || {
-            let _ = tx.send(FolderPicture::load(std::path::Path::new(&path), &spec));
-        });
-        self.pending = Some((file.to_string(), rx));
-    }
-}
-
-/// A picture decoded off the frame loop and stretched to a size, or kept
-/// as it is: the record.
-#[derive(Default)]
-struct PlainSlot {
-    key: (String, Option<(u32, u32)>),
-    frame: Option<Frame>,
-    pending: Option<((String, Option<(u32, u32)>), mpsc::Receiver<Option<Frame>>)>,
-}
-
-impl PlainSlot {
-    fn want(&mut self, file: &str, size: Option<(u32, u32)>) {
-        if let Some((wanted, rx)) = &self.pending {
-            match rx.try_recv() {
-                Ok(frame) => {
-                    self.key = wanted.clone();
-                    self.frame = frame;
-                    self.pending = None;
-                }
-                Err(mpsc::TryRecvError::Empty) => {}
-                Err(mpsc::TryRecvError::Disconnected) => self.pending = None,
-            }
-        }
-        let key = (file.to_string(), size);
-        if key == self.key
-            || self
-                .pending
-                .as_ref()
-                .is_some_and(|(wanted, _)| *wanted == key)
-        {
-            return;
-        }
-        if file.is_empty() {
-            self.key = key;
-            self.frame = None;
-            self.pending = None;
-            return;
-        }
-        let (tx, rx) = mpsc::channel();
-        let path = file.to_string();
-        thread::spawn(move || {
-            let frame = read_png(std::path::Path::new(&path)).map(|f| match size {
-                Some((w, h)) => fit_art(&f, w, h),
-                None => f,
-            });
-            let _ = tx.send(frame);
-        });
-        self.pending = Some((key, rx));
-    }
 }
 
 /// Whether a fade may start now: the engine's lock file is older than the
@@ -588,19 +480,8 @@ fn session(
     let mut profile_boxes = 0u64;
     let mut profile_frames = 0u32;
     let mut profile_window = Instant::now();
-    // The art picture, decoded and stretched once per file and box, cut with
-    // the theme's mask when it has one.
-    let mut art_cache: Option<(plot::Art, Frame)> = None;
-    // The type icon, decoded once per file, box and tint.
-    let mut icon_cache = TypeIcon::default();
-    // Folder layer pictures, decoded once per file and box, one slot per layer.
-    let mut folder_slots: Vec<PictureSlot> = Vec::new();
-    // The fanart on show and the one it replaces during a transition.
-    let mut fanart_slots: (PictureSlot, PictureSlot) = Default::default();
-    // The record picture for the track, stretched to the theme's dimension.
-    let mut vinyl_slot = PlainSlot::default();
-    // Album reel pictures for the track, scaled to the theme reels.
-    let mut reel_slots: (PlainSlot, PlainSlot) = Default::default();
+    // Every picture the scene names, decoded once per file and box.
+    let mut pictures = Pictures::default();
     let show_window = screen_available() && !headless;
     let write_file = output.is_some() || snapshot.is_some();
     let serving_remote = false;
@@ -680,12 +561,7 @@ fn session(
             skin = intake::installed_skin_named(Some(&name));
             source.set_skin(&skin);
             assets = MeterAssets::load(&skin);
-            art_cache = None;
-            icon_cache.clear();
-            folder_slots.clear();
-            fanart_slots = Default::default();
-            vinyl_slot = PlainSlot::default();
-            reel_slots = Default::default();
+            pictures.clear();
             motion = Motion::new(threads, adaptive);
             motion.bench_delay = bench_delay;
             let now = started.elapsed().as_millis() as u64;
@@ -856,105 +732,8 @@ fn session(
                 scene.bars.len()
             );
         }
-        let mut folder_pictures: Vec<Option<FolderPicture>> = Vec::new();
-        let mut reel_pictures: (Option<Frame>, Option<Frame>) = (None, None);
         if surface.is_some() || write_file {
-            match &scene.art {
-                Some(art) => {
-                    let stale = art_cache.as_ref().is_none_or(|(known, _)| known != art);
-                    if stale {
-                        art_cache = read_art(
-                            std::path::Path::new(&art.file),
-                            art.w,
-                            art.h,
-                            assets.art_mask.as_ref(),
-                        )
-                        .map(|frame| {
-                            if art.rotation && art.mask.is_empty() {
-                                apply_circle(&frame)
-                            } else {
-                                frame
-                            }
-                        })
-                        .map(|frame| (art.clone(), frame));
-                    }
-                }
-                None => art_cache = None,
-            }
-            icon_cache.follow(scene.type_area.as_ref());
-            if folder_slots.len() != scene.folder_layers.len() {
-                folder_slots = scene
-                    .folder_layers
-                    .iter()
-                    .map(|_| PictureSlot::default())
-                    .collect();
-            }
-            for (slot, layer) in folder_slots.iter_mut().zip(scene.folder_layers.iter()) {
-                slot.want(&layer.file, &layer.spec, None);
-            }
-            folder_pictures = folder_slots.iter().map(|s| s.picture.clone()).collect();
-            if let Some(fanart) = &scene.fanart {
-                let spec = FolderLayerSpec {
-                    files: Vec::new(),
-                    x: fanart.spec.x,
-                    y: fanart.spec.y,
-                    w: fanart.spec.w,
-                    h: fanart.spec.h,
-                    scale: fanart.spec.scale,
-                    zorder: fanart.spec.zorder,
-                    border: 0,
-                    border_color: [0, 0, 0],
-                };
-                // The picture being replaced is the one the current slot held.
-                let handed_over = if fanart_slots.0.file == fanart.prev_file {
-                    fanart_slots.0.picture.clone()
-                } else {
-                    None
-                };
-                fanart_slots
-                    .1
-                    .want(&fanart.prev_file, &spec, handed_over.as_ref());
-                fanart_slots.0.want(&fanart.file, &spec, None);
-            } else {
-                fanart_slots = Default::default();
-            }
-            match &scene.vinyl {
-                Some(vinyl) => vinyl_slot.want(&vinyl.file, vinyl.spec.dimension),
-                None => vinyl_slot = PlainSlot::default(),
-            }
-            // A reel from the album is scaled to the theme reel's size; the theme reel itself needs no slot.
-            reel_pictures = match &scene.reels {
-                Some(reels) => {
-                    let side = |slot: &mut PlainSlot,
-                                file: &str,
-                                spec: Option<&lead::ReelSpec>,
-                                theme: Option<&Frame>|
-                     -> Option<Frame> {
-                        let spec = spec?;
-                        if file.is_empty() || file == spec.theme_file {
-                            slot.want("", None);
-                            return theme.cloned();
-                        }
-                        slot.want(file, theme.map(|t| (t.width, t.height)));
-                        slot.frame.clone().or_else(|| theme.cloned())
-                    };
-                    (
-                        side(
-                            &mut reel_slots.0,
-                            &reels.left_file,
-                            reels.spec.left.as_ref(),
-                            assets.reels.0.as_ref(),
-                        ),
-                        side(
-                            &mut reel_slots.1,
-                            &reels.right_file,
-                            reels.spec.right.as_ref(),
-                            assets.reels.1.as_ref(),
-                        ),
-                    )
-                }
-                None => (None, None),
-            };
+            pictures.follow(&scene, &assets);
             if profiling {
                 motion.profile = Some(Vec::new());
             }
@@ -968,17 +747,14 @@ fn session(
                     needle_right: assets.indicator_right.as_ref(),
                     face_at: skin.face_at,
                     fonts: Some(&assets.fonts),
-                    art: art_cache.as_ref().map(|(_, frame)| frame),
-                    icon: icon_cache.frame(),
+                    art: pictures.art(),
+                    icon: pictures.icon(),
                     spectrum: assets.spectrum.as_ref(),
-                    folder_pictures: &folder_pictures,
-                    fanart: (
-                        fanart_slots.0.picture.as_ref(),
-                        fanart_slots.1.picture.as_ref(),
-                    ),
-                    vinyl: vinyl_slot.frame.as_ref(),
+                    folder_pictures: pictures.folder_pictures(),
+                    fanart: pictures.fanart(),
+                    vinyl: pictures.vinyl(),
                     tonearm: assets.tonearm.as_ref(),
-                    reels: (reel_pictures.0.as_ref(), reel_pictures.1.as_ref()),
+                    reels: pictures.reels(&scene, &assets),
                     indicators: assets.indicators.as_ref(),
                     base: Some(&assets.base),
                 },
@@ -1141,17 +917,14 @@ fn session(
                             needle_right: assets.indicator_right.as_ref(),
                             face_at: skin.face_at,
                             fonts: Some(&assets.fonts),
-                            art: art_cache.as_ref().map(|(_, frame)| frame),
-                            icon: icon_cache.frame(),
+                            art: pictures.art(),
+                            icon: pictures.icon(),
                             spectrum: assets.spectrum.as_ref(),
-                            folder_pictures: &folder_pictures,
-                            fanart: (
-                                fanart_slots.0.picture.as_ref(),
-                                fanart_slots.1.picture.as_ref(),
-                            ),
-                            vinyl: vinyl_slot.frame.as_ref(),
+                            folder_pictures: pictures.folder_pictures(),
+                            fanart: pictures.fanart(),
+                            vinyl: pictures.vinyl(),
                             tonearm: assets.tonearm.as_ref(),
-                            reels: (reel_pictures.0.as_ref(), reel_pictures.1.as_ref()),
+                            reels: pictures.reels(&scene, &assets),
                             indicators: assets.indicators.as_ref(),
                             base: Some(&assets.base),
                         },
@@ -1202,31 +975,7 @@ fn session(
                 let moving: Vec<(&'static str, usize)> = motion
                     .memory()
                     .into_iter()
-                    .chain([
-                        ("art", art_cache.as_ref().map_or(0, |(_, f)| f.bytes())),
-                        ("icon", icon_cache.bytes()),
-                        (
-                            "layers",
-                            folder_pictures
-                                .iter()
-                                .flatten()
-                                .map(|p| p.frame.bytes())
-                                .sum(),
-                        ),
-                        (
-                            "fanart",
-                            [&fanart_slots.0, &fanart_slots.1]
-                                .into_iter()
-                                .filter_map(|s| s.picture.as_ref())
-                                .map(|p| p.frame.bytes())
-                                .sum(),
-                        ),
-                        ("vinyl", vinyl_slot.frame.as_ref().map_or(0, Frame::bytes)),
-                        (
-                            "reels",
-                            expose::bytes_of([&reel_pictures.0, &reel_pictures.1]),
-                        ),
-                    ])
+                    .chain(pictures.memory())
                     .collect();
                 println!("glass: memory moving: {}", memory_line(&moving));
                 profile_sum.clear();

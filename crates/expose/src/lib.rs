@@ -15,9 +15,7 @@ use lead::{
     SpectrumSpec, TextAlign, TextStyle, TypeAlign, TypeMode, ZOrder,
 };
 use lead::{GaugeSpec, GaugeStyle, StateIndicator, StateLook, TonearmSpec};
-#[cfg(test)]
-use plot::Art;
-use plot::{Fanart, Indicators, Scene, Text, TypeArea};
+use plot::{Art, Fanart, Indicators, Scene, Text, TypeArea};
 
 const BG: [u8; 4] = [12, 12, 16, 255];
 
@@ -1943,6 +1941,384 @@ impl TypeIcon {
     /// Bytes the kept icon holds.
     pub fn bytes(&self) -> usize {
         self.frame().map_or(0, Frame::bytes)
+    }
+}
+
+/// A picture decoded and fitted for a box, kept until the file changes: on
+/// a machine decoded off the frame loop, the slot showing what it has
+/// until the next file is ready; on a target without threads decoded in
+/// the frame that first asks for it.
+#[derive(Default)]
+struct PictureSlot {
+    file: String,
+    picture: Option<FolderPicture>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pending: Option<(String, std::sync::mpsc::Receiver<Option<FolderPicture>>)>,
+}
+
+impl PictureSlot {
+    /// Ask for `file` in this box; `ready` is a picture of that file already
+    /// decoded elsewhere, taken over without decoding again.
+    fn want(&mut self, file: &str, spec: &FolderLayerSpec, ready: Option<&FolderPicture>) {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some((wanted, rx)) = &self.pending {
+                match rx.try_recv() {
+                    Ok(picture) => {
+                        self.file = wanted.clone();
+                        self.picture = picture;
+                        self.pending = None;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => self.pending = None,
+                }
+            }
+            if self
+                .pending
+                .as_ref()
+                .is_some_and(|(wanted, _)| wanted == file)
+            {
+                return;
+            }
+        }
+        if file == self.file {
+            return;
+        }
+        if file.is_empty() {
+            self.file.clear();
+            self.picture = None;
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.pending = None;
+            }
+            return;
+        }
+        if let Some(picture) = ready {
+            self.file = file.to_string();
+            self.picture = Some(picture.clone());
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.pending = None;
+            }
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let (path, spec) = (file.to_string(), spec.clone());
+            std::thread::spawn(move || {
+                let _ = tx.send(FolderPicture::load(Path::new(&path), &spec));
+            });
+            self.pending = Some((file.to_string(), rx));
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.file = file.to_string();
+            self.picture = FolderPicture::load(Path::new(file), spec);
+        }
+    }
+}
+
+/// A picture decoded and stretched to a size, or kept as it is: the record
+/// and the album's reels. Off the frame loop on a machine, as the slot above.
+#[derive(Default)]
+struct PlainSlot {
+    key: (String, Option<(u32, u32)>),
+    frame: Option<Frame>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pending: Option<(
+        (String, Option<(u32, u32)>),
+        std::sync::mpsc::Receiver<Option<Frame>>,
+    )>,
+}
+
+impl PlainSlot {
+    fn want(&mut self, file: &str, size: Option<(u32, u32)>) {
+        let key = (file.to_string(), size);
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some((wanted, rx)) = &self.pending {
+                match rx.try_recv() {
+                    Ok(frame) => {
+                        self.key = wanted.clone();
+                        self.frame = frame;
+                        self.pending = None;
+                    }
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {}
+                    Err(std::sync::mpsc::TryRecvError::Disconnected) => self.pending = None,
+                }
+            }
+            if self
+                .pending
+                .as_ref()
+                .is_some_and(|(wanted, _)| *wanted == key)
+            {
+                return;
+            }
+        }
+        if key == self.key {
+            return;
+        }
+        if file.is_empty() {
+            self.key = key;
+            self.frame = None;
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                self.pending = None;
+            }
+            return;
+        }
+        let decode = move |path: &str| {
+            read_png(Path::new(path)).map(|f| match size {
+                Some((w, h)) => fit_art(&f, w, h),
+                None => f,
+            })
+        };
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let (tx, rx) = std::sync::mpsc::channel();
+            let path = file.to_string();
+            std::thread::spawn(move || {
+                let _ = tx.send(decode(&path));
+            });
+            self.pending = Some((key, rx));
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.frame = decode(file);
+            self.key = key;
+        }
+    }
+}
+
+/// Every picture a scene names, decoded once per file and box and kept
+/// between frames: the album art, the type icon, the folder layers, the
+/// fanart on show and the one it replaces, the record and the album's
+/// reels. The display and the browser module each keep one and hand what
+/// it holds to `Stack`.
+#[derive(Default)]
+pub struct Pictures {
+    art: Option<(Art, Frame)>,
+    icon: TypeIcon,
+    folder: Vec<PictureSlot>,
+    /// The folder slots' pictures as `Stack` takes them, rebuilt when a
+    /// slot's file changes.
+    folder_pictures: Vec<Option<FolderPicture>>,
+    folder_files: Vec<String>,
+    fanart: (PictureSlot, PictureSlot),
+    vinyl: PlainSlot,
+    reels: (PlainSlot, PlainSlot),
+}
+
+impl Pictures {
+    /// Follow the scene: decode what changed, drop what it no longer names.
+    /// The art is decoded here and now; the rest as the slots do it.
+    pub fn follow(&mut self, scene: &Scene, assets: &MeterAssets) {
+        match &scene.art {
+            Some(art) => {
+                let stale = self.art.as_ref().is_none_or(|(known, _)| known != art);
+                if stale {
+                    self.art =
+                        read_art(Path::new(&art.file), art.w, art.h, assets.art_mask.as_ref())
+                            .map(|frame| {
+                                if art.rotation && art.mask.is_empty() {
+                                    apply_circle(&frame)
+                                } else {
+                                    frame
+                                }
+                            })
+                            .map(|frame| (art.clone(), frame));
+                }
+            }
+            None => self.art = None,
+        }
+        self.icon.follow(scene.type_area.as_ref());
+        if self.folder.len() != scene.folder_layers.len() {
+            self.folder = scene
+                .folder_layers
+                .iter()
+                .map(|_| PictureSlot::default())
+                .collect();
+        }
+        for (slot, layer) in self.folder.iter_mut().zip(scene.folder_layers.iter()) {
+            slot.want(&layer.file, &layer.spec, None);
+        }
+        if self
+            .folder
+            .iter()
+            .map(|slot| slot.file.as_str())
+            .ne(self.folder_files.iter().map(String::as_str))
+        {
+            self.folder_files = self.folder.iter().map(|slot| slot.file.clone()).collect();
+            self.folder_pictures = self
+                .folder
+                .iter()
+                .map(|slot| slot.picture.clone())
+                .collect();
+        }
+        if let Some(fanart) = &scene.fanart {
+            let spec = FolderLayerSpec {
+                files: Vec::new(),
+                x: fanart.spec.x,
+                y: fanart.spec.y,
+                w: fanart.spec.w,
+                h: fanart.spec.h,
+                scale: fanart.spec.scale,
+                zorder: fanart.spec.zorder,
+                border: 0,
+                border_color: [0, 0, 0],
+            };
+            // The picture being replaced is the one the current slot held.
+            let handed_over = if self.fanart.0.file == fanart.prev_file {
+                self.fanart.0.picture.clone()
+            } else {
+                None
+            };
+            self.fanart
+                .1
+                .want(&fanart.prev_file, &spec, handed_over.as_ref());
+            self.fanart.0.want(&fanart.file, &spec, None);
+        } else {
+            self.fanart = Default::default();
+        }
+        match &scene.vinyl {
+            Some(vinyl) => self.vinyl.want(&vinyl.file, vinyl.spec.dimension),
+            None => self.vinyl = PlainSlot::default(),
+        }
+        // A reel from the album is scaled to the theme reel's size; the
+        // theme reel itself needs no slot.
+        match &scene.reels {
+            Some(reels) => {
+                let side = |slot: &mut PlainSlot,
+                            file: &str,
+                            spec: Option<&lead::ReelSpec>,
+                            theme: Option<&Frame>| {
+                    let Some(spec) = spec else {
+                        return;
+                    };
+                    if file.is_empty() || file == spec.theme_file {
+                        slot.want("", None);
+                    } else {
+                        slot.want(file, theme.map(|t| (t.width, t.height)));
+                    }
+                };
+                side(
+                    &mut self.reels.0,
+                    &reels.left_file,
+                    reels.spec.left.as_ref(),
+                    assets.reels.0.as_ref(),
+                );
+                side(
+                    &mut self.reels.1,
+                    &reels.right_file,
+                    reels.spec.right.as_ref(),
+                    assets.reels.1.as_ref(),
+                );
+            }
+            None => self.reels = Default::default(),
+        }
+    }
+
+    /// Forget everything, for a change of meter.
+    pub fn clear(&mut self) {
+        *self = Self::default();
+    }
+
+    /// The album art stretched to its box.
+    pub fn art(&self) -> Option<&Frame> {
+        self.art.as_ref().map(|(_, frame)| frame)
+    }
+
+    /// The type icon fitted to its area.
+    pub fn icon(&self) -> Option<&Frame> {
+        self.icon.frame()
+    }
+
+    /// One entry per folder layer of the scene.
+    pub fn folder_pictures(&self) -> &[Option<FolderPicture>] {
+        &self.folder_pictures
+    }
+
+    /// The fanart on show and the one it replaces.
+    pub fn fanart(&self) -> (Option<&FolderPicture>, Option<&FolderPicture>) {
+        (
+            self.fanart.0.picture.as_ref(),
+            self.fanart.1.picture.as_ref(),
+        )
+    }
+
+    /// The record picture from the album, stretched to the theme's.
+    pub fn vinyl(&self) -> Option<&Frame> {
+        self.vinyl.frame.as_ref()
+    }
+
+    /// The reels as `Stack` takes them: the album's where the scene names
+    /// one and it is decoded, else the theme's own.
+    pub fn reels<'a>(
+        &'a self,
+        scene: &Scene,
+        assets: &'a MeterAssets,
+    ) -> (Option<&'a Frame>, Option<&'a Frame>) {
+        let Some(reels) = &scene.reels else {
+            return (None, None);
+        };
+        let side = |slot: &'a PlainSlot,
+                    file: &str,
+                    spec: Option<&lead::ReelSpec>,
+                    theme: Option<&'a Frame>| {
+            let spec = spec?;
+            if file.is_empty() || file == spec.theme_file {
+                return theme;
+            }
+            slot.frame.as_ref().or(theme)
+        };
+        (
+            side(
+                &self.reels.0,
+                &reels.left_file,
+                reels.spec.left.as_ref(),
+                assets.reels.0.as_ref(),
+            ),
+            side(
+                &self.reels.1,
+                &reels.right_file,
+                reels.spec.right.as_ref(),
+                assets.reels.1.as_ref(),
+            ),
+        )
+    }
+
+    /// The bytes each kind of picture holds, for the memory line.
+    pub fn memory(&self) -> Vec<(&'static str, usize)> {
+        vec![
+            ("art", self.art().map_or(0, Frame::bytes)),
+            ("icon", self.icon.bytes()),
+            (
+                "layers",
+                self.folder_pictures
+                    .iter()
+                    .flatten()
+                    .map(|p| p.frame.bytes())
+                    .sum(),
+            ),
+            (
+                "fanart",
+                [&self.fanart.0, &self.fanart.1]
+                    .into_iter()
+                    .filter_map(|s| s.picture.as_ref())
+                    .map(|p| p.frame.bytes())
+                    .sum(),
+            ),
+            ("vinyl", self.vinyl().map_or(0, Frame::bytes)),
+            (
+                "reels",
+                [&self.reels.0, &self.reels.1]
+                    .into_iter()
+                    .filter_map(|s| s.frame.as_ref())
+                    .map(Frame::bytes)
+                    .sum(),
+            ),
+        ]
     }
 }
 
@@ -5777,6 +6153,10 @@ mod tests {
         everything.paint_all = true;
         changed.fade.begin_in(0, 0.5, false, 1.0);
         everything.fade.begin_in(0, 0.5, false, 1.0);
+        // One base for every frame, as the display keeps one per meter: a
+        // base composed per call would have a new address whenever the
+        // allocator felt like it, and a new base repaints the whole frame.
+        let base = compose_base(240, 120, None, None, (0, 0));
         let mut art: &Frame = &art_a;
         let mut painted_boxes = 0usize;
         for step in 0..30u64 {
@@ -5805,7 +6185,7 @@ mod tests {
                 tonearm: None,
                 reels: (None, None),
                 indicators: None,
-                base: None,
+                base: Some(&base),
             };
             let a = raster_over(&scene, stack(), &mut changed, now)
                 .frame

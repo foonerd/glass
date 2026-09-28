@@ -4,7 +4,9 @@
 use std::io::{Read, Write};
 use std::net::TcpStream;
 use std::path::{Path, PathBuf};
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc;
+#[cfg(not(target_arch = "wasm32"))]
 use std::thread;
 use std::time::Duration;
 
@@ -32,6 +34,7 @@ mod channel;
 pub mod hops;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod remote;
+pub mod wants;
 pub use channel::{decode as decode_event, Channel, Command, Event, RemoteHello};
 
 use std::net::ToSocketAddrs;
@@ -401,14 +404,8 @@ pub struct FanartAnswer {
     pub order: String,
 }
 
-/// In a browser the player is not asked: the slideshow is left to the
-/// player's own display.
-#[cfg(target_arch = "wasm32")]
-fn fanart_list(_artist: &str, _uri: &str) -> FanartAnswer {
-    FanartAnswer::default()
-}
-
 /// Ask the player for an artist's fanart set and the slideshow settings.
+/// In a browser the host is asked instead, through the wants.
 #[cfg(not(target_arch = "wasm32"))]
 fn fanart_list(artist: &str, uri: &str) -> FanartAnswer {
     #[derive(serde::Deserialize)]
@@ -452,18 +449,36 @@ fn fanart_list(artist: &str, uri: &str) -> FanartAnswer {
 }
 
 /// The file for a fanart reference: the player's own copy when it is there,
-/// else fetched through the player and kept beside the album art.
+/// else fetched through the player and kept beside the album art; from the
+/// host when the host brings the pictures, empty until it does.
 fn fanart_file(reference: &str) -> String {
-    let local = Path::new(PLUGINS_DIR).join(reference);
-    if local.is_file() {
-        return local.to_string_lossy().into_owned();
+    if wants::host_pictures() {
+        let (relative, url) = picture_in_table(&format!("/albumart?sectionimage={reference}"));
+        return table_file(&relative, &url).unwrap_or_default();
     }
-    fetch_art(&format!(
-        "{}/albumart?sectionimage={reference}",
-        player_http()
-    ))
-    .map(|p| p.to_string_lossy().into_owned())
-    .unwrap_or_default()
+    #[cfg(not(target_arch = "wasm32"))]
+    {
+        let local = Path::new(PLUGINS_DIR).join(reference);
+        if local.is_file() {
+            return local.to_string_lossy().into_owned();
+        }
+        fetch_art(&format!(
+            "{}/albumart?sectionimage={reference}",
+            player_http()
+        ))
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_default()
+    }
+    #[cfg(target_arch = "wasm32")]
+    String::new()
+}
+
+/// How a fanart answer is on its way: from a thread asking the player, or
+/// from the host, which reads the want and hands the answer in.
+enum Asked {
+    #[cfg(not(target_arch = "wasm32"))]
+    Thread(mpsc::Receiver<FanartAnswer>),
+    Host,
 }
 
 fn xorshift(seed: &mut u64) -> u64 {
@@ -500,7 +515,7 @@ pub struct Slideshow {
     file: String,
     prev_file: String,
     transition_started: Option<Moment>,
-    pending: Option<(Why, mpsc::Receiver<FanartAnswer>)>,
+    pending: Option<(Why, Asked)>,
     /// Position and last advance per artist and picture set.
     memory: HashMap<String, (usize, Option<Moment>)>,
     seed: u64,
@@ -511,12 +526,20 @@ impl Slideshow {
         if self.pending.is_some() {
             return;
         }
-        let (tx, rx) = mpsc::channel();
-        let (artist, uri) = (artist.to_string(), uri.to_string());
-        thread::spawn(move || {
-            let _ = tx.send(fanart_list(&artist, &uri));
-        });
-        self.pending = Some((why, rx));
+        if !wants::host_pictures() {
+            #[cfg(not(target_arch = "wasm32"))]
+            {
+                let (tx, rx) = mpsc::channel();
+                let (artist, uri) = (artist.to_string(), uri.to_string());
+                thread::spawn(move || {
+                    let _ = tx.send(fanart_list(&artist, &uri));
+                });
+                self.pending = Some((why, Asked::Thread(rx)));
+            }
+            return;
+        }
+        wants::fanart(artist, uri);
+        self.pending = Some((why, Asked::Host));
     }
 
     fn memory_key(&self) -> String {
@@ -595,13 +618,27 @@ impl Slideshow {
     }
 
     fn take_answer(&mut self) {
-        let Some((why, rx)) = &self.pending else {
+        let Some((why, asked)) = &self.pending else {
             return;
         };
-        let answer = match rx.try_recv() {
-            Ok(answer) => answer,
-            Err(mpsc::TryRecvError::Empty) => return,
-            Err(mpsc::TryRecvError::Disconnected) => FanartAnswer::default(),
+        let answer = match asked {
+            #[cfg(not(target_arch = "wasm32"))]
+            Asked::Thread(rx) => match rx.try_recv() {
+                Ok(answer) => answer,
+                Err(mpsc::TryRecvError::Empty) => return,
+                Err(mpsc::TryRecvError::Disconnected) => FanartAnswer::default(),
+            },
+            Asked::Host => match wants::take_fanart_answer() {
+                Some(text) => match serde_json::from_str::<FanartAnswer>(&text) {
+                    Ok(answer) if answer.success => answer,
+                    Ok(answer) => FanartAnswer {
+                        images: Vec::new(),
+                        ..answer
+                    },
+                    Err(_) => FanartAnswer::default(),
+                },
+                None => return,
+            },
         };
         let why = *why;
         self.pending = None;
@@ -690,6 +727,11 @@ impl Slideshow {
     /// length and progress in milliseconds. Every frame.
     pub fn snapshot(&mut self) -> (String, String, String, u32, u32) {
         self.take_answer();
+        // A host brings the picture after it was chosen: look again until
+        // it is there or the host said it is not.
+        if wants::host_pictures() && self.file.is_empty() && self.index < self.refs.len() {
+            self.file = fanart_file(&self.refs[self.index]);
+        }
         let duration = self.transition_ms.max(50) as u32;
         let elapsed = match self.transition_started {
             Some(at) => at.elapsed().as_millis().min(u32::MAX as u128) as u32,
@@ -982,7 +1024,6 @@ pub fn art_url(reported: &str) -> String {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 fn fnv1a(text: &str) -> u64 {
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
     for byte in text.bytes() {
@@ -995,8 +1036,26 @@ fn fnv1a(text: &str) -> u64 {
 /// Fetch one picture into the art cache under the temp dir. `None` when the
 /// player does not answer, the answer is not an image, or the file cannot be
 /// written. A picture fetched earlier for the same location is reused.
-#[cfg(target_arch = "wasm32")]
-fn fetch_art(_reported: &str) -> Option<PathBuf> {
+/// Where a picture the player reports lands when the host brings it: its
+/// path under the home, by the location's hash, and the manager's route
+/// the host fetches it from.
+fn picture_in_table(reported: &str) -> (String, String) {
+    (
+        format!("pictures/{:016x}.img", fnv1a(reported)),
+        format!("/api/face/picture?at={}", bring::encode(reported)),
+    )
+}
+
+/// A file the host brings: its path when it is in the table, `None` when
+/// the host said it is missing, and `None` with the file wanted otherwise.
+fn table_file(relative: &str, url: &str) -> Option<String> {
+    let full = lead::home().join(relative).to_string_lossy().into_owned();
+    if lead::vfs::has(&full) {
+        return Some(full);
+    }
+    if !lead::vfs::is_missing(&full) {
+        wants::file(relative, url);
+    }
     None
 }
 
@@ -1035,6 +1094,7 @@ fn fetch_art(reported: &str) -> Option<PathBuf> {
 struct RemoteFolder {
     key: String,
     files: Option<Vec<String>>,
+    #[cfg(not(target_arch = "wasm32"))]
     pending: Option<mpsc::Receiver<Vec<String>>>,
 }
 
@@ -1042,6 +1102,36 @@ impl RemoteFolder {
     /// The files for the track at `uri`, or `None` while they are fetched.
     fn want(&mut self, uri: &str, groups: &[Vec<String>], manager: &str) -> Option<Vec<String>> {
         let key = uri.rfind('/').map(|i| &uri[..i]).unwrap_or(uri).to_string();
+        if wants::host_pictures() {
+            if key != self.key {
+                self.key = key;
+                self.files = None;
+            }
+            if self.files.is_none() {
+                self.files = folder_files_from_table(uri, groups);
+            }
+            return self.files.clone();
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            // Without the host's pictures and without threads there is no
+            // way to the manager: the groups stay empty.
+            let _ = (key, manager);
+            Some(vec![String::new(); groups.len()])
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.want_from_thread(key, uri, groups, manager)
+    }
+
+    /// The files fetched from the manager on a thread of their own.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn want_from_thread(
+        &mut self,
+        key: String,
+        uri: &str,
+        groups: &[Vec<String>],
+        manager: &str,
+    ) -> Option<Vec<String>> {
         if key != self.key {
             self.key = key.clone();
             self.files = None;
@@ -1072,24 +1162,59 @@ impl RemoteFolder {
     }
 }
 
-/// For each group, the first candidate the player serves from the track's
-/// folder, landed under `<home>/track/<folder hash>/`, else empty.
-#[cfg(target_arch = "wasm32")]
-fn fetch_folder_files(
-    _manager: &str,
-    _home: &str,
-    _uri: &str,
-    groups: &[Vec<String>],
-) -> Vec<String> {
-    vec![String::new(); groups.len()]
-}
-
-#[cfg(not(target_arch = "wasm32"))]
-fn fetch_folder_files(manager: &str, home: &str, uri: &str, groups: &[Vec<String>]) -> Vec<String> {
+/// The track's folder under the home: `track/<folder hash>`.
+fn track_folder_dir(uri: &str) -> String {
     use sha2::{Digest, Sha256};
     let folder = uri.rfind('/').map(|i| &uri[..i]).unwrap_or(uri);
     let hash = format!("{:x}", Sha256::digest(folder.as_bytes()));
-    let dir = Path::new(home).join("track").join(&hash[..16]);
+    format!("track/{}", &hash[..16])
+}
+
+/// A candidate name a theme may ask for from the track's folder: a plain
+/// file name, nothing that walks.
+fn plain_name(name: &str) -> Option<&str> {
+    let name = name.trim();
+    (!name.is_empty() && !name.contains('/') && !name.contains("..")).then_some(name)
+}
+
+/// The track's folder pictures as the host brings them: for each group the
+/// first candidate in the table, candidates the host said are missing
+/// passed over, and `None` while one is wanted. The candidates are asked
+/// for one at a time, in the theme's order, so the first the player has
+/// is the one taken.
+fn folder_files_from_table(uri: &str, groups: &[Vec<String>]) -> Option<Vec<String>> {
+    let dir = track_folder_dir(uri);
+    let mut files = Vec::with_capacity(groups.len());
+    for names in groups {
+        let mut found = String::new();
+        for name in names.iter().filter_map(|n| plain_name(n)) {
+            let relative = format!("{dir}/{name}");
+            let url = format!(
+                "/api/remote/track-file?uri={}&name={}",
+                bring::encode(uri),
+                bring::encode(name)
+            );
+            let full = lead::home().join(&relative).to_string_lossy().into_owned();
+            if lead::vfs::has(&full) {
+                found = full;
+                break;
+            }
+            if lead::vfs::is_missing(&full) {
+                continue;
+            }
+            wants::file(&relative, &url);
+            return None;
+        }
+        files.push(found);
+    }
+    Some(files)
+}
+
+/// For each group, the first candidate the player serves from the track's
+/// folder, landed under `<home>/track/<folder hash>/`, else empty.
+#[cfg(not(target_arch = "wasm32"))]
+fn fetch_folder_files(manager: &str, home: &str, uri: &str, groups: &[Vec<String>]) -> Vec<String> {
+    let dir = Path::new(home).join(track_folder_dir(uri));
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(8)))
         .build()
@@ -1133,8 +1258,11 @@ fn fetch_folder_files(manager: &str, home: &str, uri: &str, groups: &[Vec<String
 #[derive(Default)]
 struct ArtFetcher {
     wanted: String,
+    #[cfg(not(target_arch = "wasm32"))]
     have_url: String,
+    #[cfg(not(target_arch = "wasm32"))]
     have_file: String,
+    #[cfg(not(target_arch = "wasm32"))]
     pending: Option<(String, mpsc::Receiver<Option<PathBuf>>)>,
 }
 
@@ -1145,6 +1273,24 @@ impl ArtFetcher {
 
     /// The file for the wanted location, or empty while it is not there yet.
     fn file(&mut self) -> String {
+        if wants::host_pictures() {
+            if self.wanted.is_empty() {
+                return String::new();
+            }
+            let (relative, url) = picture_in_table(&self.wanted);
+            return table_file(&relative, &url).unwrap_or_default();
+        }
+        #[cfg(target_arch = "wasm32")]
+        {
+            String::new()
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        self.file_from_thread()
+    }
+
+    /// The file for the wanted location, fetched on a thread of its own.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn file_from_thread(&mut self) -> String {
         if let Some((url, rx)) = &self.pending {
             match rx.try_recv() {
                 Ok(result) => {
@@ -1498,6 +1644,12 @@ impl TapSource {
         self.pushed.push(event);
     }
 
+    /// Derive again from the state held at the next poll: for a host that
+    /// has just put a wanted file, or said one is missing.
+    pub fn refresh(&mut self) {
+        self.rederive = true;
+    }
+
     /// What the skin needs from the player beyond the state: icon
     /// directories, and the queue when a next line or the ticker shows it.
     pub fn with_skin(mut self, skin: &SkinDesc) -> Self {
@@ -1672,16 +1824,12 @@ impl TapSource {
         self.queue_mode = skin.rotation.queue_mode;
         self.queue_lengths.clear();
         self.queue_read_at = None;
-        // The slideshow asks the player on a thread of its own, which a
-        // browser has none of: there the player's own display runs it.
-        self.fanart = if cfg!(target_arch = "wasm32") {
-            None
-        } else {
-            skin.fanart.as_ref().map(|_| Slideshow {
-                seed: lead::epoch_nanos().max(1),
-                ..Slideshow::default()
-            })
-        };
+        // The slideshow asks the player on a thread of its own, or the
+        // host where the host brings the pictures.
+        self.fanart = skin.fanart.as_ref().map(|_| Slideshow {
+            seed: lead::epoch_nanos().max(1),
+            ..Slideshow::default()
+        });
         let spectrum_max = skin.spectrum_max.max(1.0) as u32;
         if let Some(bins) = skin.spectrum.as_ref().map(|s| s.bins.max(1)) {
             if bins != self.spectrum_bins || spectrum_max != self.spectrum_max {
@@ -1859,8 +2007,10 @@ impl Source for TapSource {
                 metadata.seek = self.seek_polled + at.elapsed().as_secs_f32();
             }
         }
-        if self.metadata_every.is_some() {
+        if self.metadata_every.is_some() || wants::host_pictures() {
             metadata.art_file = self.art.file();
+        }
+        if self.metadata_every.is_some() {
             let now_epoch_ms = lead::epoch_nanos() / 1_000_000;
             let (mode, left) = persist_state(PERSIST_FILE, now_epoch_ms);
             metadata.persist_mode = mode;

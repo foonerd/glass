@@ -25,7 +25,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use controls::{controls_of, interactive_now, override_scene, Act, Pointer, Touch};
-use expose::{raster_over, MeterAssets, Motion, Stack, TypeIcon};
+use expose::{raster_over, MeterAssets, Motion, Pictures, Stack};
 use intake::bring::{
     asset_plan, config_texts, theme_plan, Bring, Choice, RemoteConfig, ThemeFiles,
 };
@@ -64,8 +64,8 @@ struct Showing {
     /// The last frame's indicators and metadata, for a finger on them.
     indicators: Option<Indicators>,
     metadata: Metadata,
-    /// The track's type icon, decoded once per file, box and tint.
-    icon: TypeIcon,
+    /// Every picture the scene names, decoded once per file and box.
+    pictures: Pictures,
 }
 
 /// What a pointer event asked of the page.
@@ -93,20 +93,44 @@ pub struct Face {
     last_infinity: Option<Event>,
     /// The finger on the controls, kept between frames.
     touch: Touch,
+    /// A wanted file was put or said to be missing since the last frame:
+    /// the meter derives from the state again.
+    landed: bool,
 }
 
 impl Face {
     pub fn new() -> Self {
         lead::set_home(HOME);
+        intake::wants::set_host_pictures();
         Self::default()
     }
 
-    /// A file under its path in the home, as the plans name it.
-    pub fn put_file(&self, relative: &str, bytes: Vec<u8>) {
-        vfs::put(
-            &format!("{HOME}/{}", relative.trim_start_matches('/')),
-            bytes,
-        );
+    fn in_home(relative: &str) -> String {
+        format!("{HOME}/{}", relative.trim_start_matches('/'))
+    }
+
+    /// A file under its path in the home, as the plans and the wants name it.
+    pub fn put_file(&mut self, relative: &str, bytes: Vec<u8>) {
+        vfs::put(&Self::in_home(relative), bytes);
+        self.landed = true;
+    }
+
+    /// The manager has no file for a wanted path: the meter stops asking.
+    pub fn missing(&mut self, relative: &str) {
+        vfs::mark_missing(&Self::in_home(relative));
+        self.landed = true;
+    }
+
+    /// What the meter on show wants from the page: files to fetch and put,
+    /// or to mark missing, and the artist's fanart set to answer. A want is
+    /// listed again at the next frame until it is met.
+    pub fn wants(&self) -> Vec<intake::wants::Want> {
+        intake::wants::take()
+    }
+
+    /// The manager's answer to a fanart want, as its JSON.
+    pub fn fanart_answer(&self, json: &str) {
+        intake::wants::answer_fanart(json);
     }
 
     /// The manager's configuration answer: the two configuration files go
@@ -178,7 +202,7 @@ impl Face {
             rate,
             indicators: None,
             metadata: Metadata::default(),
-            icon: TypeIcon::default(),
+            pictures: Pictures::default(),
         });
         self.touch = Touch::new();
         Ok(())
@@ -290,14 +314,22 @@ impl Face {
     pub fn frame(&mut self, now_ms: u64) -> Option<&expose::Frame> {
         #[cfg(target_arch = "wasm32")]
         lead::set_clock_us(now_ms.saturating_mul(1000));
-        let Face { showing, touch, .. } = self;
+        let Face {
+            showing,
+            touch,
+            landed,
+            ..
+        } = self;
         let showing = showing.as_mut()?;
+        if std::mem::take(landed) {
+            showing.source.refresh();
+        }
         let input = showing.source.poll();
         let mut scene = plot::step(&showing.skin, &input);
         override_scene(touch, &mut scene);
         showing.indicators = scene.indicators.clone();
         showing.metadata = input.metadata;
-        showing.icon.follow(scene.type_area.as_ref());
+        showing.pictures.follow(&scene, &showing.assets);
         let assets = &showing.assets;
         let stack = Stack {
             screen: None,
@@ -307,14 +339,14 @@ impl Face {
             needle_right: assets.indicator_right.as_ref(),
             face_at: showing.skin.face_at,
             fonts: Some(&assets.fonts),
-            art: None,
-            icon: showing.icon.frame(),
+            art: showing.pictures.art(),
+            icon: showing.pictures.icon(),
             spectrum: assets.spectrum.as_ref(),
-            folder_pictures: &[],
-            fanart: (None, None),
-            vinyl: None,
+            folder_pictures: showing.pictures.folder_pictures(),
+            fanart: showing.pictures.fanart(),
+            vinyl: showing.pictures.vinyl(),
             tonearm: assets.tonearm.as_ref(),
-            reels: (assets.reels.0.as_ref(), assets.reels.1.as_ref()),
+            reels: showing.pictures.reels(&scene, assets),
             indicators: assets.indicators.as_ref(),
             base: Some(&assets.base),
         };
@@ -411,7 +443,39 @@ mod exports {
         armed();
         let path = String::from_utf8_lossy(slice(path, path_len)).into_owned();
         let bytes = slice(data, data_len).to_vec();
-        FACE.with(|face| face.borrow().put_file(&path, bytes));
+        FACE.with(|face| face.borrow_mut().put_file(&path, bytes));
+    }
+
+    /// A wanted file the manager has none of, by its path in the want.
+    /// # Safety
+    /// The pointer names an `alloc`ed buffer of the given length.
+    #[no_mangle]
+    pub unsafe extern "C" fn missing(path: *const u8, path_len: usize) {
+        armed();
+        let path = String::from_utf8_lossy(slice(path, path_len)).into_owned();
+        FACE.with(|face| face.borrow_mut().missing(&path));
+    }
+
+    /// What the meter wants from the page; the answer is the list as JSON:
+    /// `{"kind":"file","path":…,"url":…}` to fetch and `put_file` or mark
+    /// `missing`, `{"kind":"fanart","artist":…,"uri":…}` to answer with
+    /// `fanart_answer`.
+    #[no_mangle]
+    pub extern "C" fn wants() -> u32 {
+        armed();
+        let list = FACE.with(|face| face.borrow().wants());
+        answer(serde_json::to_string(&list).unwrap_or_else(|_| "[]".to_string()));
+        0
+    }
+
+    /// The manager's fanart answer for the artist wanted, as its JSON.
+    /// # Safety
+    /// The pointer names an `alloc`ed buffer of the given length.
+    #[no_mangle]
+    pub unsafe extern "C" fn fanart_answer(json: *const u8, len: usize) {
+        armed();
+        let text = String::from_utf8_lossy(slice(json, len)).into_owned();
+        FACE.with(|face| face.borrow().fanart_answer(&text));
     }
 
     /// The configuration answer; the answer is the plan as JSON, or 1 with
@@ -586,7 +650,7 @@ mod tests {
 
     /// The repository's theme into the table; its `meters.txt` comes back
     /// for a test to extend.
-    fn theme_into_table(face: &Face, name: &str) -> String {
+    fn theme_into_table(face: &mut Face, name: &str) -> String {
         let mut meters = String::new();
         for entry in std::fs::read_dir(repo_theme(name)).expect("the test theme") {
             let path = entry.expect("an entry").path();
@@ -623,7 +687,7 @@ mod tests {
         let _serial = serial();
         let mut face = Face::new();
         face.configure(&config_json()).expect("a plan");
-        theme_into_table(&face, "480x320");
+        theme_into_table(&mut face, "480x320");
         face.start(None).expect("the meter on show");
         assert_eq!((face.width(), face.height()), (480, 320));
         assert!(!face.meter().is_empty());
@@ -644,7 +708,7 @@ mod tests {
         let _serial = serial();
         let mut face = Face::new();
         face.configure(&config_json()).expect("a plan");
-        let meters = theme_into_table(&face, "480x320");
+        let meters = theme_into_table(&mut face, "480x320");
         let bar_at = meters.find("[bar]").expect("the bar meter");
         let extended = "[bar]\nconfig.extend = True\ninteractive = True\nvolume.pos = 40,300\nvolume.dim = 200,4\nvolume.style = slider\n";
         let meters = format!("{}{}{}", &meters[..bar_at], extended, &meters[bar_at + 5..]);
@@ -698,7 +762,7 @@ mod tests {
         let _serial = serial();
         let mut face = Face::new();
         face.configure(&config_json()).expect("a plan");
-        let meters = theme_into_table(&face, "480x320");
+        let meters = theme_into_table(&mut face, "480x320");
         let bar_at = meters.find("[bar]").expect("the bar meter");
         let extended = "[bar]\nconfig.extend = True\nplayinfo.type.pos = 400,20\nplayinfo.type.dimension = 60,40\nplayinfo.type.mode = icon\nplayinfo.type.color = 255,0,0\n";
         let meters = format!("{}{}{}", &meters[..bar_at], extended, &meters[bar_at + 5..]);
@@ -725,8 +789,137 @@ mod tests {
         let showing = face.showing.as_ref().expect("the meter on show");
         assert_eq!(showing.metadata.type_icon, "/glass/format-icons/cd.svg");
         assert!(
-            showing.icon.frame().is_some(),
+            showing.pictures.icon().is_some(),
             "the icon is kept between frames"
+        );
+    }
+
+    /// The bar meter with the keys given, put in the table.
+    fn bar_with(face: &mut Face, keys: &str) {
+        let meters = theme_into_table(face, "480x320");
+        let bar_at = meters.find("[bar]").expect("the bar meter");
+        let extended = format!("[bar]\nconfig.extend = True\n{keys}");
+        let meters = format!("{}{}{}", &meters[..bar_at], extended, &meters[bar_at + 5..]);
+        face.put_file("templates/480x320/meters.txt", meters.into_bytes());
+    }
+
+    /// A picture from the test theme, as bytes to hand in for a want.
+    fn a_picture() -> Vec<u8> {
+        std::fs::read(repo_theme("480x320").join("bar-indicator.png")).expect("a picture")
+    }
+
+    /// The first file wanted under `pictures/`, with its URL.
+    fn picture_wanted(face: &Face) -> Option<(String, String)> {
+        face.wants().into_iter().find_map(|w| match w {
+            intake::wants::Want::File { path, url } if path.starts_with("pictures/") => {
+                Some((path, url))
+            }
+            _ => None,
+        })
+    }
+
+    /// A meter with an album art box: the art the player reports is wanted
+    /// from the manager's picture route under a path of its own, drawn once
+    /// the page puts it, and a picture the manager has not got is not asked
+    /// for again.
+    #[test]
+    fn the_album_art_is_wanted_from_the_page_and_drawn_once_put() {
+        let _serial = serial();
+        let mut face = Face::new();
+        face.configure(&config_json()).expect("a plan");
+        bar_with(
+            &mut face,
+            "albumart.pos = 300,100\nalbumart.dimension = 60,60\n",
+        );
+        assert!(face.event(
+            br#"{"kind":"state","state":{"status":"play","title":"A song","albumart":"/albumart?path=%2Fmnt%2Fa"}}"#
+        ));
+        face.start(Some("bar")).expect("the bar on show");
+        face.frame(40).expect("a frame");
+        let (path, url) = picture_wanted(&face).expect("the art wanted");
+        assert_eq!(
+            url,
+            "/api/face/picture?at=%2Falbumart%3Fpath%3D%252Fmnt%252Fa"
+        );
+        assert!(
+            face.showing.as_ref().unwrap().pictures.art().is_none(),
+            "nothing to draw yet"
+        );
+        face.put_file(&path, a_picture());
+        face.frame(80).expect("a frame");
+        let showing = face.showing.as_ref().unwrap();
+        assert_eq!(showing.metadata.art_file, format!("/glass/{path}"));
+        assert!(
+            showing.pictures.art().is_some(),
+            "the art is drawn once put"
+        );
+        assert!(
+            picture_wanted(&face).is_none(),
+            "a picture put is not wanted again"
+        );
+        // Another track whose art the manager has not got: wanted once,
+        // then marked missing and left alone.
+        assert!(face.event(
+            br#"{"kind":"state","state":{"status":"play","title":"Another","albumart":"/albumart?path=%2Fmnt%2Fb"}}"#
+        ));
+        face.frame(120).expect("a frame");
+        let (other, _) = picture_wanted(&face).expect("the other art wanted");
+        assert_ne!(other, path);
+        face.missing(&other);
+        face.frame(160).expect("a frame");
+        assert!(
+            picture_wanted(&face).is_none(),
+            "a missing picture is not asked for again"
+        );
+        assert!(face.showing.as_ref().unwrap().pictures.art().is_none());
+    }
+
+    /// A meter with a fanart slot: the artist's set is wanted from the page,
+    /// the answer names the pictures, the picture on show is wanted in turn
+    /// and drawn once put.
+    #[test]
+    fn the_fanart_set_is_asked_of_the_page_and_its_picture_drawn() {
+        let _serial = serial();
+        let mut face = Face::new();
+        face.configure(&config_json()).expect("a plan");
+        bar_with(&mut face, "fanart.pos = 0,0\nfanart.dimension = 120,80\n");
+        assert!(face.event(
+            br#"{"kind":"state","state":{"status":"play","title":"A song","artist":"Someone","uri":"mnt/x/a.flac"}}"#
+        ));
+        face.start(Some("bar")).expect("the bar on show");
+        face.frame(40).expect("a frame");
+        let wanted = face.wants();
+        assert!(
+            wanted.contains(&intake::wants::Want::Fanart {
+                artist: "Someone".into(),
+                uri: "mnt/x/a.flac".into()
+            }),
+            "the set is asked: {wanted:?}"
+        );
+        face.fanart_answer(
+            r#"{"success":true,"images":["glass/fanart/someone/1.jpg"],"interval_ms":0,"transition":"none","transition_ms":600,"order":"sequential"}"#,
+        );
+        face.frame(80).expect("a frame");
+        let (path, url) = picture_wanted(&face).expect("the picture wanted");
+        assert_eq!(
+            url,
+            "/api/face/picture?at=%2Falbumart%3Fsectionimage%3Dglass%2Ffanart%2Fsomeone%2F1.jpg"
+        );
+        face.put_file(&path, a_picture());
+        // The slot decodes off the frame loop on a machine: a few frames.
+        let mut drawn = false;
+        for i in 0..200 {
+            face.frame(120 + i * 20).expect("a frame");
+            if face.showing.as_ref().unwrap().pictures.fanart().0.is_some() {
+                drawn = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert!(drawn, "the fanart is drawn once put");
+        assert_eq!(
+            face.showing.as_ref().unwrap().metadata.fanart_file,
+            format!("/glass/{path}")
         );
     }
 }
