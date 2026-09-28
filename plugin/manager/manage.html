@@ -185,9 +185,10 @@
     <div class="panel">
       <div class="row" style="justify-content:space-between;align-items:center">
         <h2 id="face-title" style="margin:0"></h2>
-        <button class="small" id="btn-face-full"></button>
+        <div class="row"><button class="small" id="btn-face-anymote"></button><button class="small" id="btn-face-full"></button></div>
       </div>
       <div class="help" id="face-help" style="margin:10px 0"></div>
+      <div class="help" id="face-anymote-help" style="margin:0 0 10px"></div>
       <div id="face-stage"><canvas id="face-canvas" width="16" height="9"></canvas></div>
       <div class="help" id="face-state" style="margin-top:8px"></div>
     </div>
@@ -527,6 +528,9 @@
     $('face-title').textContent = t('MANAGER_FACE_TITLE');
     $('face-help').textContent = t('MANAGER_FACE_HELP');
     $('btn-face-full').textContent = t('MANAGER_FACE_FULL');
+    $('btn-face-anymote').textContent = t('MANAGER_FACE_ANYMOTE');
+    $('face-anymote-help').textContent = t('MANAGER_FACE_ANYMOTE_HELP');
+    $('btn-face-anymote').onclick = function () { window.open('/anymote', '_blank', 'noopener'); };
     $('rm-title').textContent = t('MANAGER_RM_TITLE');
     $('rm-help').textContent = t('MANAGER_RM_HELP');
     $('btn-rm-refresh').textContent = t('MANAGER_REFRESH');

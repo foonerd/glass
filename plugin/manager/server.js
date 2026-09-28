@@ -355,6 +355,38 @@ class Manager {
     app.get('/face/face-page.js', function (req, res) {
       res.sendFile(path.join(__dirname, 'face-page.js'), { maxAge: 0 });
     });
+    // A tap or a drag on the Face tab's controls: the command a display
+    // would send down the channel, run the same way.
+    app.post('/api/face/command', wrap(async function (req, res) {
+      const body = req.body || {};
+      const name = String(body.name || '').slice(0, 32);
+      if (!/^[a-z]+$/.test(name)) return res.status(400).json({ error: 'bad-command' });
+      const message = { kind: 'command', name };
+      if (body.value !== undefined && body.value !== null) message.value = body.value;
+      self.plugin.runCommand(message);
+      res.json({ ok: true, name });
+    }));
+
+    // Anymote: the face on a page of its own, for any browser, with a
+    // manifest so a phone keeps it on the home screen as a full-screen app.
+    app.get('/anymote', function (req, res) {
+      res.sendFile(path.join(__dirname, 'anymote.html'));
+    });
+    app.get('/anymote/manifest.json', function (req, res) {
+      res.json({
+        name: 'Glass Anymote',
+        short_name: 'Anymote',
+        start_url: '/anymote',
+        display: 'fullscreen',
+        orientation: 'landscape',
+        background_color: '#000000',
+        theme_color: '#000000',
+        icons: [{ src: '/anymote/icon.svg', sizes: 'any', type: 'image/svg+xml' }]
+      });
+    });
+    app.get('/anymote/icon.svg', function (req, res) {
+      res.sendFile(path.join(__dirname, 'anymote-icon.svg'), { maxAge: 86400000 });
+    });
 
     // Car Dash: a day theme and a night theme by the clock.
     app.get('/api/cardash', function (req, res) {

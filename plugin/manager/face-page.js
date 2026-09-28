@@ -27,7 +27,9 @@
     loop: null,
     frames: false,
     starting: null,
-    restart: false
+    restart: false,
+    // Anymote: the canvas sized to the window, keeping the theme's shape.
+    fit: false
   };
 
   var $ = function (id) { return document.getElementById(id); };
@@ -183,6 +185,11 @@
     var started = ask('start', meter === 'random' ? '' : meter);
     if (started.code) throw new Error(started.answer);
     face.meter = started.answer;
+    sized();
+  }
+
+  // The canvas at the meter's size, and the frames may flow.
+  function sized() {
     face.rate = face.ex.frame_rate() || 30;
     face.width = face.ex.frame_width();
     face.height = face.ex.frame_height();
@@ -192,7 +199,59 @@
     face.ctx = canvas.getContext('2d');
     face.image = face.ctx.createImageData(face.width, face.height);
     face.ready = true;
+    listen(canvas);
+    fitted();
     showing();
+  }
+
+  // On a page of its own the canvas fills the window, the theme's shape kept.
+  function fitted() {
+    if (!face.fit || !face.width || !face.height) return;
+    var canvas = $('face-canvas');
+    var scale = Math.min(window.innerWidth / face.width, window.innerHeight / face.height);
+    canvas.style.width = Math.max(1, Math.floor(face.width * scale)) + 'px';
+    canvas.style.height = Math.max(1, Math.floor(face.height * scale)) + 'px';
+  }
+
+  // ---- the finger on the controls ---------------------------------------
+  // A pointer event goes to the module in the frame's pixels; what comes
+  // back is done here: a command to the player through the manager, a
+  // meter stepped, or a dismiss, which leaves full screen.
+  var listening = false;
+  function listen(canvas) {
+    if (listening) return;
+    listening = true;
+    canvas.style.touchAction = 'none';
+    var send = function (kind, e) {
+      if (!face.ready || !face.ex || typeof face.ex.pointer !== 'function') return;
+      var rect = canvas.getBoundingClientRect();
+      if (!rect.width || !rect.height) return;
+      var x = Math.round((e.clientX - rect.left) * face.width / rect.width);
+      var y = Math.round((e.clientY - rect.top) * face.height / rect.height);
+      var acts;
+      try {
+        acts = guarded(function () { face.ex.pointer(kind, x, y); return JSON.parse(answer() || '[]'); });
+      } catch (err) { say(face.t('MANAGER_FACE_FAILED') + ' ' + err.message, true); return; }
+      acts.forEach(function (act) {
+        if (act.command) {
+          fetch('/api/face/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(act.command) }).catch(function () {});
+        }
+        if (act.meter) { face.meter = act.meter; sized(); }
+        if (act.dismiss && document.fullscreenElement) document.exitFullscreen();
+      });
+    };
+    canvas.addEventListener('pointerdown', function (e) {
+      if (e.pointerType === 'mouse' && e.button !== 0) return;
+      try { canvas.setPointerCapture(e.pointerId); } catch (err) { /* not for us */ }
+      send(0, e);
+      e.preventDefault();
+    });
+    canvas.addEventListener('pointermove', function (e) {
+      if (e.pointerType === 'mouse' && e.buttons === 0) return;
+      send(1, e);
+    });
+    canvas.addEventListener('pointerup', function (e) { send(2, e); });
+    canvas.addEventListener('pointercancel', function (e) { send(2, e); });
   }
 
   function showing() {
@@ -300,8 +359,13 @@
     init: function (options) {
       face.t = options.t || face.t;
       face.version = options.version || face.version;
+      face.fit = !!options.fit;
       var button = $('btn-face-full');
       if (button) button.addEventListener('click', fullScreen);
+      if (face.fit) {
+        window.addEventListener('resize', fitted);
+        document.addEventListener('fullscreenchange', fitted);
+      }
     },
     show: show,
     hide: hide
