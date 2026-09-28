@@ -576,21 +576,153 @@ fn next_repeat(meta: &Metadata) -> &'static str {
     }
 }
 
-/// The control under a tap at (x, y) in theme pixels and what it asks:
-/// the theme's buttons first, then the play state, mute, shuffle and
-/// repeat indicators, then the volume and progress gauges, whose tap
-/// sets the volume or seeks by where along them it lands.
-fn tapped(
-    indicators: &plot::Indicators,
-    assets: Option<&IndicatorAssets>,
-    meta: &Metadata,
-    x: i32,
-    y: i32,
-) -> Option<Tapped> {
+/// A bar being dragged.
+struct Drag {
+    which: Which,
+    gauge: GaugeSpec,
+    /// Where along the bar the finger is, 0 to 1.
+    value: f32,
+    /// When the value was last sent, for a volume that follows the finger.
+    sent: Option<Instant>,
+    /// Whether the finger moved since it came down: a drag, else a tap.
+    moved: bool,
+}
+
+/// How often a dragged volume goes to the player.
+const DRAG_SEND_EVERY: Duration = Duration::from_millis(150);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Which {
+    Volume,
+    Progress,
+}
+
+impl Drag {
+    /// The command for where the finger is: the volume, or a seek by the
+    /// track's length.
+    fn command(&self, meta: &Metadata) -> intake::Command {
+        match self.which {
+            Which::Volume => intake::Command::with(
+                "volume",
+                serde_json::json!((self.value * 100.0).round() as u32),
+            ),
+            Which::Progress => intake::Command::with(
+                "seek",
+                serde_json::json!((self.value * meta.duration.max(0.0)).round() as u32),
+            ),
+        }
+    }
+}
+
+/// A control of the meter on show: where it is drawn and what it is.
+#[derive(Clone, Debug, PartialEq)]
+struct Control {
+    at: (i32, i32),
+    size: (u32, u32),
+    kind: ControlKind,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+enum ControlKind {
+    Button(ButtonAction),
+    PlayState,
+    Mute,
+    Shuffle,
+    Repeat,
+    Volume(GaugeSpec),
+    Progress(GaugeSpec),
+}
+
+impl Control {
+    fn gauge(&self) -> Option<(Which, &GaugeSpec)> {
+        match &self.kind {
+            ControlKind::Volume(g) => Some((Which::Volume, g)),
+            ControlKind::Progress(g) => Some((Which::Progress, g)),
+            _ => None,
+        }
+    }
+
+    fn centre(&self) -> (i32, i32) {
+        (
+            self.at.0 + self.size.0 as i32 / 2,
+            self.at.1 + self.size.1 as i32 / 2,
+        )
+    }
+
+    /// The region a finger may land in: at least twice the margin on each
+    /// axis, centred on the drawn box, and a bar reaching half a margin
+    /// past both ends so its extremes can be hit.
+    fn grown(&self, margin: u32) -> ((i32, i32), (u32, u32)) {
+        let want = margin * 2;
+        let (mut x, mut y) = self.at;
+        let (mut w, mut h) = self.size;
+        if w < want {
+            x -= (want - w) as i32 / 2;
+            w = want;
+        }
+        if h < want {
+            y -= (want - h) as i32 / 2;
+            h = want;
+        }
+        if self.gauge().is_some() {
+            let reach = (margin / 2) as i32;
+            if self.size.0 >= self.size.1 {
+                x -= reach;
+                w += 2 * reach as u32;
+            } else {
+                y -= reach;
+                h += 2 * reach as u32;
+            }
+        }
+        ((x, y), (w, h))
+    }
+
+    /// What a tap on this control asks for.
+    fn tapped(&self, meta: &Metadata, x: i32, y: i32) -> Tapped {
+        let command = |name: &str| Tapped::Command(intake::Command::new(name));
+        let with = |name: &str, value: serde_json::Value| {
+            Tapped::Command(intake::Command::with(name, value))
+        };
+        match &self.kind {
+            ControlKind::Button(action) => match action {
+                ButtonAction::Toggle => command("toggle"),
+                ButtonAction::Play => command("play"),
+                ButtonAction::Pause => command("pause"),
+                ButtonAction::Stop => command("stop"),
+                ButtonAction::Next => command("next"),
+                ButtonAction::Previous => command("previous"),
+                ButtonAction::MeterNext => Tapped::MeterNext,
+                ButtonAction::MeterPrevious => Tapped::MeterPrevious,
+                ButtonAction::Mute => with("volume", serde_json::json!("toggle")),
+                ButtonAction::Random => with("random", serde_json::json!(!meta.random)),
+                ButtonAction::Repeat => with("repeat", serde_json::json!(next_repeat(meta))),
+                ButtonAction::Dismiss => Tapped::Dismiss,
+            },
+            ControlKind::PlayState => command("toggle"),
+            ControlKind::Mute => with("volume", serde_json::json!("toggle")),
+            ControlKind::Shuffle => with("random", serde_json::json!(!meta.random)),
+            ControlKind::Repeat => with("repeat", serde_json::json!(next_repeat(meta))),
+            ControlKind::Volume(gauge) => with(
+                "volume",
+                serde_json::json!((gauge_fraction(gauge, x, y) * 100.0).round() as u32),
+            ),
+            ControlKind::Progress(gauge) => with(
+                "seek",
+                serde_json::json!(
+                    (gauge_fraction(gauge, x, y) * meta.duration.max(0.0)).round() as u32
+                ),
+            ),
+        }
+    }
+}
+
+/// The controls of the meter on show, in the order a tap is tested: the
+/// theme's buttons, the play state, mute, shuffle and repeat indicators
+/// (a LED's own size, a picture's size in its state), then the volume
+/// and progress bars.
+fn controls_of(indicators: &plot::Indicators, assets: Option<&IndicatorAssets>) -> Vec<Control> {
     let spec = &indicators.spec;
-    let command = |name: &str| Tapped::Command(intake::Command::new(name));
-    let with =
-        |name: &str, value: serde_json::Value| Tapped::Command(intake::Command::with(name, value));
+    let mut controls = Vec::new();
     for (i, button) in spec.buttons.iter().enumerate() {
         let picture = assets
             .and_then(|a| a.buttons.get(i))
@@ -600,29 +732,19 @@ fn tapped(
         } else {
             picture.map(|p| (p.width, p.height)).unwrap_or((0, 0))
         };
-        if !inside(x, y, (button.x, button.y), size) {
-            continue;
+        if size.0 > 0 && size.1 > 0 {
+            controls.push(Control {
+                at: (button.x, button.y),
+                size,
+                kind: ControlKind::Button(button.action),
+            });
         }
-        return Some(match button.action {
-            ButtonAction::Toggle => command("toggle"),
-            ButtonAction::Play => command("play"),
-            ButtonAction::Pause => command("pause"),
-            ButtonAction::Stop => command("stop"),
-            ButtonAction::Next => command("next"),
-            ButtonAction::Previous => command("previous"),
-            ButtonAction::MeterNext => Tapped::MeterNext,
-            ButtonAction::MeterPrevious => Tapped::MeterPrevious,
-            ButtonAction::Mute => with("volume", serde_json::json!("toggle")),
-            ButtonAction::Random => with("random", serde_json::json!(!meta.random)),
-            ButtonAction::Repeat => with("repeat", serde_json::json!(next_repeat(meta))),
-            ButtonAction::Dismiss => Tapped::Dismiss,
-        });
     }
-    // An indicator's box: a LED's own size, a picture's size in its state.
-    let state_box = |indicator: &Option<StateIndicator>,
-                     frames: Option<&Vec<Option<Frame>>>,
-                     state: usize|
-     -> Option<((i32, i32), (u32, u32))> {
+    let state = |indicator: &Option<StateIndicator>,
+                 frames: Option<&Vec<Option<Frame>>>,
+                 state: usize,
+                 kind: ControlKind|
+     -> Option<Control> {
         let indicator = indicator.as_ref()?;
         let size = match &indicator.look {
             StateLook::Led { w, h, .. } => (*w, *h),
@@ -635,51 +757,70 @@ fn tapped(
                 .map(|p| (p.width, p.height))
                 .unwrap_or((48, 48)),
         };
-        Some(((indicator.x, indicator.y), size))
+        Some(Control {
+            at: (indicator.x, indicator.y),
+            size,
+            kind,
+        })
     };
-    let hit =
-        |b: Option<((i32, i32), (u32, u32))>| b.is_some_and(|(at, size)| inside(x, y, at, size));
-    if hit(state_box(
+    controls.extend(state(
         &spec.playstate,
         assets.map(|a| &a.playstate),
         indicators.play_state,
-    )) {
-        return Some(command("toggle"));
-    }
-    if hit(state_box(
+        ControlKind::PlayState,
+    ));
+    controls.extend(state(
         &spec.mute,
         assets.map(|a| &a.mute),
         indicators.mute_state,
-    )) {
-        return Some(with("volume", serde_json::json!("toggle")));
-    }
-    if hit(state_box(
+        ControlKind::Mute,
+    ));
+    controls.extend(state(
         &spec.shuffle,
         assets.map(|a| &a.shuffle),
         indicators.shuffle_state,
-    )) {
-        return Some(with("random", serde_json::json!(!meta.random)));
-    }
-    if hit(state_box(
+        ControlKind::Shuffle,
+    ));
+    controls.extend(state(
         &spec.repeat,
         assets.map(|a| &a.repeat),
         indicators.repeat_state,
-    )) {
-        return Some(with("repeat", serde_json::json!(next_repeat(meta))));
-    }
+        ControlKind::Repeat,
+    ));
     if let Some(gauge) = &spec.volume {
-        if inside(x, y, (gauge.x, gauge.y), (gauge.w, gauge.h)) {
-            let level = (gauge_fraction(gauge, x, y) * 100.0).round() as u32;
-            return Some(with("volume", serde_json::json!(level)));
-        }
+        controls.push(Control {
+            at: (gauge.x, gauge.y),
+            size: (gauge.w, gauge.h),
+            kind: ControlKind::Volume(gauge.clone()),
+        });
     }
     if let Some(gauge) = &spec.progress {
-        if inside(x, y, (gauge.x, gauge.y), (gauge.w, gauge.h)) && meta.duration > 0.0 {
-            let seconds = (gauge_fraction(gauge, x, y) * meta.duration).round() as u32;
-            return Some(with("seek", serde_json::json!(seconds)));
-        }
+        controls.push(Control {
+            at: (gauge.x, gauge.y),
+            size: (gauge.w, gauge.h),
+            kind: ControlKind::Progress(gauge.clone()),
+        });
     }
-    None
+    controls
+}
+
+/// The control under a point: the first whose drawn box holds it, else the
+/// nearest whose grown box does, so a finger a little off a thin bar or a
+/// small light still lands on it.
+fn control_at(controls: &[Control], x: i32, y: i32, margin: u32) -> Option<&Control> {
+    if let Some(exact) = controls.iter().find(|c| inside(x, y, c.at, c.size)) {
+        return Some(exact);
+    }
+    controls
+        .iter()
+        .filter(|c| {
+            let (at, size) = c.grown(margin);
+            inside(x, y, at, size)
+        })
+        .min_by_key(|c| {
+            let (cx, cy) = c.centre();
+            (cx - x).pow(2) + (cy - y).pow(2)
+        })
 }
 
 fn session(
@@ -988,6 +1129,8 @@ fn session(
 
     // A step to another meter asked for by a tap; taken at the top of a frame.
     let mut meter_step: Option<i8> = None;
+    // A bar being dragged: its value follows the finger until it lifts.
+    let mut drag: Option<Drag> = None;
     loop {
         let frame_started = Instant::now();
         if let Some(step) = meter_step.take() {
@@ -1095,7 +1238,14 @@ fn session(
                 }
             }
         }
-        let scene = step(&skin, &input);
+        let mut scene = step(&skin, &input);
+        if let (Some(d), Some(indicators)) = (drag.as_ref(), scene.indicators.as_mut()) {
+            let value = (d.value * 100.0).round() as u32;
+            match d.which {
+                Which::Volume => indicators.volume = value,
+                Which::Progress => indicators.progress = value,
+            }
+        }
         let stepped_at = Instant::now();
         let mut rastered_at = stepped_at;
         if let Some(path) = record {
@@ -1279,68 +1429,115 @@ fn session(
                         eprintln!("glass: window: {err}");
                     }
                 }
-                match window.show(frame, painted.damage) {
-                    Ok(Shown::Kept) => {}
-                    Ok(Shown::Closed) => leave = Some("window closed"),
-                    Ok(Shown::LeaveFullscreen) => {
+                let shown = match window.show(frame, painted.damage) {
+                    Ok(shown) => shown,
+                    Err(err) => {
+                        eprintln!("glass: {err}");
+                        return Outcome::Exit(ExitCode::from(1));
+                    }
+                };
+                // The pointer: a tap on one of the theme's controls acts, a
+                // finger down on a bar drags its value until it lifts; any
+                // other touch does what the touch rules say.
+                let events = window.take_pointer();
+                let mut acted = false;
+                let mut dismiss = false;
+                if !events.is_empty() && interactive_now(&skin) {
+                    if let Some(indicators) = scene.indicators.as_ref() {
+                        let controls = controls_of(indicators, assets.indicators.as_ref());
+                        let margin = indicators.spec.touch_margin;
+                        for event in events {
+                            let hit = control_at(&controls, event.x, event.y, margin);
+                            match event.kind {
+                                PointerKind::Down => {
+                                    if let Some(control) = hit {
+                                        if let Some((which, gauge)) = control.gauge() {
+                                            drag = Some(Drag {
+                                                which,
+                                                value: gauge_fraction(gauge, event.x, event.y),
+                                                gauge: gauge.clone(),
+                                                sent: None,
+                                                moved: false,
+                                            });
+                                        }
+                                    }
+                                }
+                                PointerKind::Move => {
+                                    if let Some(d) = drag.as_mut() {
+                                        d.value = gauge_fraction(&d.gauge, event.x, event.y);
+                                        d.moved = true;
+                                        let due =
+                                            d.sent.is_none_or(|at| at.elapsed() >= DRAG_SEND_EVERY);
+                                        if d.which == Which::Volume && due {
+                                            d.sent = Some(Instant::now());
+                                            source.command(&d.command(&input.metadata));
+                                        }
+                                    }
+                                }
+                                PointerKind::Up => {
+                                    acted = true;
+                                    if let Some(mut d) = drag.take() {
+                                        d.value = gauge_fraction(&d.gauge, event.x, event.y);
+                                        let command = d.command(&input.metadata);
+                                        logline::say!(
+                                            Verbose,
+                                            "display",
+                                            "{} {},{}: {} {}",
+                                            if d.moved { "drag to" } else { "tap at" },
+                                            event.x,
+                                            event.y,
+                                            command.name,
+                                            command
+                                                .value
+                                                .as_ref()
+                                                .map(|v| v.to_string())
+                                                .unwrap_or_default()
+                                        );
+                                        source.command(&command);
+                                    } else if let Some(control) = hit {
+                                        match control.tapped(&input.metadata, event.x, event.y) {
+                                            Tapped::Command(command) => {
+                                                logline::say!(
+                                                    Verbose,
+                                                    "display",
+                                                    "tap at {},{}: {}",
+                                                    event.x,
+                                                    event.y,
+                                                    command.name
+                                                );
+                                                source.command(&command);
+                                            }
+                                            Tapped::MeterNext => meter_step = Some(1),
+                                            Tapped::MeterPrevious => meter_step = Some(-1),
+                                            Tapped::Dismiss => {
+                                                acted = false;
+                                                dismiss = true;
+                                            }
+                                        }
+                                    } else {
+                                        acted = false;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                match shown {
+                    Shown::Kept => {}
+                    Shown::Closed => leave = Some("window closed"),
+                    Shown::LeaveFullscreen => {
                         if let Err(err) = window.set_mode(WindowMode::Windowed) {
                             eprintln!("glass: window: {err}");
                         }
                     }
-                    Ok(Shown::EnterFullscreen) => {
+                    Shown::EnterFullscreen => {
                         if let Err(err) = window.set_mode(WindowMode::Fullscreen) {
                             eprintln!("glass: window: {err}");
                         }
                     }
-                    Ok(Shown::Touched) => {
-                        // A tap on one of the theme's controls acts; any other
-                        // tap does what the touch rules say.
-                        let mut acted = false;
-                        let mut dismiss = false;
-                        if interactive_now(&skin) {
-                            let tap = window
-                                .take_pointer()
-                                .into_iter()
-                                .rev()
-                                .find(|p| p.kind == PointerKind::Up);
-                            if let (Some(tap), Some(indicators)) = (tap, scene.indicators.as_ref())
-                            {
-                                match tapped(
-                                    indicators,
-                                    assets.indicators.as_ref(),
-                                    &input.metadata,
-                                    tap.x,
-                                    tap.y,
-                                ) {
-                                    Some(Tapped::Command(command)) => {
-                                        acted = true;
-                                        logline::say!(
-                                            Verbose,
-                                            "display",
-                                            "tap at {},{}: {}",
-                                            tap.x,
-                                            tap.y,
-                                            command.name
-                                        );
-                                        source.command(&command);
-                                    }
-                                    Some(Tapped::MeterNext) => {
-                                        acted = true;
-                                        meter_step = Some(1);
-                                    }
-                                    Some(Tapped::MeterPrevious) => {
-                                        acted = true;
-                                        meter_step = Some(-1);
-                                    }
-                                    Some(Tapped::Dismiss) => dismiss = true,
-                                    None => {}
-                                }
-                            }
-                        } else {
-                            window.take_pointer();
-                        }
+                    Shown::Touched => {
                         if acted {
-                            // Done above.
+                            // A control took the touch.
                         } else if remote.is_some() && !dismiss {
                             // A touch on a remote plays or pauses the player.
                             if let Some(remote) = remote.as_deref() {
@@ -1357,10 +1554,6 @@ fn session(
                             }
                             leave = Some("touched");
                         }
-                    }
-                    Err(err) => {
-                        eprintln!("glass: {err}");
-                        return Outcome::Exit(ExitCode::from(1));
                     }
                 }
             }
@@ -1592,4 +1785,70 @@ fn memory_line(stores: &[(&'static str, usize)]) -> String {
         .map(|(name, b)| format!("{name} {}", b / 1024))
         .collect();
     format!("{} kB ({})", total / 1024, parts.join(", "))
+}
+
+#[cfg(test)]
+mod control_tests {
+    use super::*;
+
+    fn led(x: i32, y: i32, kind: ControlKind) -> Control {
+        Control {
+            at: (x, y),
+            size: (10, 10),
+            kind,
+        }
+    }
+
+    /// A finger a little off a small light or a thin bar still lands on
+    /// it, the nearest one when two are close; a drawn box wins outright.
+    #[test]
+    fn a_finger_lands_on_the_nearest_control_within_the_margin() {
+        let spec = lead::meter_indicators(
+            "[m]\nconfig.extend = True\nvolume.pos = 0,300\nvolume.dim = 200,4\nvolume.style = slider\n",
+            "m",
+            "/t",
+        )
+        .expect("extended");
+        let gauge = spec.volume.clone().expect("a volume bar");
+        assert_eq!((gauge.x, gauge.y, gauge.w, gauge.h), (0, 300, 200, 4));
+        let controls = vec![
+            led(100, 100, ControlKind::Mute),
+            led(130, 100, ControlKind::Shuffle),
+            Control {
+                at: (gauge.x, gauge.y),
+                size: (gauge.w, gauge.h),
+                kind: ControlKind::Volume(gauge.clone()),
+            },
+        ];
+        // Inside the drawn box: exact.
+        assert_eq!(
+            control_at(&controls, 105, 105, 24).map(|c| &c.kind),
+            Some(&ControlKind::Mute)
+        );
+        // Off the box but within the margin: the nearest.
+        assert_eq!(
+            control_at(&controls, 95, 120, 24).map(|c| &c.kind),
+            Some(&ControlKind::Mute)
+        );
+        assert_eq!(
+            control_at(&controls, 128, 90, 24).map(|c| &c.kind),
+            Some(&ControlKind::Shuffle)
+        );
+        // With no margin, off the box is off.
+        assert_eq!(control_at(&controls, 95, 120, 0), None);
+        // A thin bar answers 20 pixels above it, and past its end.
+        let hit = control_at(&controls, 100, 282, 24).expect("the bar");
+        assert!(matches!(hit.kind, ControlKind::Volume(_)));
+        assert!(
+            control_at(&controls, -8, 301, 24).is_some(),
+            "half a margin past the end"
+        );
+        assert!(control_at(&controls, -30, 301, 24).is_none());
+        // Where along the bar: clamped at the ends.
+        assert_eq!(gauge_fraction(&gauge, 100, 301), 0.5);
+        assert_eq!(gauge_fraction(&gauge, -8, 301), 0.0);
+        assert_eq!(gauge_fraction(&gauge, 250, 301), 1.0);
+        // The grown box of a light is centred on it.
+        assert_eq!(controls[0].grown(24), ((81, 81), (48, 48)));
+    }
 }

@@ -1189,6 +1189,15 @@ pub struct IndicatorsSpec {
     /// override it either way.
     #[serde(default)]
     pub interactive: bool,
+    /// `touch.margin`: half the least size of a control's touch region,
+    /// in pixels; a control smaller than twice this grows to it, centred.
+    /// 24 unless the theme says; 0 keeps every control to its drawn box.
+    #[serde(default = "default_touch_margin")]
+    pub touch_margin: u32,
+}
+
+fn default_touch_margin() -> u32 {
+    24
 }
 
 /// A button a theme draws: a picture at a position, or a bare region with
@@ -1534,6 +1543,9 @@ pub fn meter_indicators(meters_txt: &str, meter: &str, theme_dir: &str) -> Optio
     let spec = IndicatorsSpec {
         buttons,
         interactive: truthy(get("interactive")),
+        touch_margin: get("touch.margin")
+            .and_then(|v| v.trim().parse().ok())
+            .unwrap_or(24),
         volume: gauge(
             "volume",
             GaugeStyle::Numeric,
@@ -4114,12 +4126,14 @@ mod interactive_tests {
         );
         assert!(play.image.is_empty());
         let plain = meter_indicators(
-            "[m]\nconfig.extend = True\nvolume.pos = 1,1\nvolume.size = 10,10\n",
+            "[m]\nconfig.extend = True\ntouch.margin = 0\nvolume.pos = 1,1\nvolume.size = 10,10\n",
             "m",
             "/t",
         )
         .expect("extended");
+        assert_eq!(spec.touch_margin, 24, "the usual finger");
         assert!(!plain.interactive);
+        assert_eq!(plain.touch_margin, 0);
         assert!(plain.buttons.is_empty());
         assert_eq!(ButtonAction::parse("Prev"), Some(ButtonAction::Previous));
         assert_eq!(ButtonAction::parse("shuffle"), Some(ButtonAction::Random));
