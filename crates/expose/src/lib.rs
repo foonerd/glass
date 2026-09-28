@@ -2349,10 +2349,10 @@ pub fn read_icon(path: &Path, w: u32, h: u32, tint: Option<[u8; 3]>) -> Option<F
         let scale = (w as f32 / sw).min(h as f32 / sh);
         let pw = ((sw * scale).round() as u32).clamp(1, w);
         let ph = ((sh * scale).round() as u32).clamp(1, h);
-        let mut pixmap = tiny_skia::Pixmap::new(pw, ph)?;
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(pw, ph)?;
         resvg::render(
             &tree,
-            tiny_skia::Transform::from_scale(scale, scale),
+            resvg::tiny_skia::Transform::from_scale(scale, scale),
             &mut pixmap.as_mut(),
         );
         let mut rgba = Vec::with_capacity((pw * ph * 4) as usize);
@@ -3896,63 +3896,325 @@ struct Area {
     reversed: bool,
 }
 
-/// The paint for a channel's bars: the palette, along the area or across it.
-fn palette_shader<'a>(
-    palette: &lead::Palette,
-    area: &Area,
-    horizontal: bool,
-    alpha: f32,
-) -> Option<tiny_skia::Shader<'a>> {
-    use tiny_skia::{Color, GradientStop, LinearGradient, Point, SpreadMode, Transform};
-    let n = palette.stops.len();
-    if n == 0 {
-        return None;
-    }
-    let colour =
-        |c: [u8; 4]| Color::from_rgba8(c[0], c[1], c[2], (c[3] as f32 * alpha).round() as u8);
-    if n == 1 {
-        return Some(tiny_skia::Shader::SolidColor(colour(
-            palette.stops[0].color,
-        )));
-    }
-    let stops: Vec<GradientStop> = (0..n)
-        .map(|i| {
-            let pos = palette.stops[i]
-                .pos
-                .unwrap_or(i as f32 / (n - 1) as f32)
-                .clamp(0.0, 1.0);
-            GradientStop::new(pos, colour(palette.stops[i].color))
-        })
-        .collect();
-    let (start, end) = if horizontal {
-        let (a, b) = (
-            Point::from_xy(area.x, area.y),
-            Point::from_xy(area.x + area.w, area.y),
-        );
-        if area.reversed {
-            (b, a)
-        } else {
-            (a, b)
-        }
-    } else if area.hanging {
-        (
-            Point::from_xy(area.x, area.y),
-            Point::from_xy(area.x, area.y + area.h),
-        )
-    } else {
-        (
-            Point::from_xy(area.x, area.y + area.h),
-            Point::from_xy(area.x, area.y),
-        )
-    };
-    LinearGradient::new(start, end, stops, SpreadMode::Pad, Transform::identity())
+/// What a fill is coloured with: one colour, a colour per row of the box
+/// (the palette along the bars), or a colour per column (across them).
+enum Ink<'a> {
+    Solid([u8; 4]),
+    Rows(&'a [[u8; 4]]),
+    Cols(&'a [[u8; 4]]),
 }
 
-/// One channel's bars, peaks and LEDs into the pixmap. `span` is the
-/// area the palette runs over, the bars' own area unless a split palette
-/// spans both channels.
+impl Ink<'_> {
+    fn at(&self, x: usize, y: usize) -> [u8; 4] {
+        match self {
+            Ink::Solid(c) => *c,
+            Ink::Rows(rows) => rows[y.min(rows.len().saturating_sub(1))],
+            Ink::Cols(cols) => cols[x.min(cols.len().saturating_sub(1))],
+        }
+    }
+}
+
+/// `c` at `a` (0 to 255) over one pixel, straight alpha: opaque copies.
+#[inline]
+fn blend_px(d: &mut [u8], c: [u8; 4], a: u32) {
+    if a == 0 {
+        return;
+    }
+    if a >= 255 {
+        d[0] = c[0];
+        d[1] = c[1];
+        d[2] = c[2];
+        d[3] = 255;
+        return;
+    }
+    let da = d[3] as u32;
+    let oa = a + (da * (255 - a) + 127) / 255;
+    if oa == 0 {
+        return;
+    }
+    let keep = da * (255 - a);
+    for k in 0..3 {
+        let num = c[k] as u32 * a * 255 + d[k] as u32 * keep;
+        d[k] = (num / (oa * 255)) as u8;
+    }
+    d[3] = oa as u8;
+}
+
+/// A run of one colour at one alpha: the blend's factors worked out once,
+/// so a pixel on the background it was worked out for costs multiplies
+/// and shifts, and only a pixel already painted takes the general path.
+fn blend_run(px: &mut [u8], c: [u8; 4], a: u32, under: u32) {
+    if a == 0 {
+        return;
+    }
+    if a >= 255 {
+        for d in px.as_chunks_mut::<4>().0 {
+            d[0] = c[0];
+            d[1] = c[1];
+            d[2] = c[2];
+            d[3] = 255;
+        }
+        return;
+    }
+    let oa = a + (under * (255 - a) + 127) / 255;
+    let keep = under * (255 - a);
+    let inv = (1u64 << 24) / u64::from(oa.max(1) * 255);
+    let oa8 = oa.min(255) as u8;
+    for d in px.as_chunks_mut::<4>().0 {
+        if d[3] as u32 == under {
+            for k in 0..3 {
+                let num = u64::from(c[k] as u32 * a * 255 + d[k] as u32 * keep);
+                d[k] = ((num * inv) >> 24).min(255) as u8;
+            }
+            d[3] = oa8;
+        } else {
+            blend_px(d, c, a);
+        }
+    }
+}
+
+/// `ink` at `alpha` over the pixels of row `y` from `xa` to `xb` (box
+/// pixels, fractional ends covering their pixel in part), inside `clip`.
+/// The run between the ends is filled without per-pixel arithmetic on the
+/// coverage; a colour per row is looked up once for the span.
+fn fill_span(
+    out: &mut Frame,
+    clip: (i32, i32, i32, i32),
+    y: i32,
+    xa: f32,
+    xb: f32,
+    ink: &Ink,
+    alpha: f32,
+) {
+    if y < clip.1 || y >= clip.3 || alpha <= 0.0 || xb <= xa {
+        return;
+    }
+    let (cx0, cx1) = (clip.0.max(0) as f32, clip.2.min(out.width as i32) as f32);
+    let (xa, xb) = (xa.max(cx0), xb.min(cx1));
+    if xb <= xa {
+        return;
+    }
+    let width = out.width as usize;
+    let row = y as usize * width;
+    let span_alpha = (alpha * 255.0).round().clamp(0.0, 255.0) as u32;
+    let x0 = xa.ceil() as usize;
+    let x1 = (xb.floor() as usize).min(width);
+    // The partial pixel at the left end.
+    if x0 > 0 && (x0 as f32) > xa {
+        edge_px(
+            out,
+            ink,
+            row,
+            y as usize,
+            x0 - 1,
+            span_alpha,
+            x0 as f32 - xa,
+        );
+    }
+    if x0 < x1 {
+        match ink {
+            Ink::Solid(_) | Ink::Rows(_) => {
+                let c = ink.at(x0, y as usize);
+                let a = ((c[3] as u32 * span_alpha) + 127) / 255;
+                let under = out.rgba[(row + x0) * 4 + 3] as u32;
+                blend_run(&mut out.rgba[(row + x0) * 4..(row + x1) * 4], c, a, under);
+            }
+            Ink::Cols(_) => {
+                for x in x0..x1 {
+                    let c = ink.at(x, y as usize);
+                    let a = ((c[3] as u32 * span_alpha) + 127) / 255;
+                    let at = (row + x) * 4;
+                    blend_px(&mut out.rgba[at..at + 4], c, a);
+                }
+            }
+        }
+    }
+    // The partial pixel at the right end.
+    if xb > x1 as f32 && x1 < width {
+        edge_px(out, ink, row, y as usize, x1, span_alpha, xb - x1 as f32);
+    }
+}
+
+/// One pixel at an end of a span, covered in part.
+fn edge_px(
+    out: &mut Frame,
+    ink: &Ink,
+    row: usize,
+    y: usize,
+    x: usize,
+    span_alpha: u32,
+    cover: f32,
+) {
+    let c = ink.at(x, y);
+    let cover = (cover.clamp(0.0, 1.0) * 255.0).round() as u32;
+    let a = (c[3] as u32 * span_alpha * cover + 127 * 255) / (255 * 255);
+    let at = (row + x) * 4;
+    blend_px(&mut out.rgba[at..at + 4], c, a.min(255));
+}
+
+/// The blend of one alpha over one destination alpha, worked out once.
+struct Factors {
+    a: u32,
+    under: u32,
+    keep: u32,
+    inv: u64,
+    oa8: u8,
+}
+
+fn factors(a: u32, under: u32) -> Factors {
+    let oa = a + (under * (255 - a) + 127) / 255;
+    Factors {
+        a,
+        under,
+        keep: under * (255 - a),
+        inv: (1u64 << 24) / u64::from(oa.max(1) * 255),
+        oa8: oa.min(255) as u8,
+    }
+}
+
+/// One pixel with the factors: multiplies and a shift on the destination
+/// alpha they were made for, the general path on any other.
+#[inline]
+fn blend_fast(d: &mut [u8], c: [u8; 4], f: &Factors) {
+    if f.a >= 255 {
+        d[0] = c[0];
+        d[1] = c[1];
+        d[2] = c[2];
+        d[3] = 255;
+        return;
+    }
+    if d[3] as u32 != f.under {
+        blend_px(d, c, f.a);
+        return;
+    }
+    for k in 0..3 {
+        let num = u64::from(c[k] as u32 * f.a * 255 + d[k] as u32 * f.keep);
+        d[k] = ((num * f.inv) >> 24).min(255) as u8;
+    }
+    d[3] = f.oa8;
+}
+
+/// A rectangle of `ink`, its edges snapped to whole pixels, blended over
+/// what is under it: the factors are worked out once per rectangle (per
+/// row for a palette whose stops carry their own alpha), so a bar costs
+/// its pixels and little else.
+fn fill_rect(
+    out: &mut Frame,
+    clip: (i32, i32, i32, i32),
+    xa: f32,
+    ya: f32,
+    xb: f32,
+    yb: f32,
+    ink: &Ink,
+    alpha: f32,
+) {
+    if alpha <= 0.0 || xb <= xa || yb <= ya {
+        return;
+    }
+    let width = out.width as usize;
+    let x0 = (xa.round() as i32).max(clip.0).max(0) as usize;
+    let mut x1 = (xb.round() as i32).min(clip.2).min(width as i32) as usize;
+    if x1 <= x0 {
+        x1 = (x0 + 1).min(width);
+        if x1 <= x0 || (x0 as i32) >= clip.2 {
+            return;
+        }
+    }
+    let y0 = (ya.round() as i32).max(clip.1).max(0) as usize;
+    let y1 = (yb.round() as i32).min(clip.3).min(out.height as i32) as usize;
+    if y1 <= y0 {
+        return;
+    }
+    let span_alpha = (alpha * 255.0).round().clamp(0.0, 255.0) as u32;
+    let under = out.rgba[(y0 * width + x0) * 4 + 3] as u32;
+    match ink {
+        Ink::Solid(c) => {
+            let f = factors(((c[3] as u32 * span_alpha) + 127) / 255, under);
+            if f.a == 0 {
+                return;
+            }
+            for y in y0..y1 {
+                let row = y * width;
+                for d in out.rgba[(row + x0) * 4..(row + x1) * 4]
+                    .as_chunks_mut::<4>()
+                    .0
+                {
+                    blend_fast(d, *c, &f);
+                }
+            }
+        }
+        Ink::Rows(table) => {
+            let mut f = factors(0, under);
+            let mut last_a = u32::MAX;
+            for y in y0..y1 {
+                let c = table[y.min(table.len().saturating_sub(1))];
+                let a = ((c[3] as u32 * span_alpha) + 127) / 255;
+                if a != last_a {
+                    f = factors(a, under);
+                    last_a = a;
+                }
+                if a == 0 {
+                    continue;
+                }
+                let row = y * width;
+                for d in out.rgba[(row + x0) * 4..(row + x1) * 4]
+                    .as_chunks_mut::<4>()
+                    .0
+                {
+                    blend_fast(d, c, &f);
+                }
+            }
+        }
+        Ink::Cols(table) => {
+            for y in y0..y1 {
+                let row = y * width;
+                for x in x0..x1 {
+                    let c = table[x.min(table.len().saturating_sub(1))];
+                    let a = ((c[3] as u32 * span_alpha) + 127) / 255;
+                    let at = (row + x) * 4;
+                    blend_px(&mut out.rgba[at..at + 4], c, a);
+                }
+            }
+        }
+    }
+}
+
+/// The palette as a colour per row of the box for the bars in `area`,
+/// their base the palette's start; or per column when it runs across.
+fn palette_lookup(
+    palette: &lead::Palette,
+    span: &Area,
+    horizontal: bool,
+    box_w: u32,
+    box_h: u32,
+) -> Vec<[u8; 4]> {
+    if horizontal {
+        (0..box_w as usize)
+            .map(|x| {
+                let t = ((x as f32 + 0.5 - span.x) / span.w.max(1.0)).clamp(0.0, 1.0);
+                palette.at(if span.reversed { 1.0 - t } else { t })
+            })
+            .collect()
+    } else {
+        (0..box_h as usize)
+            .map(|y| {
+                let t = if span.hanging {
+                    (y as f32 + 0.5 - span.y) / span.h.max(1.0)
+                } else {
+                    (span.y + span.h - y as f32 - 0.5) / span.h.max(1.0)
+                };
+                palette.at(t.clamp(0.0, 1.0))
+            })
+            .collect()
+    }
+}
+
+/// One channel's bars, peaks and LEDs into the frame. `span` is the area
+/// the palette runs over, the bars' own area unless a split palette spans
+/// both channels.
+#[allow(clippy::too_many_arguments)]
 fn draw_channel(
-    pixmap: &mut tiny_skia::Pixmap,
+    out: &mut Frame,
     look: &lead::Look,
     palette: &lead::Palette,
     area: &Area,
@@ -3961,11 +4223,16 @@ fn draw_channel(
     peaks: &[Peak],
     alpha: f32,
 ) {
-    use tiny_skia::{Color, FillRule, Mask, Paint, PathBuilder, Rect, Stroke, Transform};
     let n = levels.len();
     if n == 0 || area.w < 1.0 || area.h < 1.0 {
         return;
     }
+    let clip = (
+        area.x.floor() as i32,
+        area.y.floor() as i32,
+        (area.x + area.w).ceil() as i32,
+        (area.y + area.h).ceil() as i32,
+    );
     let pitch = area.w / n as f32;
     let space = if look.bar_space < 1.0 {
         pitch * look.bar_space
@@ -3974,45 +4241,34 @@ fn draw_channel(
     }
     .clamp(0.0, (pitch - 1.0).max(0.0));
     let bar_w = (pitch - space).max(1.0);
-    let colour =
-        |c: [u8; 4], a: f32| Color::from_rgba8(c[0], c[1], c[2], (c[3] as f32 * a).round() as u8);
-    // Everything a channel draws is clipped to its area.
-    let clip = Rect::from_xywh(area.x, area.y, area.w, area.h).and_then(|r| {
-        let mut mask = Mask::new(pixmap.width(), pixmap.height())?;
-        mask.fill_path(
-            &PathBuilder::from_rect(r),
-            FillRule::Winding,
-            true,
-            Transform::identity(),
-        );
-        Some(mask)
-    });
-    // The paint of a bar at `alpha`: the palette along the span, one
-    // colour by the bar's place, or one by its level.
-    let bar_paint = |i: usize, level: f32, a: f32| -> Paint<'static> {
-        let mut paint = Paint {
-            anti_alias: true,
-            ..Paint::default()
-        };
-        match look.color_mode {
-            lead::ColorMode::Gradient => {
-                if let Some(shader) = palette_shader(palette, span, look.palette_horizontal, a) {
-                    paint.shader = shader;
+    let lookup = match look.color_mode {
+        lead::ColorMode::Gradient => Some(palette_lookup(
+            palette,
+            span,
+            look.palette_horizontal,
+            out.width,
+            out.height,
+        )),
+        _ => None,
+    };
+    let ink_for = |i: usize, level: f32| -> Ink<'_> {
+        match (look.color_mode, lookup.as_deref()) {
+            (lead::ColorMode::Gradient, Some(table)) => {
+                if look.palette_horizontal {
+                    Ink::Cols(table)
+                } else {
+                    Ink::Rows(table)
                 }
             }
-            lead::ColorMode::Index => {
-                let t = if n > 1 {
-                    i as f32 / (n - 1) as f32
-                } else {
-                    0.0
-                };
-                paint.set_color(colour(palette.at(t), a));
-            }
-            lead::ColorMode::Level => paint.set_color(colour(palette.for_level(level), a)),
+            (lead::ColorMode::Index, _) => Ink::Solid(palette.at(if n > 1 {
+                i as f32 / (n - 1) as f32
+            } else {
+                0.0
+            })),
+            (lead::ColorMode::Level, _) => Ink::Solid(palette.for_level(level)),
+            _ => Ink::Solid([255, 255, 255, 255]),
         }
-        paint
     };
-    // LEDs: the cells a bar is cut into.
     let led_cells = if look.led {
         let wanted = if look.led_max > 0 {
             look.led_max as f32
@@ -4027,6 +4283,7 @@ fn draw_channel(
         let level = raw.clamp(0.0, 1.0);
         let slot = if area.reversed { n - 1 - i } else { i };
         let x = area.x + slot as f32 * pitch + space / 2.0;
+        let (xa, xb) = (x, x + bar_w);
         let bar_alpha = if look.lumi {
             alpha * level
         } else if look.alpha_bars {
@@ -4034,13 +4291,8 @@ fn draw_channel(
         } else {
             alpha * look.fill_alpha
         };
+        let ink = ink_for(i, level);
         let bar_h = if look.lumi { area.h } else { level * area.h };
-        let top = if area.hanging {
-            area.y
-        } else {
-            area.y + area.h - bar_h
-        };
-        let mut body = PathBuilder::new();
         if look.led && led_cells > 0 {
             let cell = area.h / led_cells as f32;
             let gap = (cell * look.led_space.0).min(cell * 0.9);
@@ -4063,81 +4315,82 @@ fn draw_channel(
                         area.y + area.h - k as f32 * cell,
                     )
                 };
-                let Some(r) = Rect::from_ltrb(x + inset, cy0, x + bar_w - inset, cy1) else {
-                    continue;
-                };
                 if look.led_true {
-                    // Each cell in the colour of its own height, as a
-                    // column of coloured lamps.
+                    // Each cell in the colour of its own height, a column of lamps.
                     let t = (k as f32 + 0.5) / led_cells as f32;
-                    let mut lamp = Paint {
-                        anti_alias: true,
-                        ..Paint::default()
-                    };
-                    lamp.set_color(colour(palette.at(t), bar_alpha));
-                    pixmap.fill_rect(r, &lamp, Transform::identity(), clip.as_ref());
+                    let lamp = Ink::Solid(palette.at(t));
+                    fill_rect(
+                        out,
+                        clip,
+                        xa + inset,
+                        cy0,
+                        xb - inset,
+                        cy1,
+                        &lamp,
+                        bar_alpha,
+                    );
                 } else {
-                    body.push_rect(r);
+                    fill_rect(out, clip, xa + inset, cy0, xb - inset, cy1, &ink, bar_alpha);
                 }
             }
         } else if bar_h >= 0.5 {
-            if look.round {
-                // The outer corners rounded, the base overshooting the
-                // area by the radius so only the top shows the rounding.
-                let radius = (bar_w / 2.0).min(bar_h).max(0.5);
-                let (l, r) = (x, x + bar_w);
-                let mut pb = PathBuilder::new();
-                if area.hanging {
-                    let (t, b) = (top - radius, top + bar_h);
-                    pb.move_to(l, t);
-                    pb.line_to(r, t);
-                    pb.line_to(r, b - radius);
-                    pb.quad_to(r, b, r - radius, b);
-                    pb.line_to(l + radius, b);
-                    pb.quad_to(l, b, l, b - radius);
-                } else {
-                    let (t, b) = (top, top + bar_h + radius);
-                    pb.move_to(l, b);
-                    pb.line_to(l, t + radius);
-                    pb.quad_to(l, t, l + radius, t);
-                    pb.line_to(r - radius, t);
-                    pb.quad_to(r, t, r, t + radius);
-                    pb.line_to(r, b);
-                }
-                pb.close();
-                if let Some(path) = pb.finish() {
-                    body.push_path(&path);
-                }
-            } else if let Some(r) = Rect::from_xywh(x, top, bar_w, bar_h) {
-                body.push_rect(r);
-            }
-        }
-        if let Some(path) = body.finish() {
-            let fill = bar_paint(i, level, bar_alpha);
-            if look.outline {
-                let stroke = Stroke {
-                    width: look.line_width.max(1.0),
-                    ..Stroke::default()
-                };
-                if look.fill_alpha > 0.0 {
-                    pixmap.fill_path(
-                        &path,
-                        &fill,
-                        FillRule::Winding,
-                        Transform::identity(),
-                        clip.as_ref(),
-                    );
-                }
-                let line = bar_paint(i, level, alpha);
-                pixmap.stroke_path(&path, &line, &stroke, Transform::identity(), clip.as_ref());
+            let (top, bottom) = if area.hanging {
+                (area.y, area.y + bar_h)
             } else {
-                pixmap.fill_path(
-                    &path,
-                    &fill,
-                    FillRule::Winding,
-                    Transform::identity(),
-                    clip.as_ref(),
-                );
+                (area.y + area.h - bar_h, area.y + area.h)
+            };
+            let (y0, y1) = (top.round() as i32, bottom.round() as i32);
+            let radius = if look.round {
+                (bar_w / 2.0).min(bar_h).max(0.5)
+            } else {
+                0.0
+            };
+            if !look.round && !look.outline {
+                fill_rect(out, clip, xa, top, xb, bottom, &ink, bar_alpha);
+                continue;
+            }
+            for y in y0.max(clip.1)..y1.min(clip.3) {
+                // The outer corners rounded: the top rows narrow by the circle.
+                let from_cap = if area.hanging {
+                    (y1 - 1 - y) as f32 + 0.5
+                } else {
+                    (y - y0) as f32 + 0.5
+                };
+                let inset = if radius > 0.0 && from_cap < radius {
+                    let d = radius - from_cap;
+                    radius - (radius * radius - d * d).max(0.0).sqrt()
+                } else {
+                    0.0
+                };
+                if look.outline {
+                    let lw = look.line_width.max(1.0);
+                    let edge = from_cap < lw
+                        || (if area.hanging {
+                            (y - y0) as f32
+                        } else {
+                            (y1 - 1 - y) as f32
+                        } + 0.5)
+                            < lw;
+                    if edge {
+                        fill_span(out, clip, y, xa + inset, xb - inset, &ink, alpha);
+                    } else {
+                        if look.fill_alpha > 0.0 {
+                            fill_span(
+                                out,
+                                clip,
+                                y,
+                                xa + inset + lw,
+                                xb - inset - lw,
+                                &ink,
+                                bar_alpha,
+                            );
+                        }
+                        fill_span(out, clip, y, xa + inset, xa + inset + lw, &ink, alpha);
+                        fill_span(out, clip, y, xb - inset - lw, xb - inset, &ink, alpha);
+                    }
+                } else {
+                    fill_span(out, clip, y, xa + inset, xb - inset, &ink, bar_alpha);
+                }
             }
         }
         // The peak: a thin mark at the peak's height, fading if it fades.
@@ -4151,23 +4404,16 @@ fn draw_channel(
                     area.y + area.h - ph
                 };
                 let mark_alpha = alpha * (1.0 - peak.fade).clamp(0.0, 1.0);
-                let mut mark = Paint {
-                    anti_alias: true,
-                    ..Paint::default()
-                };
-                let c = match look.color_mode {
-                    lead::ColorMode::Gradient => palette.at(peak.level.clamp(0.0, 1.0)),
-                    lead::ColorMode::Index => palette.at(if n > 1 {
+                let mark = match look.color_mode {
+                    lead::ColorMode::Gradient => Ink::Solid(palette.at(peak.level.clamp(0.0, 1.0))),
+                    lead::ColorMode::Index => Ink::Solid(palette.at(if n > 1 {
                         i as f32 / (n - 1) as f32
                     } else {
                         0.0
-                    }),
-                    lead::ColorMode::Level => palette.for_level(peak.level),
+                    })),
+                    lead::ColorMode::Level => Ink::Solid(palette.for_level(peak.level)),
                 };
-                mark.set_color(colour(c, mark_alpha));
-                if let Some(r) = Rect::from_xywh(x, py, bar_w, 2.0) {
-                    pixmap.fill_rect(r, &mark, Transform::identity(), clip.as_ref());
-                }
+                fill_rect(out, clip, xa, py, xb, py + 2.0, &mark, mark_alpha);
             }
         }
     }
@@ -4235,32 +4481,35 @@ fn push_areas<'p>(
 
 /// The analyser's box drawn into `out`: the background at its alpha, the
 /// channels laid out as the look says, mirrored and reflected as asked.
+/// Straight into the frame's pixels: a bar is a run of rows filled from a
+/// palette lookup, so a frame costs the pixels it covers and no more.
 fn render_analyser(
     a: &plot::Analyser,
     smoothed: &[Vec<f32>; 2],
     peaks: &[Vec<Peak>; 2],
     out: &mut Frame,
 ) {
-    use tiny_skia::{Color, Pixmap, PixmapPaint, Transform};
     let (w, h) = (a.w.max(1), a.h.max(1));
-    let Some(mut pixmap) = Pixmap::new(w, h) else {
-        return;
-    };
     let look = &a.look;
-    pixmap.fill(
-        Color::from_rgba(0.0, 0.0, 0.0, look.bgr_alpha.clamp(0.0, 1.0)).unwrap_or(Color::BLACK),
-    );
+    out.width = w;
+    out.height = h;
+    let bg = (look.bgr_alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
+    out.rgba.clear();
+    out.rgba.resize((w * h * 4) as usize, 0);
+    if bg > 0 {
+        for px in out.rgba.as_chunks_mut::<4>().0 {
+            px[3] = bg;
+        }
+    }
     let (fw, fh) = (w as f32, h as f32);
-    // The reflection takes the bottom share of the box.
     let bars_h = if look.reflex > 0.0 {
-        fh * (1.0 - look.reflex)
+        (fh * (1.0 - look.reflex)).max(1.0)
     } else {
         fh
     };
     let stereo = a.stereo && !a.levels[1].is_empty();
     let left = look.palette_left.as_ref().unwrap_or(&look.palette);
     let right = look.palette_right.as_ref().unwrap_or(&look.palette);
-    // Where each channel draws, by the layout; a mono bank draws once.
     let mut areas: Vec<(usize, Area, &lead::Palette, f32)> = Vec::new();
     let half_w = fw / 2.0;
     let mirror = look.mirror;
@@ -4345,7 +4594,7 @@ fn render_analyser(
             }
         };
         draw_channel(
-            &mut pixmap,
+            out,
             look,
             palette,
             area,
@@ -4356,53 +4605,46 @@ fn render_analyser(
         );
     }
     if look.reflex > 0.0 {
-        // The bars' picture flipped under them, dimmed and faded.
-        let reflex_h = fh - bars_h;
-        if let Some(mut source) = Pixmap::new(w, bars_h.max(1.0) as u32) {
-            source.fill(Color::TRANSPARENT);
-            let paint = PixmapPaint {
-                opacity: 1.0,
-                ..PixmapPaint::default()
-            };
-            source.draw_pixmap(0, 0, pixmap.as_ref(), &paint, Transform::identity(), None);
-            // Brightness: multiply the colours.
-            if (look.reflex_bright - 1.0).abs() > 1e-3 {
-                let k = look.reflex_bright.clamp(0.0, 4.0);
-                for px in source.pixels_mut() {
-                    let c = px.demultiply();
-                    let m = |v: u8| ((v as f32 * k).round().clamp(0.0, 255.0)) as u8;
-                    *px = tiny_skia::ColorU8::from_rgba(
-                        m(c.red()),
-                        m(c.green()),
-                        m(c.blue()),
-                        c.alpha(),
-                    )
-                    .premultiply();
-                }
-            }
-            let scale_y = if look.reflex_fit {
-                reflex_h / bars_h.max(1.0)
+        // The bars upside down under them, dimmed and faded: each row of
+        // the reflection reads one row of the bars, squeezed to fit or not.
+        let reflex_h = (fh - bars_h).max(0.0) as usize;
+        let bars_rows = bars_h.round().max(1.0) as usize;
+        let alpha_255 = (look.reflex_alpha.clamp(0.0, 1.0) * 255.0).round() as u32;
+        let bright_255 = (look.reflex_bright.clamp(0.0, 4.0) * 255.0).round() as u32;
+        let width = w as usize;
+        for ry in 0..reflex_h {
+            let source = if look.reflex_fit {
+                ((ry as f32 + 0.5) / reflex_h.max(1) as f32 * bars_rows as f32) as usize
             } else {
-                1.0
+                ry
             };
-            let transform =
-                Transform::from_scale(1.0, -scale_y).post_translate(0.0, bars_h + reflex_h);
-            let paint = PixmapPaint {
-                opacity: look.reflex_alpha.clamp(0.0, 1.0),
-                quality: tiny_skia::FilterQuality::Bilinear,
-                ..PixmapPaint::default()
-            };
-            pixmap.draw_pixmap(0, 0, source.as_ref(), &paint, transform, None);
+            if source >= bars_rows {
+                break;
+            }
+            let src_row = (bars_rows - 1 - source) * width * 4;
+            let dst_row = (bars_rows + ry) * width * 4;
+            if dst_row + width * 4 > out.rgba.len() {
+                break;
+            }
+            for x in 0..width {
+                let sa = out.rgba[src_row + x * 4 + 3] as u32;
+                // The background is under every pixel already: only what the
+                // bars added above the background goes into the reflection.
+                let added = sa.saturating_sub(bg as u32);
+                let a = (added * alpha_255 + 127) / 255;
+                if a == 0 {
+                    continue;
+                }
+                let c = [
+                    ((out.rgba[src_row + x * 4] as u32 * bright_255) / 255).min(255) as u8,
+                    ((out.rgba[src_row + x * 4 + 1] as u32 * bright_255) / 255).min(255) as u8,
+                    ((out.rgba[src_row + x * 4 + 2] as u32 * bright_255) / 255).min(255) as u8,
+                    255,
+                ];
+                let at = dst_row + x * 4;
+                blend_px(&mut out.rgba[at..at + 4], c, a.min(255));
+            }
         }
-    }
-    out.width = w;
-    out.height = h;
-    out.rgba.clear();
-    out.rgba.reserve((w * h * 4) as usize);
-    for px in pixmap.pixels() {
-        let c = px.demultiply();
-        out.rgba
-            .extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
     }
 }
 
@@ -7294,6 +7536,35 @@ mod analyser_tests {
             (0..100).all(|y| pixel(picture, 5, y)[..3] == [0, 0, 0]),
             "the mark rests on the empty bar"
         );
+    }
+
+    /// The worst of the reference theme's looks, 256 bands of two channels
+    /// as full-height luminance bars in a 1200 by 420 box: a frame must
+    /// cost a few milliseconds, not tens, or a Pi cannot keep 60 a second.
+    #[test]
+    fn a_dense_luminance_frame_costs_milliseconds() {
+        let look = Look {
+            lumi: true,
+            bar_space: 0.0,
+            layout: Layout::DualHorizontal,
+            smoothing: 0.6,
+            peaks: false,
+            ..Look::default()
+        };
+        let left: Vec<f32> = (0..256).map(|i| ((i * 37) % 100) as f32 / 100.0).collect();
+        let right: Vec<f32> = (0..256).map(|i| ((i * 53) % 100) as f32 / 100.0).collect();
+        let a = analyser(look, 1200, 420, left, right);
+        let mut motion = AnalyserMotion::default();
+        motion.advance(&a, 0);
+        let started = std::time::Instant::now();
+        let frames = 60;
+        for i in 1..=frames {
+            motion.advance(&a, i * 16);
+        }
+        let per_frame = started.elapsed().as_secs_f64() * 1000.0 / frames as f64;
+        eprintln!("a dense luminance frame: {per_frame:.2} ms");
+        let bound = if cfg!(debug_assertions) { 100.0 } else { 8.0 };
+        assert!(per_frame < bound, "a frame took {per_frame:.1} ms");
     }
 
     #[test]

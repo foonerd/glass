@@ -2157,6 +2157,7 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         skin.artist = texts.artist;
         skin.album = texts.album;
         skin.sample = texts.sample;
+        skin.volume_value = texts.volume_value;
         let font_path = current_value(&text, "font.path").unwrap_or_default();
         let mut time = texts.time;
         let mut time_elapsed = texts.time_elapsed;

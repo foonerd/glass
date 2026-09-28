@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.49] - 2026-09-28
+
+The analyser draws its bars straight into the frame from a palette lookup, forty times cheaper than the shapes of 0.7.48: a dense look of 256 bands on two channels costs a couple of milliseconds a frame instead of a whole core. Its level range now defaults to -60 to 0 dB, the bank's own scale, where a full-scale sine reads 0 dB in its band. A theme may write the volume as a number beside its gauge with `volume.value.pos`.
+
 ## [0.7.48] - 2026-09-28
 
 The analyser: a spectrum section with `style = bars` is drawn as anti-aliased bars from a palette, with peaks that hold and fall or fade, in one of four channel layouts (single, dual-vertical, dual-horizontal, dual-combined), mirrored, reflected, as LEDs, as full-height luminance bars, as outlines, rounded, with each bar's opacity its level, coloured along the bar, by its place or by its level, over a background of any alpha, weighted by the A, B, C, D or ITU-R 468 curve, on a decibel or a linear scale over any frequency range. The keys follow audioMotion-analyzer's controls, name for name with the same defaults, so a configuration ports across; ten palettes ship by name and a theme writes its own as stops. A development reference theme in the catalog, `1280x720_glass_analyser`, shows four looks with the cover, a fanart slot, the track texts and time, the progress and volume sliders and the buttons, for authors to start from.

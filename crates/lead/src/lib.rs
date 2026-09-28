@@ -1278,7 +1278,10 @@ pub struct Look {
     pub style: LookStyle,
     /// `range`: the bands drawn, in hertz.
     pub range: (f32, f32),
-    /// `level.range`: the decibels of an empty and a full bar.
+    /// `level.range`: the decibels of an empty and a full bar. The bank's
+    /// bands read hotter than a browser's single bins, a full-scale sine
+    /// reading 0 dB in its band, so the default is -60 to 0 rather than
+    /// audioMotion's -85 to -25.
     pub level_range: (f32, f32),
     /// `level.scale = linear`: the bar by amplitude, raised to `1 / level.boost`.
     pub level_linear: bool,
@@ -1329,7 +1332,7 @@ impl Default for Look {
         Self {
             style: LookStyle::Bars,
             range: (20.0, 22_000.0),
-            level_range: (-85.0, -25.0),
+            level_range: (-60.0, 0.0),
             level_linear: false,
             level_boost: 1.0,
             weighting: Weighting::None,
@@ -2589,6 +2592,8 @@ pub struct MeterTexts {
     pub next_artist: Option<TextSpec>,
     pub next_album: Option<TextSpec>,
     pub ticker: Option<TickerSpec>,
+    /// `volume.value.pos`: the volume as a number, beside its gauge.
+    pub volume_value: Option<TextSpec>,
 }
 
 /// One snapshot of the outside world. `plot` turns it into a scene.
@@ -2637,6 +2642,9 @@ pub struct SkinDesc {
     pub album: Option<TextSpec>,
     #[serde(default)]
     pub sample: Option<TextSpec>,
+    /// The volume as a number, beside its gauge.
+    #[serde(default)]
+    pub volume_value: Option<TextSpec>,
     #[serde(default)]
     pub time: Option<TextSpec>,
     #[serde(default)]
@@ -2717,6 +2725,7 @@ impl SkinDesc {
             artist: None,
             album: None,
             sample: None,
+            volume_value: None,
             time: None,
             art: None,
             type_area: None,
@@ -3474,6 +3483,37 @@ pub fn meter_texts(
             font_file,
         })
     };
+    // A number placed by the theme: the volume beside its gauge. `x,y[,style]`,
+    // its own size, colour and width, centred as the meter's texts are.
+    let value_field = |prefix: &str| -> Option<TextSpec> {
+        let pos = get(&format!("{prefix}.pos"))?;
+        let mut parts = pos.split(',');
+        let x = parts.next()?.trim().parse().ok()?;
+        let y = parts.next()?.trim().parse().ok()?;
+        let style = match parts.next().map(|w| w.trim().to_ascii_lowercase()) {
+            Some(word) if word == "bold" => TextStyle::Bold,
+            Some(word) if word == "regular" => TextStyle::Regular,
+            Some(word) if word == "digi" => TextStyle::Digi,
+            _ => TextStyle::Light,
+        };
+        Some(TextSpec {
+            x,
+            y,
+            style,
+            size: number(&format!("{prefix}.fontsize"), size_of(style)),
+            color: get(&format!("{prefix}.color"))
+                .and_then(color_triplet)
+                .unwrap_or(font_color),
+            max_width: number(&format!("{prefix}.maxwidth"), 0),
+            align,
+            speed: 0.0,
+            font_file: get(&format!("{prefix}.font"))
+                .unwrap_or("")
+                .trim()
+                .to_string(),
+        })
+    };
+    let volume_value = value_field("volume.value");
     let time = time_field("remaining", font_color);
     let time_color = time.as_ref().map(|t| t.color).unwrap_or(font_color);
     let time_elapsed = time_field("elapsed", time_color);
@@ -3566,6 +3606,7 @@ pub fn meter_texts(
             Some(("playinfo.album.maxwidth", "album")),
         ),
         sample,
+        volume_value,
         time,
         time_elapsed,
         time_total,
@@ -5068,7 +5109,7 @@ mod look_tests {
         assert_eq!(defaults.palette.name, "classic");
         assert_eq!(defaults.peak_hold_ms, 500);
         assert_eq!(defaults.gravity, 3.8);
-        assert_eq!(defaults.level_range, (-85.0, -25.0));
+        assert_eq!(defaults.level_range, (-60.0, 0.0));
     }
 
     #[test]
