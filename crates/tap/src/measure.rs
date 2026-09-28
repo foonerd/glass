@@ -6,8 +6,11 @@
 
 use std::path::{Path, PathBuf};
 
+use bank::Demand;
+
 use crate::analysis::Analyser;
-use crate::ring::{Frame, Writer, MAX_CHANNELS};
+use crate::demand::Watch;
+use crate::ring::{now_ns, Frame, Writer, MAX_CHANNELS};
 use crate::sample::Layout;
 use crate::{dop, dsd};
 
@@ -19,13 +22,13 @@ pub struct Shape {
     pub layout: Layout,
 }
 
-/// How the measurements are made and where they go.
+/// How the measurements are made and where they go. What the bank looks
+/// like is the demand's, read from its file beside the rings.
 #[derive(Clone, Debug)]
 pub struct Settings {
     /// The tag in the ring's file name.
     pub ring: String,
-    pub fft_size: usize,
-    /// Frames between measurements; zero means half the FFT.
+    /// Frames between measurements; zero means the bank's own hop.
     pub hop: usize,
     /// Hops the ring keeps.
     pub slots: usize,
@@ -35,7 +38,6 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             ring: "glasstap".to_string(),
-            fft_size: 2048,
             hop: 0,
             slots: 64,
         }
@@ -46,6 +48,9 @@ pub struct Measure {
     settings: Settings,
     dir: PathBuf,
     shape: Option<Shape>,
+    /// The demand in force and its file, looked at as the stream plays.
+    demand: Demand,
+    watch: Watch,
     analyser: Option<Analyser>,
     writer: Option<Writer>,
     /// The frame published for one-bit audio: a level, no spectrum.
@@ -59,9 +64,13 @@ pub struct Measure {
 impl Measure {
     /// Rings go under `dir`.
     pub fn new(dir: impl Into<PathBuf>, settings: Settings) -> Self {
+        let dir: PathBuf = dir.into();
+        let watch = Watch::new(&dir);
         Self {
             settings,
-            dir: dir.into(),
+            demand: watch.current(),
+            watch,
+            dir,
             shape: None,
             analyser: None,
             writer: None,
@@ -74,6 +83,11 @@ impl Measure {
 
     pub fn shape(&self) -> Option<Shape> {
         self.shape
+    }
+
+    /// The demand the bank is measured to.
+    pub fn demand(&self) -> Demand {
+        self.demand
     }
 
     /// The ring's file while a stream has one.
@@ -92,14 +106,12 @@ impl Measure {
         let Some(s) = shape else {
             return Ok(());
         };
-        let hop = if self.settings.hop == 0 {
-            self.settings.fft_size / 2
-        } else {
-            self.settings.hop
-        };
-        let analyser = Analyser::new(s.rate, s.channels, self.settings.fft_size, hop);
+        let analyser = Analyser::new(s.rate, s.channels, self.demand, self.settings.hop);
         self.quiet = Frame {
             spectrum: [vec![0.0; analyser.bins()], vec![0.0; analyser.bins()]],
+            hold: [vec![0.0; analyser.bins()], vec![0.0; analyser.bins()]],
+            scale: analyser.demand().scale,
+            window: analyser.fft_size() as u32,
             ..Frame::default()
         };
         self.group = if s.layout.is_dsd() {
@@ -112,7 +124,7 @@ impl Measure {
             &self.settings.ring,
             s.rate,
             s.channels,
-            analyser.fft_size() as u32,
+            analyser.demand(),
             analyser.hop() as u32,
             self.settings.slots,
         );
@@ -135,7 +147,18 @@ impl Measure {
 
     /// Frames between measurements for the stream on hand.
     pub fn hop(&self) -> usize {
-        self.analyser.as_ref().map(|a| a.hop()).unwrap_or(1024)
+        self.analyser.as_ref().map(|a| a.hop()).unwrap_or(bank::HOP)
+    }
+
+    /// Look at the demand file: a new demand measures the stream anew,
+    /// into a new ring of the new shape.
+    pub fn follow_demand(&mut self) -> bool {
+        let Some(demand) = self.watch.changed(now_ns()) else {
+            return false;
+        };
+        self.demand = demand;
+        let _ = self.set_shape(self.shape);
+        true
     }
 
     /// Measure `samples`, interleaved as the stream's shape says, and hand
@@ -143,6 +166,7 @@ impl Measure {
     /// frames had gone in when the hop completed, so the caller can place
     /// the hop in time. Frames are words for one-bit audio.
     pub fn take(&mut self, samples: &[i16], sink: &mut dyn FnMut(&Frame, usize)) {
+        self.follow_demand();
         let (Some(shape), Some(analyser)) = (self.shape, self.analyser.as_mut()) else {
             return;
         };
@@ -215,7 +239,6 @@ mod tests {
     fn settings() -> Settings {
         Settings {
             ring: "test".into(),
-            fft_size: 256,
             hop: 128,
             slots: 8,
         }

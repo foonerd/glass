@@ -4,7 +4,7 @@ VU meters, spectrum analysers, turntables and cassette decks on a Volumio player
 
 <p align="center"><img src="https://raw.githubusercontent.com/wiki/foonerd/glass/images/display-turntable.png" width="720" alt="Glass on a player's screen"></p>
 
-The workspace version is **0.7.46**.
+The workspace version is **0.7.47**.
 
 ## Get it
 
@@ -49,7 +49,8 @@ flowchart LR
 | `expose` | `crates/expose` | Rasters a scene: pictures, fonts, needles, bars, turning pictures, fades; only the boxes that changed. |
 | `controls` | `crates/controls` | A meter's controls under a finger: regions, taps and drags, what they ask of the player; the display, the remotes and the browser module share it. |
 | `pane` | `crates/pane` | The window: SDL2, full screen or windowed on a chosen screen, a streaming texture, the keys and the pointer in the frame's pixels. |
-| `tap` and `glasstap` | `crates/tap`, `bins/glasstap` | The ALSA PCM plugin that heads the player's chain, passes every stream through byte for byte, PCM, DoP and native DSD, and measures it on its own thread into the ring. |
+| `tap` and `glasstap` | `crates/tap`, `bins/glasstap` | The ALSA PCM plugin that heads the player's chain, passes every stream through byte for byte, PCM, DoP and native DSD, and measures it on its own thread into the ring, as the demand of the theme on show asks. |
+| `bank` | `crates/bank` | The spectrum analyser: an overlapped FFT projected onto up to 256 bands per channel on a log, mel or linear scale, with a peak hold and onsets. Apache-2.0, a port of the evo framework's terminus analyser. |
 | `glass` | `bins/glass` | The display: reads the ring and the player's state, draws at the frame rate, uploads when `DISPLAY` is set. As `glass --remote`, the same display on another machine, with its own settings page. |
 | `glass-serve` | `bins/glass-serve` | Sends the ring's frames to subscribed remotes over UDP, and to browser pages as an event stream on a local socket. |
 | `glass-face` | `bins/glass-face` | The pipeline as a WebAssembly module: the manager's Face tab draws the meters in a browser with it. |

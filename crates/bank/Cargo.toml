@@ -1,0 +1,17 @@
+[package]
+name = "bank"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license = "Apache-2.0"
+description = "The spectrum bank: an overlapped FFT projected onto the bands a theme asks for"
+
+[dependencies]
+rustfft = "6.2"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+serde_json = "1"
+
+[lints]
+workspace = true

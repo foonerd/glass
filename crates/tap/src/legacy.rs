@@ -1,7 +1,10 @@
 //! The two FIFO records the previous tap wrote, made from this tap's
 //! measurements so both can run side by side: a meter record of two 16-bit
 //! levels with the old decay, and a spectrum record of `size` 32-bit values
-//! on the old logarithmic bins with the old smoothing.
+//! on the old logarithmic bins with the old smoothing. The same regrouping
+//! gives a theme of the previous engine its bars from the bank.
+
+use bank::Scale;
 
 /// The meter as it was: per update, the peak of the update's samples on the
 /// 16-bit scale, falling no faster than `decay_ms` allows from full scale.
@@ -40,27 +43,35 @@ impl Meter {
     }
 }
 
-/// The spectrum as it was: `size` bins spaced logarithmically over the
-/// first 256 of a 512-point FFT's outputs, each the summed magnitude of its
-/// FFT bins on the 16-bit scale, smoothed against the last value, and
-/// squeezed with a logarithm.
-pub struct Spectrum {
+/// The old spectrum's outputs below half the sample rate: a 512-point FFT
+/// gave 256 of them, index `k` standing for `k` times the rate over 512.
+const OLD_OUTPUTS: f64 = 256.0;
+const OLD_FFT: f64 = 512.0;
+
+/// The spectrum as it was, from the bank: `size` bars spaced
+/// logarithmically over the old 256 outputs, each fed by the bands whose
+/// centre falls in its range, smoothed against the last value, and squeezed
+/// with a logarithm. A full-scale sine in one band reads as the old tap
+/// read it at one output.
+pub struct Regroup {
     size: usize,
     max: u32,
-    log_f: bool,
     log_y: bool,
     smooth: f64,
+    /// Bar edges on the old 257-output scale, 1 through 257.
     edges: Vec<f64>,
     held: Vec<f64>,
+    /// The bands of each bar, for the bank shape and rate last seen.
+    members: Vec<Vec<usize>>,
+    shape: Option<(usize, Scale, u32)>,
 }
 
-impl Spectrum {
+impl Regroup {
     pub fn new(size: usize, max: u32, log_f: bool, log_y: bool, smoothing_factor: u32) -> Self {
         let size = size.clamp(1, 256);
-        // Bin edges on the old 257-output scale, 1 through 257.
         let mut edges = vec![1.0f64; size + 1];
         if log_f {
-            let log_gs = (256f64).log10() / size as f64;
+            let log_gs = OLD_OUTPUTS.log10() / size as f64;
             for m in 1..=size {
                 let mut width = 10f64.powf(log_gs * m as f64) - edges[m - 1];
                 if width < 1.0 {
@@ -69,7 +80,7 @@ impl Spectrum {
                 edges[m] = edges[m - 1] + width;
             }
         } else {
-            let group = (257 / size) as f64;
+            let group = ((OLD_OUTPUTS as usize + 1) / size) as f64;
             for m in 1..=size {
                 edges[m] = edges[m - 1] + group;
             }
@@ -77,11 +88,12 @@ impl Spectrum {
         Self {
             size,
             max,
-            log_f,
             log_y,
             smooth: smoothing_factor.min(100) as f64,
             edges,
             held: vec![0.0; size],
+            members: Vec::new(),
+            shape: None,
         }
     }
 
@@ -89,27 +101,65 @@ impl Spectrum {
         self.size
     }
 
-    /// One record from a spectrum of `magnitudes` (a full-scale sine reading
-    /// 1.0 at its bin) with `bins` values up to half the sample rate.
-    pub fn update(&mut self, magnitudes: &[f32]) -> Vec<u32> {
-        let bins = magnitudes.len().max(1) as f64;
-        // The old scale had 256 outputs below Nyquist; ours has `bins`.
-        let per_old = bins / 256.0;
+    /// Each bar's range in hertz at `rate`, from the old output scale.
+    pub fn bar_ranges_hz(&self, rate: u32) -> Vec<(f32, f32)> {
+        let per_output = rate as f64 / OLD_FFT;
+        (0..self.size)
+            .map(|m| {
+                (
+                    (self.edges[m] * per_output) as f32,
+                    (self.edges[m + 1] * per_output) as f32,
+                )
+            })
+            .collect()
+    }
+
+    /// Which bands feed which bar, worked out once per bank shape: the
+    /// bands whose centre falls in the bar's range, or the band that holds
+    /// the bar's middle when none does.
+    fn place(&mut self, bins: usize, scale: Scale, rate: u32) {
+        if self.shape == Some((bins, scale, rate)) {
+            return;
+        }
+        let edges = bank::edges(bins, scale);
+        let centres = bank::centres(bins, scale);
+        let ranges = self.bar_ranges_hz(rate);
+        self.members = ranges
+            .iter()
+            .map(|&(lo, hi)| {
+                let inside: Vec<usize> = centres
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, c)| **c >= lo && **c < hi)
+                    .map(|(i, _)| i)
+                    .collect();
+                if !inside.is_empty() {
+                    return inside;
+                }
+                let middle = (lo + hi) / 2.0;
+                edges
+                    .iter()
+                    .position(|&(a, b)| middle >= a && middle < b)
+                    .map(|i| vec![i])
+                    .unwrap_or_default()
+            })
+            .collect();
+        self.shape = Some((bins, scale, rate));
+    }
+
+    /// One record from one channel's bands on `scale`, at `rate`.
+    pub fn update(&mut self, bands: &[f32], scale: Scale, rate: u32) -> Vec<u32> {
+        self.place(bands.len().max(1), scale, rate);
         let mut out = Vec::with_capacity(self.size);
         for m in 0..self.size {
-            let from = (self.edges[m] * per_old) as usize;
-            let to = ((self.edges[m + 1] * per_old) as usize)
-                .max(from + 1)
-                .min(magnitudes.len());
-            let mut y = 0.0f64;
-            if from < magnitudes.len() {
-                for v in &magnitudes[from..to] {
-                    // The old value summed |X| / N over the bin, |X| / N being the amplitude over two.
-                    y += *v as f64 * 16383.5;
-                }
-                y /= per_old.max(1.0);
-            }
-            y = y.clamp(0.0, 65535.0);
+            // The bar's energy over its bands, on the old 16-bit scale: a
+            // full-scale sine in one band read 16383.5 at one output.
+            let power: f64 = self.members[m]
+                .iter()
+                .filter_map(|&i| bands.get(i))
+                .map(|v| (*v as f64) * (*v as f64))
+                .sum();
+            let mut y = (power.sqrt() * 16383.5).clamp(0.0, 65535.0);
             y = (self.smooth * self.held[m] + (100.0 - self.smooth) * y) / 100.0;
             self.held[m] = y;
             let mut v = if self.log_y {
@@ -122,9 +172,23 @@ impl Spectrum {
             }
             out.push((v.min(1.0) * self.max as f64) as u32);
         }
-        let _ = self.log_f;
         out
     }
+}
+
+/// A frame of a tap that measured before the bank made to read as the
+/// rest: its raw spectrum projected onto the projector's bands, with the
+/// hold the projector keeps. A frame that is not raw is left alone.
+pub fn project_raw(frame: &mut crate::ring::Frame, projector: &mut bank::Projector) {
+    if !frame.raw {
+        return;
+    }
+    let bank = projector.project([&frame.spectrum[0], &frame.spectrum[1]]);
+    frame.spectrum = [bank.channel(0).to_vec(), bank.channel(1).to_vec()];
+    frame.hold = [bank.channel_hold(0).to_vec(), bank.channel_hold(1).to_vec()];
+    frame.onsets = 0;
+    frame.scale = projector.demand().scale;
+    frame.raw = false;
 }
 
 /// The meter record: the two levels, little-endian 16 bits each.
@@ -157,12 +221,15 @@ mod tests {
     }
 
     #[test]
-    fn a_single_tone_lands_in_one_bin_and_smooths_in() {
-        let mut spectrum = Spectrum::new(20, 100, true, true, 60);
-        assert_eq!(spectrum.size(), 20);
-        let mut magnitudes = vec![0.0f32; 1024];
-        magnitudes[600] = 1.0; // high up: the last few log bins
-        let first = spectrum.update(&magnitudes);
+    fn a_single_tone_lands_in_the_bar_that_holds_it_and_smooths_in() {
+        let mut regroup = Regroup::new(20, 100, true, true, 60);
+        assert_eq!(regroup.size(), 20);
+        // A 256-band log bank with one band lit: the one holding 1 kHz.
+        let centres = bank::centres(256, Scale::Log);
+        let lit_band = centres.iter().position(|c| *c >= 1_000.0).unwrap();
+        let mut bands = vec![0.0f32; 256];
+        bands[lit_band] = 1.0;
+        let first = regroup.update(&bands, Scale::Log, 48_000);
         assert_eq!(first.len(), 20);
         let lit: Vec<usize> = first
             .iter()
@@ -170,18 +237,66 @@ mod tests {
             .filter(|(_, v)| **v > 0)
             .map(|(i, _)| i)
             .collect();
-        assert_eq!(lit.len(), 1, "one bin lit: {first:?}");
-        assert!(lit[0] >= 15, "a high tone lands high: {}", lit[0]);
-        let second = spectrum.update(&magnitudes);
+        assert_eq!(lit.len(), 1, "one bar lit: {first:?}");
+        let (lo, hi) = regroup.bar_ranges_hz(48_000)[lit[0]];
+        assert!(
+            lo <= centres[lit_band] && centres[lit_band] < hi,
+            "the bar {} spans {lo} to {hi} Hz",
+            lit[0]
+        );
+        let second = regroup.update(&bands, Scale::Log, 48_000);
         assert!(
             second[lit[0]] >= first[lit[0]],
             "smoothing rises towards the value"
         );
-        let quiet = spectrum.update(&vec![0.0; 1024]);
+        let quiet = regroup.update(&vec![0.0; 256], Scale::Log, 48_000);
         assert!(
             quiet[lit[0]] < second[lit[0]],
             "and falls when the tone stops"
         );
         assert_eq!(spectrum_record(&[1, 258]).len(), 8);
+    }
+
+    #[test]
+    fn a_raw_frame_is_projected_once_and_a_bank_frame_left_alone() {
+        let mut raw = crate::ring::Frame {
+            spectrum: [vec![0.0; 1024], vec![0.0; 1024]],
+            window: 2048,
+            raw: true,
+            ..Default::default()
+        };
+        raw.spectrum[0][43] = 1.0;
+        let mut projector =
+            bank::Projector::new(48_000, 2048, 1024, bank::Demand::new(64, 2, Scale::Log));
+        project_raw(&mut raw, &mut projector);
+        assert!(!raw.raw);
+        assert_eq!(raw.spectrum[0].len(), 64);
+        assert_eq!(raw.hold[1].len(), 64);
+        assert!(raw.spectrum[0].iter().any(|m| *m > 0.5));
+        assert!(raw.spectrum[1].iter().all(|m| *m == 0.0));
+        let before = raw.clone();
+        project_raw(&mut raw, &mut projector);
+        assert_eq!(raw, before, "a bank frame is not projected again");
+    }
+
+    #[test]
+    fn every_bar_within_the_bank_has_a_band_to_read_whatever_the_bank() {
+        for (bins, scale) in [(32, Scale::Log), (64, Scale::Mel), (256, Scale::Linear)] {
+            let mut regroup = Regroup::new(128, 100, true, false, 0);
+            let bands = vec![1.0f32; bins];
+            let out = regroup.update(&bands, scale, 44_100);
+            let ranges = regroup.bar_ranges_hz(44_100);
+            for (m, value) in out.iter().enumerate() {
+                let (lo, _) = ranges[m];
+                if lo < bank::HIGH_HZ {
+                    assert!(
+                        *value > 0,
+                        "{bins} {scale:?}: bar {m} reads nothing: {out:?}"
+                    );
+                } else {
+                    assert_eq!(*value, 0, "above the bank there is nothing to read");
+                }
+            }
+        }
     }
 }

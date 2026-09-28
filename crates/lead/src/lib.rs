@@ -268,7 +268,21 @@ pub struct Levels {
 /// Latest spectrum frame, raw scope units. Older frames are discarded upstream.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Bins {
+    /// The theme's bars on the pipe scale, as the previous engine's
+    /// spectrum read them, regrouped from the bank.
     pub values: Vec<f32>,
+    /// The bank per channel, a full-scale sine reading 1.0 in its band;
+    /// a one-channel bank fills both.
+    #[serde(default)]
+    pub bank: [Vec<f32>; 2],
+    /// The bank's peak hold per channel, the same layout.
+    #[serde(default)]
+    pub hold: [Vec<f32>; 2],
+    #[serde(default)]
+    pub scale: bank::Scale,
+    /// The onsets of the four band groups, sub-bass lowest.
+    #[serde(default)]
+    pub onsets: u8,
 }
 
 /// Now-playing text and position for the surface.
@@ -925,6 +939,11 @@ pub struct SpectrumSpec {
     pub topping: Option<(u32, u32)>,
     /// `fgr.filename` as a path, or empty.
     pub foreground: String,
+    /// What the section asks of the bank: `bins`, `channels`, `scale` and
+    /// `window`; `None` for a section that says nothing, which is measured
+    /// as its `size` rounded up.
+    #[serde(default)]
+    pub demand: Option<bank::Demand>,
 }
 
 impl SpectrumSpec {
@@ -1086,7 +1105,43 @@ pub fn spectrum_from_theme(
             _ => None,
         },
         foreground: get("fgr.filename").map(path).unwrap_or_default(),
+        demand: section_demand(get("bins"), get("channels"), get("scale"), get("window")),
     })
+}
+
+/// The bank a spectrum section asks for, from its `bins`, `channels`,
+/// `scale` and `window` values; `None` when it names none of them.
+fn section_demand(
+    bins: Option<&str>,
+    channels: Option<&str>,
+    scale: Option<&str>,
+    window: Option<&str>,
+) -> Option<bank::Demand> {
+    let bins = bins.and_then(|v| v.trim().parse::<usize>().ok());
+    let channels = channels.and_then(|v| v.trim().parse::<usize>().ok());
+    let scale = scale.and_then(bank::Scale::parse);
+    let window = window.and_then(|v| v.trim().parse::<usize>().ok());
+    if bins.is_none() && channels.is_none() && scale.is_none() && window.is_none() {
+        return None;
+    }
+    Some(
+        bank::Demand {
+            bins: bins.unwrap_or(bank::MAX_BINS),
+            channels: channels.unwrap_or(2),
+            scale: scale.unwrap_or_default(),
+            window: window.unwrap_or(0),
+        }
+        .clean(),
+    )
+}
+
+/// The bank count a theme of the previous engine is measured at: its bar
+/// count rounded up to the next of 32, 64, 128 and 256.
+pub fn bins_for_legacy(size: usize) -> usize {
+    [32, 64, 128, 256]
+        .into_iter()
+        .find(|b| *b >= size)
+        .unwrap_or(bank::MAX_BINS)
 }
 
 /// How a picture is placed in a box: kept in proportion and centred, or

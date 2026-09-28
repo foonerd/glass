@@ -1,0 +1,10 @@
+bank
+Copyright (c) 2026 Just a Nerd
+
+This crate is a port of the spectrum analyser of the terminus audio
+plugin of the evo framework (org.evoframework.audio.terminus, src/fft.rs),
+by the same author, licensed under the Apache License, Version 2.0. The
+window length became a parameter, the input is taken per channel, the peak
+hold falls by the hop's own time, a band's level is scaled for the Hann
+window's main lobe so a full-scale sine reads one, and the names follow
+this workspace.

@@ -165,6 +165,7 @@ fn scale_frame(frame: &mut Frame, gain: f32) {
     for bin in frame
         .spectrum
         .iter_mut()
+        .chain(frame.hold.iter_mut())
         .flat_map(|channel| channel.iter_mut())
     {
         *bin = (*bin * gain).min(1.0);
@@ -200,6 +201,7 @@ mod tests {
             peak: [peak, peak],
             rms: [peak / 2.0, peak / 2.0],
             spectrum: [vec![bin; 4], vec![bin; 4]],
+            ..Frame::default()
         };
         wire::encode(&frame, 48_000, 2, 0)
     }

@@ -10,9 +10,10 @@
 //! from the thread that writes audio. Every entry point catches a panic,
 //! nothing allocates once the stream is set up, and nothing blocks.
 //!
-//! Configuration keys, in the `pcm_scope` or the `pcm` node: `fft_size`
-//! (default 2048), `hop` (default half the FFT), `ring` (a tag in the
-//! ring's file name) and `slots` (hops kept in the ring, default 64); for
+//! Configuration keys, in the `pcm_scope` or the `pcm` node: `hop`
+//! (default the bank's 1024), `ring` (a tag in the ring's file name) and
+//! `slots` (hops kept in the ring, default 64); `fft_size` is accepted and
+//! no longer read, the bank's window being the demand's (`tap::demand`); for
 //! the scope also `meter` and `spectrum` (the FIFO paths, optional),
 //! `meter_max`, `spectrum_max`, `spectrum_size`, `decay_ms`,
 //! `logarithmic_frequency`, `logarithmic_amplitude` and `smoothing_factor`
@@ -111,7 +112,6 @@ pub(crate) struct Settings {
     log_f: bool,
     log_y: bool,
     smoothing: u32,
-    fft_size: usize,
     hop: usize,
     ring: String,
     slots: usize,
@@ -129,7 +129,6 @@ impl Default for Settings {
             log_f: true,
             log_y: true,
             smoothing: 60,
-            fft_size: 2048,
             hop: 0,
             ring: "glasstap".to_string(),
             slots: 64,
@@ -151,7 +150,9 @@ struct State {
     meter: Option<Fifo>,
     spectrum: Option<Fifo>,
     legacy_meter: legacy::Meter,
-    legacy_spectrum: legacy::Spectrum,
+    legacy_spectrum: legacy::Regroup,
+    /// The demand file beside the rings, followed as the stream plays.
+    watch: tap::demand::Watch,
     staging: [Vec<i16>; 2],
     dop_group: usize,
     /// Set after a panic: the scope does nothing more, the player plays on.
@@ -214,7 +215,7 @@ pub(crate) unsafe fn settings_from(conf: *const snd_config_t) -> Settings {
             "logarithmic_frequency" => s.log_f = integer(node).unwrap_or(1) != 0,
             "logarithmic_amplitude" => s.log_y = integer(node).unwrap_or(1) != 0,
             "smoothing_factor" => s.smoothing = integer(node).unwrap_or(60).clamp(0, 100) as u32,
-            "fft_size" => s.fft_size = integer(node).unwrap_or(2048).clamp(64, 32_768) as usize,
+            "fft_size" => {}
             "hop" => s.hop = integer(node).unwrap_or(0).clamp(0, 32_768) as usize,
             "slots" => s.slots = integer(node).unwrap_or(64).clamp(2, 4096) as usize,
             "ring" => {
@@ -229,9 +230,6 @@ pub(crate) unsafe fn settings_from(conf: *const snd_config_t) -> Settings {
             other => note(&format!("unknown key {other} ignored")),
         }
     }
-    if s.hop == 0 {
-        s.hop = s.fft_size / 2;
-    }
     s
 }
 
@@ -245,24 +243,8 @@ unsafe extern "C" fn enable(scope: *mut snd_pcm_scope_t) -> c_int {
         st.bufsize = snd_pcm_meter_get_bufsize(st.pcm) as usize;
         st.dop_group = tap::dop::group_frames(st.rate);
         st.staging = [vec![0; st.bufsize], vec![0; st.bufsize]];
-        st.analyser = Some(Analyser::new(
-            st.rate,
-            st.channels as u32,
-            st.settings.fft_size,
-            st.settings.hop,
-        ));
-        match Writer::create(
-            Path::new(tap::ring::DIR),
-            &st.settings.ring,
-            st.rate,
-            st.channels as u32,
-            st.settings.fft_size as u32,
-            st.settings.hop as u32,
-            st.settings.slots,
-        ) {
-            Ok(w) => st.writer = Some(w),
-            Err(e) => note(&format!("no ring: {e}")),
-        }
+        let demand = st.watch.current();
+        remeasure(st, demand);
         0
     }));
     match outcome {
@@ -314,8 +296,34 @@ unsafe extern "C" fn update(scope: *mut snd_pcm_scope_t) {
     }
 }
 
+/// The analyser and the ring for a demand, on the stream as it is.
+fn remeasure(st: &mut State, demand: tap::Demand) {
+    let analyser = Analyser::new(st.rate, st.channels as u32, demand, st.settings.hop);
+    match Writer::create(
+        Path::new(tap::ring::DIR),
+        &st.settings.ring,
+        st.rate,
+        st.channels as u32,
+        analyser.demand(),
+        analyser.hop() as u32,
+        st.settings.slots,
+    ) {
+        Ok(w) => st.writer = Some(w),
+        Err(e) => {
+            st.writer = None;
+            note(&format!("no ring: {e}"));
+        }
+    }
+    st.analyser = Some(analyser);
+}
+
 /// One period: copy the new frames out of the meter's buffer, measure them.
 unsafe fn measure(st: &mut State) {
+    if st.analyser.is_some() {
+        if let Some(demand) = st.watch.changed(tap::ring::now_ns()) {
+            remeasure(st, demand);
+        }
+    }
     let pcm = st.pcm;
     let now = snd_pcm_meter_get_now(pcm);
     let boundary = snd_pcm_meter_get_boundary(pcm);
@@ -387,6 +395,9 @@ unsafe fn measure(st: &mut State) {
         frame.peak = [raw[0] as f32 / 32767.0, raw[1] as f32 / 32767.0];
         frame.rms = frame.peak;
         frame.spectrum = [vec![0.0; analyser.bins()], vec![0.0; analyser.bins()]];
+        frame.hold = [vec![0.0; analyser.bins()], vec![0.0; analyser.bins()]];
+        frame.scale = analyser.demand().scale;
+        frame.window = analyser.fft_size() as u32;
         if let Some(w) = st.writer.as_mut() {
             w.publish(&frame);
         }
@@ -395,6 +406,7 @@ unsafe fn measure(st: &mut State) {
     let writer = st.writer.as_mut();
     let spectrum_fifo = st.spectrum.as_mut();
     let legacy_spectrum = &mut st.legacy_spectrum;
+    let rate = st.rate;
     let mut writer = writer;
     let mut spectrum_fifo = spectrum_fifo;
     let chans: [&[i16]; 2] = [left, right];
@@ -403,7 +415,7 @@ unsafe fn measure(st: &mut State) {
             w.publish(frame);
         }
         if let Some(fifo) = spectrum_fifo.as_mut() {
-            let values = legacy_spectrum.update(&frame.spectrum[0]);
+            let values = legacy_spectrum.update(&frame.spectrum[0], frame.scale, rate);
             fifo.write(&legacy::spectrum_record(&values));
         }
     });
@@ -463,13 +475,14 @@ pub unsafe extern "C" fn _snd_pcm_scope_glasstap_open(
             pcm,
             s16,
             legacy_meter: legacy::Meter::new(settings.decay_ms, settings.meter_max),
-            legacy_spectrum: legacy::Spectrum::new(
+            legacy_spectrum: legacy::Regroup::new(
                 settings.spectrum_size,
                 settings.spectrum_max,
                 settings.log_f,
                 settings.log_y,
                 settings.smoothing,
             ),
+            watch: tap::demand::Watch::new(Path::new(tap::ring::DIR)),
             settings,
             old: 0,
             channels: 2,
