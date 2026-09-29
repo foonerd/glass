@@ -35,7 +35,7 @@ pub mod hops;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod remote;
 pub mod wants;
-pub use channel::{decode as decode_event, Channel, Command, Event, RemoteHello};
+pub use channel::{decode as decode_event, Channel, Command, Event, QueueItem, RemoteHello};
 
 use std::net::ToSocketAddrs;
 use std::sync::RwLock;
@@ -1487,6 +1487,9 @@ pub struct TapSource {
     queue_mode: bool,
     queue_lengths: Vec<f32>,
     queue_read_at: Option<Moment>,
+    /// The queue as the plugin pushed it; none until it does, and then the
+    /// player is not asked for it.
+    queue_held: Option<Vec<QueueItem>>,
     /// The plugin's channel, when the player runs under it: the state
     /// arrives as it changes and the player is not asked.
     channel: Option<Channel>,
@@ -1627,6 +1630,7 @@ impl TapSource {
             queue_mode: false,
             queue_lengths: Vec::new(),
             queue_read_at: None,
+            queue_held: None,
             channel: Some(channel),
             channel_was_live: false,
             pushed: Vec::new(),
@@ -1745,28 +1749,47 @@ impl TapSource {
         self.reel_files.clone()
     }
 
+    /// The track after `position`: from the queue the plugin pushed, or
+    /// asked of the player while none has been pushed.
+    fn next_in_queue(&self, position: i64) -> (String, String, String) {
+        match self.queue_held.as_ref() {
+            Some(items) => usize::try_from(position + 1)
+                .ok()
+                .and_then(|i| items.get(i))
+                .map(|item| (item.title.clone(), item.artist.clone(), item.album.clone()))
+                .unwrap_or_default(),
+            None => queue_next(position),
+        }
+    }
+
     /// In queue mode, the seconds of queue before `position` and the whole
-    /// queue's length, from the player's queue read every ten seconds.
+    /// queue's length, from the queue the plugin pushed, or from the
+    /// player's queue read every ten seconds while none has been pushed.
     fn queue_progress_for(&mut self, position: i64) -> (f32, f32) {
         if !self.queue_mode {
             return (0.0, 0.0);
         }
-        if self
-            .queue_read_at
-            .is_none_or(|at| at.elapsed() >= Duration::from_secs(10))
+        if self.queue_held.is_none()
+            && self
+                .queue_read_at
+                .is_none_or(|at| at.elapsed() >= Duration::from_secs(10))
         {
             self.queue_lengths = queue_lengths();
             self.queue_read_at = Some(Moment::now());
         }
-        let total: f32 = self.queue_lengths.iter().sum();
-        if self.queue_lengths.is_empty() || total <= 0.0 {
+        let held: Vec<f32>;
+        let lengths: &[f32] = match self.queue_held.as_ref() {
+            Some(items) => {
+                held = items.iter().map(|item| item.duration).collect();
+                &held
+            }
+            None => &self.queue_lengths,
+        };
+        let total: f32 = lengths.iter().sum();
+        if lengths.is_empty() || total <= 0.0 {
             return (0.0, 0.0);
         }
-        let before: f32 = self
-            .queue_lengths
-            .iter()
-            .take(position.max(0) as usize)
-            .sum();
+        let before: f32 = lengths.iter().take(position.max(0) as usize).sum();
         (before, total)
     }
 
@@ -1952,6 +1975,10 @@ impl Source for TapSource {
                     meter,
                 } => self.config_seen = Some((version, theme, meter)),
                 Event::Showing { theme, meter } => self.showing_seen = Some((theme, meter)),
+                Event::Queue(items) => {
+                    self.queue_held = Some(items);
+                    self.rederive = true;
+                }
                 Event::Hello { .. } => {}
             }
         }
@@ -1996,7 +2023,7 @@ impl Source for TapSource {
                     show.update(&playing.artist, &playing.uri);
                 }
                 let (next_title, next_artist, next_album) = if self.wants_next {
-                    queue_next(playing.position)
+                    self.next_in_queue(playing.position)
                 } else {
                     Default::default()
                 };

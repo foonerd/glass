@@ -87,10 +87,11 @@ pub struct Face {
     showing: Option<Showing>,
     /// Events that arrived before the meter was on show, kept for it.
     early: Vec<Event>,
-    /// The player's last state and infinity, given to every meter put on
-    /// show, so a change of meter does not wait for the next push.
+    /// The player's last state, infinity and queue, given to every meter
+    /// put on show, so a change of meter does not wait for the next push.
     last_state: Option<Event>,
     last_infinity: Option<Event>,
+    last_queue: Option<Event>,
     /// The finger on the controls, kept between frames.
     touch: Touch,
     /// A wanted file was put or said to be missing since the last frame:
@@ -190,6 +191,7 @@ impl Face {
             .last_state
             .iter()
             .chain(self.last_infinity.iter())
+            .chain(self.last_queue.iter())
             .cloned()
             .chain(self.early.drain(..))
         {
@@ -284,6 +286,7 @@ impl Face {
         match &event {
             Event::State(_) => self.last_state = Some(event.clone()),
             Event::Infinity(_) => self.last_infinity = Some(event.clone()),
+            Event::Queue(_) => self.last_queue = Some(event.clone()),
             _ => {}
         }
         match self.showing.as_mut() {
@@ -754,6 +757,49 @@ mod tests {
             face.showing.as_ref().map(|s| s.metadata.title.as_str()),
             Some("A song")
         );
+    }
+
+    /// A meter with next-track rows: the track after the playing one comes
+    /// from the queue the plugin pushes, a queue pushed later moves it under
+    /// the same track, a queue pushed before the meter is on show is kept
+    /// for it, and the last track has nothing after it.
+    #[test]
+    fn the_next_track_comes_from_the_queue_the_plugin_pushes() {
+        let _serial = serial();
+        let mut face = Face::new();
+        face.configure(&config_json()).expect("a plan");
+        let meters = theme_into_table(&mut face, "480x320");
+        let bar_at = meters.find("[bar]").expect("the bar meter");
+        let extended = "[bar]\nconfig.extend = True\nplayinfo.next.title.pos = 10,300\nplayinfo.next.artist.pos = 10,280\n";
+        let meters = format!("{}{}{}", &meters[..bar_at], extended, &meters[bar_at + 5..]);
+        face.put_file("templates/480x320/meters.txt", meters.into_bytes());
+        assert!(face.event(
+            br#"{"kind":"queue","items":[{"name":"First","artist":"A","duration":100},{"name":"Second","artist":"B","album":"Two","duration":200}]}"#
+        ));
+        assert!(face.event(
+            br#"{"kind":"state","state":{"status":"play","title":"First","artist":"A","position":0}}"#
+        ));
+        face.start(Some("bar")).expect("the bar on show");
+        face.frame(40).expect("a frame");
+        let next = |face: &Face| {
+            face.showing.as_ref().map(|s| {
+                (
+                    s.metadata.next_title.clone(),
+                    s.metadata.next_artist.clone(),
+                )
+            })
+        };
+        assert_eq!(next(&face), Some(("Second".into(), "B".into())));
+        assert!(face.event(
+            br#"{"kind":"queue","items":[{"name":"First","artist":"A"},{"name":"Third","artist":"C"}]}"#
+        ));
+        face.frame(80).expect("a frame");
+        assert_eq!(next(&face), Some(("Third".into(), "C".into())));
+        assert!(face.event(
+            br#"{"kind":"state","state":{"status":"play","title":"Third","artist":"C","position":1}}"#
+        ));
+        face.frame(120).expect("a frame");
+        assert_eq!(next(&face), Some((String::new(), String::new())));
     }
 
     /// A meter given a type area: the track's type names an icon the page

@@ -1,8 +1,8 @@
 //! The plugin's channel: a local socket the plugin serves, one JSON object
 //! per line, or the same over TCP for a remote display. A display that
-//! connects gets a greeting, then the player's state and the infinity flag
-//! as the plugin last saw them, then every change as it comes, and word
-//! when the configuration changes; it sends commands for the player back,
+//! connects gets a greeting, then the player's state, the queue and the
+//! infinity flag as the plugin last saw them, then every change as it
+//! comes, and word when the configuration changes; it sends commands for the player back,
 //! and a remote says who it is. Nothing here blocks the frame loop: the
 //! socket is non-blocking and a poll reads what has arrived.
 
@@ -36,6 +36,44 @@ pub enum Event {
     },
     /// The meter the player's own display shows, for remotes that follow it.
     Showing { theme: String, meter: String },
+    /// The player's queue as the plugin pushes it, on connect and on every
+    /// change: the tracks in order, for the next line and the queue's length.
+    Queue(Vec<QueueItem>),
+}
+
+/// One track of the player's queue, as the plugin's `queue` line carries it.
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct QueueItem {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    /// Seconds; 0 when the player does not say.
+    pub duration: f32,
+}
+
+fn queue_item(item: &Value) -> QueueItem {
+    let text = |key: &str| {
+        item.get(key)
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .trim()
+            .to_string()
+    };
+    let title = text("title");
+    QueueItem {
+        title: if title.is_empty() {
+            text("name")
+        } else {
+            title
+        },
+        artist: text("artist"),
+        album: text("album"),
+        duration: item
+            .get("duration")
+            .and_then(Value::as_f64)
+            .unwrap_or(0.0)
+            .max(0.0) as f32,
+    }
 }
 
 /// A command for the player, sent to the plugin.
@@ -382,6 +420,13 @@ pub fn decode(line: &[u8]) -> Option<Event> {
             theme: text("theme"),
             meter: text("meter"),
         }),
+        "queue" => Some(Event::Queue(
+            value
+                .get("items")
+                .and_then(Value::as_array)
+                .map(|items| items.iter().map(queue_item).collect())
+                .unwrap_or_default(),
+        )),
         _ => None,
     }
 }
@@ -560,6 +605,33 @@ mod tests {
             }
         );
         assert_eq!(decode(br#"{"kind":"unknown"}"#), None);
+    }
+
+    #[test]
+    fn the_queue_is_parsed_with_the_name_for_a_title_and_no_duration_as_zero() {
+        let event = decode(
+            br#"{"kind":"queue","items":[{"name":"One","artist":"A","album":"X","duration":12.5,"uri":"mnt/x"},{"title":"Two","name":"not this"}]}"#,
+        )
+        .expect("a queue line");
+        assert_eq!(
+            event,
+            Event::Queue(vec![
+                QueueItem {
+                    title: "One".into(),
+                    artist: "A".into(),
+                    album: "X".into(),
+                    duration: 12.5
+                },
+                QueueItem {
+                    title: "Two".into(),
+                    ..Default::default()
+                },
+            ])
+        );
+        assert_eq!(
+            decode(br#"{"kind":"queue"}"#),
+            Some(Event::Queue(Vec::new()))
+        );
     }
 
     #[test]
