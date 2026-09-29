@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.64] - 2026-09-29
+
+A theme of another size fits the player's screen. `position.type = fit`, the third choice of the settings page's Meter Position, scales the theme to the screen with its shape kept and centres it, so every size in the catalogue can show on any player; touches land on the theme's controls as before. The scale is the window's own, as a remote display fits a theme, and costs the player nothing on the software path beyond what a remote pays.
+
 ## [0.7.63] - 2026-09-29
 
 Two analyser keys close the last of the evo looks. `blend = add` makes the box's own drawing add its colour to what is under it within the box instead of covering it, so overlapping channels, a trail's wake or a glow's halo bloom and saturate as in evo's prism; the box still sits on the theme as its alpha says. `dot.hold = True` sits each dot of the dots style at the band's held peak and lets it fall with it, evo's peak constellation, with no separate peak mark. The fanart interval's help on the plugin's settings page says the seconds count from the last change and that a new track moves the picture on as well.
