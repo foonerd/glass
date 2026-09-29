@@ -168,6 +168,10 @@
             {
               "value": 1,
               "label": "manually"
+            },
+            {
+              "value": 2,
+              "label": "fit to screen"
             }
           ]
         },

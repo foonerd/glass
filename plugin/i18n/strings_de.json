@@ -5,7 +5,7 @@
     "TIMEOUT": "Wartezeit für Bildschimschoner",
     "TIMEOUT_DOC": "Wartezeit in Sekunden bis der Glassmeter-Bildschirmschoner startet.<br /><br />Folgende Einstellungen sollten im Touch Display Plugin eingestellt werden:<br />- das Timeout für den Standardbildschirmschoner sollte größer sein als das für Glass<br />- 'Kein Bildschirmschoner während der Wiedergabe' auf 'On'",
     "POSITION_TYPE": "Meter-Position",
-    "POSITION_TYPE_DOC": "Positionierung der Glass-Anzeige, wenn die Displayauflösung höher ist als die Meter-Auflösung",
+    "POSITION_TYPE_DOC": "Wo ein Thema anderer Größe auf dem Bildschirm liegt: zentriert, an einer eigenen Position oder eingepasst, auf den Bildschirm skaliert bei gleichbleibenden Proportionen.",
     "POS_X": "Position X",
     "POS_X_DOC": "Horizontale Position der Glass-Anzeige",
     "POS_Y": "Position Y",
