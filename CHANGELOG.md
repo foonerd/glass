@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.56] - 2026-09-29
+
+Effects that work across the analyser's styles, the organic and atmosphere looks of the evo framework as keys: `trail` keeps a fading wake of the last frame under the new one; `bar.glow` puts a soft halo behind each bar and `bar.fade` dims a bar at its base and brightens it at its tip; `sparkle` throws specks above loud bars; `line.width.max` makes a graph's line a ribbon whose width follows the level and `line.glow` a soft band around it; `echo` draws a ghost of the levels that follows them slowly, a mark per bar or a line of its own on a graph.
+
 ## [0.7.55] - 2026-09-29
 
 Two more analyser styles. `style = dots` draws a disc per band at its level, `dot.size` pixels across, the peaks as smaller discs. `style = waterfall` draws a spectrogram: each frame's levels become a row of colour at the base of the box, the palette by level, or the band's colour at the level's opacity by index, and the rows move away `waterfall.speed` rows a frame towards the far edge, or from the far edge towards the base with `waterfall.reverse`; the box keeps as many frames as it has rows. Both take the layouts, the mirror and the onset flash.

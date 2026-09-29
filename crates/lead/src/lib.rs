@@ -1414,6 +1414,31 @@ pub struct Look {
     pub waterfall_speed: u32,
     #[serde(default)]
     pub waterfall_reverse: bool,
+    /// `trail`: the share of the last frame kept under this one, a fading
+    /// wake; 0 for none.
+    #[serde(default)]
+    pub trail: f32,
+    /// `bar.glow`: a soft halo behind each bar, wider by this share of the
+    /// pitch; 0 for none. `line.glow`: a soft band this many pixels wide
+    /// around a graph's line.
+    #[serde(default)]
+    pub bar_glow: f32,
+    #[serde(default)]
+    pub line_glow: f32,
+    /// `bar.fade`: each bar dim at its base and bright at its tip.
+    #[serde(default)]
+    pub bar_fade: bool,
+    /// `sparkle`: specks above loud bars, twinkling.
+    #[serde(default)]
+    pub sparkle: bool,
+    /// `line.width.max`: a graph line this thick at a full level, thinning
+    /// to `line.width` at nothing; 0 for a fixed width.
+    #[serde(default)]
+    pub line_width_max: f32,
+    /// `echo`: a ghost of the levels that follows them by this share a
+    /// frame, drawn as a line of its own; 0 for none.
+    #[serde(default)]
+    pub echo: f32,
 }
 
 fn default_waterfall_speed() -> u32 {
@@ -1504,6 +1529,13 @@ impl Default for Look {
             dot_size: 0.0,
             waterfall_speed: default_waterfall_speed(),
             waterfall_reverse: false,
+            trail: 0.0,
+            bar_glow: 0.0,
+            line_glow: 0.0,
+            bar_fade: false,
+            sparkle: false,
+            line_width_max: 0.0,
+            echo: 0.0,
         }
     }
 }
@@ -1710,6 +1742,35 @@ fn look_from_section(get: &dyn Fn(&str) -> Option<String>) -> Option<Look> {
     }
     if let Some(v) = flag("waterfall.reverse") {
         look.waterfall_reverse = v;
+    }
+    if let Some(v) = number("trail") {
+        look.trail = v.clamp(0.0, 0.98);
+    }
+    if let Some(v) = get("bar.glow") {
+        look.bar_glow = match v.trim().parse::<f32>() {
+            Ok(n) => n.clamp(0.0, 8.0),
+            Err(_) if truthy(Some(v.as_str())) => 1.2,
+            Err(_) => 0.0,
+        };
+    }
+    if let Some(v) = number("line.glow") {
+        look.line_glow = v.clamp(0.0, 200.0);
+    }
+    if let Some(v) = flag("bar.fade") {
+        look.bar_fade = v;
+    }
+    if let Some(v) = flag("sparkle") {
+        look.sparkle = v;
+    }
+    if let Some(v) = number("line.width.max") {
+        look.line_width_max = v.clamp(0.0, 200.0);
+    }
+    if let Some(v) = get("echo") {
+        look.echo = match v.trim().parse::<f32>() {
+            Ok(n) => n.clamp(0.0, 1.0),
+            Err(_) if truthy(Some(v.as_str())) => 0.05,
+            Err(_) => 0.0,
+        };
     }
     Some(look)
 }
