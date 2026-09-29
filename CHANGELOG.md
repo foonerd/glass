@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.61] - 2026-09-29
+
+The fanart slideshow keeps its interval. The check that moves the picture on ran only when the player pushed a state, so a picture changed at a track change, a pause or a volume step and not every interval; the display now gives the slideshow the player's artist and track once a second between states, and the interval, the order and the transition run as set.
+
 ## [0.7.60] - 2026-09-29
 
 The Face shows the next track. The plugin pushes the player's queue down its channel, `{"kind":"queue","items":[...]}` on connect and on every change, and a display takes the track after the playing one and the queue's length from it; the Face, which cannot ask the player itself, had nothing to draw in a theme's next-track rows. The player's own display and remotes read the same line, so a reordered queue moves their next line at once, and a display asks the player for the queue only while it has not been given one.
