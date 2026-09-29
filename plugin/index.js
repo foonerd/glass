@@ -3111,9 +3111,12 @@ Glass.prototype.applyActiveThemeFolder = function (folder, opts) {
 };
 
 
+// A theme folder as the Themes tab lists them: any name that is not hidden
+// and stays inside the templates root. A name without an underscore is a
+// theme too (1280x400 is one).
 Glass.prototype.isValidThemeFolderName = function (folder) {
   return !!folder && typeof folder === 'string' &&
-    folder.indexOf('/') === -1 && folder.indexOf('..') === -1 && folder.indexOf('_') !== -1;
+    folder.indexOf('/') === -1 && folder.indexOf('..') === -1 && folder.indexOf('.') !== 0;
 };
 
 // Safely remove base+folder only when it resolves under the expected templates root.
@@ -3156,7 +3159,7 @@ Glass.prototype.removeTheme = function (folder) {
   var allFolders = [];
   try {
     fs.readdirSync(base_folder_P).forEach(function (f) {
-      if (f.indexOf('_') !== -1 && fs.statSync(base_folder_P + f).isDirectory()) {
+      if (f.indexOf('.') !== 0 && fs.statSync(base_folder_P + f).isDirectory()) {
         allFolders.push(f);
       }
     });
