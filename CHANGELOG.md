@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.57] - 2026-09-29
+
+A graph's line, its ribbon width and its glow keep their width across the line on a slope: the column's span grows by the slope's secant, so a steep run reads as wide as a flat one instead of thinning to a thread.
+
 ## [0.7.56] - 2026-09-29
 
 Effects that work across the analyser's styles, the organic and atmosphere looks of the evo framework as keys: `trail` keeps a fading wake of the last frame under the new one; `bar.glow` puts a soft halo behind each bar and `bar.fade` dims a bar at its base and brightens it at its tip; `sparkle` throws specks above loud bars; `line.width.max` makes a graph's line a ribbon whose width follows the level and `line.glow` a soft band around it; `echo` draws a ghost of the levels that follows them slowly, a mark per bar or a line of its own on a graph.
