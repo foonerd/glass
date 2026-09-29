@@ -365,6 +365,12 @@
       </div>
       <div class="row" style="margin-top:10px"><button class="primary" id="btn-share-apply"></button></div>
     </div>
+    <div class="panel hidden" id="legacy-panel">
+      <h2 id="legacy-title" style="margin:0 0 10px"></h2>
+      <div class="help" id="legacy-help" style="margin-bottom:10px"></div>
+      <div class="help" id="legacy-installed" style="margin-bottom:10px"></div>
+      <div class="row"><button id="btn-legacy-wipe"></button></div>
+    </div>
     <div class="panel" id="log-panel">
       <h2 id="log-title" style="margin:0 0 10px"></h2>
       <div class="help" id="log-help" style="margin-bottom:10px"></div>
@@ -680,7 +686,7 @@
     if (name === 'artwork') { loadDisplay(); loadArtwork(); } loadFonts();
     if (name === 'backups') loadBackups();
     if (name === 'status') { loadStatus(); }
-    if (name === 'system') { loadUpdate(false); loadPerformance(); loadSharing(); loadTouch(); loadLogging(); }
+    if (name === 'system') { loadUpdate(false); loadPerformance(); loadSharing(); loadTouch(); loadLogging(); loadLegacy(); }
     if (name === 'remotes') loadRemotes();
     if (window.GlassFace) { if (name === 'face') { GlassFace.show(); } else { GlassFace.hide(); } }
   }
@@ -1356,6 +1362,22 @@
   };
 
   // ---- status -----------------------------------------------------------
+  function loadLegacy() {
+    api('GET', '/api/legacy').then(function (l) {
+      $('legacy-panel').classList.toggle('hidden', !l.present);
+      if (!l.present) return;
+      $('legacy-title').textContent = t('MANAGER_LEGACY_TITLE');
+      $('legacy-help').textContent = t('MANAGER_LEGACY_DOC').replace('{n}', l.themes).replace('{mb}', Math.round(l.bytes / 1048576));
+      $('legacy-installed').textContent = l.installed ? t('MANAGER_LEGACY_INSTALLED') : '';
+      $('btn-legacy-wipe').textContent = t('MANAGER_LEGACY_WIPE');
+    }).catch(function () { $('legacy-panel').classList.add('hidden'); });
+  }
+  $('btn-legacy-wipe').onclick = function () {
+    confirmDialog(t('MANAGER_LEGACY_CONFIRM_TITLE'), t('MANAGER_LEGACY_CONFIRM_MSG'), t('MANAGER_LEGACY_WIPE')).then(function (ok) {
+      if (!ok) return;
+      api('POST', '/api/legacy/wipe').then(function () { toast(t('MANAGER_LEGACY_DONE')); loadLegacy(); }).catch(function (e) { toast(errorText(e), 'error'); });
+    });
+  };
   function loadStatus() {
     api('GET', '/api/status').then(function (s) {
       state.status = s;

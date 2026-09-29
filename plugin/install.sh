@@ -86,10 +86,16 @@ done
 # SETUP: themes. Adopt what PeppyMeter Screensaver left, then add the bundled ones.
 # =============================================================================
 mkdir -p "$DATA_DIR"
-if [ -d "$LEGACY_DATA/templates" ]; then
+# The themes are brought in once, when Glass's own theme folder is first made:
+# a later install or upgrade leaves that folder as the listener keeps it, so
+# a theme removed stays removed.
+FIRST_THEMES=0
+[ -d "$DATA_DIR/templates" ] || FIRST_THEMES=1
+if [ "$FIRST_THEMES" = 1 ] && [ -d "$LEGACY_DATA/templates" ]; then
   # PeppyMeter Screensaver's themes, still installed (disabled) or uninstalled
-  # with its themes preserved: copied into Glass's own folder, what is missing
-  # here; its folder is left as it was, for a return to that plugin.
+  # with its themes preserved: copied into Glass's own folder; its folder is
+  # left as it was, for a return to that plugin, and the manager's System
+  # tab offers to wipe it.
   echo "Copying PeppyMeter Screensaver themes..."
   FREE_KB=$(df -Pk "$DATA_DIR" | awk 'NR==2 {print $4}')
   NEED_KB=$(du -sk "$LEGACY_DATA" | awk '{print $1}')
@@ -104,12 +110,13 @@ if [ -d "$LEGACY_DATA/templates" ]; then
   fi
 fi
 mkdir -p "$DATA_DIR/templates" "$DATA_DIR/templates_spectrum"
+# The bundled themes the same: seeded with the folder, never put back after.
 if [ -d "$PLUGIN_DIR/templates" ]; then
-  cp -rn "$PLUGIN_DIR/templates/." "$DATA_DIR/templates/"
+  [ "$FIRST_THEMES" = 1 ] && cp -rn "$PLUGIN_DIR/templates/." "$DATA_DIR/templates/"
   rm -rf "$PLUGIN_DIR/templates"
 fi
 if [ -d "$PLUGIN_DIR/templates_spectrum" ]; then
-  cp -rn "$PLUGIN_DIR/templates_spectrum/." "$DATA_DIR/templates_spectrum/"
+  [ "$FIRST_THEMES" = 1 ] && cp -rn "$PLUGIN_DIR/templates_spectrum/." "$DATA_DIR/templates_spectrum/"
   rm -rf "$PLUGIN_DIR/templates_spectrum"
 fi
 chmod -R 755 "$DATA_DIR"

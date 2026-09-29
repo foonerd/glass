@@ -314,6 +314,16 @@ class Manager {
       res.json({ job: job });
     });
 
+    // The old plugin's themes, and their removal.
+    app.get('/api/legacy', function (req, res) {
+      res.json(self.plugin.legacyThemes());
+    });
+
+    app.post('/api/legacy/wipe', wrap(async function (req, res) {
+      const result = await self.exclusive(function () { return self.plugin.wipeLegacyThemes(); });
+      res.json(Object.assign(result, self.plugin.legacyThemes()));
+    }));
+
     // Where the theme goes on the screen.
     app.get('/api/display', function (req, res) {
       res.json(self.plugin.displayPlacement());

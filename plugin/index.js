@@ -23,6 +23,7 @@ const os = require('os');
 const { Manager, DEFAULT_PORT: MANAGER_DEFAULT_PORT } = require('./manager/server');
 const { FaceFeed } = require('./manager/facefeed');
 const { compact: compactQueue } = require('./manager/queue');
+const legacyThemes = require('./manager/legacy');
 const { safeFolderName, sections: configSections } = require('./manager/zip');
 
 const id = 'glass: ';
@@ -4496,6 +4497,22 @@ Glass.prototype.setMeterSelection = function (data) {
         self.updateUIConfig();
     }
     return { ok: true, changed: changed };
+};
+
+// What the old plugin's folder still holds, and whether that plugin is
+// still installed, for the manager's System tab.
+Glass.prototype.legacyThemes = function () {
+    var info = legacyThemes.legacyThemes(LEGACY_DATA);
+    info.installed = fs.existsSync('/data/plugins/user_interface/' + LEGACY_PLUGIN);
+    return info;
+};
+
+// Remove the old plugin's theme trees, at the listener's request.
+Glass.prototype.wipeLegacyThemes = function () {
+    var self = this;
+    var removed = legacyThemes.wipeLegacyThemes(LEGACY_DATA);
+    self.logger.info(id + 'themes: ' + LEGACY_PLUGIN + "'s " + (removed.length ? removed.join(' and ') : 'nothing') + ' removed at the request of the manager');
+    return { ok: true, removed: removed };
 };
 
 // Where the theme goes on the screen: fitted to it, scaled with its shape
