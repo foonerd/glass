@@ -30,6 +30,7 @@ const BACKUP_FILES = ['manifest.json', 'config.json', 'peppymeter_config.txt', '
 const DEFAULT_PORT = 5582;
 const MAX_TRACK_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
+const CATALOG_INDEX_MAX_AGE_MS = 10 * 60 * 1000;
 const JOBS_KEPT = 50;
 const METER_NAME = /^[^/\\\0]{1,128}$/;
 const SIZE_PREFIX = /^(\d{3,4})x(\d{3,4})/;
@@ -240,13 +241,16 @@ class Manager {
       res.json(Object.assign({ ok: true }, self.plugin.meterSelection()));
     }));
 
-    // The catalog.
+    // The catalog: the index fetched when there is none, or again when the
+    // one kept is older than ten minutes (a 304 when it has not changed);
+    // a failed refresh keeps the index kept.
     app.get('/api/catalog', wrap(async function (req, res) {
-      if (!self.catalog.index) {
+      if (self.catalog.stale(CATALOG_INDEX_MAX_AGE_MS)) {
         try {
           await self.catalog.refresh();
         } catch (e) {
-          return res.json(self.catalogView(e));
+          if (!self.catalog.index) return res.json(self.catalogView(e));
+          self.logger.warn('glass: catalog: the index could not be refreshed, the one kept stands: ' + e.message);
         }
       }
       res.json(self.catalogView(null));
@@ -849,9 +853,11 @@ class Manager {
       let file = null;
       try {
         job.state = 'downloading';
-        file = await self.catalog.download(entry, function (done, total) {
+        const got = await self.catalog.downloadCurrent(entry.name, function (done, total) {
           job.progress = { done: done, total: total };
         });
+        file = got.file;
+        entry = got.entry;
         job.state = 'checking';
         const zip = await Zip.open(file);
         try {
