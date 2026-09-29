@@ -2,7 +2,9 @@
 // The theme catalog: the index peppy_templates publishes, kept on the
 // player with its ETag, the thumbnails it names fetched as they are looked
 // at, and the zips downloaded and checked against the index's checksum
-// before anything is unpacked. What was installed from the catalog is
+// before anything is unpacked. A zip that no longer matches the index as
+// kept (the catalog moved on since) has the index fetched again and the
+// download made once more. What was installed from the catalog is
 // remembered by name and checksum, so an updated zip shows as an update.
 
 const crypto = require('crypto');
@@ -196,6 +198,13 @@ class Catalog {
     return this.index ? this.index.templates : [];
   }
 
+  // Whether the index as kept is older than `ms`; true without one.
+  stale(ms) {
+    if (!this.index || !this.fetchedAt) return true;
+    const at = Date.parse(this.fetchedAt);
+    return !(at > 0) || Date.now() - at > ms;
+  }
+
   find(name) {
     return this.entries().find(function (t) { return t.name === name; }) || null;
   }
@@ -257,6 +266,28 @@ class Catalog {
       await fsp.rm(tmp, { force: true });
       await fsp.rm(file, { force: true });
       throw e;
+    }
+  }
+
+  // Download an entry by name. When the file on the server no longer
+  // matches the index as kept, the index is fetched again and the download
+  // made once more against the entry as it stands now; the first error
+  // stands when the index has not moved. Resolves with the file and the
+  // entry it matches.
+  async downloadCurrent(name, onProgress) {
+    let entry = this.find(name);
+    if (!entry) throw new CatalogError('unknown', 'the catalog does not list ' + name);
+    try {
+      return { file: await this.download(entry, onProgress), entry: entry };
+    } catch (e) {
+      if (!(e instanceof CatalogError) || ['too-large', 'size', 'checksum'].indexOf(e.code) === -1) throw e;
+      const before = entry.sha256;
+      await this.refresh();
+      entry = this.find(name);
+      if (!entry) throw new CatalogError('unknown', 'the catalog no longer lists ' + name);
+      if (entry.sha256 === before) throw e;
+      this.logger.info('glass: catalog: ' + name + ' changed since the index was fetched; downloading it again');
+      return { file: await this.download(entry, onProgress), entry: entry };
     }
   }
 
