@@ -103,3 +103,20 @@ test('a page that connects before any push gets what the plugin holds now', asyn
   assert.equal(plugin[2].on, true);
   feed.stop();
 });
+
+test('the queue the plugin holds or pushes reaches a page, the last of its kind', async () => {
+  const socketPath = path.join(os.tmpdir(), 'glass-face-test-queue-' + process.pid + '.sock');
+  const feed = new FaceFeed({ socketPath, current: () => ({ queue: [{ title: 'One', artist: '', album: '', duration: 1 }] }) });
+  const p = page();
+  feed.attach(p.req, p.res);
+  let plugin = p.events().filter(e => e.event === 'plugin').map(e => JSON.parse(e.data));
+  assert.deepEqual(plugin.map(m => m.kind), ['queue']);
+  assert.equal(plugin[0].items[0].title, 'One');
+  feed.push({ kind: 'queue', items: [{ title: 'Two', artist: '', album: '', duration: 2 }] });
+  const later = page();
+  feed.attach(later.req, later.res);
+  plugin = later.events().filter(e => e.event === 'plugin').map(e => JSON.parse(e.data));
+  assert.deepEqual(plugin.map(m => m.kind), ['queue']);
+  assert.equal(plugin[0].items[0].title, 'Two', 'the pushed queue replaces what the plugin held');
+  feed.stop();
+});

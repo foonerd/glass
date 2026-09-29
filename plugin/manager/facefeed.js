@@ -3,13 +3,14 @@
 // server-sent event stream. The frames come from glass-serve's pages
 // socket, one upstream connection shared by every page and opened only
 // while a page is connected; the plugin's own lines (state, infinity,
-// config, showing) come from the plugin as it pushes them to displays.
+// config, showing, queue) come from the plugin as it pushes them to
+// displays.
 //
 // Events, as the page sees them:
 //   event: hop      data: <the frames datagram, base64>
 //   event: plugin   data: <a line of the plugin's, the JSON object with its kind>
-// A page that connects gets the plugin's last config, state, showing and
-// infinity first, so its first frame is not painted from nothing.
+// A page that connects gets the plugin's last config, state, showing,
+// infinity and queue first, so its first frame is not painted from nothing.
 
 const http = require('http');
 
@@ -21,14 +22,14 @@ class FaceFeed {
     this.socketPath = opts.socketPath;
     this.logger = opts.logger || { info() {}, warn() {} };
     // What the plugin holds now, for a page that connects before any push:
-    // `{ state, infinity, showing }` as the channel keeps them.
+    // `{ state, infinity, showing, queue }` as the channel keeps them.
     this.current = typeof opts.current === 'function' ? opts.current : function () { return {}; };
     this.clients = new Set();
     this.upstream = null;
     this.upstreamLive = false;
     this.retry = null;
     this.backoff = RETRY_MIN_MS;
-    this.last = { config: null, state: null, showing: null, infinity: null };
+    this.last = { config: null, state: null, showing: null, infinity: null, queue: null };
     this.hops = 0;
   }
 
@@ -50,9 +51,10 @@ class FaceFeed {
       config: self.last.config,
       state: self.last.state || (now.state ? JSON.stringify({ kind: 'state', state: now.state }) : null),
       showing: self.last.showing || (now.showing ? JSON.stringify({ kind: 'showing', theme: now.showing.theme, meter: now.showing.meter }) : null),
-      infinity: self.last.infinity || (now.infinity !== undefined && now.infinity !== null ? JSON.stringify({ kind: 'infinity', on: !!now.infinity }) : null)
+      infinity: self.last.infinity || (now.infinity !== undefined && now.infinity !== null ? JSON.stringify({ kind: 'infinity', on: !!now.infinity }) : null),
+      queue: self.last.queue || (Array.isArray(now.queue) ? JSON.stringify({ kind: 'queue', items: now.queue }) : null)
     };
-    ['config', 'state', 'showing', 'infinity'].forEach(function (kind) {
+    ['config', 'state', 'showing', 'infinity', 'queue'].forEach(function (kind) {
       if (opening[kind]) self.write(res, 'plugin', opening[kind]);
     });
     self.write(res, 'feed', JSON.stringify({ frames: self.upstreamLive }));

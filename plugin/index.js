@@ -22,6 +22,7 @@ const pluginVersion = require('./package.json').version;
 const os = require('os');
 const { Manager, DEFAULT_PORT: MANAGER_DEFAULT_PORT } = require('./manager/server');
 const { FaceFeed } = require('./manager/facefeed');
+const { compact: compactQueue } = require('./manager/queue');
 const { safeFolderName, sections: configSections } = require('./manager/zip');
 
 const id = 'glass: ';
@@ -71,6 +72,7 @@ function Channel(logger, onAttach, onCommand) {
     this.clients = [];
     this.state = null;
     this.infinity = null;
+    this.queue = null;
 }
 
 Channel.prototype.listen = function (path) {
@@ -94,6 +96,7 @@ Channel.prototype.attach = function (conn) {
     self.logger.info(id + 'channel: a display connected');
     self.tell(conn, { kind: 'hello', protocol: CHANNEL_PROTOCOL, plugin: pluginVersion });
     if (self.state) { self.tell(conn, { kind: 'state', state: self.state }); }
+    if (self.queue) { self.tell(conn, { kind: 'queue', items: self.queue }); }
     if (self.showing) { self.tell(conn, { kind: 'showing', theme: self.showing.theme, meter: self.showing.meter }); }
     if (self.infinity !== null) { self.tell(conn, { kind: 'infinity', on: self.infinity }); }
     conn.on('data', function (chunk) {
@@ -917,6 +920,7 @@ Glass.prototype.onStart = function () {
     self.channel = new Channel(self.logger, function () {
         socket.emit('getState', '');
         socket.emit('getInfinityPlayback', '');
+        socket.emit('getQueue', '');
         // A remote that connects hears the configuration as it stands, so a
         // change made while it was away is not missed.
         self.pushRemoteConfig();
@@ -928,7 +932,7 @@ Glass.prototype.onStart = function () {
     // The feed behind the manager's Face tab: the frames from the daemon's
     // pages socket, and every line the displays hear, for browser pages.
     self.face = new FaceFeed({ socketPath: faceSocketPath, logger: self.logger, current: function () {
-        return self.channel ? { state: self.channel.state, infinity: self.channel.infinity, showing: self.channel.showing } : {};
+        return self.channel ? { state: self.channel.state, infinity: self.channel.infinity, showing: self.channel.showing, queue: self.channel.queue } : {};
     } });
     self.channel.onPush = function (message) { self.face.push(message); };
 
@@ -979,6 +983,7 @@ Glass.prototype.onStart = function () {
     // when the run flag goes.
     socket.emit('getState', '');
     socket.emit('getInfinityPlayback', '');
+    socket.emit('getQueue', '');
     var lastService = '';
     var lastUri = '';
 
@@ -987,6 +992,17 @@ Glass.prototype.onStart = function () {
         if (self.channel) {
             self.channel.infinity = on;
             self.channel.push({ kind: 'infinity', on: on });
+        }
+    });
+
+    // The queue, as the player answers getQueue and pushes it on every
+    // change: displays draw the next track and the queue's length from it,
+    // the Face among them, which cannot ask the player itself.
+    socket.on('pushQueue', function (queue) {
+        var items = compactQueue(queue);
+        if (self.channel) {
+            self.channel.queue = items;
+            self.channel.push({ kind: 'queue', items: items });
         }
     });
 
