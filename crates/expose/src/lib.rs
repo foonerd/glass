@@ -3812,6 +3812,8 @@ pub struct AnalyserMotion {
     last_ms: Option<u64>,
     pictures: [Frame; 2],
     which: usize,
+    /// The box's polar map for the radial look, built once per box size.
+    radial: Option<RadialMap>,
 }
 
 impl AnalyserMotion {
@@ -3868,13 +3870,256 @@ impl AnalyserMotion {
         }
         self.which = 1 - self.which;
         let picture = &mut self.pictures[self.which];
-        render_analyser(a, &self.smoothed, &self.peaks, picture);
+        if look.radial {
+            render_radial(
+                a,
+                &self.smoothed,
+                &self.peaks,
+                now_ms,
+                &mut self.radial,
+                picture,
+            );
+        } else {
+            render_analyser(a, &self.smoothed, &self.peaks, picture);
+        }
         picture
     }
 
-    /// The bytes the two pictures hold.
+    /// The bytes the two pictures hold, and the polar map when there is one.
     pub fn bytes(&self) -> usize {
-        self.pictures.iter().map(Frame::bytes).sum()
+        self.pictures.iter().map(Frame::bytes).sum::<usize>()
+            + self.radial.as_ref().map_or(0, |m| m.entries.len() * 4)
+    }
+}
+
+/// The polar map of a box for the radial look: each pixel's distance from
+/// the centre in sixty-fourths of a pixel (the high half) and its angle as
+/// a turn in 65536 steps, 0 at the top and clockwise (the low half); a
+/// pixel outside the box's circle is marked so.
+struct RadialMap {
+    w: u32,
+    h: u32,
+    entries: Vec<u32>,
+}
+
+const RADIAL_OUTSIDE: u32 = u32::MAX;
+
+impl RadialMap {
+    fn build(w: u32, h: u32) -> Self {
+        let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+        let rmax = cx.min(cy);
+        let mut entries = Vec::with_capacity((w * h) as usize);
+        for y in 0..h {
+            for x in 0..w {
+                let dx = x as f32 + 0.5 - cx;
+                let dy = y as f32 + 0.5 - cy;
+                let r = (dx * dx + dy * dy).sqrt();
+                if r >= rmax {
+                    entries.push(RADIAL_OUTSIDE);
+                    continue;
+                }
+                let mut angle = dx.atan2(-dy);
+                if angle < 0.0 {
+                    angle += std::f32::consts::TAU;
+                }
+                let a = ((angle / std::f32::consts::TAU) * 65536.0) as u32 & 0xffff;
+                let rq = ((r * 64.0).round() as u32).min(0xfffe);
+                entries.push((rq << 16) | a);
+            }
+        }
+        Self { w, h, entries }
+    }
+}
+
+/// Which band a point of the circle falls in, from its angle around the
+/// turn (65536 steps), for `n` bands over the whole turn or, mirrored,
+/// over half of it and back: the band and how far across it the point is.
+fn radial_band(u: u32, n: usize, mirror: i8) -> (usize, f32) {
+    let v = match mirror {
+        0 => u,
+        1 => {
+            if u < 32768 {
+                u * 2
+            } else {
+                (65535 - u) * 2
+            }
+        }
+        _ => {
+            if u < 32768 {
+                65535 - u * 2
+            } else {
+                65535 - (65535 - u) * 2
+            }
+        }
+    };
+    let pos = v * n as u32;
+    let band = ((pos >> 16) as usize).min(n - 1);
+    (band, (pos & 0xffff) as f32 / 65536.0)
+}
+
+/// The radial look: every pixel of the box's circle asks the polar map
+/// where it is, finds its band and channel by the layout, and takes the
+/// bar's colour when it lies between the base circle and the bar's tip,
+/// or the peak's when it lies on the peak's ring. The whole picture turns
+/// with `spin`.
+fn render_radial(
+    a: &plot::Analyser,
+    smoothed: &[Vec<f32>; 2],
+    peaks: &[Vec<Peak>; 2],
+    now_ms: u64,
+    map: &mut Option<RadialMap>,
+    out: &mut Frame,
+) {
+    let (w, h) = (a.w.max(1), a.h.max(1));
+    let look = &a.look;
+    out.width = w;
+    out.height = h;
+    let bg = (look.bgr_alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
+    out.rgba.clear();
+    out.rgba.resize((w * h * 4) as usize, 0);
+    if bg > 0 {
+        for px in out.rgba.as_chunks_mut::<4>().0 {
+            px[3] = bg;
+        }
+    }
+    let n = smoothed[0].len();
+    if n == 0 {
+        return;
+    }
+    if map.as_ref().is_none_or(|m| m.w != w || m.h != h) {
+        *map = Some(RadialMap::build(w, h));
+    }
+    let Some(map) = map.as_ref() else {
+        return;
+    };
+    let stereo = a.stereo && smoothed[1].len() == n;
+    let layout = if stereo {
+        look.layout
+    } else {
+        lead::Layout::Single
+    };
+    let rmax = (w.min(h) as f32 / 2.0 - 1.0).max(1.0);
+    let r0 = rmax * look.radius.clamp(0.0, 0.95);
+    // Each channel's base circle and reach, negative for inward.
+    let (base, reach): ([f32; 2], [f32; 2]) = match layout {
+        lead::Layout::DualVertical => ([r0, r0], [rmax - r0, -r0]),
+        _ if look.radial_invert => ([rmax, rmax], [-(rmax - r0), -(rmax - r0)]),
+        _ => ([r0, r0], [rmax - r0, rmax - r0]),
+    };
+    let spin = (((now_ms as f64 / 60_000.0) * f64::from(look.spin_rpm)).rem_euclid(1.0) * 65536.0)
+        as u32
+        & 0xffff;
+    // The gap between bars as a share of a sector: a share below 1 as
+    // given, else pixels measured on the base circle.
+    let space = if look.bar_space < 1.0 {
+        look.bar_space
+    } else {
+        look.bar_space * n as f32 / (std::f32::consts::TAU * r0.max(1.0))
+    }
+    .clamp(0.0, 0.9);
+    let (gap_lo, gap_hi) = (space / 2.0, 1.0 - space / 2.0);
+    let left = look.palette_left.as_ref().unwrap_or(&look.palette);
+    let right = look.palette_right.as_ref().unwrap_or(&look.palette);
+    let palettes = [left, right];
+    // The colours: along the reach for the gradient mode, else one per band.
+    let gradient: [Vec<[u8; 4]>; 2] = [
+        (0..256).map(|k| left.at(k as f32 / 255.0)).collect(),
+        (0..256).map(|k| right.at(k as f32 / 255.0)).collect(),
+    ];
+    let inks: [Vec<[u8; 4]>; 2] = std::array::from_fn(|ch| {
+        (0..n)
+            .map(|i| match look.color_mode {
+                lead::ColorMode::Index => palettes[ch].at(if n > 1 {
+                    i as f32 / (n - 1) as f32
+                } else {
+                    0.0
+                }),
+                lead::ColorMode::Level => {
+                    palettes[ch].for_level(smoothed[ch].get(i).copied().unwrap_or(0.0))
+                }
+                lead::ColorMode::Gradient => [0, 0, 0, 0],
+            })
+            .collect()
+    });
+    let channel_alpha = [
+        1.0f32,
+        if matches!(layout, lead::Layout::DualCombined) {
+            0.5
+        } else {
+            1.0
+        },
+    ];
+    let channels: &[usize] = match layout {
+        lead::Layout::Single => &[0],
+        _ => &[0, 1],
+    };
+    let width = w as usize;
+    for y in 0..h as usize {
+        for x in 0..width {
+            let e = map.entries[y * width + x];
+            if e == RADIAL_OUTSIDE {
+                continue;
+            }
+            let r = (e >> 16) as f32 / 64.0;
+            let u = ((e & 0xffff) + 65536 - spin) & 0xffff;
+            let at = (y * width + x) * 4;
+            for &ch in channels {
+                // Which band, by the layout: a half of the circle per
+                // channel side by side, else the whole circle for each.
+                let (band, frac) = match layout {
+                    lead::Layout::DualHorizontal => {
+                        let (side, v) = if u >= 32768 {
+                            (0usize, (65535 - u) * 2)
+                        } else {
+                            (1usize, u * 2)
+                        };
+                        if side != ch {
+                            continue;
+                        }
+                        radial_band(v, n, look.mirror)
+                    }
+                    _ => radial_band(u, n, if look.mirror == 0 { 0 } else { 1 }),
+                };
+                if frac < gap_lo || frac > gap_hi {
+                    continue;
+                }
+                let level = smoothed[ch][band].clamp(0.0, 1.0);
+                let (b, reach) = (base[ch], reach[ch]);
+                let along = (r - b) * reach.signum();
+                let span = reach.abs().max(1.0);
+                let bar_alpha =
+                    channel_alpha[ch] * look.fill_alpha * if look.alpha_bars { level } else { 1.0 };
+                if along >= 0.0 && along < level * span {
+                    let c = match look.color_mode {
+                        lead::ColorMode::Gradient => {
+                            gradient[ch][((along / span) * 255.0).clamp(0.0, 255.0) as usize]
+                        }
+                        _ => inks[ch][band],
+                    };
+                    let alpha = ((c[3] as f32 * bar_alpha).round().clamp(0.0, 255.0)) as u32;
+                    blend_px(&mut out.rgba[at..at + 4], c, alpha);
+                }
+                if look.peaks {
+                    let peak = peaks[ch].get(band).copied().unwrap_or_default();
+                    if peak.level > level + 0.002 {
+                        let pr = peak.level.clamp(0.0, 1.0) * span;
+                        if (along - pr).abs() < 1.0 {
+                            let c = match look.color_mode {
+                                lead::ColorMode::Gradient => {
+                                    palettes[ch].at(peak.level.clamp(0.0, 1.0))
+                                }
+                                lead::ColorMode::Index => inks[ch][band],
+                                lead::ColorMode::Level => palettes[ch].for_level(peak.level),
+                            };
+                            let mark_alpha = channel_alpha[ch] * (1.0 - peak.fade).clamp(0.0, 1.0);
+                            let alpha =
+                                ((c[3] as f32 * mark_alpha).round().clamp(0.0, 255.0)) as u32;
+                            blend_px(&mut out.rgba[at..at + 4], c, alpha);
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -7667,6 +7912,99 @@ mod analyser_tests {
         }
         let per_frame = started.elapsed().as_secs_f64() * 1000.0 / frames as f64;
         eprintln!("a dense outlined frame: {per_frame:.2} ms");
+        let bound = if cfg!(debug_assertions) { 100.0 } else { 8.0 };
+        assert!(per_frame < bound, "a frame took {per_frame:.1} ms");
+    }
+
+    /// Four bands round a circle: the first band's sector, clockwise from
+    /// the top, is filled from the base circle out; an empty band's is not;
+    /// the centre and the corners stay background. A quarter turn a second
+    /// of spin moves the filled sector on; inverted, the bars grow inward.
+    #[test]
+    fn a_radial_look_draws_bars_out_from_the_base_circle_and_spins() {
+        let look = Look {
+            radial: true,
+            radius: 0.3,
+            spin_rpm: 15.0,
+            smoothing: 0.0,
+            peaks: false,
+            bar_space: 0.0,
+            bgr_alpha: 1.0,
+            color_mode: lead::ColorMode::Index,
+            ..Look::default()
+        };
+        let a = analyser(
+            look.clone(),
+            100,
+            100,
+            vec![1.0, 0.0, 1.0, 0.0],
+            vec![1.0, 0.0, 1.0, 0.0],
+        );
+        let mut motion = AnalyserMotion::default();
+        let picture = motion.advance(&a, 0);
+        let lit = |p: [u8; 4]| p[0] as u32 + p[1] as u32 + p[2] as u32 > 100;
+        // Band 0 spans the top right quadrant; its middle at 45 degrees.
+        assert!(lit(pixel(picture, 74, 25)), "band 0 filled at r 35");
+        assert!(!lit(pixel(picture, 74, 74)), "band 1 empty");
+        assert!(
+            !lit(pixel(picture, 50, 50)),
+            "the centre inside the base circle"
+        );
+        assert!(
+            !lit(pixel(picture, 57, 43)),
+            "r 10, inside the base circle of 14.7"
+        );
+        assert!(!lit(pixel(picture, 2, 2)), "the corner outside the circle");
+        // A second on at 15 rpm: a quarter turn clockwise, band 0 now at the bottom right.
+        let picture = motion.advance(&a, 1000);
+        assert!(lit(pixel(picture, 74, 74)), "band 0 turned on by a quarter");
+        assert!(
+            !lit(pixel(picture, 74, 25)),
+            "band 3, empty, took its place"
+        );
+        let inverted = Look {
+            radial_invert: true,
+            spin_rpm: 0.0,
+            ..look
+        };
+        let a = analyser(
+            inverted,
+            100,
+            100,
+            vec![0.5, 0.0, 0.5, 0.0],
+            vec![0.5, 0.0, 0.5, 0.0],
+        );
+        let mut motion = AnalyserMotion::default();
+        let picture = motion.advance(&a, 0);
+        // Half a bar from the rim (49) inward over 34 pixels reaches r 32.
+        assert!(lit(pixel(picture, 79, 20)), "r 42, filled from the rim");
+        assert!(!lit(pixel(picture, 67, 32)), "r 25, short of the bar's tip");
+    }
+
+    /// A dense radial frame, two channels of 256 bands, must cost what
+    /// the other looks do.
+    #[test]
+    fn a_dense_radial_frame_costs_milliseconds() {
+        let look = Look {
+            radial: true,
+            layout: Layout::DualVertical,
+            smoothing: 0.6,
+            peaks: true,
+            spin_rpm: 3.0,
+            ..Look::default()
+        };
+        let left: Vec<f32> = (0..256).map(|i| ((i * 37) % 100) as f32 / 100.0).collect();
+        let right: Vec<f32> = (0..256).map(|i| ((i * 53) % 100) as f32 / 100.0).collect();
+        let a = analyser(look, 420, 420, left, right);
+        let mut motion = AnalyserMotion::default();
+        motion.advance(&a, 0);
+        let started = std::time::Instant::now();
+        let frames = 60;
+        for i in 1..=frames {
+            motion.advance(&a, i * 16);
+        }
+        let per_frame = started.elapsed().as_secs_f64() * 1000.0 / frames as f64;
+        eprintln!("a dense radial frame: {per_frame:.2} ms");
         let bound = if cfg!(debug_assertions) { 100.0 } else { 8.0 };
         assert!(per_frame < bound, "a frame took {per_frame:.1} ms");
     }
