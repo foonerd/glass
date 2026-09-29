@@ -64,8 +64,10 @@ test('the cutter\'s folders, name and warnings come back, and the packager\'s zi
   assert.deepEqual(result.folders.map(f => [f.install, f.folder]), [['templates', '1280x720_x'], ['templates_spectrum', '1280x720_x']]);
   assert.equal(fs.readFileSync(path.join(out, 'templates', '1280x720_x', 'meters.txt'), 'utf8').trim(), 'cut');
   assert.deepEqual(result.warnings, ['meters.txt: [m] odd.key: not a key the cutter knows; kept as it is']);
-  const packed = await pack({ launcher, env: {}, themeDir: theme, out: path.join(dir, 'pkg'), settle: 2 });
+  let shots = 0;
+  const packed = await pack({ launcher, env: {}, themeDir: theme, out: path.join(dir, 'pkg'), settle: 2, onProgress: function (n) { shots = n; } });
   assert.equal(packed.zip, path.join(dir, 'pkg', '1920x1080_x.zip'));
+  assert.equal(shots, 1, 'one snapshot line counted');
   assert.equal(fs.readFileSync(packed.zip, 'utf8').trim(), 'zipbytes');
   await assert.rejects(cut({ launcher: path.join(dir, 'missing.sh'), env: {}, themeDir: theme, width: 1280, height: 720, out }));
   await fsp.rm(dir, { recursive: true, force: true });

@@ -948,9 +948,16 @@ class Manager {
         await fsp.mkdir(staging, { recursive: true });
         try { await fsp.chown(staging, self.previews.uid, self.previews.gid); } catch (e) { /* same user */ }
         job.state = 'packaging';
+        let total = 0;
+        try {
+          total = fs.readFileSync(path.join(self.paths.meterBase, folder, 'meters.txt'), 'utf8').split('\n').filter(function (l) { return /^\s*\[/.test(l); }).length;
+        } catch (e) { /* unknown: the bar waits */ }
+        job.progress = { done: 0, total: total };
+        job.settle = settle;
         const result = await tailor.pack({
           launcher: self.paths.launcher, env: self.plugin.launchEnv(), uid: self.previews.uid, gid: self.previews.gid,
-          themeDir: path.join(self.paths.meterBase, folder), out: staging, settle: settle
+          themeDir: path.join(self.paths.meterBase, folder), out: staging, settle: settle,
+          onProgress: function (done) { job.progress = { done: done, total: Math.max(total, done) }; }
         });
         result.warnings.forEach(function (w) { self.logger.info('glass: manager package ' + folder + ': ' + w); });
         job.file = result.zip;

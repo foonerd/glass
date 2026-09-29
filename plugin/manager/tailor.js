@@ -30,7 +30,17 @@ function run(opts) {
     const child = spawn(opts.launcher, opts.args, options);
     let out = '';
     let err = '';
-    child.stdout.on('data', function (d) { out += d; if (out.length > 262144) out = out.slice(-131072); });
+    let pending = '';
+    child.stdout.on('data', function (d) {
+      out += d;
+      if (out.length > 262144) out = out.slice(-131072);
+      if (opts.onLine) {
+        pending += d;
+        const lines = pending.split('\n');
+        pending = lines.pop();
+        lines.forEach(function (line) { try { opts.onLine(line.trim()); } catch (e) { /* the listener's own */ } });
+      }
+    });
     child.stderr.on('data', function (d) { err += d; if (err.length > 262144) err = err.slice(-131072); });
     const timer = setTimeout(function () { child.kill('SIGKILL'); }, opts.timeoutMs || CUT_TIMEOUT_MS);
     child.on('error', function (e) { clearTimeout(timer); reject(e); });
@@ -71,10 +81,20 @@ async function cut(opts) {
   return { name: done[1], pictures: parseInt(done[2], 10), folders: folders, warnings: warningsOf(result.err) };
 }
 
-// Package a theme folder into `out`: resolves with the zip's path.
+// Package a theme folder into `out`: resolves with the zip's path. Each
+// meter's snapshot, as the display reports it, counts up `onProgress`.
 async function pack(opts) {
   const args = ['--headless', '--package', '--theme', opts.themeDir, '--out', opts.out, '--settle', String(opts.settle || 3)];
-  const result = await run({ launcher: opts.launcher, env: opts.env, uid: opts.uid, gid: opts.gid, args: args, timeoutMs: PACKAGE_TIMEOUT_MS });
+  let shots = 0;
+  const result = await run({
+    launcher: opts.launcher, env: opts.env, uid: opts.uid, gid: opts.gid, args: args, timeoutMs: PACKAGE_TIMEOUT_MS,
+    onLine: function (line) {
+      if (/^glass: snapshot /.test(line)) {
+        shots += 1;
+        if (opts.onProgress) opts.onProgress(shots);
+      }
+    }
+  });
   const lines = result.out.split('\n').map(function (l) { return l.trim(); }).filter(Boolean);
   const zip = lines.find(function (l) { return l.endsWith('.zip') && !l.startsWith('glass:'); });
   if (!zip) throw new Error('the packager wrote no zip' + (lines.length ? ': ' + lines[lines.length - 1] : ''));
