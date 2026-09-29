@@ -3819,6 +3819,34 @@ pub struct AnalyserMotion {
     radial: Option<RadialMap>,
     /// The scale labels, set once per look and box.
     labels: LabelCache,
+    /// When each band group last had an onset: sub-bass, bass, mid, high.
+    onset_since: [Option<u64>; 4],
+}
+
+/// What the onsets do to this frame, decayed to now: a brightening per
+/// band (flash), a growth of every bar as a share (pulse), and rings on
+/// their way from the base to the tip with their alpha (ring), in a colour.
+#[derive(Default)]
+struct OnsetFrame {
+    boost: Vec<f32>,
+    pulse: f32,
+    rings: Vec<(f32, f32)>,
+    color: [u8; 4],
+}
+
+/// A band's group by its centre frequency: sub-bass below 60 Hz, bass
+/// below 250, mid below 2000, high above, as the bank groups them.
+fn band_group(edges: (f32, f32)) -> usize {
+    let centre = (edges.0.max(1.0) * edges.1.max(1.0)).sqrt();
+    if centre < 60.0 {
+        0
+    } else if centre < 250.0 {
+        1
+    } else if centre < 2000.0 {
+        2
+    } else {
+        3
+    }
 }
 
 /// The scale labels of an analyser box, set once per look and box and
@@ -3911,25 +3939,83 @@ impl AnalyserMotion {
                 }
             }
         }
+        // The onsets: a group that fired starts its effect now; each
+        // effect fades over the decay.
+        let mut onset = OnsetFrame {
+            color: [
+                look.onset_color[0],
+                look.onset_color[1],
+                look.onset_color[2],
+                255,
+            ],
+            ..OnsetFrame::default()
+        };
+        if look.onset != lead::OnsetLook::Off {
+            for g in 0..4 {
+                if a.onsets & look.onset_groups & (1 << g) != 0 {
+                    self.onset_since[g] = Some(now_ms);
+                }
+            }
+            let decay = look.onset_decay_ms.max(1) as f32;
+            let glow: [f32; 4] = std::array::from_fn(|g| {
+                self.onset_since[g].map_or(0.0, |since| {
+                    (1.0 - now_ms.saturating_sub(since) as f32 / decay).clamp(0.0, 1.0)
+                        * look.onset_strength
+                })
+            });
+            match look.onset {
+                lead::OnsetLook::Flash => {
+                    onset.boost = a.edges.iter().map(|&e| glow[band_group(e)]).collect();
+                }
+                lead::OnsetLook::Pulse => {
+                    onset.pulse = glow.iter().cloned().fold(0.0, f32::max) * 0.3;
+                }
+                lead::OnsetLook::Ring => {
+                    for g in 0..4 {
+                        if let Some(since) = self.onset_since[g] {
+                            let t = now_ms.saturating_sub(since) as f32 / decay;
+                            if t < 1.0 && look.onset_groups & (1 << g) != 0 {
+                                onset.rings.push((t, (1.0 - t) * look.onset_strength));
+                            }
+                        }
+                    }
+                }
+                lead::OnsetLook::Off => {}
+            }
+        }
+        let grown: [Vec<f32>; 2];
+        let levels: &[Vec<f32>; 2] = if onset.pulse > 0.0 {
+            grown = std::array::from_fn(|ch| {
+                self.smoothed[ch]
+                    .iter()
+                    .map(|l| (l * (1.0 + onset.pulse)).min(1.0))
+                    .collect()
+            });
+            &grown
+        } else {
+            &self.smoothed
+        };
         self.which = 1 - self.which;
         let picture = &mut self.pictures[self.which];
         if look.radial {
             render_radial(
                 a,
-                &self.smoothed,
+                levels,
                 &self.peaks,
                 now_ms,
                 &mut self.radial,
                 picture,
+                &onset,
             );
         } else {
             render_analyser(
                 a,
-                &self.smoothed,
+                levels,
                 &self.peaks,
                 picture,
                 fonts,
                 &mut self.labels,
+                &onset,
             );
         }
         picture
@@ -4019,6 +4105,7 @@ fn render_radial(
     now_ms: u64,
     map: &mut Option<RadialMap>,
     out: &mut Frame,
+    onset: &OnsetFrame,
 ) {
     let (w, h) = (a.w.max(1), a.h.max(1));
     let look = &a.look;
@@ -4154,6 +4241,12 @@ fn render_radial(
                     };
                     let alpha = ((c[3] as f32 * bar_alpha).round().clamp(0.0, 255.0)) as u32;
                     blend_px(&mut out.rgba[at..at + 4], c, alpha);
+                    if let Some(&boost) = onset.boost.get(band) {
+                        if boost > 0.0 {
+                            let a = (boost * 0.7 * 255.0).round() as u32;
+                            blend_px(&mut out.rgba[at..at + 4], onset.color, a);
+                        }
+                    }
                 }
                 if look.peaks {
                     let peak = peaks[ch].get(band).copied().unwrap_or_default();
@@ -4171,6 +4264,19 @@ fn render_radial(
                             let alpha =
                                 ((c[3] as f32 * mark_alpha).round().clamp(0.0, 255.0)) as u32;
                             blend_px(&mut out.rgba[at..at + 4], c, alpha);
+                        }
+                    }
+                }
+            }
+            // The onset rings, on the first channel's reach.
+            if !onset.rings.is_empty() {
+                let along = (r - base[0]) * reach[0].signum();
+                let span = reach[0].abs().max(1.0);
+                if along >= 0.0 && along < span {
+                    for &(t, ring_alpha) in &onset.rings {
+                        if (along - t * span).abs() < 1.0 {
+                            let a = (ring_alpha * 255.0).round().clamp(0.0, 255.0) as u32;
+                            blend_px(&mut out.rgba[at..at + 4], onset.color, a);
                         }
                     }
                 }
@@ -4517,8 +4623,37 @@ fn draw_channel(
     levels: &[f32],
     peaks: &[Peak],
     alpha: f32,
+    onset: &OnsetFrame,
 ) {
     let n = levels.len();
+    // An onset's flash: the bar brightened towards the onset colour.
+    let flash = |out: &mut Frame, i: usize, level: f32, xa: f32, xb: f32| {
+        if let Some(&boost) = onset.boost.get(i) {
+            if boost > 0.0 && level > 0.0 {
+                let (top, bottom) = if area.hanging {
+                    (area.y, area.y + level * area.h)
+                } else {
+                    (area.y + area.h - level * area.h, area.y + area.h)
+                };
+                let clip = (
+                    area.x.floor() as i32,
+                    area.y.floor() as i32,
+                    (area.x + area.w).ceil() as i32,
+                    (area.y + area.h).ceil() as i32,
+                );
+                fill_rect(
+                    out,
+                    clip,
+                    xa,
+                    top,
+                    xb,
+                    bottom,
+                    &Ink::Solid(onset.color),
+                    alpha * boost * 0.7,
+                );
+            }
+        }
+    };
     if n == 0 || area.w < 1.0 || area.h < 1.0 {
         return;
     }
@@ -4628,6 +4763,7 @@ fn draw_channel(
                     fill_rect(out, clip, xa + inset, cy0, xb - inset, cy1, &ink, bar_alpha);
                 }
             }
+            flash(out, i, level, xa, xb);
         } else if bar_h >= 0.5 {
             let (top, bottom) = if area.hanging {
                 (area.y, area.y + bar_h)
@@ -4637,6 +4773,7 @@ fn draw_channel(
             let (y0, y1) = (top.round() as i32, bottom.round() as i32);
             if !look.round && !look.outline {
                 fill_rect(out, clip, xa, top, xb, bottom, &ink, bar_alpha);
+                flash(out, i, level, xa, xb);
                 continue;
             }
             // A rounded or outlined bar: the straight body as rectangles,
@@ -4715,6 +4852,7 @@ fn draw_channel(
                     fill_span(out, clip, y, sxa + inset, sxb - inset, &ink, bar_alpha);
                 }
             }
+            flash(out, i, level, sxa, sxb);
         }
         // The peak: a thin mark at the peak's height, fading if it fades.
         if look.peaks && !look.lumi {
@@ -4758,6 +4896,7 @@ fn draw_graph(
     levels: &[f32],
     peaks: &[Peak],
     alpha: f32,
+    onset: &OnsetFrame,
 ) {
     let n = levels.len();
     if n == 0 || area.w < 1.0 || area.h < 1.0 {
@@ -4847,6 +4986,28 @@ fn draw_graph(
                     1.0
                 };
             fill_rect(out, clip, xf, top, xf + 1.0, bottom, &ink, fill_alpha);
+        }
+        // An onset's flash on this column, the band's boost read across.
+        if !onset.boost.is_empty() && level > 0.0 {
+            let boost_of = |i: usize| onset.boost.get(i).copied().unwrap_or(0.0);
+            let boost = across(&boost_of, xf + 0.5);
+            if boost > 0.0 {
+                let (top, bottom) = if area.hanging {
+                    (area.y, y_of(level))
+                } else {
+                    (y_of(level), area.y + area.h)
+                };
+                fill_rect(
+                    out,
+                    clip,
+                    xf,
+                    top,
+                    xf + 1.0,
+                    bottom,
+                    &Ink::Solid(onset.color),
+                    alpha * boost * 0.7,
+                );
+            }
         }
         // The line: from this column's height to the next one's, so a
         // steep slope stays joined, `line.width` thick.
@@ -4998,6 +5159,7 @@ fn render_analyser(
     out: &mut Frame,
     fonts: Option<&Fonts>,
     labels: &mut LabelCache,
+    onset: &OnsetFrame,
 ) {
     let (w, h) = (a.w.max(1), a.h.max(1));
     let look = &a.look;
@@ -5120,6 +5282,7 @@ fn render_analyser(
                 &smoothed[*ch],
                 &peaks[*ch],
                 *alpha,
+                onset,
             ),
             lead::LookStyle::Bars => draw_channel(
                 out,
@@ -5130,7 +5293,32 @@ fn render_analyser(
                 &smoothed[*ch],
                 &peaks[*ch],
                 *alpha,
+                onset,
             ),
+        }
+    }
+    // The onset rings: a line across each area on its way from the base to the top.
+    if !onset.rings.is_empty() {
+        let clip = (0, 0, w as i32, h as i32);
+        let ink = Ink::Solid(onset.color);
+        for (_, area, _, _) in &areas {
+            for &(t, ring_alpha) in &onset.rings {
+                let y = if area.hanging {
+                    area.y + t * area.h
+                } else {
+                    area.y + area.h - t * area.h
+                };
+                fill_rect(
+                    out,
+                    clip,
+                    area.x,
+                    y - 1.0,
+                    area.x + area.w,
+                    y + 1.0,
+                    &ink,
+                    ring_alpha,
+                );
+            }
         }
     }
     if look.reflex > 0.0 {
@@ -8502,6 +8690,70 @@ mod analyser_tests {
             })
         });
         assert!(db0, "the 0 dB label at the top left");
+    }
+
+    /// An onset in the bass group: with `flash` the bass band brightens
+    /// and the high band does not, and the brightness is gone once the
+    /// decay has passed; with `pulse` every bar grows for the moment;
+    /// with `ring` a line crosses the box half way through the decay.
+    #[test]
+    fn an_onset_flashes_its_group_pulses_every_bar_or_sends_a_ring() {
+        let base = Look {
+            onset: lead::OnsetLook::Flash,
+            onset_strength: 1.0,
+            onset_decay_ms: 200,
+            smoothing: 0.0,
+            peaks: false,
+            bar_space: 0.0,
+            bgr_alpha: 1.0,
+            color_mode: lead::ColorMode::Index,
+            palette: lead::Palette::parse("#204080").expect("one stop"),
+            ..Look::default()
+        };
+        let sum = |p: [u8; 4]| p[0] as u32 + p[1] as u32 + p[2] as u32;
+        let make = |look: Look, onsets: u8| {
+            let mut a = analyser(look, 100, 50, vec![0.5, 0.5], vec![0.5, 0.5]);
+            a.edges = vec![(60.0, 250.0), (2000.0, 8000.0)];
+            a.onsets = onsets;
+            a
+        };
+        // Flash: the bass bar (left) brighter than the high bar (right).
+        let mut motion = AnalyserMotion::default();
+        let picture = motion.advance(&make(base.clone(), 0b0010), 0);
+        let (bass, high) = (pixel(picture, 25, 40), pixel(picture, 75, 40));
+        assert!(
+            sum(bass) > sum(high) + 60,
+            "bass flashed: {bass:?} against {high:?}"
+        );
+        let picture = motion.advance(&make(base.clone(), 0), 400);
+        assert_eq!(pixel(picture, 25, 40), pixel(picture, 75, 40), "decayed");
+        // Pulse: the bars grow by three tenths of the strength: 0.5 becomes 0.65.
+        let pulse = Look {
+            onset: lead::OnsetLook::Pulse,
+            ..base.clone()
+        };
+        let mut motion = AnalyserMotion::default();
+        let picture = motion.advance(&make(pulse, 0b0010), 0);
+        assert!(
+            sum(pixel(picture, 75, 20)) > 60,
+            "a bar at 0.65 covers row 20 of 50"
+        );
+        let picture = motion.advance(&make(base.clone(), 0), 0);
+        assert_eq!(sum(pixel(picture, 75, 20)), 0, "at 0.5 it does not");
+        // Ring: half way through the decay a line crosses the box at half height.
+        let ring = Look {
+            onset: lead::OnsetLook::Ring,
+            ..base
+        };
+        let mut motion = AnalyserMotion::default();
+        motion.advance(&make(ring.clone(), 0b0010), 0);
+        let picture = motion.advance(&make(ring, 0), 100);
+        assert!(
+            sum(pixel(picture, 75, 25)) > 200,
+            "the ring at half height: {:?}",
+            pixel(picture, 75, 25)
+        );
+        assert!(sum(pixel(picture, 75, 10)) < 60, "and not above it");
     }
 
     /// A dense graph frame, two channels of 256 bands with a line and a
