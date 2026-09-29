@@ -5217,6 +5217,10 @@ fn draw_graph(
         if lw_here > 0.0 || look.line_glow > 0.0 {
             let next = across(&level_of, xf + 1.5);
             let (ya, yb) = (y_of(level), y_of(next));
+            // A stroke keeps its width across the line: on a slope the
+            // column's span grows by the slope's secant, so a steep run is
+            // as wide as a flat one.
+            let secant = (1.0 + (yb - ya) * (yb - ya)).sqrt().min(8.0);
             let line_ink = match look.color_mode {
                 lead::ColorMode::Gradient => Ink::Solid(palette.at(level)),
                 _ => ink_for(level),
@@ -5224,7 +5228,7 @@ fn draw_graph(
             if look.line_glow > 0.0 {
                 // A soft band around the line: two passes, wide and faint, narrower and less faint.
                 for (share, band_alpha) in [(1.0f32, 0.18f32), (0.5, 0.3)] {
-                    let half = look.line_glow * share / 2.0;
+                    let half = look.line_glow * share * secant / 2.0;
                     fill_rect(
                         out,
                         clip,
@@ -5238,13 +5242,14 @@ fn draw_graph(
                 }
             }
             if lw_here > 0.0 {
+                let half = lw_here * secant / 2.0;
                 fill_rect(
                     out,
                     clip,
                     xf,
-                    ya.min(yb) - lw_here / 2.0,
+                    ya.min(yb) - half,
                     xf + 1.0,
-                    ya.max(yb) + lw_here / 2.0,
+                    ya.max(yb) + half,
                     &line_ink,
                     alpha,
                 );
@@ -9371,8 +9376,46 @@ mod analyser_tests {
             sum(pixel(&picture, 50, 25)) > 600,
             "the ribbon, six wide, at half height"
         );
+        assert!(
+            sum(pixel(&picture, 50, 22)) > 600 && sum(pixel(&picture, 50, 27)) > 600,
+            "six wide: three rows above and below the middle are the line's"
+        );
+        assert!(
+            sum(pixel(&picture, 50, 18)) < 400,
+            "seven rows above it is the glow only: {}",
+            sum(pixel(&picture, 50, 18))
+        );
         let band = sum(pixel(&picture, 50, 32));
         assert!(band > 60 && band < 400, "the glow band below it: {band}");
+        // The reference theme's ribbon: 1.5 to 40 wide with a 30 glow, by
+        // level, in a 600 tall box: at half level the line is 21 rows.
+        let hanger = Look {
+            style: lead::LookStyle::Graph,
+            fill_alpha: 0.0,
+            line_width: 1.5,
+            line_width_max: 40.0,
+            line_glow: 30.0,
+            color_mode: lead::ColorMode::Level,
+            palette: lead::Palette::named("violet").expect("violet"),
+            smoothing: 0.0,
+            peaks: false,
+            bgr_alpha: 1.0,
+            ..Look::default()
+        };
+        let a = analyser(hanger, 100, 600, vec![0.5, 0.5], vec![0.5, 0.5]);
+        let picture = AnalyserMotion::default().advance(&a, 0).clone();
+        let core: Vec<u32> = (270..330)
+            .filter(|&y| {
+                pixel(&picture, 50, y)[3] == 255
+                    && sum(pixel(&picture, 50, y)) == sum(pixel(&picture, 50, 300))
+            })
+            .collect();
+        assert!(
+            core.len() >= 19 && core.len() <= 22,
+            "the ribbon's core rows at half level: {} ({:?})",
+            core.len(),
+            pixel(&picture, 50, 300)
+        );
         // Echo: after one frame at rate 0.5 the ghost sits half way.
         let echo = Look {
             echo: 0.5,
