@@ -22,6 +22,7 @@ const { Catalog, CatalogError } = require('./catalog');
 const { Previews } = require('./previews');
 const { Updater, UpdateError } = require('./update');
 const { zipDirectory } = require('./zipwrite');
+const tailor = require('./tailor');
 
 const MAX_BACKUP_UPLOAD_BYTES = 32 * 1024 * 1024;
 const MAX_BACKUP_FILE_BYTES = 4 * 1024 * 1024;
@@ -194,6 +195,37 @@ class Manager {
       if (result.error) return res.status(400).json({ error: result.error });
       res.json({ ok: true, switchedTo: result.switchedTo || null });
     }));
+
+    // The cutter: a copy of the theme at another size, installed beside it.
+    app.post('/api/themes/:folder/tailor', wrap(async function (req, res) {
+      const folder = self.folderParam(req);
+      if (!fs.existsSync(path.join(self.paths.meterBase, folder, 'meters.txt'))) return res.status(404).json({ error: 'not-found' });
+      const body = req.body || {};
+      const size = tailor.parseSize(String(body.width || '') + 'x' + String(body.height || ''));
+      if (!size) return res.status(400).json({ error: 'bad-size' });
+      const job = self.newJob('tailor', folder + ' \u2192 ' + size.width + 'x' + size.height);
+      self.runTailor(job, folder, size, body.stretch === true || body.stretch === 'true');
+      res.status(202).json({ ok: true, job: job });
+    }));
+
+    // The packager: the theme as the catalogue takes it, with a preview,
+    // as a zip the browser fetches when the job is done.
+    app.post('/api/themes/:folder/package', wrap(async function (req, res) {
+      const folder = self.folderParam(req);
+      if (!fs.existsSync(path.join(self.paths.meterBase, folder, 'meters.txt'))) return res.status(404).json({ error: 'not-found' });
+      const settle = Math.min(30, Math.max(1, parseInt((req.body || {}).settle, 10) || 3));
+      const job = self.newJob('package', folder);
+      self.runPackage(job, folder, settle);
+      res.status(202).json({ ok: true, job: job });
+    }));
+
+    app.get('/api/jobs/:id/file', function (req, res) {
+      const job = self.jobs.find(function (j) { return String(j.id) === String(req.params.id); });
+      if (!job || job.kind !== 'package' || job.state !== 'done' || !job.file || !fs.existsSync(job.file)) return res.status(404).json({ error: 'not-found' });
+      res.setHeader('Content-Disposition', 'attachment; filename="' + path.basename(job.file).replace(/[^A-Za-z0-9 ._()+-]/g, '_') + '"');
+      res.setHeader('Content-Type', 'application/zip');
+      res.sendFile(job.file, { maxAge: 0 });
+    });
 
     app.get('/api/themes/:folder/previews', wrap(async function (req, res) {
       const folder = self.folderParam(req);
@@ -866,6 +898,70 @@ class Manager {
       if (!error && job.kind !== 'upgrade' && this.plugin && typeof this.plugin.themesWritten === 'function') { try { this.plugin.themesWritten(); } catch (e) {} }
       this.logger.info('glass: manager ' + job.kind + ' ' + job.name + ' done: ' + job.folders.map(function (f) { return f.install + '/' + f.folder; }).join(', '));
     }
+  }
+
+  // Cut a theme to a size into a staging folder, then move the copy and
+  // its twin into the trees, replacing a copy of that name, and draw its
+  // previews.
+  runTailor(job, folder, size, stretch) {
+    const self = this;
+    self.exclusive(async function () {
+      const staging = path.join(self.catalog.downloadsDir, 'tailor-' + job.id);
+      try {
+        await fsp.rm(staging, { recursive: true, force: true });
+        await fsp.mkdir(staging, { recursive: true });
+        try { await fsp.chown(staging, self.previews.uid, self.previews.gid); } catch (e) { /* same user */ }
+        job.state = 'cutting';
+        const result = await tailor.cut({
+          launcher: self.paths.launcher, env: self.plugin.launchEnv(), uid: self.previews.uid, gid: self.previews.gid,
+          themeDir: path.join(self.paths.meterBase, folder), width: size.width, height: size.height, stretch: stretch, out: staging
+        });
+        result.warnings.forEach(function (w) { self.logger.info('glass: manager tailor ' + folder + ': ' + w); });
+        job.state = 'unpacking';
+        for (const f of result.folders) {
+          const root = f.install === 'templates' ? self.paths.meterBase : self.paths.spectrumBase;
+          await fsp.mkdir(root, { recursive: true });
+          const dest = path.join(root, f.folder);
+          await fsp.rm(dest, { recursive: true, force: true });
+          await fsp.rename(f.path, dest);
+          await ownTree(dest, self.previews.uid, self.previews.gid);
+          job.folders.push({ install: f.install, folder: f.folder, kind: f.install === 'templates' ? 'meter' : 'spectrum', files: 0, bytes: 0, names: [] });
+        }
+        await self.afterInstall(job);
+        self.finish(job, null);
+      } catch (e) {
+        self.finish(job, e);
+      } finally {
+        await fsp.rm(staging, { recursive: true, force: true });
+      }
+    });
+  }
+
+  // Package a theme into the downloads folder; the zip stays for the
+  // browser to fetch until the plugin starts again.
+  runPackage(job, folder, settle) {
+    const self = this;
+    self.exclusive(async function () {
+      const staging = path.join(self.catalog.downloadsDir, 'package-' + job.id);
+      try {
+        await fsp.rm(staging, { recursive: true, force: true });
+        await fsp.mkdir(staging, { recursive: true });
+        try { await fsp.chown(staging, self.previews.uid, self.previews.gid); } catch (e) { /* same user */ }
+        job.state = 'packaging';
+        const result = await tailor.pack({
+          launcher: self.paths.launcher, env: self.plugin.launchEnv(), uid: self.previews.uid, gid: self.previews.gid,
+          themeDir: path.join(self.paths.meterBase, folder), out: staging, settle: settle
+        });
+        result.warnings.forEach(function (w) { self.logger.info('glass: manager package ' + folder + ': ' + w); });
+        job.file = result.zip;
+        job.state = 'done';
+        job.endedAt = new Date().toISOString();
+        self.logger.info('glass: manager package ' + folder + ' done: ' + result.zip);
+      } catch (e) {
+        await fsp.rm(staging, { recursive: true, force: true });
+        self.finish(job, e);
+      }
+    });
   }
 
   runInstall(job, entry) {

@@ -477,6 +477,22 @@
 </div>
 
 <!-- Confirm -->
+<div class="modal-back" id="tailor-modal">
+  <div class="modal small">
+    <h2 id="tl-title"></h2>
+    <div class="help" id="tl-help" style="margin-bottom:12px"></div>
+    <div class="form">
+      <div><label id="tl-width-label"></label><input type="number" id="tl-width" min="64" max="7680"></div>
+      <div><label id="tl-height-label"></label><input type="number" id="tl-height" min="64" max="4320"></div>
+      <div class="full"><label class="switch"><input type="checkbox" id="tl-stretch"><span id="tl-stretch-label"></span></label></div>
+    </div>
+    <div class="foot">
+      <button id="tl-cancel"></button>
+      <button class="primary" id="tl-ok"></button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-back" id="confirm-modal">
   <div class="modal small">
     <h2 id="cf-title"></h2>
@@ -618,6 +634,11 @@
     $('disp-x-label').textContent = t('MANAGER_DISPLAY_X');
     $('disp-y-label').textContent = t('MANAGER_DISPLAY_Y');
     $('btn-disp-save').textContent = t('MANAGER_SAVE');
+    $('tl-width-label').textContent = t('MANAGER_TAILOR_WIDTH');
+    $('tl-height-label').textContent = t('MANAGER_TAILOR_HEIGHT');
+    $('tl-stretch-label').textContent = t('MANAGER_TAILOR_STRETCH');
+    $('tl-cancel').textContent = t('MANAGER_CANCEL');
+    $('tl-ok').textContent = t('MANAGER_TAILOR_RUN');
     $('art-help').textContent = t('FANART_ENABLE_DOC');
     $('art-enabled-label').textContent = t('FANART_ENABLE_LABEL');
     $('art-keymode-label').textContent = t('FANART_KEY_MODE_LABEL');
@@ -803,6 +824,8 @@
           '<div class="actions">' +
             (th.active ? '' : '<button class="small primary" data-act="activate">' + esc(t('MANAGER_ACTIVATE')) + '</button>') +
             '<button class="small" data-act="details">' + esc(t('MANAGER_DETAILS')) + '</button>' +
+            '<button class="small" data-act="tailor">' + esc(t('MANAGER_TAILOR_BTN')) + '</button>' +
+            '<button class="small" data-act="package">' + esc(t('MANAGER_PACKAGE_BTN')) + '</button>' +
             '<button class="small danger" data-act="remove">' + esc(t('THEME_REMOVE_BTN')) + '</button>' +
           '</div>' +
         '</div>';
@@ -812,6 +835,8 @@
           if (b.dataset.act === 'activate') activateTheme(th.folder);
           else if (b.dataset.act === 'details') openTheme(th.folder);
           else if (b.dataset.act === 'remove') removeTheme(th.folder);
+          else if (b.dataset.act === 'tailor') tailorTheme(th);
+          else if (b.dataset.act === 'package') packageTheme(th.folder);
         };
       });
       grid.appendChild(card);
@@ -836,6 +861,38 @@
     return api('POST', '/api/themes/' + encodeURIComponent(folder) + '/activate').then(function () {
       toast(t('MANAGER_ACTIVATED') + ' ' + folder);
       return loadThemes().then(function () { if (state.currentTheme === folder) openTheme(folder); });
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+
+  // The cutter: a copy of the theme at another size, the active theme's
+  // size offered first as the screen's.
+  var tailorResolve = null;
+  function tailorTheme(th) {
+    var active = (state.themes || []).find(function (x) { return x.active; }) || th;
+    $('tl-title').textContent = t('MANAGER_TAILOR_TITLE') + ' ' + th.folder;
+    $('tl-help').textContent = t('MANAGER_TAILOR_DOC');
+    $('tl-width').value = active.width || th.width || '';
+    $('tl-height').value = active.height || th.height || '';
+    $('tl-stretch').checked = false;
+    $('tailor-modal').classList.add('open');
+    tailorResolve = function (go) {
+      $('tailor-modal').classList.remove('open');
+      if (!go) return;
+      var body = { width: parseInt($('tl-width').value, 10), height: parseInt($('tl-height').value, 10), stretch: $('tl-stretch').checked };
+      api('POST', '/api/themes/' + encodeURIComponent(th.folder) + '/tailor', body).then(function (data) {
+        toast(t('MANAGER_TAILOR_STARTED') + ' ' + data.job.name);
+        watchJob(data.job);
+      }).catch(function (e) { toast(errorText(e), 'error'); });
+    };
+  }
+  $('tl-cancel').onclick = function () { if (tailorResolve) tailorResolve(false); };
+  $('tl-ok').onclick = function () { if (tailorResolve) tailorResolve(true); };
+
+  // The packager: the zip comes down when the job is done.
+  function packageTheme(folder) {
+    api('POST', '/api/themes/' + encodeURIComponent(folder) + '/package', { settle: 3 }).then(function (data) {
+      toast(t('MANAGER_PACKAGE_STARTED') + ' ' + folder);
+      watchJob(data.job);
     }).catch(function (e) { toast(errorText(e), 'error'); });
   }
 
@@ -1004,7 +1061,10 @@
         renderJobs();
         if (before !== data.job.state && (data.job.state === 'done' || data.job.state === 'failed' || data.job.state === 'rendering')) {
           if (data.job.state === 'failed') toast(t('MANAGER_JOB_FAILED') + ' ' + data.job.name + ': ' + errorText(data.job.error ? { code: data.job.error.error, message: data.job.error.message } : null), 'error');
-          if (data.job.state === 'done' || data.job.state === 'rendering') {
+          if (data.job.kind === 'package' && data.job.state === 'done') {
+            toast(t('MANAGER_PACKAGE_DONE') + ' ' + data.job.name);
+            window.location.href = '/api/jobs/' + id + '/file';
+          } else if (data.job.state === 'done' || data.job.state === 'rendering') {
             if (before !== 'rendering' && before !== 'done') {
               toast(t('MANAGER_JOB_DONE') + ' ' + data.job.folders.map(function (f) { return f.folder; }).join(', '));
               loadThemes().then(function () { data.job.folders.forEach(function (f) { if (f.install === 'templates') pollPreviews(f.folder); }); });
@@ -1021,7 +1081,7 @@
     Object.keys(state.jobs).forEach(function (id) {
       var j = state.jobs[id];
       var pct = j.progress && j.progress.total ? Math.round(j.progress.done * 100 / j.progress.total) : 0;
-      var label = { queued: 'MANAGER_JOB_QUEUED', downloading: 'MANAGER_JOB_DOWNLOADING', checking: 'MANAGER_JOB_CHECKING', unpacking: 'MANAGER_JOB_UNPACKING', rendering: 'MANAGER_JOB_RENDERING', done: 'MANAGER_JOB_DONE', failed: 'MANAGER_JOB_FAILED' }[j.state] || j.state;
+      var label = { queued: 'MANAGER_JOB_QUEUED', downloading: 'MANAGER_JOB_DOWNLOADING', checking: 'MANAGER_JOB_CHECKING', unpacking: 'MANAGER_JOB_UNPACKING', rendering: 'MANAGER_JOB_RENDERING', cutting: 'MANAGER_JOB_CUTTING', packaging: 'MANAGER_JOB_PACKAGING', done: j.kind === 'package' ? 'MANAGER_PACKAGE_READY' : 'MANAGER_JOB_DONE', failed: 'MANAGER_JOB_FAILED' }[j.state] || j.state;
       html += '<div class="job"><b>' + esc(j.name) + '</b> · ' + esc(t(label)) +
         (j.state === 'downloading' || j.state === 'unpacking' ? ' ' + pct + '%' + (j.progress.total ? ' (' + fmtBytes(j.progress.done) + ' / ' + fmtBytes(j.progress.total) + ')' : '') : '') +
         (j.state === 'failed' && j.error ? ' <span class="muted">' + esc(errorText({ code: j.error.error, message: j.error.message })) + '</span>' : '') +
