@@ -3207,7 +3207,12 @@ pub fn screen_from_config(text: &str) -> (u32, u32) {
             _ => {}
         }
     }
-    let (folder_w, folder_h) = size_from_folder(&folder).unwrap_or((800, 480));
+    // The folder may be a path, as an override gives one: its last part is the name.
+    let folder_name = Path::new(&folder)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or(&folder);
+    let (folder_w, folder_h) = size_from_folder(folder_name).unwrap_or((800, 480));
     match (width, height) {
         (Some(w), Some(h)) => (w, h),
         _ => (folder_w, folder_h),
@@ -5104,6 +5109,27 @@ mod tests {
             }
         );
         assert_eq!(transition_settings(""), TransitionSettings::default());
+    }
+
+    /// The theme's size comes from the folder's name, also when the
+    /// configuration names the folder by its whole path.
+    #[test]
+    fn the_screen_size_reads_the_folder_name_out_of_a_path() {
+        assert_eq!(
+            screen_from_config("[current]\nmeter.folder = 1280x720_x\n"),
+            (1280, 720)
+        );
+        assert_eq!(
+            screen_from_config(
+                "[current]\nmeter.folder = /data/INTERNAL/glass/templates/1280x720_x\n"
+            ),
+            (1280, 720)
+        );
+        assert_eq!(screen_from_config("[current]\nmeter.folder = /tmp/cut/templates/3840x2160_y\nscreen.width = 100\nscreen.height = 50\n"), (100, 50));
+        assert_eq!(
+            screen_from_config("[current]\nmeter.folder = /x/none\n"),
+            (800, 480)
+        );
     }
 
     #[test]
