@@ -300,7 +300,7 @@ pub fn raster(scene: &Scene) -> Frame {
             fonts: None,
             art: None,
             icon: None,
-            spectrum: None,
+            spectra: &[],
             folder_pictures: &[],
             fanart: (None, None),
             vinyl: None,
@@ -374,8 +374,8 @@ pub struct Stack<'a> {
     pub art: Option<&'a Frame>,
     /// Type icon already fitted for `Scene::type_area`, tinted when it was an SVG.
     pub icon: Option<&'a Frame>,
-    /// The spectrum's pictures, built from `Scene::spectrum` once per meter.
-    pub spectrum: Option<&'a SpectrumAssets>,
+    /// The spectrum boxes' pictures, one per `Scene::spectra`, built once per meter.
+    pub spectra: &'a [SpectrumAssets],
     /// One entry per `Scene::folder_layers`, the picture fitted to its box.
     pub folder_pictures: &'a [Option<FolderPicture>],
     /// The fanart on show and the one it replaces, fitted to the slot.
@@ -415,7 +415,7 @@ pub fn raster_over<'m>(
             bar_heights: scene
                 .bar_heights
                 .iter()
-                .map(|&h| (h as f32 * ramp) as u32)
+                .map(|heights| heights.iter().map(|&h| (h as f32 * ramp) as u32).collect())
                 .collect(),
             ..scene.clone()
         };
@@ -552,17 +552,29 @@ pub fn raster_over<'m>(
         .iter()
         .map(|t| text.advance(t, stack.fonts, now_ms))
         .collect();
-    let analyser_picture = scene.analyser.as_ref().map(|a| {
-        (
-            a.x,
-            a.y,
-            analyser.advance_with_fonts(a, now_ms, stack.fonts),
-        )
-    });
-    let spectrum_plan = match (&scene.spectrum, stack.spectrum) {
-        (Some(spec), Some(_)) => Some(spectrum.advance(spec, &scene.bar_heights)),
-        _ => None,
-    };
+    // One motion per box, grown as the scene asks; the boxes keep their order.
+    while analyser.len() < scene.analysers.len() {
+        analyser.push(AnalyserMotion::default());
+    }
+    let analyser_pictures: Vec<(i32, i32, &Frame)> = scene
+        .analysers
+        .iter()
+        .zip(analyser.iter_mut())
+        .map(|(a, motion)| (a.x, a.y, motion.advance_with_fonts(a, now_ms, stack.fonts)))
+        .collect();
+    while spectrum.len() < scene.spectra.len() {
+        spectrum.push(SpectrumMotion::default());
+    }
+    let spectrum_plans: Vec<Option<SpectrumPlan>> = scene
+        .spectra
+        .iter()
+        .enumerate()
+        .zip(spectrum.iter_mut())
+        .map(|((i, spec), motion)| {
+            let heights = scene.bar_heights.get(i).map(Vec::as_slice).unwrap_or(&[]);
+            stack.spectra.get(i).map(|_| motion.advance(spec, heights))
+        })
+        .collect();
     labels.sweep(now_ms);
     let type_label = scene.type_area.as_ref().and_then(|area| {
         labels.ensure(
@@ -720,12 +732,12 @@ pub fn raster_over<'m>(
             ops.extend(turned_op(needles, *key, *at));
         }
     }
-    if let (Some(spec), Some(assets), Some(plan)) =
-        (&scene.spectrum, stack.spectrum, &spectrum_plan)
-    {
-        plan_spectrum(spec, assets, plan, &mut ops);
+    for (i, spec) in scene.spectra.iter().enumerate() {
+        if let (Some(assets), Some(Some(plan))) = (stack.spectra.get(i), spectrum_plans.get(i)) {
+            plan_spectrum(spec, assets, plan, &mut ops);
+        }
     }
-    if let Some((x, y, picture)) = analyser_picture {
+    for (x, y, picture) in analyser_pictures {
         ops.push(blit_op(picture, (x, y)));
     }
     // A scene without a theme shows plain meter columns and spectrum bars.
@@ -3317,9 +3329,10 @@ fn draw_bar(
 #[derive(Default)]
 pub struct Motion {
     pub text: TextMotion,
-    pub spectrum: SpectrumMotion,
-    /// The analyser's bars and peaks between frames, and its picture.
-    pub analyser: AnalyserMotion,
+    /// One per spectrum box: the toppings of the previous engine's bars.
+    pub spectrum: Vec<SpectrumMotion>,
+    /// One per analyser box: its bars and peaks between frames, and its picture.
+    pub analyser: Vec<AnalyserMotion>,
     pub vinyl: VinylMotion,
     pub tonearm: TonearmMotion,
     pub reels: (ReelMotion, ReelMotion),
@@ -7289,8 +7302,8 @@ pub struct MeterAssets {
     pub indicator_right: Option<Frame>,
     pub fonts: Fonts,
     pub art_mask: Option<Frame>,
-    /// The spectrum's pictures when the meter shows one.
-    pub spectrum: Option<SpectrumAssets>,
+    /// The spectrum boxes' pictures, one per box the meter shows.
+    pub spectra: Vec<SpectrumAssets>,
     /// The tonearm picture when the meter has one.
     pub tonearm: Option<Frame>,
     /// The theme's reel pictures; an album's reel is scaled to their size.
@@ -7317,7 +7330,10 @@ impl MeterAssets {
             ("mask", bytes_of([&self.art_mask])),
             (
                 "spectrum",
-                self.spectrum.as_ref().map_or(0, SpectrumAssets::bytes),
+                self.spectra
+                    .iter()
+                    .map(SpectrumAssets::bytes)
+                    .sum::<usize>(),
             ),
             (
                 "indicators",
@@ -7377,7 +7393,7 @@ impl MeterAssets {
                 .as_ref()
                 .filter(|art| !art.mask.is_empty())
                 .and_then(|art| read_png(Path::new(&art.mask))),
-            spectrum: skin.spectrum.as_ref().map(SpectrumAssets::load),
+            spectra: skin.spectra.iter().map(SpectrumAssets::load).collect(),
             tonearm: skin
                 .tonearm
                 .as_ref()
@@ -7856,6 +7872,7 @@ mod tests {
         let spec = SpectrumSpec {
             x: 10,
             y: 20,
+            channel: lead::SpectrumChannel::Mean,
             w: 100,
             h: 60,
             origin_x: 5,
@@ -8340,7 +8357,7 @@ mod tests {
                     fonts: None,
                     art: None,
                     icon: None,
-                    spectrum: None,
+                    spectra: &[],
                     folder_pictures: &[],
                     fanart: (None, None),
                     vinyl: None,
@@ -8366,7 +8383,7 @@ mod tests {
                     fonts: None,
                     art: None,
                     icon: None,
-                    spectrum: None,
+                    spectra: &[],
                     folder_pictures: &[],
                     fanart: (None, None),
                     vinyl: None,
@@ -8468,7 +8485,7 @@ mod tests {
                 fonts: None,
                 art: Some(art),
                 icon: None,
-                spectrum: None,
+                spectra: &[],
                 folder_pictures: &[],
                 fanart: (None, None),
                 vinyl: None,

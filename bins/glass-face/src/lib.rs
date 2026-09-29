@@ -177,9 +177,11 @@ impl Face {
         }
         let assets = MeterAssets::load(&skin);
         let bins = skin
-            .spectrum
-            .as_ref()
-            .map_or(lead::DEFAULT_SPECTRUM_BINS, |s| s.bins.max(1));
+            .spectra
+            .iter()
+            .map(|s| s.bins.max(1))
+            .max()
+            .unwrap_or(lead::DEFAULT_SPECTRUM_BINS);
         let mut source = TapSource::new(bins, skin.meter_max)
             .without_player()
             .with_hops(Box::new(self.hops.clone()))
@@ -341,7 +343,7 @@ impl Face {
             fonts: Some(&assets.fonts),
             art: showing.pictures.art(),
             icon: showing.pictures.icon(),
-            spectrum: assets.spectrum.as_ref(),
+            spectra: &assets.spectra,
             folder_pictures: showing.pictures.folder_pictures(),
             fanart: showing.pictures.fanart(),
             vinyl: showing.pictures.vinyl(),
