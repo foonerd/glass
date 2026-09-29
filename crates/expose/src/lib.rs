@@ -552,10 +552,13 @@ pub fn raster_over<'m>(
         .iter()
         .map(|t| text.advance(t, stack.fonts, now_ms))
         .collect();
-    let analyser_picture = scene
-        .analyser
-        .as_ref()
-        .map(|a| (a.x, a.y, analyser.advance(a, now_ms)));
+    let analyser_picture = scene.analyser.as_ref().map(|a| {
+        (
+            a.x,
+            a.y,
+            analyser.advance_with_fonts(a, now_ms, stack.fonts),
+        )
+    });
     let spectrum_plan = match (&scene.spectrum, stack.spectrum) {
         (Some(spec), Some(_)) => Some(spectrum.advance(spec, &scene.bar_heights)),
         _ => None,
@@ -3814,11 +3817,51 @@ pub struct AnalyserMotion {
     which: usize,
     /// The box's polar map for the radial look, built once per box size.
     radial: Option<RadialMap>,
+    /// The scale labels, set once per look and box.
+    labels: LabelCache,
+}
+
+/// The scale labels of an analyser box, set once per look and box and
+/// blitted every frame: each line with its top left in the box, and the
+/// ticks and faint lines as rectangles with their alpha.
+#[derive(Default)]
+struct LabelCache {
+    key: Option<LabelKey>,
+    lines: Vec<(i32, i32, Frame)>,
+    marks: Vec<(f32, f32, f32, f32, f32)>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct LabelKey {
+    w: u32,
+    h: u32,
+    n: usize,
+    lo: u32,
+    hi: u32,
+    level: (u32, u32),
+    flags: u8,
+    size: u32,
+    color: [u8; 3],
+    layout: u8,
+    mirror: i8,
+    reflex: u32,
 }
 
 impl AnalyserMotion {
-    /// Advance the bars and the peaks to `now_ms` and draw the box.
+    /// Advance the bars and the peaks to `now_ms` and draw the box, the
+    /// scale labels in the bitmap font.
     pub fn advance(&mut self, a: &plot::Analyser, now_ms: u64) -> &Frame {
+        self.advance_with_fonts(a, now_ms, None)
+    }
+
+    /// Advance the bars and the peaks to `now_ms` and draw the box, the
+    /// scale labels set in the theme's regular font.
+    pub fn advance_with_fonts(
+        &mut self,
+        a: &plot::Analyser,
+        now_ms: u64,
+        fonts: Option<&Fonts>,
+    ) -> &Frame {
         let dt = self
             .last_ms
             .map(|last| (now_ms.saturating_sub(last) as f32 / 1000.0).clamp(0.0, 0.1))
@@ -3880,7 +3923,14 @@ impl AnalyserMotion {
                 picture,
             );
         } else {
-            render_analyser(a, &self.smoothed, &self.peaks, picture);
+            render_analyser(
+                a,
+                &self.smoothed,
+                &self.peaks,
+                picture,
+                fonts,
+                &mut self.labels,
+            );
         }
         picture
     }
@@ -4064,6 +4114,15 @@ fn render_radial(
             let u = ((e & 0xffff) + 65536 - spin) & 0xffff;
             let at = (y * width + x) * 4;
             for &ch in channels {
+                // First the reach: a pixel outside this channel's ring,
+                // between its base circle and its furthest tip, costs
+                // nothing more.
+                let (b, reach) = (base[ch], reach[ch]);
+                let along = (r - b) * reach.signum();
+                let span = reach.abs().max(1.0);
+                if along < 0.0 || along >= span {
+                    continue;
+                }
                 // Which band, by the layout: a half of the circle per
                 // channel side by side, else the whole circle for each.
                 let (band, frac) = match layout {
@@ -4084,12 +4143,9 @@ fn render_radial(
                     continue;
                 }
                 let level = smoothed[ch][band].clamp(0.0, 1.0);
-                let (b, reach) = (base[ch], reach[ch]);
-                let along = (r - b) * reach.signum();
-                let span = reach.abs().max(1.0);
                 let bar_alpha =
                     channel_alpha[ch] * look.fill_alpha * if look.alpha_bars { level } else { 1.0 };
-                if along >= 0.0 && along < level * span {
+                if along < level * span {
                     let c = match look.color_mode {
                         lead::ColorMode::Gradient => {
                             gradient[ch][((along / span) * 255.0).clamp(0.0, 255.0) as usize]
@@ -4686,6 +4742,191 @@ fn draw_channel(
     }
 }
 
+/// One channel as a graph: the band levels, read at each band's centre and
+/// joined straight between neighbours, give every column of the area a
+/// height; the area under that line is filled at `fill.alpha` in the
+/// palette, the line itself is `line.width` pixels thick at the ink of its
+/// height, and the peaks are marks per band or, with `peaks.line`, a line
+/// of their own.
+#[allow(clippy::too_many_arguments)]
+fn draw_graph(
+    out: &mut Frame,
+    look: &lead::Look,
+    palette: &lead::Palette,
+    area: &Area,
+    span: &Area,
+    levels: &[f32],
+    peaks: &[Peak],
+    alpha: f32,
+) {
+    let n = levels.len();
+    if n == 0 || area.w < 1.0 || area.h < 1.0 {
+        return;
+    }
+    let clip = (
+        area.x.floor() as i32,
+        area.y.floor() as i32,
+        (area.x + area.w).ceil() as i32,
+        (area.y + area.h).ceil() as i32,
+    );
+    let pitch = area.w / n as f32;
+    let band_at = |i: usize| -> usize {
+        if area.reversed {
+            n - 1 - i
+        } else {
+            i
+        }
+    };
+    // A value across the area, between the band centres, straight between neighbours.
+    let across = |values: &dyn Fn(usize) -> f32, xf: f32| -> f32 {
+        let t = ((xf - area.x) / pitch - 0.5).clamp(0.0, (n - 1) as f32);
+        let i = t.floor() as usize;
+        let f = t - i as f32;
+        let a = values(band_at(i));
+        let b = values(band_at((i + 1).min(n - 1)));
+        (a + (b - a) * f).clamp(0.0, 1.0)
+    };
+    let level_of = |i: usize| levels[i];
+    let peak_of = |i: usize| peaks.get(i).map_or(0.0, |p| p.level);
+    let fade_of = |i: usize| peaks.get(i).map_or(0.0, |p| p.fade);
+    let lookup = match look.color_mode {
+        lead::ColorMode::Gradient => Some(palette_lookup(
+            palette,
+            span,
+            look.palette_horizontal,
+            out.width,
+            out.height,
+        )),
+        _ => None,
+    };
+    let lw = look.line_width.max(0.0);
+    let y_of = |level: f32| -> f32 {
+        if area.hanging {
+            area.y + level * area.h
+        } else {
+            area.y + area.h - level * area.h
+        }
+    };
+    let x0 = area.x.floor().max(clip.0 as f32) as i32;
+    let x1 = (area.x + area.w).ceil().min(clip.2 as f32) as i32;
+    for x in x0..x1 {
+        let xf = x as f32;
+        let level = across(&level_of, xf + 0.5);
+        let t_across = ((xf + 0.5 - area.x) / area.w).clamp(0.0, 1.0);
+        let ink_for = |lvl: f32| -> Ink<'_> {
+            match (look.color_mode, lookup.as_deref()) {
+                (lead::ColorMode::Gradient, Some(table)) => {
+                    if look.palette_horizontal {
+                        Ink::Cols(table)
+                    } else {
+                        Ink::Rows(table)
+                    }
+                }
+                (lead::ColorMode::Index, _) => Ink::Solid(palette.at(if area.reversed {
+                    1.0 - t_across
+                } else {
+                    t_across
+                })),
+                (lead::ColorMode::Level, _) => Ink::Solid(palette.for_level(lvl)),
+                _ => Ink::Solid([255, 255, 255, 255]),
+            }
+        };
+        let ink = ink_for(level);
+        // The area under the line.
+        if look.fill_alpha > 0.0 && level > 0.0 {
+            let (top, bottom) = if area.hanging {
+                (area.y, y_of(level))
+            } else {
+                (y_of(level), area.y + area.h)
+            };
+            let fill_alpha = alpha
+                * look.fill_alpha
+                * if look.alpha_bars || look.lumi {
+                    level
+                } else {
+                    1.0
+                };
+            fill_rect(out, clip, xf, top, xf + 1.0, bottom, &ink, fill_alpha);
+        }
+        // The line: from this column's height to the next one's, so a
+        // steep slope stays joined, `line.width` thick.
+        if lw > 0.0 {
+            let next = across(&level_of, xf + 1.5);
+            let (ya, yb) = (y_of(level), y_of(next));
+            let line_ink = match look.color_mode {
+                lead::ColorMode::Gradient => Ink::Solid(palette.at(level)),
+                _ => ink_for(level),
+            };
+            fill_rect(
+                out,
+                clip,
+                xf,
+                ya.min(yb) - lw / 2.0,
+                xf + 1.0,
+                ya.max(yb) + lw / 2.0,
+                &line_ink,
+                alpha,
+            );
+        }
+        // The peaks as a line of their own.
+        if look.peaks && look.peak_line {
+            let peak = across(&peak_of, xf + 0.5);
+            if peak > level + 0.002 {
+                let next = across(&peak_of, xf + 1.5);
+                let (ya, yb) = (y_of(peak), y_of(next));
+                let fade = across(&fade_of, xf + 0.5);
+                let mark = match look.color_mode {
+                    lead::ColorMode::Gradient => Ink::Solid(palette.at(peak)),
+                    lead::ColorMode::Level => Ink::Solid(palette.for_level(peak)),
+                    lead::ColorMode::Index => ink_for(peak),
+                };
+                fill_rect(
+                    out,
+                    clip,
+                    xf,
+                    ya.min(yb) - 1.0,
+                    xf + 1.0,
+                    ya.max(yb) + 1.0,
+                    &mark,
+                    alpha * (1.0 - fade).clamp(0.0, 1.0),
+                );
+            }
+        }
+    }
+    // The peaks as a mark per band.
+    if look.peaks && !look.peak_line {
+        for (i, raw) in levels.iter().enumerate() {
+            let peak = peaks.get(i).copied().unwrap_or_default();
+            let level = raw.clamp(0.0, 1.0);
+            if peak.level <= level + 0.002 {
+                continue;
+            }
+            let slot = band_at(i);
+            let xa = area.x + slot as f32 * pitch;
+            let py = y_of(peak.level.clamp(0.0, 1.0));
+            let mark = match look.color_mode {
+                lead::ColorMode::Gradient => Ink::Solid(palette.at(peak.level.clamp(0.0, 1.0))),
+                lead::ColorMode::Index => Ink::Solid(palette.at(if n > 1 {
+                    i as f32 / (n - 1) as f32
+                } else {
+                    0.0
+                })),
+                lead::ColorMode::Level => Ink::Solid(palette.for_level(peak.level)),
+            };
+            fill_rect(
+                out,
+                clip,
+                xa,
+                py - 1.0,
+                xa + pitch,
+                py + 1.0,
+                &mark,
+                alpha * (1.0 - peak.fade).clamp(0.0, 1.0),
+            );
+        }
+    }
+}
+
 /// A channel's area into `areas`, whole or as two halves mirrored: the
 /// bands one way and their mirror image, meeting in the middle.
 #[allow(clippy::too_many_arguments)]
@@ -4755,6 +4996,8 @@ fn render_analyser(
     smoothed: &[Vec<f32>; 2],
     peaks: &[Vec<Peak>; 2],
     out: &mut Frame,
+    fonts: Option<&Fonts>,
+    labels: &mut LabelCache,
 ) {
     let (w, h) = (a.w.max(1), a.h.max(1));
     let look = &a.look;
@@ -4769,10 +5012,17 @@ fn render_analyser(
         }
     }
     let (fw, fh) = (w as f32, h as f32);
-    let bars_h = if look.reflex > 0.0 {
-        (fh * (1.0 - look.reflex)).max(1.0)
+    // The frequency scale takes a strip at the bottom of the box.
+    let strip = if look.scale_x {
+        (look.scale_size + 6) as f32
     } else {
-        fh
+        0.0
+    };
+    let body_h = (fh - strip).max(1.0);
+    let bars_h = if look.reflex > 0.0 {
+        (body_h * (1.0 - look.reflex)).max(1.0)
+    } else {
+        body_h
     };
     let stereo = a.stereo && !a.levels[1].is_empty();
     let left = look.palette_left.as_ref().unwrap_or(&look.palette);
@@ -4860,21 +5110,33 @@ fn render_analyser(
                 reversed: area.reversed,
             }
         };
-        draw_channel(
-            out,
-            look,
-            palette,
-            area,
-            &span,
-            &smoothed[*ch],
-            &peaks[*ch],
-            *alpha,
-        );
+        match look.style {
+            lead::LookStyle::Graph => draw_graph(
+                out,
+                look,
+                palette,
+                area,
+                &span,
+                &smoothed[*ch],
+                &peaks[*ch],
+                *alpha,
+            ),
+            lead::LookStyle::Bars => draw_channel(
+                out,
+                look,
+                palette,
+                area,
+                &span,
+                &smoothed[*ch],
+                &peaks[*ch],
+                *alpha,
+            ),
+        }
     }
     if look.reflex > 0.0 {
         // The bars upside down under them, dimmed and faded: each row of
         // the reflection reads one row of the bars, squeezed to fit or not.
-        let reflex_h = (fh - bars_h).max(0.0) as usize;
+        let reflex_h = (body_h - bars_h).max(0.0) as usize;
         let bars_rows = bars_h.round().max(1.0) as usize;
         let alpha_255 = (look.reflex_alpha.clamp(0.0, 1.0) * 255.0).round() as u32;
         let bright_255 = (look.reflex_bright.clamp(0.0, 4.0) * 255.0).round() as u32;
@@ -4912,6 +5174,179 @@ fn render_analyser(
                 blend_px(&mut out.rgba[at..at + 4], c, a.min(255));
             }
         }
+    }
+    if look.scale_x || look.scale_y {
+        draw_scales(out, a, &areas, body_h, fonts, labels);
+    }
+}
+
+/// The frequencies labelled along the bottom, and their texts.
+const SCALE_HZ: [(f32, &str); 10] = [
+    (20.0, "20"),
+    (50.0, "50"),
+    (100.0, "100"),
+    (200.0, "200"),
+    (500.0, "500"),
+    (1000.0, "1k"),
+    (2000.0, "2k"),
+    (5000.0, "5k"),
+    (10_000.0, "10k"),
+    (20_000.0, "20k"),
+];
+
+/// Where a frequency falls across the drawn bands, 0 at the first band's
+/// low edge and 1 at the last band's high edge, straight inside each band.
+fn across_bands(edges: &[(f32, f32)], hz: f32) -> Option<f32> {
+    let n = edges.len();
+    let (lo, hi) = (edges.first()?.0, edges.last()?.1);
+    if hz < lo || hz > hi {
+        return None;
+    }
+    let i = edges
+        .iter()
+        .position(|&(a, b)| hz >= a && hz < b)
+        .unwrap_or(n - 1);
+    let (a, b) = edges[i];
+    let inside = if b > a { (hz - a) / (b - a) } else { 0.0 };
+    Some((i as f32 + inside.clamp(0.0, 1.0)) / n as f32)
+}
+
+/// The scales of a box: frequency labels in a strip under the bars, one set
+/// per distinct run of bands (each half of a mirror, each channel's side),
+/// with a tick above each; and decibel labels at the left of each bars area
+/// with a faint line across at every step. Set once per look and box, then
+/// blitted every frame.
+fn draw_scales(
+    out: &mut Frame,
+    a: &plot::Analyser,
+    areas: &[(usize, Area, &lead::Palette, f32)],
+    body_h: f32,
+    fonts: Option<&Fonts>,
+    cache: &mut LabelCache,
+) {
+    let look = &a.look;
+    let n = a.edges.len();
+    if n == 0 {
+        return;
+    }
+    let key = LabelKey {
+        w: out.width,
+        h: out.height,
+        n,
+        lo: a.edges[0].0.to_bits(),
+        hi: a.edges[n - 1].1.to_bits(),
+        level: (look.level_range.0.to_bits(), look.level_range.1.to_bits()),
+        flags: u8::from(look.scale_x)
+            | u8::from(look.scale_y) << 1
+            | u8::from(look.note_labels) << 2
+            | u8::from(look.level_linear) << 3
+            | u8::from(look.lumi) << 4,
+        size: look.scale_size,
+        color: look.scale_color,
+        layout: look.layout as u8,
+        mirror: look.mirror,
+        reflex: look.reflex.to_bits(),
+    };
+    if cache.key != Some(key) {
+        cache.key = Some(key);
+        cache.lines.clear();
+        cache.marks.clear();
+        let color = look.scale_color;
+        let size = look.scale_size;
+        let set = |text: &str| -> Frame {
+            render_text(fonts, TextStyle::Regular, size, color, text, 0)
+                .unwrap_or_else(|| bitmap_line(text))
+        };
+        if look.scale_x {
+            let notes: Vec<(f32, String)> = (1..=8)
+                .map(|k| (32.703 * 2f32.powi(k - 1), format!("C{k}")))
+                .collect();
+            let hz: Vec<(f32, String)> = SCALE_HZ
+                .iter()
+                .map(|(f, t)| (*f, (*t).to_string()))
+                .collect();
+            let labels = if look.note_labels { &notes } else { &hz };
+            let mut runs: Vec<(f32, f32, bool)> = Vec::new();
+            for (_, area, _, _) in areas {
+                let run = (area.x, area.w, area.reversed);
+                if !runs
+                    .iter()
+                    .any(|r| r.0 == run.0 && r.1 == run.1 && r.2 == run.2)
+                {
+                    runs.push(run);
+                }
+            }
+            for (x, w, reversed) in runs {
+                for (f, text) in labels {
+                    let Some(t) = across_bands(&a.edges, *f) else {
+                        continue;
+                    };
+                    let px = if reversed { x + w - t * w } else { x + t * w };
+                    let line = set(text);
+                    let left = px - line.width as f32 / 2.0;
+                    if left < 0.0 || left + line.width as f32 > out.width as f32 {
+                        continue;
+                    }
+                    cache
+                        .lines
+                        .push((left.round() as i32, (body_h + 3.0) as i32, line));
+                    cache
+                        .marks
+                        .push((px - 0.5, body_h, px + 0.5, body_h + 3.0, 1.0));
+                }
+            }
+        }
+        if look.scale_y && !look.level_linear && !look.lumi {
+            let (lo, hi) = look.level_range;
+            let step = if hi - lo >= 90.0 { 20.0 } else { 10.0 };
+            let mut seen: Vec<(u32, u32, u32, u32, bool)> = Vec::new();
+            for (_, area, _, _) in areas {
+                let sig = (
+                    area.x.to_bits(),
+                    area.y.to_bits(),
+                    area.w.to_bits(),
+                    area.h.to_bits(),
+                    area.hanging,
+                );
+                if seen.contains(&sig) {
+                    continue;
+                }
+                seen.push(sig);
+                let mut db = (lo / step).ceil() * step;
+                while db <= hi + 0.01 {
+                    let level = ((db - lo) / (hi - lo).max(1.0)).clamp(0.0, 1.0);
+                    let y = if area.hanging {
+                        area.y + level * area.h
+                    } else {
+                        area.y + area.h - level * area.h
+                    };
+                    let line = set(&format!("{}", db.round() as i32));
+                    let top = (y - line.height as f32 / 2.0)
+                        .clamp(area.y, (area.y + area.h - line.height as f32).max(area.y));
+                    let left = area.x + 30.0 - line.width as f32;
+                    cache
+                        .lines
+                        .push((left.round().max(0.0) as i32, top.round() as i32, line));
+                    cache
+                        .marks
+                        .push((area.x + 33.0, y - 0.5, area.x + area.w, y + 0.5, 0.2));
+                    db += step;
+                }
+            }
+        }
+    }
+    let clip = (0, 0, out.width as i32, out.height as i32);
+    let ink = Ink::Solid([
+        look.scale_color[0],
+        look.scale_color[1],
+        look.scale_color[2],
+        255,
+    ]);
+    for &(x0, y0, x1, y1, alpha) in &cache.marks {
+        fill_rect(out, clip, x0, y0, x1, y1, &ink, alpha);
+    }
+    for (x, y, line) in &cache.lines {
+        blit_op(line, (*x, *y)).paint(&mut Band::whole(out));
     }
 }
 
@@ -7979,6 +8414,123 @@ mod analyser_tests {
         // Half a bar from the rim (49) inward over 34 pixels reaches r 32.
         assert!(lit(pixel(picture, 79, 20)), "r 42, filled from the rim");
         assert!(!lit(pixel(picture, 67, 32)), "r 25, short of the bar's tip");
+    }
+
+    /// Two bands as a graph: full at the first band's centre, empty at the
+    /// second's, half way between, the area filled under the line; with a
+    /// line and no fill, only the line's pixels are lit.
+    #[test]
+    fn a_graph_joins_the_band_tips_and_fills_under_them() {
+        let look = Look {
+            style: lead::LookStyle::Graph,
+            smoothing: 0.0,
+            peaks: false,
+            bgr_alpha: 1.0,
+            color_mode: lead::ColorMode::Index,
+            ..Look::default()
+        };
+        let a = analyser(look.clone(), 100, 50, vec![1.0, 0.0], vec![1.0, 0.0]);
+        let mut motion = AnalyserMotion::default();
+        let picture = motion.advance(&a, 0);
+        let lit = |p: [u8; 4]| p[0] as u32 + p[1] as u32 + p[2] as u32 > 100;
+        assert!(
+            lit(pixel(picture, 25, 2)) && lit(pixel(picture, 25, 47)),
+            "full at band 0's centre"
+        );
+        assert!(!lit(pixel(picture, 75, 47)), "empty at band 1's centre");
+        assert!(
+            lit(pixel(picture, 50, 40)),
+            "half way between: the lower half filled"
+        );
+        assert!(!lit(pixel(picture, 50, 10)), "and the upper half not");
+        let lined = Look {
+            line_width: 3.0,
+            fill_alpha: 0.0,
+            ..look
+        };
+        let a = analyser(lined, 100, 50, vec![1.0, 0.0], vec![1.0, 0.0]);
+        let mut motion = AnalyserMotion::default();
+        let picture = motion.advance(&a, 0);
+        assert!(
+            lit(pixel(picture, 50, 25)),
+            "the line half way up at the middle"
+        );
+        assert!(
+            !lit(pixel(picture, 50, 40)),
+            "nothing under it without a fill"
+        );
+    }
+
+    /// With the frequency scale on, the bars end above a strip that holds
+    /// the labels, a label under the band edge at 100 Hz; with the level
+    /// scale on, a label sits at the left near the top for 0 dB.
+    #[test]
+    fn the_scales_sit_under_and_beside_the_bars() {
+        let look = Look {
+            scale_x: true,
+            scale_y: true,
+            smoothing: 0.0,
+            peaks: false,
+            bar_space: 0.0,
+            bgr_alpha: 1.0,
+            color_mode: lead::ColorMode::Index,
+            ..Look::default()
+        };
+        let mut a = analyser(look, 300, 80, vec![1.0, 1.0, 1.0], vec![1.0, 1.0, 1.0]);
+        a.edges = vec![(20.0, 100.0), (100.0, 1000.0), (1000.0, 10_000.0)];
+        let mut motion = AnalyserMotion::default();
+        let picture = motion.advance(&a, 0);
+        let lit = |p: [u8; 4]| p[0] as u32 + p[1] as u32 + p[2] as u32 > 100;
+        // The strip is 17 rows: the bars stop at row 62.
+        assert!(
+            lit(pixel(picture, 150, 60)),
+            "a full bar just above the strip"
+        );
+        assert!(
+            !lit(pixel(picture, 60, 75)),
+            "the strip between labels is background"
+        );
+        // The 100 Hz label is centred on x 100: some ink near it in the strip.
+        let inked = (90..111).any(|x| (64..80).any(|y| lit(pixel(picture, x, y))));
+        assert!(inked, "the 100 Hz label in the strip");
+        // The 0 dB label at the left near the top of the bars.
+        let db0 = (0..30).any(|x| {
+            (0..12).any(|y| {
+                let p = pixel(picture, x, y);
+                // The label's grey over a bar's colour reads as a change from the bar.
+                p != pixel(picture, 60, y)
+            })
+        });
+        assert!(db0, "the 0 dB label at the top left");
+    }
+
+    /// A dense graph frame, two channels of 256 bands with a line and a
+    /// peak line, must cost what the other looks do.
+    #[test]
+    fn a_dense_graph_frame_costs_milliseconds() {
+        let look = Look {
+            style: lead::LookStyle::Graph,
+            layout: Layout::DualVertical,
+            line_width: 2.0,
+            fill_alpha: 0.4,
+            peak_line: true,
+            smoothing: 0.6,
+            ..Look::default()
+        };
+        let left: Vec<f32> = (0..256).map(|i| ((i * 37) % 100) as f32 / 100.0).collect();
+        let right: Vec<f32> = (0..256).map(|i| ((i * 53) % 100) as f32 / 100.0).collect();
+        let a = analyser(look, 1200, 420, left, right);
+        let mut motion = AnalyserMotion::default();
+        motion.advance(&a, 0);
+        let started = std::time::Instant::now();
+        let frames = 60;
+        for i in 1..=frames {
+            motion.advance(&a, i * 16);
+        }
+        let per_frame = started.elapsed().as_secs_f64() * 1000.0 / frames as f64;
+        eprintln!("a dense graph frame: {per_frame:.2} ms");
+        let bound = if cfg!(debug_assertions) { 100.0 } else { 8.0 };
+        assert!(per_frame < bound, "a frame took {per_frame:.1} ms");
     }
 
     /// A dense radial frame, two channels of 256 bands, must cost what
