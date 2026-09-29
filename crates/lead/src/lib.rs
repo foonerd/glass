@@ -1338,6 +1338,25 @@ pub struct Look {
     pub reflex_fit: bool,
     /// `bgr.alpha`: how solid the box's own background is.
     pub bgr_alpha: f32,
+    /// `radial`: the bars radiate from a circle instead of rising from a
+    /// baseline; LEDs, luminance, outlines, rounding and the reflection
+    /// do not apply.
+    #[serde(default)]
+    pub radial: bool,
+    /// `radial.invert`: the bars grow from the rim towards the centre.
+    #[serde(default)]
+    pub radial_invert: bool,
+    /// `radius`: the base circle as a share of the box's radius; inverted,
+    /// how close to the centre the bars reach.
+    #[serde(default = "default_radius")]
+    pub radius: f32,
+    /// `spin`: revolutions a minute, clockwise positive.
+    #[serde(default)]
+    pub spin_rpm: f32,
+}
+
+fn default_radius() -> f32 {
+    0.3
 }
 
 impl Default for Look {
@@ -1378,6 +1397,10 @@ impl Default for Look {
             reflex_bright: 1.0,
             reflex_fit: true,
             bgr_alpha: 0.7,
+            radial: false,
+            radial_invert: false,
+            radius: default_radius(),
+            spin_rpm: 0.0,
         }
     }
 }
@@ -1511,6 +1534,18 @@ fn look_from_section(get: &dyn Fn(&str) -> Option<String>) -> Option<Look> {
     }
     if let Some(v) = number("bgr.alpha") {
         look.bgr_alpha = v.clamp(0.0, 1.0);
+    }
+    if let Some(v) = flag("radial") {
+        look.radial = v;
+    }
+    if let Some(v) = flag("radial.invert") {
+        look.radial_invert = v;
+    }
+    if let Some(v) = number("radius") {
+        look.radius = v.clamp(0.0, 0.95);
+    }
+    if let Some(v) = number("spin").or_else(|| number("spin.speed")) {
+        look.spin_rpm = v.clamp(-600.0, 600.0);
     }
     Some(look)
 }
