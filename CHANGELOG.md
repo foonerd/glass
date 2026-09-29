@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.62] - 2026-09-29
+
+The Catalog installs a theme whose zip moved on since the index was fetched. A download is checked against the index as kept on the player; when the catalogue had been updated since, the install failed with "response larger than allowed" or a size mismatch. The Manager now fetches the index again and downloads once more against the entry as it stands, and the Catalog tab refreshes an index older than ten minutes on its own.
+
+The radial look costs less: each channel's ring is walked from its base circle to the frame's furthest tip instead of every pixel of the circle, and an angle's band comes from a table built once per layout.
+
 ## [0.7.61] - 2026-09-29
 
 The fanart slideshow keeps its interval. The check that moves the picture on ran only when the player pushed a state, so a picture changed at a track change, a pause or a volume step and not every interval; the display now gives the slideshow the player's artist and track once a second between states, and the interval, the order and the transition run as set.
