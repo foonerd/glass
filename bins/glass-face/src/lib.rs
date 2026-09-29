@@ -802,6 +802,36 @@ mod tests {
         assert_eq!(next(&face), Some((String::new(), String::new())));
     }
 
+    /// Queue progress mode on the Face: the seconds before the playing
+    /// track and the whole queue's length come from the queue the plugin
+    /// pushes, so the bar runs over the queue as on the player's screen.
+    #[test]
+    fn queue_progress_comes_from_the_queue_the_plugin_pushes() {
+        let _serial = serial();
+        let mut face = Face::new();
+        let config = config_json().replace(
+            "frame.rate = 30\\n",
+            "frame.rate = 30\\nqueue.mode = queue\\n",
+        );
+        assert_ne!(
+            config,
+            config_json(),
+            "the queue mode is in the configuration"
+        );
+        face.configure(&config).expect("a plan");
+        theme_into_table(&mut face, "480x320");
+        assert!(face.event(
+            br#"{"kind":"queue","items":[{"name":"First","duration":100},{"name":"Second","duration":200},{"name":"Third","duration":50}]}"#
+        ));
+        assert!(face.event(
+            br#"{"kind":"state","state":{"status":"play","title":"Second","position":1,"duration":200,"seek":10000}}"#
+        ));
+        face.start(None).expect("the meter on show");
+        face.frame(40).expect("a frame");
+        let meta = &face.showing.as_ref().unwrap().metadata;
+        assert_eq!((meta.queue_before_s, meta.queue_total_s), (100.0, 350.0));
+    }
+
     /// A meter given a type area: the track's type names an icon the page
     /// brought under the home; the icon is found there and painted in the
     /// area's colour, rather than the label standing in for it.
