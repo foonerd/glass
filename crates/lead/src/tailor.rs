@@ -81,6 +81,10 @@ pub enum Kind {
     Screen,
     /// A picture, or a list of pictures, to resample.
     Picture,
+    /// The screen's own picture: resampled, then laid at the letterbox
+    /// offset on a sheet of the new screen's size, so the copy's backdrop
+    /// fills its screen as the original's did.
+    Backdrop,
     /// A share below 1, pixels from 1 up.
     Share,
     /// Angles, counts, shares, colours, names, flags: as it is.
@@ -93,7 +97,7 @@ const RULES: &[(&str, Kind)] = &[
     // The screen.
     ("screen.width", Kind::Screen),
     ("screen.height", Kind::Screen),
-    ("screen.bgr", Kind::Picture),
+    ("screen.bgr", Kind::Backdrop),
     // The meter: its place on screen, and everything inside it relative to that.
     ("meter.x", Kind::X),
     ("meter.y", Kind::Y),
@@ -147,10 +151,10 @@ const RULES: &[(&str, Kind)] = &[
     ("fanart.dimension", Kind::Size),
     ("vinyl.pos", Kind::Point),
     ("vinyl.dimension", Kind::Size),
-    ("vinyl.center", Kind::Offset),
+    ("vinyl.center", Kind::Point),
     ("vinyl.filename", Kind::Picture),
     ("reel.*.pos", Kind::Point),
-    ("reel.*.center", Kind::Offset),
+    ("reel.*.center", Kind::Point),
     ("reel.*.filename", Kind::Picture),
     ("tonearm.pivot.screen", Kind::Point),
     ("tonearm.pivot.image", Kind::Offset),
@@ -440,6 +444,8 @@ pub fn kind_of(key: &str) -> Option<Kind> {
 pub struct Tailored {
     pub text: String,
     pub pictures: Vec<String>,
+    /// Those among the pictures that are the screen's own, to be padded to the new screen.
+    pub backdrops: Vec<String>,
     pub warnings: Vec<String>,
 }
 
@@ -522,7 +528,14 @@ fn transform(key: &str, kind: Kind, value: &str, plan: &Plan) -> Result<Option<S
             }
             .to_string(),
         )),
-        Kind::Picture | Kind::Keep => Ok(None),
+        Kind::Picture | Kind::Backdrop | Kind::Keep => Ok(None),
+    }
+}
+
+/// `name` on the list, once.
+fn noted(list: &mut Vec<String>, name: &str) {
+    if !list.iter().any(|p| p == name) {
+        list.push(name.to_string());
     }
 }
 
@@ -535,6 +548,7 @@ pub fn tailor_text(text: &str, plan: &Plan) -> Tailored {
     let ending = if text.contains("\r\n") { "\r\n" } else { "\n" };
     let mut out = String::with_capacity(text.len() + 64);
     let mut pictures: Vec<String> = Vec::new();
+    let mut backdrops: Vec<String> = Vec::new();
     let mut warnings = Vec::new();
     let mut section = String::new();
     for raw in text.split('\n') {
@@ -558,9 +572,14 @@ pub fn tailor_text(text: &str, plan: &Plan) -> Tailored {
                     }
                     Some(Kind::Picture) => {
                         for name in value.split(',').map(str::trim).filter(|n| !n.is_empty()) {
-                            if !pictures.iter().any(|p| p == name) {
-                                pictures.push(name.to_string());
-                            }
+                            noted(&mut pictures, name);
+                        }
+                        None
+                    }
+                    Some(Kind::Backdrop) => {
+                        for name in value.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+                            noted(&mut pictures, name);
+                            noted(&mut backdrops, name);
                         }
                         None
                     }
@@ -585,6 +604,7 @@ pub fn tailor_text(text: &str, plan: &Plan) -> Tailored {
     Tailored {
         text: out,
         pictures,
+        backdrops,
         warnings,
     }
 }
@@ -833,11 +853,15 @@ mod tests {
     fn the_text_is_rewritten_by_the_kind_of_each_key() {
         let plan = Plan::fit((1000, 500), (2000, 1200));
         assert_eq!((plan.sx, plan.ox, plan.oy), (2.0, 0.0, 100.0));
-        let text = "# a comment\r\n[gold]\r\nmeter.type = circular\r\nmeter.x = 10\r\nmeter.y = 20\r\nleft.x = 5\r\nleft.origin.y = 7\r\ndistance = 30\r\nbgr.filename = gold-bgr.png\r\nalbumart.pos = 100,50\r\nalbumart.dimension = 40,40\r\nplayinfo.title.pos = 10,20,bold\r\nfont.size.bold = 16\r\nvolume.pos = 1,2\r\nvolume.dim = 3,4\r\nvolume.slider.travel = 5,9\r\nvolume.marker.1.pos = 6,6\r\nbutton.play.image = play.png, play-lit.png\r\nstart.angle = 45\r\nbar.space = 0.25\r\nscreen.width = 1000\r\nmystery.key = 4\r\nleft.y = oops\r\n";
+        let text = "# a comment\r\n[gold]\r\nmeter.type = circular\r\nmeter.x = 10\r\nmeter.y = 20\r\nleft.x = 5\r\nleft.origin.y = 7\r\ndistance = 30\r\nbgr.filename = gold-bgr.png\r\nalbumart.pos = 100,50\r\nalbumart.dimension = 40,40\r\nplayinfo.title.pos = 10,20,bold\r\nfont.size.bold = 16\r\nvolume.pos = 1,2\r\nvolume.dim = 3,4\r\nvolume.slider.travel = 5,9\r\nvolume.marker.1.pos = 6,6\r\nbutton.play.image = play.png, play-lit.png\r\nvinyl.pos = 10,10\r\nvinyl.center = 20,30\r\nreel.left.center = 5,5\r\ntonearm.pivot.image = 3,4\r\nscreen.bgr = wall.jpg\r\nstart.angle = 45\r\nbar.space = 0.25\r\nscreen.width = 1000\r\nmystery.key = 4\r\nleft.y = oops\r\n";
         let t = tailor_text(text, &plan);
-        let want = "# a comment\r\n[gold]\r\nmeter.type = circular\r\nmeter.x = 20\r\nmeter.y = 140\r\nleft.x = 10\r\nleft.origin.y = 14\r\ndistance = 60\r\nbgr.filename = gold-bgr.png\r\nalbumart.pos = 200,200\r\nalbumart.dimension = 80,80\r\nplayinfo.title.pos = 20,140,bold\r\nfont.size.bold = 32\r\nvolume.pos = 2,104\r\nvolume.dim = 6,8\r\nvolume.slider.travel = 10,18\r\nvolume.marker.1.pos = 12,12\r\nbutton.play.image = play.png, play-lit.png\r\nstart.angle = 45\r\nbar.space = 0.25\r\nscreen.width = 2000\r\nmystery.key = 4\r\nleft.y = oops\r\n";
+        let want = "# a comment\r\n[gold]\r\nmeter.type = circular\r\nmeter.x = 20\r\nmeter.y = 140\r\nleft.x = 10\r\nleft.origin.y = 14\r\ndistance = 60\r\nbgr.filename = gold-bgr.png\r\nalbumart.pos = 200,200\r\nalbumart.dimension = 80,80\r\nplayinfo.title.pos = 20,140,bold\r\nfont.size.bold = 32\r\nvolume.pos = 2,104\r\nvolume.dim = 6,8\r\nvolume.slider.travel = 10,18\r\nvolume.marker.1.pos = 12,12\r\nbutton.play.image = play.png, play-lit.png\r\nvinyl.pos = 20,120\r\nvinyl.center = 40,160\r\nreel.left.center = 10,110\r\ntonearm.pivot.image = 6,8\r\nscreen.bgr = wall.jpg\r\nstart.angle = 45\r\nbar.space = 0.25\r\nscreen.width = 2000\r\nmystery.key = 4\r\nleft.y = oops\r\n";
         assert_eq!(t.text, want);
-        assert_eq!(t.pictures, vec!["gold-bgr.png", "play.png", "play-lit.png"]);
+        assert_eq!(
+            t.pictures,
+            vec!["gold-bgr.png", "play.png", "play-lit.png", "wall.jpg"]
+        );
+        assert_eq!(t.backdrops, vec!["wall.jpg"]);
         assert_eq!(t.warnings.len(), 2, "{:?}", t.warnings);
         assert!(t.warnings[0].contains("mystery.key") && t.warnings[1].contains("left.y"));
         let spaced = tailor_text("[s]\nbar.space = 3\norigin.x = 2.5\n", &plan);
