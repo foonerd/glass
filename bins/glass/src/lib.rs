@@ -21,6 +21,7 @@ use plot::{step, Scene};
 use std::time::Duration;
 
 mod governor;
+mod package;
 mod remote;
 mod tailor;
 
@@ -108,6 +109,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
     let mut tailor_out: Option<String> = None;
     let mut tailor_spectrum: Option<String> = None;
     let mut tailor_stretch = false;
+    let mut package = false;
     let mut args = args.into_iter().skip(1).peekable();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -250,6 +252,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
                 }
             },
             "--stretch" => tailor_stretch = true,
+            "--package" => package = true,
             "--help" => {
                 let ring = if cfg!(unix) {
                     "Reads the tap's ring under /dev/shm and the player's state."
@@ -260,7 +263,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
                     "glass [--once] [--headless] [--print] [--output frame.png|frame.ppm] [--record step.json]\n      \
                      [--theme FOLDER] [--meter NAME|random|a,b,c] [--interval SECONDS] [--fps N] [--threads N]\n      \
                      [--list] [--snapshot DIR [--settle SECONDS] [--thumb WIDTH]]\n      \
-                     [--tailor WxH --theme FOLDER|NAME [--out DIR] [--spectrum FOLDER] [--from WxH] [--stretch]]\n      \
+                     [--tailor WxH --theme FOLDER|NAME [--out DIR] [--spectrum FOLDER] [--from WxH] [--stretch]] [--package]\n      \
                      [--remote [HOST|discover] [--name NAME] [--cache DIR] [--config FILE] [--manager-port N] [--settings]] [--dev]\n\
                      {ring}\n\
                      A window opens when a screen is there (DISPLAY on Linux). --headless skips it.\n\
@@ -271,6 +274,8 @@ pub fn run(args: Vec<String>) -> ExitCode {
                      --list prints the installed themes and their meters.\n\
                      --tailor writes a copy of a theme and its spectrum twin at another size under --out (the working folder\n\
                        without it): one scale factor and the theme centred, or --stretch to the screen's shape.\n\
+                     --package writes a theme (or the cut just made) as the catalogue takes it: the meters snapshotted\n\
+                       for --settle seconds each into one preview, and DIR/<name>.zip with the theme, its twin and the preview.\n\
                      --snapshot shows each meter of the theme (or of the --meter list) for --settle seconds\n\
                      and writes DIR/<theme>/<meter>.png, then leaves.\n\
                      --thumb writes DIR/<theme>/<meter>.thumb.png beside each snapshot, WIDTH pixels wide.\n\
@@ -318,6 +323,9 @@ pub fn run(args: Vec<String>) -> ExitCode {
         );
     }
     intake::set_overrides(run.overrides.clone());
+    // A package, of the theme as it is or of the cut made first: the
+    // display snapshots the meters headless, then the preview and the zip.
+    let mut package_of: Option<(std::path::PathBuf, Option<std::path::PathBuf>)> = None;
     if let Some(to) = tailor_to {
         let Some(theme) = run.overrides.theme.as_deref() else {
             eprintln!("glass: --tailor needs --theme, a theme folder or an installed theme's name");
@@ -334,7 +342,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
                 }
             }
         };
-        let out = tailor_out.unwrap_or_else(|| ".".to_string());
+        let out = tailor_out.clone().unwrap_or_else(|| ".".to_string());
         let job = tailor::Job {
             theme: theme_dir,
             spectrum: tailor_spectrum.map(std::path::PathBuf::from),
@@ -343,7 +351,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
             out: std::path::PathBuf::from(out),
             stretch: tailor_stretch,
         };
-        return match tailor::run(&job) {
+        match tailor::run(&job) {
             Ok(report) => {
                 for folder in &report.folders {
                     println!("{}", folder.display());
@@ -355,6 +363,72 @@ pub fn run(args: Vec<String>) -> ExitCode {
                 for warning in &report.warnings {
                     eprintln!("glass: {warning}");
                 }
+                if !package {
+                    return ExitCode::SUCCESS;
+                }
+                package_of = Some((report.folders[0].clone(), report.folders.get(1).cloned()));
+            }
+            Err(why) => {
+                eprintln!("glass: {why}");
+                return ExitCode::from(1);
+            }
+        }
+    } else if package {
+        let Some(theme) = run.overrides.theme.as_deref() else {
+            eprintln!(
+                "glass: --package needs --theme, a theme folder or an installed theme's name"
+            );
+            return ExitCode::from(2);
+        };
+        let theme_dir = if std::path::Path::new(theme).is_dir() {
+            std::path::PathBuf::from(theme)
+        } else {
+            match intake::installed_theme_dir(theme) {
+                Some(dir) => dir,
+                None => {
+                    eprintln!("glass: {theme}: not a folder, nor an installed theme");
+                    return ExitCode::from(2);
+                }
+            }
+        };
+        package_of = Some((theme_dir, tailor_spectrum.map(std::path::PathBuf::from)));
+    }
+    if let Some((theme_dir, twin)) = package_of {
+        let out = std::path::PathBuf::from(tailor_out.unwrap_or_else(|| ".".to_string()));
+        let theme_dir = std::fs::canonicalize(&theme_dir).unwrap_or(theme_dir);
+        let name = theme_dir
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_else(|| "theme".into());
+        let work = out.join(format!(".package-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&work);
+        // The snapshots: the session on this theme, headless, every meter.
+        let mut shooting = Run {
+            headless: true,
+            snapshot: Some(work.to_string_lossy().into_owned()),
+            thumb: None,
+            overrides: Overrides {
+                theme: Some(theme_dir.to_string_lossy().into_owned()),
+                meter: None,
+                ..run.overrides.clone()
+            },
+            ..run
+        };
+        shooting.once = false;
+        let code = match session(&shooting, None, &mut None) {
+            Outcome::Exit(code) => code,
+            Outcome::Reload(_) => ExitCode::SUCCESS,
+        };
+        if code != ExitCode::SUCCESS {
+            let _ = std::fs::remove_dir_all(&work);
+            return code;
+        }
+        let result = package::build(&name, &theme_dir, twin.as_deref(), &work.join(&name), &out);
+        let _ = std::fs::remove_dir_all(&work);
+        return match result {
+            Ok(zip) => {
+                println!("{}", zip.display());
+                println!("glass: {name} packaged for the catalogue");
                 ExitCode::SUCCESS
             }
             Err(why) => {

@@ -2264,11 +2264,21 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
             // the theme's own name wins when the two disagree, as after a
             // theme override or before the player has caught up.
             let base = Path::new(&settings.base_folder);
+            // A theme beside a `templates_spectrum` tree of its own, as a cut
+            // or a package lays one out, brings its twin from there first.
+            let beside = theme
+                .parent()
+                .and_then(Path::parent)
+                .zip(theme.file_name())
+                .map(|(root, name)| root.join("templates_spectrum").join(name))
+                .filter(|dir| lead::is_file(&dir.join("spectrum.txt")));
             let by_theme = theme
                 .file_name()
                 .map(|name| base.join(name))
                 .filter(|dir| lead::is_file(&dir.join("spectrum.txt")));
-            let folder = by_theme.unwrap_or_else(|| base.join(&settings.folder));
+            let folder = beside
+                .or(by_theme)
+                .unwrap_or_else(|| base.join(&settings.folder));
             if let Some(spectra) = lead::read_to_string(&folder.join("spectrum.txt")) {
                 skin.spectra = placed
                     .iter()
