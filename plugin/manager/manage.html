@@ -824,8 +824,8 @@
           '<div class="actions">' +
             (th.active ? '' : '<button class="small primary" data-act="activate">' + esc(t('MANAGER_ACTIVATE')) + '</button>') +
             '<button class="small" data-act="details">' + esc(t('MANAGER_DETAILS')) + '</button>' +
-            '<button class="small" data-act="tailor">' + esc(t('MANAGER_TAILOR_BTN')) + '</button>' +
-            '<button class="small" data-act="package">' + esc(t('MANAGER_PACKAGE_BTN')) + '</button>' +
+            (runningJob(th.folder, 'tailor') ? '<button class="small" disabled>' + esc(t('MANAGER_TAILOR_RUNNING')) + '</button>' : '<button class="small" data-act="tailor">' + esc(t('MANAGER_TAILOR_BTN')) + '</button>') +
+            (runningJob(th.folder, 'package') ? '<button class="small" disabled>' + esc(t('MANAGER_PACKAGE_RUNNING')) + '</button>' : '<button class="small" data-act="package">' + esc(t('MANAGER_PACKAGE_BTN')) + '</button>') +
             '<button class="small danger" data-act="remove">' + esc(t('THEME_REMOVE_BTN')) + '</button>' +
           '</div>' +
         '</div>';
@@ -1048,6 +1048,7 @@
   function watchJob(job) {
     state.jobs[job.id] = job;
     renderJobs();
+    renderThemes();
     if (!jobTimer) jobTimer = setInterval(pollJobs, 1000);
   }
   var jobTimer = null;
@@ -1059,6 +1060,7 @@
         var before = state.jobs[id].state;
         state.jobs[id] = data.job;
         renderJobs();
+        if (before !== data.job.state && (data.job.kind === 'tailor' || data.job.kind === 'package')) renderThemes();
         if (before !== data.job.state && (data.job.state === 'done' || data.job.state === 'failed' || data.job.state === 'rendering')) {
           if (data.job.state === 'failed') toast(t('MANAGER_JOB_FAILED') + ' ' + data.job.name + ': ' + errorText(data.job.error ? { code: data.job.error.error, message: data.job.error.message } : null), 'error');
           if (data.job.kind === 'package' && data.job.state === 'done') {
@@ -1071,7 +1073,8 @@
               if (state.catalog) loadCatalog(false);
             }
           }
-          if (data.job.state === 'done' || data.job.state === 'failed') setTimeout(function () { delete state.jobs[id]; renderJobs(); }, 8000);
+          // A package's row stays with its download; the others go after a moment.
+          if (data.job.state === 'failed' || (data.job.state === 'done' && data.job.kind !== 'package')) setTimeout(function () { delete state.jobs[id]; renderJobs(); renderThemes(); }, 8000);
         }
       }).catch(function () {});
     });
@@ -1082,14 +1085,24 @@
       var j = state.jobs[id];
       var pct = j.progress && j.progress.total ? Math.round(j.progress.done * 100 / j.progress.total) : 0;
       var label = { queued: 'MANAGER_JOB_QUEUED', downloading: 'MANAGER_JOB_DOWNLOADING', checking: 'MANAGER_JOB_CHECKING', unpacking: 'MANAGER_JOB_UNPACKING', rendering: 'MANAGER_JOB_RENDERING', cutting: 'MANAGER_JOB_CUTTING', packaging: 'MANAGER_JOB_PACKAGING', done: j.kind === 'package' ? 'MANAGER_PACKAGE_READY' : 'MANAGER_JOB_DONE', failed: 'MANAGER_JOB_FAILED' }[j.state] || j.state;
-      html += '<div class="job"><b>' + esc(j.name) + '</b> · ' + esc(t(label)) +
+      var packaging = j.state === 'packaging' && j.progress && j.progress.total;
+      var left = packaging ? Math.max(0, (j.progress.total - j.progress.done) * (j.settle || 3)) : 0;
+      html += '<div class="job" data-job="' + esc(String(j.id)) + '"><b>' + esc(j.name) + '</b> · ' + esc(t(label)) +
         (j.state === 'downloading' || j.state === 'unpacking' ? ' ' + pct + '%' + (j.progress.total ? ' (' + fmtBytes(j.progress.done) + ' / ' + fmtBytes(j.progress.total) + ')' : '') : '') +
+        (packaging ? ' · ' + esc(t('MANAGER_PACKAGE_PROGRESS').replace('{done}', j.progress.done).replace('{total}', j.progress.total).replace('{s}', left)) : '') +
         (j.state === 'failed' && j.error ? ' <span class="muted">' + esc(errorText({ code: j.error.error, message: j.error.message })) + '</span>' : '') +
-        (j.state === 'downloading' || j.state === 'unpacking' ? '<div class="progress"><div style="width:' + pct + '%"></div></div>' : '') +
+        (j.kind === 'package' && j.state === 'done' ? ' <a class="small" href="/api/jobs/' + esc(String(j.id)) + '/file">' + esc(t('MANAGER_PACKAGE_DOWNLOAD')) + '</a>' : '') +
+        (j.state === 'downloading' || j.state === 'unpacking' || packaging ? '<div class="progress"><div style="width:' + pct + '%"></div></div>' : '') +
         '</div>';
     });
     $('jobs-themes').innerHTML = html;
     $('jobs-catalog').innerHTML = html;
+  }
+  // A theme's running job of a kind, for its card.
+  function runningJob(folder, kind) {
+    return Object.keys(state.jobs).map(function (id) { return state.jobs[id]; }).find(function (j) {
+      return j.kind === kind && j.state !== 'done' && j.state !== 'failed' && (j.name === folder || j.name.indexOf(folder + ' ') === 0);
+    });
   }
 
   // ---- catalog ----------------------------------------------------------
