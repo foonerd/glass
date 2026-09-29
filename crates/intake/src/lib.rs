@@ -318,6 +318,15 @@ fn config_text() -> Option<String> {
     Some(text)
 }
 
+/// The folder of an installed theme by its name, under the installed
+/// `base.folder`; none without a configuration or the folder.
+pub fn installed_theme_dir(name: &str) -> Option<PathBuf> {
+    let text = config_text()?;
+    let base = current_value(&text, "base.folder").filter(|b| !b.is_empty())?;
+    let dir = PathBuf::from(base).join(name);
+    dir.is_dir().then_some(dir)
+}
+
 /// Every theme folder under the installed `base.folder`, each with the
 /// names of its meters, in folder order.
 pub fn installed_themes() -> Vec<(String, Vec<String>)> {

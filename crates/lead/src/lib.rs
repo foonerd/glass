@@ -139,6 +139,8 @@ pub fn epoch_nanos() -> u64 {
 /// fonts here under the paths the configuration names, and every reader
 /// below looks here when the file system has nothing. On a machine it
 /// stays empty and costs one lookup.
+pub mod tailor;
+
 pub mod vfs {
     use std::collections::{HashMap, HashSet};
     use std::sync::{Arc, Mutex, OnceLock};
