@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.69] - 2026-09-29
+
+A theme named by its whole path keeps its size. The screen size came from the folder setting as written, so a theme given as a path, as `--package` and `--tailor` give one, fell back to 800x480 and the package's preview showed the meters cropped. The size now comes from the last part of the path.
+
 ## [0.7.68] - 2026-09-29
 
 The package. `glass --package --theme FOLDER|NAME --out DIR` writes a theme as the catalogue takes it: the display snapshots every meter headless, for `--settle` seconds each, tiles them into one `preview.png` in the theme's own width, and writes `DIR/<name>.zip` with the theme, its spectrum twin and the preview in the collection's layout, ready for a pull request or the Manager's upload. `--tailor` with `--package` cuts first and packages the cut. A theme given by its own path brings its spectrum twin from beside it, as a cut lays one out.
