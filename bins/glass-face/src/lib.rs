@@ -970,4 +970,50 @@ mod tests {
             format!("/glass/{path}")
         );
     }
+
+    /// The slideshow's interval runs between the player's states: with the
+    /// set on show and nothing else changing, the set is asked again once
+    /// the interval is over, and the answer moves the picture on.
+    #[test]
+    fn the_slideshow_moves_on_at_its_interval_between_states() {
+        let _serial = serial();
+        let mut face = Face::new();
+        face.configure(&config_json()).expect("a plan");
+        bar_with(&mut face, "fanart.pos = 0,0\nfanart.dimension = 120,80\n");
+        assert!(face.event(
+            br#"{"kind":"state","state":{"status":"play","title":"A song","artist":"Else","uri":"mnt/x/b.flac"}}"#
+        ));
+        face.start(Some("bar")).expect("the bar on show");
+        face.frame(40).expect("a frame");
+        let set = intake::wants::Want::Fanart {
+            artist: "Else".into(),
+            uri: "mnt/x/b.flac".into(),
+        };
+        assert!(face.wants().contains(&set), "the set is asked");
+        let answer = r#"{"success":true,"images":["glass/fanart/else/a.jpg","glass/fanart/else/b.jpg"],"interval_ms":300,"transition":"none","transition_ms":600,"order":"sequential"}"#;
+        face.fanart_answer(answer);
+        face.frame(80).expect("a frame");
+        // The picture on show is the one wanted from the page.
+        let picture_asked = |face: &Face, name: &str| {
+            face.wants()
+                .iter()
+                .any(|w| matches!(w, intake::wants::Want::File { url, .. } if url.contains(name)))
+        };
+        assert!(picture_asked(&face, "a.jpg"), "{:?}", face.wants());
+        assert!(!picture_asked(&face, "b.jpg"), "{:?}", face.wants());
+        assert!(
+            !face.wants().contains(&set),
+            "nothing asked before the interval"
+        );
+        // No state arrives; the interval passes, and a second with it.
+        std::thread::sleep(std::time::Duration::from_millis(1400));
+        face.frame(1500).expect("a frame");
+        assert!(
+            face.wants().contains(&set),
+            "the set is asked again once the interval is over"
+        );
+        face.fanart_answer(answer);
+        face.frame(1540).expect("a frame");
+        assert!(picture_asked(&face, "b.jpg"), "{:?}", face.wants());
+    }
 }

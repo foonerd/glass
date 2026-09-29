@@ -1471,6 +1471,9 @@ pub struct TapSource {
     folder_files: Vec<String>,
     /// The fanart slideshow, run only when the skin has a slot.
     fanart: Option<Slideshow>,
+    /// When the slideshow was last given the player's artist and track
+    /// between states, so its interval runs while nothing else changes.
+    fanart_checked_at: Option<Moment>,
     /// The record's album file name to look for in the track folder, and the file found.
     vinyl_album_file: String,
     vinyl_key: String,
@@ -1618,6 +1621,7 @@ impl TapSource {
             folder_key: String::new(),
             folder_files: Vec::new(),
             fanart: None,
+            fanart_checked_at: None,
             vinyl_album_file: String::new(),
             vinyl_key: String::new(),
             vinyl_file: String::new(),
@@ -2087,6 +2091,13 @@ impl Source for TapSource {
             metadata.persist_left = left;
         }
         if let Some(show) = self.fanart.as_mut() {
+            if self
+                .fanart_checked_at
+                .is_none_or(|at| at.elapsed() >= Duration::from_secs(1))
+            {
+                self.fanart_checked_at = Some(Moment::now());
+                show.update(&self.playing_held.artist, &self.playing_held.uri);
+            }
             let (file, prev, mode, duration, elapsed) = show.snapshot();
             metadata.fanart_file = file;
             metadata.fanart_prev_file = prev;
