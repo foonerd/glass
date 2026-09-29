@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.55] - 2026-09-29
+
+Two more analyser styles. `style = dots` draws a disc per band at its level, `dot.size` pixels across, the peaks as smaller discs. `style = waterfall` draws a spectrogram: each frame's levels become a row of colour at the base of the box, the palette by level, or the band's colour at the level's opacity by index, and the rows move away `waterfall.speed` rows a frame towards the far edge, or from the far edge towards the base with `waterfall.reverse`; the box keeps as many frames as it has rows. Both take the layouts, the mirror and the onset flash.
+
 ## [0.7.54] - 2026-09-29
 
 The analyser answers onsets, a band group rising after quiet as the bank hears it: `onset = flash` brightens that group's bars towards `onset.color` and fades them back, `pulse` grows every bar by up to three tenths and settles it back, `ring` sends a line from the base to the top of the box, a ring out from the base circle in the radial look, fading as it goes. `onset.decay` says how long, `onset.strength` how much, `onset.groups` which of sub-bass, bass, mid and high fire it. This look is Glass's own.
