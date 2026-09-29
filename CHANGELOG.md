@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.72] - 2026-09-29
+
+A cut theme's disc and reels turn about the right point: `vinyl.center` and the reels' centres are points on the screen and take the letterbox offset like the pictures' positions, where the cutter had scaled them alone, so a disc could be drawn twice, once at its place and once about the wrong centre. A theme's `screen.bgr`, which the engine puts at the screen's top left whatever the meter's place, is set on a canvas of the new size at the offset instead of scaled alone, so it stays under the theme.
+
 ## [0.7.71] - 2026-09-29
 
 Package says what it is doing. The job row counts the meters shown as the display reports each snapshot, with a bar and the seconds to go, the theme's card shows "Packaging…" or "Cutting…" in place of the button while its job runs, and a finished package keeps a Download link in its row beside the download that starts on its own.
