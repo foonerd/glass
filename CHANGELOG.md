@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.60] - 2026-09-29
+
+The Face shows the next track. The plugin pushes the player's queue down its channel, `{"kind":"queue","items":[...]}` on connect and on every change, and a display takes the track after the playing one and the queue's length from it; the Face, which cannot ask the player itself, had nothing to draw in a theme's next-track rows. The player's own display and remotes read the same line, so a reordered queue moves their next line at once, and a display asks the player for the queue only while it has not been given one.
+
 ## [0.7.59] - 2026-09-29
 
 A meter shows several spectrum boxes. `spectrum.name` takes a comma list of sections, one box each in that order, `spectrum.size` for all of them or `spectrum.2.size`, `spectrum.3.size` and so on for a box of its own size. A spectrum section says which channel it draws with `channel = left`, `right` or `mean` when the analyser's layout is `single`, so a classic layout with a face per channel takes a spectrum per face, and the Manager measures two channels when a section asks for one.
