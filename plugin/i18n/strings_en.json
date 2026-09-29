@@ -69,7 +69,7 @@
     "FANART_KEY_LABEL": "Personal fanart.tv key",
     "FANART_KEY_DOC": "Your own fanart.tv API key, used as the api_key when key mode is Personal. Required in Personal mode; if left blank, fanart.tv is skipped and the slideshow falls back to local art and Volumio's artist art. Register a project at fanart.tv to get a key (Account > API).",
     "FANART_INTERVAL_LABEL": "Fanart change interval (seconds)",
-    "FANART_INTERVAL_DOC": "Automatically advance to the next fanart image every N seconds. 0 means change only when the track changes. Range: 0 to 3600.",
+    "FANART_INTERVAL_DOC": "Automatically advance to the next fanart image every N seconds, counted from the last change; a new track changes the image as well. 0 means change only when the track changes. Range: 0 to 3600.",
     "FANART_ORDER_LABEL": "Fanart order",
     "FANART_ORDER_DOC": "How the slideshow picks the next image. <b>Sequential</b> follows filename order (01, 02...). <b>Random</b> picks a different image each time. The current image is kept when random meter mode switches skins (same artist).",
     "FANART_ORDER_SEQUENTIAL": "Sequential",

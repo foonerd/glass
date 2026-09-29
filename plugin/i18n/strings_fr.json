@@ -69,7 +69,7 @@
     "FANART_KEY_LABEL": "Clé fanart.tv personnelle",
     "FANART_KEY_DOC": "Votre propre clé API fanart.tv, utilisée comme api_key lorsque le mode de clé est Personnel. Requise en mode Personnel ; si elle est laissée vide, fanart.tv est ignoré et le diaporama se rabat sur les illustrations locales et les images d'artiste de Volumio. Enregistrez un projet sur fanart.tv pour obtenir une clé (Compte > API).",
     "FANART_INTERVAL_LABEL": "Intervalle de changement du fanart (secondes)",
-    "FANART_INTERVAL_DOC": "Passe automatiquement à l'image de fanart suivante toutes les N secondes. 0 signifie un changement uniquement au changement de morceau. Plage : 0 à 3600.",
+    "FANART_INTERVAL_DOC": "Passe automatiquement à l'image de fanart suivante toutes les N secondes, comptées depuis le dernier changement ; un nouveau morceau change aussi l'image. 0 signifie un changement uniquement au changement de morceau. Plage : 0 à 3600.",
     "FANART_ORDER_LABEL": "Ordre du fanart",
     "FANART_ORDER_DOC": "Comment le diaporama choisit l'image suivante. <b>Séquentiel</b> suit l'ordre des noms de fichier (01, 02...). <b>Aléatoire</b> choisit une image différente à chaque fois. L'image en cours est conservée quand le mode aléatoire du meter change de skin (même artiste).",
     "FANART_ORDER_SEQUENTIAL": "Séquentiel",

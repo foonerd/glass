@@ -69,7 +69,7 @@
     "FANART_KEY_LABEL": "Persönlicher fanart.tv-Schlüssel",
     "FANART_KEY_DOC": "Dein eigener fanart.tv-API-Schlüssel, der im Modus „Persönlicher Schlüssel“ als api_key verwendet wird. Im persönlichen Modus erforderlich; bleibt er leer, wird fanart.tv übersprungen und die Diashow greift auf lokale Bilder und Volumios Künstlerbilder zurück. Registriere ein Projekt bei fanart.tv für einen Schlüssel (Konto > API).",
     "FANART_INTERVAL_LABEL": "Fanart-Wechselintervall (Sekunden)",
-    "FANART_INTERVAL_DOC": "Wechselt automatisch alle N Sekunden zum nächsten Fanart-Bild. 0 bedeutet, nur beim Titelwechsel zu wechseln. Bereich: 0 bis 3600.",
+    "FANART_INTERVAL_DOC": "Wechselt automatisch alle N Sekunden zum nächsten Fanart-Bild, gezählt ab dem letzten Wechsel; ein neuer Titel wechselt das Bild ebenfalls. 0 bedeutet, nur beim Titelwechsel zu wechseln. Bereich: 0 bis 3600.",
     "FANART_ORDER_LABEL": "Fanart-Reihenfolge",
     "FANART_ORDER_DOC": "Wie die Diashow das nächste Bild wählt. <b>Sequenziell</b> folgt der Dateinamen-Reihenfolge (01, 02...). <b>Zufällig</b> wählt jedes Mal ein anderes Bild. Das aktuelle Bild bleibt erhalten, wenn der Zufalls-Meter-Modus das Skin wechselt (gleicher Künstler).",
     "FANART_ORDER_SEQUENTIAL": "Sequenziell",
