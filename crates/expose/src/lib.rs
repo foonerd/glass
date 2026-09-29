@@ -368,6 +368,67 @@ pub fn fit_art(frame: &Frame, w: u32, h: u32) -> Frame {
     }
 }
 
+/// A picture file's size, from its header.
+pub fn picture_size(path: &Path) -> Option<(u32, u32)> {
+    image::ImageReader::new(std::io::Cursor::new(read_file(path)?))
+        .with_guessed_format()
+        .ok()?
+        .into_dimensions()
+        .ok()
+}
+
+/// A picture file scaled by `sx` and `sy` into another file of the same
+/// format (by its name), for the cutter: decoded, its colour premultiplied
+/// by its alpha so edges do not fringe, resampled with Lanczos, and
+/// written back. The new size comes back, or why it could not be done.
+pub fn resample_picture(src: &Path, dst: &Path, sx: f32, sy: f32) -> Result<(u32, u32), String> {
+    let bytes = read_file(src).ok_or_else(|| format!("{}: cannot be read", src.display()))?;
+    let image = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()
+        .map_err(|e| format!("{}: {e}", src.display()))?
+        .decode()
+        .map_err(|e| format!("{}: {e}", src.display()))?
+        .into_rgba8();
+    let (w, h) = (
+        ((image.width() as f32 * sx).round() as u32).max(1),
+        ((image.height() as f32 * sy).round() as u32).max(1),
+    );
+    let mut premultiplied = image;
+    for px in premultiplied.pixels_mut() {
+        let a = px[3] as u32;
+        for k in 0..3 {
+            px[k] = ((px[k] as u32 * a + 127) / 255) as u8;
+        }
+    }
+    let mut scaled =
+        image::imageops::resize(&premultiplied, w, h, image::imageops::FilterType::Lanczos3);
+    for px in scaled.pixels_mut() {
+        let a = px[3] as u32;
+        if a > 0 && a < 255 {
+            for k in 0..3 {
+                px[k] = ((px[k] as u32 * 255 + a / 2) / a).min(255) as u8;
+            }
+        }
+    }
+    let ext = dst
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|e| e.to_ascii_lowercase())
+        .unwrap_or_default();
+    match ext.as_str() {
+        "jpg" | "jpeg" => {
+            // JPEG has no alpha: on an opaque background.
+            let rgb = image::DynamicImage::ImageRgba8(scaled).into_rgb8();
+            rgb.save(dst)
+                .map_err(|e| format!("{}: {e}", dst.display()))?;
+        }
+        _ => scaled
+            .save(dst)
+            .map_err(|e| format!("{}: {e}", dst.display()))?,
+    }
+    Ok((w, h))
+}
+
 /// `background` is the theme picture. It is copied in place. It is not scaled.
 /// A theme is authored at its own resolution, so a mismatch leaves the dark fill.
 pub struct Stack<'a> {

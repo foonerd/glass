@@ -22,6 +22,7 @@ use std::time::Duration;
 
 mod governor;
 mod remote;
+mod tailor;
 
 use remote::run::RemoteSession;
 
@@ -102,6 +103,11 @@ pub fn run(args: Vec<String>) -> ExitCode {
     let mut open_settings = false;
     let mut dev = false;
     let mut manager_port: u16 = intake::remote::DEFAULT_MANAGER_PORT;
+    let mut tailor_to: Option<(u32, u32)> = None;
+    let mut tailor_from: Option<(u32, u32)> = None;
+    let mut tailor_out: Option<String> = None;
+    let mut tailor_spectrum: Option<String> = None;
+    let mut tailor_stretch = false;
     let mut args = args.into_iter().skip(1).peekable();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -215,6 +221,35 @@ pub fn run(args: Vec<String>) -> ExitCode {
                 }
             },
             "--list" => list = true,
+            "--tailor" => match args.next().and_then(|s| tailor::parse_size(&s)) {
+                Some(size) => tailor_to = Some(size),
+                None => {
+                    eprintln!("glass: --tailor needs a size, WIDTHxHEIGHT");
+                    return ExitCode::from(2);
+                }
+            },
+            "--from" => match args.next().and_then(|s| tailor::parse_size(&s)) {
+                Some(size) => tailor_from = Some(size),
+                None => {
+                    eprintln!("glass: --from needs a size, WIDTHxHEIGHT");
+                    return ExitCode::from(2);
+                }
+            },
+            "--out" => match args.next() {
+                Some(dir) => tailor_out = Some(dir),
+                None => {
+                    eprintln!("glass: --out needs a folder");
+                    return ExitCode::from(2);
+                }
+            },
+            "--spectrum" => match args.next() {
+                Some(dir) => tailor_spectrum = Some(dir),
+                None => {
+                    eprintln!("glass: --spectrum needs a folder");
+                    return ExitCode::from(2);
+                }
+            },
+            "--stretch" => tailor_stretch = true,
             "--help" => {
                 let ring = if cfg!(unix) {
                     "Reads the tap's ring under /dev/shm and the player's state."
@@ -225,6 +260,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
                     "glass [--once] [--headless] [--print] [--output frame.png|frame.ppm] [--record step.json]\n      \
                      [--theme FOLDER] [--meter NAME|random|a,b,c] [--interval SECONDS] [--fps N] [--threads N]\n      \
                      [--list] [--snapshot DIR [--settle SECONDS] [--thumb WIDTH]]\n      \
+                     [--tailor WxH --theme FOLDER|NAME [--out DIR] [--spectrum FOLDER] [--from WxH] [--stretch]]\n      \
                      [--remote [HOST|discover] [--name NAME] [--cache DIR] [--config FILE] [--manager-port N] [--settings]] [--dev]\n\
                      {ring}\n\
                      A window opens when a screen is there (DISPLAY on Linux). --headless skips it.\n\
@@ -233,6 +269,8 @@ pub fn run(args: Vec<String>) -> ExitCode {
                      --theme, --meter, --interval and --fps stand in for the installed configuration's values.\n\
                      --threads N paints every frame on N threads; by default a frame takes from one thread up to one a core as it needs.\n\
                      --list prints the installed themes and their meters.\n\
+                     --tailor writes a copy of a theme and its spectrum twin at another size under --out (the working folder\n\
+                       without it): one scale factor and the theme centred, or --stretch to the screen's shape.\n\
                      --snapshot shows each meter of the theme (or of the --meter list) for --settle seconds\n\
                      and writes DIR/<theme>/<meter>.png, then leaves.\n\
                      --thumb writes DIR/<theme>/<meter>.thumb.png beside each snapshot, WIDTH pixels wide.\n\
@@ -280,6 +318,51 @@ pub fn run(args: Vec<String>) -> ExitCode {
         );
     }
     intake::set_overrides(run.overrides.clone());
+    if let Some(to) = tailor_to {
+        let Some(theme) = run.overrides.theme.as_deref() else {
+            eprintln!("glass: --tailor needs --theme, a theme folder or an installed theme's name");
+            return ExitCode::from(2);
+        };
+        let theme_dir = if std::path::Path::new(theme).is_dir() {
+            std::path::PathBuf::from(theme)
+        } else {
+            match intake::installed_theme_dir(theme) {
+                Some(dir) => dir,
+                None => {
+                    eprintln!("glass: {theme}: not a folder, nor an installed theme");
+                    return ExitCode::from(2);
+                }
+            }
+        };
+        let out = tailor_out.unwrap_or_else(|| ".".to_string());
+        let job = tailor::Job {
+            theme: theme_dir,
+            spectrum: tailor_spectrum.map(std::path::PathBuf::from),
+            from: tailor_from,
+            to,
+            out: std::path::PathBuf::from(out),
+            stretch: tailor_stretch,
+        };
+        return match tailor::run(&job) {
+            Ok(report) => {
+                for folder in &report.folders {
+                    println!("{}", folder.display());
+                }
+                println!(
+                    "glass: {} cut to {}x{}: {} pictures resampled",
+                    report.name, to.0, to.1, report.pictures
+                );
+                for warning in &report.warnings {
+                    eprintln!("glass: {warning}");
+                }
+                ExitCode::SUCCESS
+            }
+            Err(why) => {
+                eprintln!("glass: {why}");
+                ExitCode::from(1)
+            }
+        };
+    }
     if list {
         // Written through a lock so a closed pipe (`| head`) ends the listing quietly.
         use std::io::Write;
