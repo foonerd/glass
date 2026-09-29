@@ -218,9 +218,20 @@ impl TextMotion {
 const METER: [u8; 4] = [80, 220, 120, 255];
 const BAR: [u8; 4] = [90, 170, 255, 255];
 
+/// How drawing lands on a frame: over what is there, the alpha deciding,
+/// or added to it, so overlaps bloom and colours saturate.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum Blend {
+    #[default]
+    Normal,
+    Add,
+}
+
 /// One finished picture. `pane` uploads it once.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Frame {
+    /// How the primitives land on this frame; normal unless a look asks.
+    pub blend: Blend,
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
@@ -326,6 +337,7 @@ pub fn read_art(path: &Path, w: u32, h: u32, mask: Option<&Frame>) -> Option<Fra
         .ok()?
         .into_rgba8();
     let frame = Frame {
+        blend: Blend::Normal,
         width: image.width(),
         height: image.height(),
         rgba: image.into_raw(),
@@ -349,6 +361,7 @@ pub fn fit_art(frame: &Frame, w: u32, h: u32) -> Frame {
     };
     let scaled = image::imageops::resize(&image, w, h, image::imageops::FilterType::Triangle);
     Frame {
+        blend: Blend::Normal,
         width: w,
         height: h,
         rgba: scaled.into_raw(),
@@ -2370,6 +2383,7 @@ pub fn read_icon(path: &Path, w: u32, h: u32, tint: Option<[u8; 3]>) -> Option<F
             rgba.extend_from_slice(&[c.red(), c.green(), c.blue(), c.alpha()]);
         }
         Frame {
+            blend: Blend::Normal,
             width: pw,
             height: ph,
             rgba,
@@ -2562,6 +2576,7 @@ fn render_line(
         }
     }
     Some(Frame {
+        blend: Blend::Normal,
         width,
         height,
         rgba,
@@ -3225,6 +3240,7 @@ pub fn flip_x(src: &Frame) -> Frame {
         }
     }
     Frame {
+        blend: Blend::Normal,
         width: src.width,
         height: src.height,
         rgba,
@@ -4294,6 +4310,11 @@ fn render_radial(
     let look = &a.look;
     let bg = (look.bgr_alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
     begin_frame(out, w, h, bg, previous);
+    out.blend = if look.blend_add {
+        Blend::Add
+    } else {
+        Blend::Normal
+    };
     let n = smoothed[0].len();
     if n == 0 {
         return;
@@ -4435,11 +4456,11 @@ fn render_radial(
                     _ => inks[ch][band],
                 };
                 let alpha = ((c[3] as f32 * bar_alpha).round().clamp(0.0, 255.0)) as u32;
-                blend_px(&mut out.rgba[at..at + 4], c, alpha);
+                put_px(out, at, c, alpha);
                 if let Some(&boost) = onset.boost.get(band) {
                     if boost > 0.0 {
                         let a = (boost * 0.7 * 255.0).round() as u32;
-                        blend_px(&mut out.rgba[at..at + 4], onset.color, a);
+                        put_px(out, at, onset.color, a);
                     }
                 }
             }
@@ -4457,7 +4478,7 @@ fn render_radial(
                         };
                         let mark_alpha = channel_alpha[ch] * (1.0 - peak.fade).clamp(0.0, 1.0);
                         let alpha = ((c[3] as f32 * mark_alpha).round().clamp(0.0, 255.0)) as u32;
-                        blend_px(&mut out.rgba[at..at + 4], c, alpha);
+                        put_px(out, at, c, alpha);
                     }
                 }
             }
@@ -4478,7 +4499,7 @@ fn render_radial(
                 let along = (r - base[0]) * reach[0].signum();
                 if along >= 0.0 && along < span && (along - t * span).abs() < 1.0 {
                     let at = (y * width + x) * 4;
-                    blend_px(&mut out.rgba[at..at + 4], onset.color, a);
+                    put_px(out, at, onset.color, a);
                 }
             });
         }
@@ -4517,6 +4538,28 @@ impl Ink<'_> {
 
 /// `c` at `a` (0 to 255) over one pixel, straight alpha: opaque copies.
 #[inline]
+/// One pixel added: the colour times its alpha on top of what is there,
+/// saturating, the alpha joined as a cover would join it.
+fn add_px(d: &mut [u8], c: [u8; 4], a: u32) {
+    if a == 0 {
+        return;
+    }
+    let a = a.min(255);
+    for k in 0..3 {
+        d[k] = (d[k] as u32 + (c[k] as u32 * a + 127) / 255).min(255) as u8;
+    }
+    d[3] = (a + (d[3] as u32 * (255 - a) + 127) / 255).min(255) as u8;
+}
+
+/// One pixel of the frame at byte offset `at`, landed as the frame blends.
+#[inline]
+fn put_px(out: &mut Frame, at: usize, c: [u8; 4], a: u32) {
+    match out.blend {
+        Blend::Add => add_px(&mut out.rgba[at..at + 4], c, a),
+        Blend::Normal => blend_px(&mut out.rgba[at..at + 4], c, a),
+    }
+}
+
 fn blend_px(d: &mut [u8], c: [u8; 4], a: u32) {
     if a == 0 {
         return;
@@ -4598,6 +4641,18 @@ fn fill_span(
     let width = out.width as usize;
     let row = y as usize * width;
     let span_alpha = (alpha * 255.0).round().clamp(0.0, 255.0) as u32;
+    if out.blend == Blend::Add {
+        let (x0, x1) = (
+            (xa.round().max(0.0) as usize).min(width),
+            (xb.round().max(0.0) as usize).min(width),
+        );
+        for x in x0..x1 {
+            let c = ink.at(x, y as usize);
+            let a = ((c[3] as u32 * span_alpha) + 127) / 255;
+            add_px(&mut out.rgba[(row + x) * 4..(row + x) * 4 + 4], c, a);
+        }
+        return;
+    }
     let x0 = xa.ceil() as usize;
     let x1 = (xb.floor() as usize).min(width);
     // The partial pixel at the left end.
@@ -4727,6 +4782,17 @@ fn fill_rect(
         return;
     }
     let span_alpha = (alpha * 255.0).round().clamp(0.0, 255.0) as u32;
+    if out.blend == Blend::Add {
+        for y in y0..y1 {
+            let row = y * width;
+            for x in x0..x1 {
+                let c = ink.at(x, y);
+                let a = ((c[3] as u32 * span_alpha) + 127) / 255;
+                add_px(&mut out.rgba[(row + x) * 4..(row + x) * 4 + 4], c, a);
+            }
+        }
+        return;
+    }
     let under = out.rgba[(y0 * width + x0) * 4 + 3] as u32;
     match ink {
         Ink::Solid(c) => {
@@ -5473,7 +5539,8 @@ fn fill_disc(
 
 /// One channel as dots: a disc per band at its level, `dot.size` across,
 /// the peaks as discs half that size, an onset's flash as a disc of the
-/// onset colour over the dot.
+/// onset colour over the dot; with `dot.hold` the disc sits at the band's
+/// held peak instead and falls with it, and no peak mark is drawn.
 #[allow(clippy::too_many_arguments)]
 fn draw_dots(
     out: &mut Frame,
@@ -5523,16 +5590,22 @@ fn draw_dots(
     };
     for (i, raw) in levels.iter().enumerate() {
         let level = raw.clamp(0.0, 1.0);
+        let held = peaks.get(i).map_or(0.0, |p| p.level.clamp(0.0, 1.0));
+        let shown = if look.dot_hold {
+            level.max(held)
+        } else {
+            level
+        };
         let slot = if area.reversed { n - 1 - i } else { i };
         let cx = area.x + (slot as f32 + 0.5) * pitch;
-        let dot_alpha = alpha * look.fill_alpha * if look.alpha_bars { level } else { 1.0 };
+        let dot_alpha = alpha * look.fill_alpha * if look.alpha_bars { shown } else { 1.0 };
         fill_disc(
             out,
             clip,
             cx,
-            y_of(level),
+            y_of(shown),
             radius,
-            &ink_for(i, level),
+            &ink_for(i, shown),
             dot_alpha,
         );
         if let Some(&boost) = onset.boost.get(i) {
@@ -5541,14 +5614,14 @@ fn draw_dots(
                     out,
                     clip,
                     cx,
-                    y_of(level),
+                    y_of(shown),
                     radius,
                     &Ink::Solid(onset.color),
                     alpha * boost * 0.7,
                 );
             }
         }
-        if look.peaks {
+        if look.peaks && !look.dot_hold {
             let peak = peaks.get(i).copied().unwrap_or_default();
             if peak.level > level + 0.002 {
                 fill_disc(
@@ -5743,6 +5816,11 @@ fn render_analyser(
     }
     let bg = (look.bgr_alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
     begin_frame(out, w, h, bg, previous);
+    out.blend = if look.blend_add {
+        Blend::Add
+    } else {
+        Blend::Normal
+    };
     let (fw, fh) = (w as f32, h as f32);
     // The frequency scale takes a strip at the bottom of the box.
     let strip = if look.scale_x {
@@ -5965,7 +6043,7 @@ fn render_analyser(
                     255,
                 ];
                 let at = dst_row + x * 4;
-                blend_px(&mut out.rgba[at..at + 4], c, a.min(255));
+                put_px(out, at, c, a.min(255));
             }
         }
     }
@@ -6211,6 +6289,7 @@ fn fill_frame(fill: &Fill, (w, h): (u32, u32), stretch: bool) -> Option<Frame> {
 fn solid_frame(w: u32, h: u32, color: [u8; 4]) -> Frame {
     let (w, h) = (w.max(1), h.max(1));
     Frame {
+        blend: Blend::Normal,
         width: w,
         height: h,
         rgba: color.repeat((w * h) as usize),
@@ -6245,6 +6324,7 @@ pub fn gradient_frame(w: u32, h: u32, colors: &[[u8; 4]]) -> Frame {
         }
     }
     Frame {
+        blend: Blend::Normal,
         width: w,
         height: h,
         rgba,
@@ -6429,6 +6509,7 @@ impl FolderPicture {
                 }
                 Self {
                     frame: Frame {
+                        blend: Blend::Normal,
                         width: bw,
                         height: bh,
                         rgba,
@@ -6578,6 +6659,7 @@ pub fn blur(src: &Frame, radius: u32) -> Frame {
         }
     }
     Frame {
+        blend: Blend::Normal,
         width: src.width,
         height: src.height,
         rgba: a
@@ -6589,6 +6671,7 @@ pub fn blur(src: &Frame, radius: u32) -> Frame {
 
 fn empty_frame(w: u32, h: u32) -> Frame {
     Frame {
+        blend: Blend::Normal,
         width: w.max(1),
         height: h.max(1),
         rgba: vec![0u8; (w.max(1) * h.max(1) * 4) as usize],
@@ -7529,6 +7612,7 @@ pub fn compose_base(
 ) -> Frame {
     let (width, height) = (width.max(1), height.max(1));
     let mut frame = Frame {
+        blend: Blend::Normal,
         width,
         height,
         rgba: vec![0u8; (width * height * 4) as usize],
@@ -7604,6 +7688,7 @@ pub fn read_png(path: &Path) -> Option<Frame> {
     let width = image.width();
     let height = image.height();
     Some(Frame {
+        blend: Blend::Normal,
         width,
         height,
         rgba: image.into_raw(),
@@ -7832,6 +7917,7 @@ mod tests {
 
     fn sprite(width: u32, height: u32, color: [u8; 4]) -> Frame {
         Frame {
+            blend: Blend::Normal,
             width,
             height,
             rgba: (0..width * height).flat_map(|_| color).collect(),
@@ -7847,6 +7933,7 @@ mod tests {
     fn a_bar_shows_the_picture_from_the_end_its_direction_names() {
         // A 4 wide, 2 tall picture whose columns are 1, 2, 3, 4 in red.
         let mut pic = Frame {
+            blend: Blend::Normal,
             width: 4,
             height: 2,
             rgba: vec![0; 4 * 2 * 4],
@@ -8142,6 +8229,7 @@ mod tests {
     #[test]
     fn a_picture_kept_turned_keeps_its_soft_alpha() {
         let mut soft = Frame {
+            blend: Blend::Normal,
             width: 4,
             height: 4,
             rgba: vec![0; 64],
@@ -8343,6 +8431,7 @@ mod tests {
             h: 61,
         }];
         let mut one = Frame {
+            blend: Blend::Normal,
             width: 97,
             height: 61,
             rgba: vec![0; 97 * 61 * 4],
@@ -8351,6 +8440,7 @@ mod tests {
         assert_ne!(one.rgba, base.rgba, "something was painted");
         for threads in [2usize, 3, 7] {
             let mut many = Frame {
+                blend: Blend::Normal,
                 width: 97,
                 height: 61,
                 rgba: vec![0; 97 * 61 * 4],
@@ -8361,6 +8451,7 @@ mod tests {
         // Every step stays inside the box it declares.
         for (i, op) in ops.iter().enumerate() {
             let mut alone = Frame {
+                blend: Blend::Normal,
                 width: 97,
                 height: 61,
                 rgba: vec![0; 97 * 61 * 4],
@@ -8381,6 +8472,7 @@ mod tests {
         }
         // Painting two boxes touches nothing outside them.
         let mut boxed = Frame {
+            blend: Blend::Normal,
             width: 97,
             height: 61,
             rgba: vec![7; 97 * 61 * 4],
@@ -8688,6 +8780,7 @@ mod tests {
         });
         assert_eq!(fonts.loaded(), 1);
         let mut frame = Frame {
+            blend: Blend::Normal,
             width: 120,
             height: 40,
             rgba: vec![0u8; 120 * 40 * 4],
@@ -8722,6 +8815,7 @@ mod tests {
         );
 
         let mut clipped = Frame {
+            blend: Blend::Normal,
             width: 120,
             height: 40,
             rgba: vec![0u8; 120 * 40 * 4],
@@ -8747,6 +8841,7 @@ mod tests {
         });
         let mut motion = TextMotion::default();
         let mut frame = Frame {
+            blend: Blend::Normal,
             width: 200,
             height: 40,
             rgba: vec![0u8; 200 * 40 * 4],
@@ -8910,6 +9005,7 @@ mod tests {
             icon: "x.svg".into(),
         };
         let mut frame = Frame {
+            blend: Blend::Normal,
             width: 80,
             height: 40,
             rgba: vec![0u8; 80 * 40 * 4],
@@ -9369,6 +9465,61 @@ mod analyser_tests {
     /// Dots: a disc at the band's level and nothing above or below it;
     /// waterfall: a frame's levels as a row at the base, moving up a row
     /// a frame as new rows come.
+    #[test]
+    fn an_additive_box_blooms_where_its_channels_overlap_and_a_held_dot_sits_at_the_peak() {
+        // Two channels over each other (the right a shade lower, so the
+        // analyser is stereo), the second at half alpha: covering, the
+        // overlap stays at the colour's level; adding, it goes past it.
+        let combined = |add: bool| Look {
+            layout: Layout::DualCombined,
+            smoothing: 0.0,
+            peaks: false,
+            bar_space: 0.0,
+            bgr_alpha: 1.0,
+            color_mode: lead::ColorMode::Index,
+            blend_add: add,
+            ..Look::default()
+        };
+        let sum = |p: [u8; 4]| p[0] as u32 + p[1] as u32 + p[2] as u32;
+        let a = analyser(combined(false), 20, 40, vec![1.0], vec![0.99]);
+        let mut motion = AnalyserMotion::default();
+        let covered = sum(pixel(motion.advance(&a, 0), 10, 20));
+        let a = analyser(combined(true), 20, 40, vec![1.0], vec![0.99]);
+        let mut motion = AnalyserMotion::default();
+        let added = sum(pixel(motion.advance(&a, 0), 10, 20));
+        assert!(
+            added > covered + 60,
+            "added {added} against covered {covered}"
+        );
+        // A dot held at the peak: the disc at the peak's height, none at the level's.
+        let look = Look {
+            style: lead::LookStyle::Dots,
+            smoothing: 0.0,
+            peaks: true,
+            peak_hold_ms: 10_000,
+            dot_size: 6.0,
+            dot_hold: true,
+            bgr_alpha: 1.0,
+            color_mode: lead::ColorMode::Index,
+            ..Look::default()
+        };
+        let a = analyser(look, 20, 100, vec![0.9], vec![0.9]);
+        let mut motion = AnalyserMotion::default();
+        motion.advance(&a, 0);
+        // The level drops; the peak holds where it was.
+        let a = analyser(a.look.clone(), 20, 100, vec![0.2], vec![0.2]);
+        let picture = motion.advance(&a, 100);
+        let lit = |p: [u8; 4]| sum(p) > 100;
+        assert!(
+            lit(pixel(picture, 10, 10)),
+            "the dot at the held peak, y of 0.9"
+        );
+        assert!(
+            !lit(pixel(picture, 10, 80)),
+            "nothing at the level, y of 0.2"
+        );
+    }
+
     #[test]
     fn dots_sit_at_their_levels_and_a_waterfall_moves_its_rows_away() {
         let dots = Look {

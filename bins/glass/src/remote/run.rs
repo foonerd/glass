@@ -197,6 +197,7 @@ fn host_font() -> Option<String> {
 fn status_frame(lines: &[String]) -> expose::Frame {
     let (width, height) = (800u32, 480u32);
     let mut frame = expose::Frame {
+        blend: expose::Blend::Normal,
         width,
         height,
         rgba: vec![0; (width * height * 4) as usize],

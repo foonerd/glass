@@ -1412,6 +1412,14 @@ pub struct Look {
     /// `dot.size`: a dot's diameter in pixels; 0 takes seven tenths of a band's width.
     #[serde(default)]
     pub dot_size: f32,
+    /// `dot.hold`: the dot sits at the band's held peak and falls with it,
+    /// instead of at the level with a smaller peak mark above.
+    #[serde(default)]
+    pub dot_hold: bool,
+    /// `blend = add`: the box's own drawing adds its colour to what is
+    /// under it within the box instead of covering it, so overlaps bloom.
+    #[serde(default)]
+    pub blend_add: bool,
     /// `waterfall.speed`: rows a frame the spectrogram moves; `waterfall.reverse`
     /// starts the rows at the far edge instead of the base.
     #[serde(default = "default_waterfall_speed")]
@@ -1531,6 +1539,8 @@ impl Default for Look {
             onset_groups: default_onset_groups(),
             onset_color: default_onset_color(),
             dot_size: 0.0,
+            dot_hold: false,
+            blend_add: false,
             waterfall_speed: default_waterfall_speed(),
             waterfall_reverse: false,
             trail: 0.0,
@@ -1740,6 +1750,12 @@ fn look_from_section(get: &dyn Fn(&str) -> Option<String>) -> Option<Look> {
     }
     if let Some(v) = number("dot.size") {
         look.dot_size = v.clamp(0.0, 200.0);
+    }
+    if let Some(v) = flag("dot.hold") {
+        look.dot_hold = v;
+    }
+    if let Some(v) = get("blend") {
+        look.blend_add = v.trim().eq_ignore_ascii_case("add");
     }
     if let Some(v) = number("waterfall.speed") {
         look.waterfall_speed = v.clamp(1.0, 16.0) as u32;
