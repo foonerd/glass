@@ -213,6 +213,33 @@
   <!-- Artwork -->
   <section class="view" id="view-artwork">
     <div class="panel">
+      <h2 id="disp-title"></h2>
+      <div class="help" id="disp-help" style="margin-bottom:12px"></div>
+      <div class="form">
+        <div class="full">
+          <label class="switch"><input type="checkbox" id="disp-fit"><span id="disp-fit-label"></span></label>
+        </div>
+        <div>
+          <label id="disp-position-label"></label>
+          <select id="disp-position">
+            <option value="center"></option>
+            <option value="manual"></option>
+          </select>
+        </div>
+        <div id="disp-x-box">
+          <label id="disp-x-label"></label>
+          <input type="number" id="disp-x" min="0" max="7680">
+        </div>
+        <div id="disp-y-box">
+          <label id="disp-y-label"></label>
+          <input type="number" id="disp-y" min="0" max="4320">
+        </div>
+        <div class="full row">
+          <button class="primary" id="btn-disp-save"></button>
+        </div>
+      </div>
+    </div>
+    <div class="panel">
       <h2 id="art-title"></h2>
       <div class="help" id="art-help" style="margin-bottom:12px"></div>
       <div class="form">
@@ -576,6 +603,15 @@
     $('fonts-custom-title').textContent = t('MANAGER_FONTS_CUSTOM_TITLE');
     $('fonts-custom-doc').textContent = t('MANAGER_FONTS_CUSTOM_DOC');
     $('btn-fonts-upload').textContent = t('MANAGER_FONTS_UPLOAD');
+    $('disp-title').textContent = t('MANAGER_DISPLAY_TITLE');
+    $('disp-help').textContent = t('MANAGER_DISPLAY_DOC');
+    $('disp-fit-label').textContent = t('MANAGER_DISPLAY_FIT');
+    $('disp-position-label').textContent = t('MANAGER_DISPLAY_POSITION');
+    $('disp-position').options[0].textContent = t('MANAGER_DISPLAY_CENTERED');
+    $('disp-position').options[1].textContent = t('MANAGER_DISPLAY_MANUAL');
+    $('disp-x-label').textContent = t('MANAGER_DISPLAY_X');
+    $('disp-y-label').textContent = t('MANAGER_DISPLAY_Y');
+    $('btn-disp-save').textContent = t('MANAGER_SAVE');
     $('art-help').textContent = t('FANART_ENABLE_DOC');
     $('art-enabled-label').textContent = t('FANART_ENABLE_LABEL');
     $('art-keymode-label').textContent = t('FANART_KEY_MODE_LABEL');
@@ -641,7 +677,7 @@
     document.querySelectorAll('.view').forEach(function (v) { v.classList.toggle('active', v.id === 'view-' + name); });
     try { localStorage.setItem('glass-manager-tab', name); } catch (e) {}
     if (name === 'catalog' && !state.catalog) loadCatalog(false);
-    if (name === 'artwork') loadArtwork(); loadFonts();
+    if (name === 'artwork') { loadDisplay(); loadArtwork(); } loadFonts();
     if (name === 'backups') loadBackups();
     if (name === 'status') { loadStatus(); }
     if (name === 'system') { loadUpdate(false); loadPerformance(); loadSharing(); loadTouch(); loadLogging(); }
@@ -1216,6 +1252,25 @@
       toast(t('MANAGER_FONTS_UPLOADED') + ' ' + data.name);
       renderFonts(data);
     }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
+  function showDisplayXY() {
+    var manual = $('disp-position').value === 'manual';
+    $('disp-x-box').style.display = manual ? '' : 'none';
+    $('disp-y-box').style.display = manual ? '' : 'none';
+  }
+  $('disp-position').onchange = showDisplayXY;
+  function loadDisplay() {
+    api('GET', '/api/display').then(function (d) {
+      $('disp-fit').checked = !!d.fit;
+      $('disp-position').value = d.position;
+      $('disp-x').value = d.x;
+      $('disp-y').value = d.y;
+      showDisplayXY();
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  $('btn-disp-save').onclick = function () {
+    var body = { fit: $('disp-fit').checked, position: $('disp-position').value, x: parseInt($('disp-x').value, 10) || 0, y: parseInt($('disp-y').value, 10) || 0 };
+    api('POST', '/api/display', body).then(function () { toast(t('MANAGER_SAVED')); loadDisplay(); }).catch(function (e) { toast(errorText(e), 'error'); });
   };
   function loadArtwork() {
     api('GET', '/api/artwork').then(function (a) {

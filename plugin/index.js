@@ -1691,10 +1691,8 @@ Glass.prototype.getUIConfig = function () {
             // Display and activation.
             C('timeout').value = self.config.get('timeout');
             minmax[0] = [C('timeout').attributes[2].min, C('timeout').attributes[3].max, C('timeout').attributes[0].placeholder];
-            if (meterConfig.current['position.type'] == 'fit') {
-                C('positionType').value.value = 2;
-                C('positionType').value.label = 'fit to screen';
-            } else if (meterConfig.current['position.type'] == 'center') {
+            C('positionFit').value = String(meterConfig.current['position.fit']).toLowerCase() === 'true' || meterConfig.current['position.type'] == 'fit';
+            if (meterConfig.current['position.type'] == 'center' || meterConfig.current['position.type'] == 'fit') {
                 C('positionType').value.value = 0;
                 C('positionType').value.label = 'centered';
             } else {
@@ -1909,9 +1907,14 @@ Glass.prototype.saveDisplayConf = function (confData) {
   if (fs.existsSync(MeterConfigFile)){
 
     // write position type
-    var pos_type = use_SDL2 ? (confData.positionType.value == 0 ? 'center' : confData.positionType.value == 2 ? 'fit' : 'manual') : 'center';
+    var pos_type = use_SDL2 ? (confData.positionType.value == 0 ? 'center' : 'manual') : 'center';
     if (meterConfig.current['position.type'] !== pos_type) {
         meterConfig.current['position.type'] = pos_type;
+        noChanges = false;
+    }
+    var pos_fit = use_SDL2 && (confData.positionFit === true || confData.positionFit === 'true') ? 'True' : 'False';
+    if (String(meterConfig.current['position.fit']) !== pos_fit) {
+        meterConfig.current['position.fit'] = pos_fit;
         noChanges = false;
     }
     if (use_SDL2) {
@@ -4485,6 +4488,49 @@ Glass.prototype.setMeterSelection = function (data) {
     if (String(meterConfig.current['random.change.title']) !== title) { meterConfig.current['random.change.title'] = title; changed = true; }
     if (parseInt(meterConfig.current['random.meter.interval'], 10) !== interval) { meterConfig.current['random.meter.interval'] = interval; changed = true; }
     self.config.set('randomSelection', mode === 'list' ? meter : '');
+    if (changed) {
+        fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+        try { self.updateConfigVersion(); } catch (e) {}
+        if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+        uiNeedsUpdate = true;
+        self.updateUIConfig();
+    }
+    return { ok: true, changed: changed };
+};
+
+// Where the theme goes on the screen: fitted to it, scaled with its shape
+// kept, or pixel for pixel; centred, or with its top left at a position.
+Glass.prototype.displayPlacement = function () {
+    var self = this;
+    self.loadConfigs();
+    var cur = (meterConfig && meterConfig.current) || {};
+    var type = String(cur['position.type'] || 'center').toLowerCase();
+    return {
+        fit: String(cur['position.fit']).toLowerCase() === 'true' || type === 'fit',
+        position: type === 'center' || type === 'fit' ? 'center' : 'manual',
+        x: parseInt(cur['position.x'], 10) || 0,
+        y: parseInt(cur['position.y'], 10) || 0
+    };
+};
+
+// The same, set: the meter configuration is written, the displays hear of
+// the change and the player's display starts again with it.
+Glass.prototype.setDisplayPlacement = function (data) {
+    var self = this;
+    self.loadConfigs();
+    if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return { error: 'GLASS.NO_PEPPYCONFIG' }; }
+    var now = self.displayPlacement();
+    var fit = data.fit === undefined ? now.fit : (data.fit === true || data.fit === 'true');
+    var position = data.position === undefined ? now.position : String(data.position);
+    if (['center', 'manual'].indexOf(position) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    var x = data.x === undefined ? now.x : parseInt(data.x, 10);
+    var y = data.y === undefined ? now.y : parseInt(data.y, 10);
+    if (isNaN(x) || isNaN(y) || x < 0 || y < 0 || x > 7680 || y > 4320) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    var wanted = { 'position.fit': fit ? 'True' : 'False', 'position.type': position, 'position.x': String(x), 'position.y': String(y) };
+    var changed = false;
+    Object.keys(wanted).forEach(function (k) {
+        if (String(meterConfig.current[k]) !== wanted[k]) { meterConfig.current[k] = wanted[k]; changed = true; }
+    });
     if (changed) {
         fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
         try { self.updateConfigVersion(); } catch (e) {}
