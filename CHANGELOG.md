@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.59] - 2026-09-29
+
+A meter shows several spectrum boxes. `spectrum.name` takes a comma list of sections, one box each in that order, `spectrum.size` for all of them or `spectrum.2.size`, `spectrum.3.size` and so on for a box of its own size. A spectrum section says which channel it draws with `channel = left`, `right` or `mean` when the analyser's layout is `single`, so a classic layout with a face per channel takes a spectrum per face, and the Manager measures two channels when a section asks for one.
+
 ## [0.7.58] - 2026-09-29
 
 The Manager removes any theme its Themes tab lists. A folder whose name has no underscore, `1280x400` for one, was listed but refused with "The selected theme cannot be removed"; the removal now accepts every folder the tab shows, hidden ones aside, and counts them the same way when it keeps the last theme.
