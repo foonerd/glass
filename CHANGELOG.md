@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.65] - 2026-09-29
+
+The fitted theme can be placed. Fit and position are two settings now: `position.fit = True` scales the theme to the screen with its shape kept, and `position.type` says where it goes, centred or with its top left at `position.x`, `position.y`, fitted or not; `position.type = fit` from 0.7.64 still reads as fitted and centred. The plugin's settings page has a Fit to screen switch above Meter Position, and the Manager's Appearance tab gains a Display section at its top with the same controls, applied at once. The window draws the fitted frame into a rectangle of its own and maps touches through it.
+
 ## [0.7.64] - 2026-09-29
 
 A theme of another size fits the player's screen. `position.type = fit`, the third choice of the settings page's Meter Position, scales the theme to the screen with its shape kept and centres it, so every size in the catalogue can show on any player; touches land on the theme's controls as before. The scale is the window's own, as a remote display fits a theme, and costs the player nothing on the software path beyond what a remote pays.
