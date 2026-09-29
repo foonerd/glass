@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.71] - 2026-09-29
+
+Package says what it is doing. The job row counts the meters shown as the display reports each snapshot, with a bar and the seconds to go, the theme's card shows "Packaging…" or "Cutting…" in place of the button while its job runs, and a finished package keeps a Download link in its row beside the download that starts on its own.
+
 ## [0.7.70] - 2026-09-29
 
 Tailor and Package on the Manager's Themes tab. Tailor cuts a copy of a theme to another screen size on the player, the theme on show's size offered first, with the choice to stretch to the screen's shape instead of keeping the theme's, and installs the copy beside the original with its previews drawn. Package makes the theme's catalogue zip with a preview of every meter and hands it to the browser when it is ready. Both run as jobs the tab follows.
