@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.58] - 2026-09-29
+
+The Manager removes any theme its Themes tab lists. A folder whose name has no underscore, `1280x400` for one, was listed but refused with "The selected theme cannot be removed"; the removal now accepts every folder the tab shows, hidden ones aside, and counts them the same way when it keeps the last theme.
+
 ## [0.7.57] - 2026-09-29
 
 A graph's line, its ribbon width and its glow keep their width across the line on a slope: the column's span grows by the slope's secant, so a steep run reads as wide as a flat one instead of thinning to a thread.
