@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.68] - 2026-09-29
+
+The package. `glass --package --theme FOLDER|NAME --out DIR` writes a theme as the catalogue takes it: the display snapshots every meter headless, for `--settle` seconds each, tiles them into one `preview.png` in the theme's own width, and writes `DIR/<name>.zip` with the theme, its spectrum twin and the preview in the collection's layout, ready for a pull request or the Manager's upload. `--tailor` with `--package` cuts first and packages the cut. A theme given by its own path brings its spectrum twin from beside it, as a cut lays one out.
+
 ## [0.7.67] - 2026-09-29
 
 The cutter. `glass --tailor WIDTHxHEIGHT --theme FOLDER --out DIR` writes a copy of a theme and its spectrum twin at another size: every position, size, length and font size in the two text files scaled by a table that classifies each key the parser reads, with a test that holds the parser to it; every picture resampled; comments, order and unknown keys kept and the unknown named. One scale factor keeps the theme's shape, centred, with `--stretch` for the screen's shape instead; `--from WxH` gives the size of a theme whose folder name does not. A creator shrinks a 4K theme to check it on a smaller screen, or lifts a small one, and works on the differences.
