@@ -152,6 +152,13 @@
           "value": 15
         },
         {
+          "id": "positionFit",
+          "element": "switch",
+          "doc": "TRANSLATE.GLASS.POSITION_FIT_DOC",
+          "label": "TRANSLATE.GLASS.POSITION_FIT",
+          "value": false
+        },
+        {
           "id": "positionType",
           "element": "select",
           "doc": "TRANSLATE.GLASS.POSITION_TYPE_DOC",
@@ -168,10 +175,6 @@
             {
               "value": 1,
               "label": "manually"
-            },
-            {
-              "value": 2,
-              "label": "fit to screen"
             }
           ]
         },

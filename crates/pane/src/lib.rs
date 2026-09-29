@@ -105,9 +105,11 @@ pub struct Surface {
     frame_size: (u32, u32),
     /// Pointer events since the last take, in frame pixels.
     pointer: Vec<Pointer>,
-    /// Where the frame's top left sat in the window at the last show,
-    /// for mapping window pixels to frame pixels when not fitted.
+    /// Where the frame's top left sat in the window at the last show, and
+    /// the scale it was shown at (1 when not fitted), for mapping window
+    /// pixels to frame pixels.
     last_offset: (i32, i32),
+    last_scale: f32,
 }
 
 impl Surface {
@@ -143,13 +145,17 @@ impl Surface {
         Ok(())
     }
 
-    /// Keep a pointer event in frame pixels: a fitted window's events are
-    /// already scaled to the frame; otherwise the frame's offset comes off.
+    /// Keep a pointer event in frame pixels: the frame's offset comes off,
+    /// and a fitted frame's scale.
     fn push_pointer(&mut self, kind: PointerKind, x: i32, y: i32) {
-        let (x, y) = if self.fit {
-            (x, y)
+        let (x, y) = (x - self.last_offset.0, y - self.last_offset.1);
+        let (x, y) = if self.fit && self.last_scale > 0.0 {
+            (
+                (x as f32 / self.last_scale).round() as i32,
+                (y as f32 / self.last_scale).round() as i32,
+            )
         } else {
-            (x - self.last_offset.0, y - self.last_offset.1)
+            (x, y)
         };
         if self.pointer.len() < 256 {
             self.pointer.push(Pointer { kind, x, y });
@@ -213,15 +219,10 @@ impl Surface {
             }
         }
         let window = builder.build().map_err(|err| err.to_string())?;
-        let mut canvas = window
+        let canvas = window
             .into_canvas()
             .build()
             .map_err(|err| err.to_string())?;
-        if options.fit {
-            canvas
-                .set_logical_size(width, height)
-                .map_err(|err| err.to_string())?;
-        }
         // Say what draws the frames, so a report from a player tells whether
         // the upload goes through hardware.
         let info = canvas.info();
@@ -244,6 +245,7 @@ impl Surface {
             frame_size: (width, height),
             pointer: Vec::new(),
             last_offset: (0, 0),
+            last_scale: 1.0,
         })
     }
 
@@ -257,19 +259,15 @@ impl Surface {
         self.placement = Some((x, y));
     }
 
-    /// Follow a new frame size: a window sized to the frame is resized, a
-    /// fitted one maps the new size to the screen.
+    /// Follow a new frame size: a window sized to the frame is resized; a
+    /// fitted frame is scaled to the window at the next show.
     pub fn fit_to(&mut self, width: u32, height: u32) -> Result<(), String> {
         let (width, height) = (width.max(1), height.max(1));
         if self.frame_size == (width, height) {
             return Ok(());
         }
         self.frame_size = (width, height);
-        if self.fit {
-            self.canvas
-                .set_logical_size(width, height)
-                .map_err(|err| err.to_string())?;
-        } else {
+        if !self.fit {
             let window = self.canvas.window_mut();
             if (window.window_flags()
                 & sdl2::sys::SDL_WindowFlags::SDL_WINDOW_FULLSCREEN_DESKTOP as u32)
@@ -361,29 +359,52 @@ impl Surface {
         self.canvas
             .set_draw_color(sdl2::pixels::Color::RGB(0, 0, 0));
         self.canvas.clear();
-        if self.fit {
-            // The logical size is the frame's: the renderer scales it to the window.
-            self.canvas
-                .copy(texture, None, None)
-                .map_err(|err| err.to_string())?;
+        let (window_w, window_h) = self
+            .canvas
+            .output_size()
+            .unwrap_or((frame.width, frame.height));
+        let (x, y, w, h, scale) = if self.fit {
+            fitted_rect(
+                (frame.width, frame.height),
+                (window_w, window_h),
+                self.placement,
+            )
         } else {
-            let (window_w, window_h) = self
-                .canvas
-                .output_size()
-                .unwrap_or((frame.width, frame.height));
             let (x, y) = self.placement.unwrap_or((
                 (window_w as i32 - frame.width as i32) / 2,
                 (window_h as i32 - frame.height as i32) / 2,
             ));
-            self.last_offset = (x, y);
-            let dest = sdl2::rect::Rect::new(x, y, frame.width, frame.height);
-            self.canvas
-                .copy(texture, None, dest)
-                .map_err(|err| err.to_string())?;
-        }
+            (x, y, frame.width, frame.height, 1.0)
+        };
+        self.last_offset = (x, y);
+        self.last_scale = scale;
+        let dest = sdl2::rect::Rect::new(x, y, w.max(1), h.max(1));
+        self.canvas
+            .copy(texture, None, dest)
+            .map_err(|err| err.to_string())?;
         self.canvas.present();
         Ok(if touched { Shown::Touched } else { Shown::Kept })
     }
+}
+
+/// Where a frame fitted to a window goes: scaled by one factor both ways
+/// until it fills the window's width or height, whichever comes first,
+/// centred, or with its top left at `placement`; and the scale it took.
+pub fn fitted_rect(
+    frame: (u32, u32),
+    window: (u32, u32),
+    placement: Option<(i32, i32)>,
+) -> (i32, i32, u32, u32, f32) {
+    let (fw, fh) = (frame.0.max(1) as f32, frame.1.max(1) as f32);
+    let (ww, wh) = (window.0.max(1) as f32, window.1.max(1) as f32);
+    let scale = (ww / fw).min(wh / fh);
+    let w = (fw * scale).round().max(1.0) as u32;
+    let h = (fh * scale).round().max(1.0) as u32;
+    let (x, y) = placement.unwrap_or((
+        (window.0 as i32 - w as i32) / 2,
+        (window.1 as i32 - h as i32) / 2,
+    ));
+    (x, y, w, h, scale)
 }
 
 /// Publish a scene to a remote glass. No pixels cross this call.
@@ -406,4 +427,31 @@ pub fn write_ppm(path: impl AsRef<Path>, frame: &Frame) -> io::Result<()> {
     file.write_all(&rgb)?;
     drop(file);
     std::fs::rename(&part, path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fitted_rect;
+
+    /// A 1024x600 frame on a 1280x720 screen fills the height at 1.2 and
+    /// sits centred with a bar each side, or where a placement says; a
+    /// tall frame fills the height and keeps its shape.
+    #[test]
+    fn a_fitted_frame_fills_one_way_and_keeps_its_shape() {
+        assert_eq!(
+            fitted_rect((1024, 600), (1280, 720), None),
+            (25, 0, 1229, 720, 1.2)
+        );
+        assert_eq!(
+            fitted_rect((1024, 600), (1280, 720), Some((0, 0))),
+            (0, 0, 1229, 720, 1.2)
+        );
+        let (x, y, w, h, scale) = fitted_rect((600, 1024), (1280, 720), None);
+        assert_eq!((y, h), (0, 720));
+        assert!((scale - 720.0 / 1024.0).abs() < 1e-6 && w == 422 && x == (1280 - 422) / 2);
+        assert_eq!(
+            fitted_rect((1280, 720), (1280, 720), None),
+            (0, 0, 1280, 720, 1.0)
+        );
+    }
 }

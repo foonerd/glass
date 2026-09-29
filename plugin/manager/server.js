@@ -314,6 +314,17 @@ class Manager {
       res.json({ job: job });
     });
 
+    // Where the theme goes on the screen.
+    app.get('/api/display', function (req, res) {
+      res.json(self.plugin.displayPlacement());
+    });
+
+    app.post('/api/display', wrap(async function (req, res) {
+      const result = await self.exclusive(function () { return self.plugin.setDisplayPlacement(req.body || {}); });
+      if (result.error) return res.status(400).json(result);
+      res.json(Object.assign({ ok: true }, self.plugin.displayPlacement()));
+    }));
+
     // Artwork.
     app.get('/api/artwork', function (req, res) {
       res.json(self.plugin.artworkSettings());
