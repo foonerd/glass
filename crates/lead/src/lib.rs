@@ -969,6 +969,8 @@ pub struct SpectrumSpec {
 pub enum LookStyle {
     #[default]
     Bars,
+    /// The band levels joined into a line, the area under it filled.
+    Graph,
 }
 
 /// How the bands' colours are taken from the palette.
@@ -1353,6 +1355,32 @@ pub struct Look {
     /// `spin`: revolutions a minute, clockwise positive.
     #[serde(default)]
     pub spin_rpm: f32,
+    /// `peaks.line`: in the graph style, the peaks joined into a line of
+    /// their own instead of a mark per band.
+    #[serde(default)]
+    pub peak_line: bool,
+    /// `scale.x`: a strip of frequency labels under the bars, with
+    /// `note.labels` the notes' names instead of hertz.
+    #[serde(default)]
+    pub scale_x: bool,
+    #[serde(default)]
+    pub note_labels: bool,
+    /// `scale.y`: decibel labels at the left of the bars with faint lines across.
+    #[serde(default)]
+    pub scale_y: bool,
+    /// `scale.size` and `scale.color`: the labels' size and colour.
+    #[serde(default = "default_scale_size")]
+    pub scale_size: u32,
+    #[serde(default = "default_scale_color")]
+    pub scale_color: [u8; 3],
+}
+
+fn default_scale_size() -> u32 {
+    11
+}
+
+fn default_scale_color() -> [u8; 3] {
+    [180, 180, 180]
 }
 
 fn default_radius() -> f32 {
@@ -1401,6 +1429,12 @@ impl Default for Look {
             radial_invert: false,
             radius: default_radius(),
             spin_rpm: 0.0,
+            peak_line: false,
+            scale_x: false,
+            note_labels: false,
+            scale_y: false,
+            scale_size: default_scale_size(),
+            scale_color: default_scale_color(),
         }
     }
 }
@@ -1411,6 +1445,7 @@ fn look_from_section(get: &dyn Fn(&str) -> Option<String>) -> Option<Look> {
     let style = get("style")?;
     let style = match style.trim().to_ascii_lowercase().as_str() {
         "bars" => LookStyle::Bars,
+        "graph" | "area" | "line" => LookStyle::Graph,
         _ => return None,
     };
     let mut look = Look {
@@ -1546,6 +1581,24 @@ fn look_from_section(get: &dyn Fn(&str) -> Option<String>) -> Option<Look> {
     }
     if let Some(v) = number("spin").or_else(|| number("spin.speed")) {
         look.spin_rpm = v.clamp(-600.0, 600.0);
+    }
+    if let Some(v) = flag("peaks.line") {
+        look.peak_line = v;
+    }
+    if let Some(v) = flag("scale.x") {
+        look.scale_x = v;
+    }
+    if let Some(v) = flag("scale.y") {
+        look.scale_y = v;
+    }
+    if let Some(v) = flag("note.labels") {
+        look.note_labels = v;
+    }
+    if let Some(v) = number("scale.size") {
+        look.scale_size = v.clamp(6.0, 48.0) as u32;
+    }
+    if let Some(c) = get("scale.color").and_then(|v| color_triplet(&v)) {
+        look.scale_color = c;
     }
     Some(look)
 }

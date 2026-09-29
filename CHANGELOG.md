@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.53] - 2026-09-29
+
+The analyser's graph style: `style = graph` joins the band levels into a line across the box, the area under it filled at `fill.alpha` in the palette and the line drawn `line.width` pixels thick; `peaks.line` joins the peaks into a line of their own. Scales: `scale.x` labels the frequencies in a strip under the bars (`note.labels` names the notes instead), `scale.y` labels the decibels at the left with faint lines across, both in the theme's regular font at `scale.size` in `scale.color`. The radial look costs half of what it did: a pixel outside a channel's ring is passed over before its band is worked out.
+
 ## [0.7.52] - 2026-09-29
 
 The analyser's radial look: `radial = True` draws the bands round a circle instead of along a baseline, the bars growing out from a base circle of `radius` (a share of the box's radius, 0.3 unless said) to the rim, or, with `radial.invert`, in from the rim towards the centre. `spin` turns the whole picture, in revolutions a minute, clockwise for positive values. The layouts follow: `dual-vertical` puts the left channel outside the base circle and the right inside it, `dual-horizontal` gives each channel half the circle, `dual-combined` lays them over each other; `mirror` runs the bands over half the turn and back. The palettes, colour modes, peaks, `bar.space` and `alpha` apply as before; LEDs, luminance, outlines, rounding and the reflection do not, as in audioMotion. A frame of 256 bands on two channels costs what the other looks do.
