@@ -974,6 +974,20 @@ pub enum LookStyle {
 }
 
 /// How the bands' colours are taken from the palette.
+/// `onset`: what an onset in a band group does to the picture.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum OnsetLook {
+    #[default]
+    Off,
+    /// The bars of the group brighten and fade back.
+    Flash,
+    /// Every bar grows a little and settles back.
+    Pulse,
+    /// A line, or a ring in the radial look, runs from the base to the tip and fades.
+    Ring,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum ColorMode {
@@ -1373,6 +1387,36 @@ pub struct Look {
     pub scale_size: u32,
     #[serde(default = "default_scale_color")]
     pub scale_color: [u8; 3],
+    /// `onset`, `onset.decay`, `onset.strength`, `onset.groups`,
+    /// `onset.color`: what an onset does, how long it lasts in
+    /// milliseconds, how strong it is (0 to 1), which band groups fire it
+    /// (bits: sub-bass, bass, mid, high), and the colour it flashes in.
+    #[serde(default)]
+    pub onset: OnsetLook,
+    #[serde(default = "default_onset_decay")]
+    pub onset_decay_ms: u32,
+    #[serde(default = "default_onset_strength")]
+    pub onset_strength: f32,
+    #[serde(default = "default_onset_groups")]
+    pub onset_groups: u8,
+    #[serde(default = "default_onset_color")]
+    pub onset_color: [u8; 3],
+}
+
+fn default_onset_decay() -> u32 {
+    150
+}
+
+fn default_onset_strength() -> f32 {
+    0.6
+}
+
+fn default_onset_groups() -> u8 {
+    0b1111
+}
+
+fn default_onset_color() -> [u8; 3] {
+    [255, 255, 255]
 }
 
 fn default_scale_size() -> u32 {
@@ -1435,6 +1479,11 @@ impl Default for Look {
             scale_y: false,
             scale_size: default_scale_size(),
             scale_color: default_scale_color(),
+            onset: OnsetLook::Off,
+            onset_decay_ms: default_onset_decay(),
+            onset_strength: default_onset_strength(),
+            onset_groups: default_onset_groups(),
+            onset_color: default_onset_color(),
         }
     }
 }
@@ -1599,6 +1648,37 @@ fn look_from_section(get: &dyn Fn(&str) -> Option<String>) -> Option<Look> {
     }
     if let Some(c) = get("scale.color").and_then(|v| color_triplet(&v)) {
         look.scale_color = c;
+    }
+    if let Some(v) = get("onset") {
+        look.onset = match v.trim().to_ascii_lowercase().as_str() {
+            "flash" => OnsetLook::Flash,
+            "pulse" => OnsetLook::Pulse,
+            "ring" => OnsetLook::Ring,
+            _ => OnsetLook::Off,
+        };
+    }
+    if let Some(v) = number("onset.decay") {
+        look.onset_decay_ms = v.clamp(30.0, 3000.0) as u32;
+    }
+    if let Some(v) = number("onset.strength") {
+        look.onset_strength = v.clamp(0.0, 1.0);
+    }
+    if let Some(v) = get("onset.groups") {
+        let v = v.trim().to_ascii_lowercase();
+        look.onset_groups = if v == "all" || v.is_empty() {
+            0b1111
+        } else {
+            v.split(',').map(str::trim).fold(0u8, |bits, g| match g {
+                "sub" | "sub-bass" | "subbass" => bits | 1,
+                "bass" => bits | 2,
+                "mid" => bits | 4,
+                "high" => bits | 8,
+                _ => bits,
+            })
+        };
+    }
+    if let Some(c) = get("onset.color").and_then(|v| color_triplet(&v)) {
+        look.onset_color = c;
     }
     Some(look)
 }

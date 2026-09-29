@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.54] - 2026-09-29
+
+The analyser answers onsets, a band group rising after quiet as the bank hears it: `onset = flash` brightens that group's bars towards `onset.color` and fades them back, `pulse` grows every bar by up to three tenths and settles it back, `ring` sends a line from the base to the top of the box, a ring out from the base circle in the radial look, fading as it goes. `onset.decay` says how long, `onset.strength` how much, `onset.groups` which of sub-bass, bass, mid and high fire it. This look is Glass's own.
+
 ## [0.7.53] - 2026-09-29
 
 The analyser's graph style: `style = graph` joins the band levels into a line across the box, the area under it filled at `fill.alpha` in the palette and the line drawn `line.width` pixels thick; `peaks.line` joins the peaks into a line of their own. Scales: `scale.x` labels the frequencies in a strip under the bars (`note.labels` names the notes instead), `scale.y` labels the decibels at the left with faint lines across, both in the theme's regular font at `scale.size` in `scale.color`. The radial look costs half of what it did: a pixel outside a channel's ring is passed over before its band is worked out.
