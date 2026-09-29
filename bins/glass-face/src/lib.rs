@@ -673,6 +673,7 @@ mod tests {
 
     #[test]
     fn the_plans_place_every_file_under_the_home() {
+        let _serial = serial();
         let mut face = Face::new();
         let plan = face.configure(&config_json()).expect("a plan");
         assert_eq!(plan[0].relative, "fonts/DSEG7Classic-Italic.ttf");
