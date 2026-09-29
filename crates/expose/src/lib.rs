@@ -3821,6 +3821,8 @@ pub struct AnalyserMotion {
     labels: LabelCache,
     /// When each band group last had an onset: sub-bass, bass, mid, high.
     onset_since: [Option<u64>; 4],
+    /// The waterfall's rows so far, the box's size, kept between frames.
+    waterfall: Frame,
 }
 
 /// What the onsets do to this frame, decayed to now: a brightening per
@@ -4016,15 +4018,18 @@ impl AnalyserMotion {
                 fonts,
                 &mut self.labels,
                 &onset,
+                &mut self.waterfall,
             );
         }
         picture
     }
 
-    /// The bytes the two pictures hold, and the polar map when there is one.
+    /// The bytes the two pictures hold, the polar map when there is one,
+    /// and the waterfall's rows.
     pub fn bytes(&self) -> usize {
         self.pictures.iter().map(Frame::bytes).sum::<usize>()
             + self.radial.as_ref().map_or(0, |m| m.entries.len() * 4)
+            + self.waterfall.bytes()
     }
 }
 
@@ -5088,6 +5093,214 @@ fn draw_graph(
     }
 }
 
+/// A disc of `radius` about a centre, row by row with fractional ends.
+fn fill_disc(
+    out: &mut Frame,
+    clip: (i32, i32, i32, i32),
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    ink: &Ink,
+    alpha: f32,
+) {
+    let r = radius.max(0.5);
+    let y0 = (cy - r).floor() as i32;
+    let y1 = (cy + r).ceil() as i32;
+    for y in y0..y1 {
+        let dy = y as f32 + 0.5 - cy;
+        let half = (r * r - dy * dy).max(0.0).sqrt();
+        if half > 0.0 {
+            fill_span(out, clip, y, cx - half, cx + half, ink, alpha);
+        }
+    }
+}
+
+/// One channel as dots: a disc per band at its level, `dot.size` across,
+/// the peaks as discs half that size, an onset's flash as a disc of the
+/// onset colour over the dot.
+#[allow(clippy::too_many_arguments)]
+fn draw_dots(
+    out: &mut Frame,
+    look: &lead::Look,
+    palette: &lead::Palette,
+    area: &Area,
+    levels: &[f32],
+    peaks: &[Peak],
+    alpha: f32,
+    onset: &OnsetFrame,
+) {
+    let n = levels.len();
+    if n == 0 || area.w < 1.0 || area.h < 1.0 {
+        return;
+    }
+    let clip = (
+        area.x.floor() as i32,
+        area.y.floor() as i32,
+        (area.x + area.w).ceil() as i32,
+        (area.y + area.h).ceil() as i32,
+    );
+    let pitch = area.w / n as f32;
+    let size = if look.dot_size > 0.0 {
+        look.dot_size
+    } else {
+        (pitch * 0.7).max(2.0)
+    };
+    let radius = size / 2.0;
+    let y_of = |level: f32| -> f32 {
+        let level = level.clamp(0.0, 1.0);
+        if area.hanging {
+            area.y + level * area.h
+        } else {
+            area.y + area.h - level * area.h
+        }
+    };
+    let ink_for = |i: usize, level: f32| -> Ink<'static> {
+        Ink::Solid(match look.color_mode {
+            lead::ColorMode::Gradient => palette.at(level.clamp(0.0, 1.0)),
+            lead::ColorMode::Index => palette.at(if n > 1 {
+                i as f32 / (n - 1) as f32
+            } else {
+                0.0
+            }),
+            lead::ColorMode::Level => palette.for_level(level),
+        })
+    };
+    for (i, raw) in levels.iter().enumerate() {
+        let level = raw.clamp(0.0, 1.0);
+        let slot = if area.reversed { n - 1 - i } else { i };
+        let cx = area.x + (slot as f32 + 0.5) * pitch;
+        let dot_alpha = alpha * look.fill_alpha * if look.alpha_bars { level } else { 1.0 };
+        fill_disc(
+            out,
+            clip,
+            cx,
+            y_of(level),
+            radius,
+            &ink_for(i, level),
+            dot_alpha,
+        );
+        if let Some(&boost) = onset.boost.get(i) {
+            if boost > 0.0 {
+                fill_disc(
+                    out,
+                    clip,
+                    cx,
+                    y_of(level),
+                    radius,
+                    &Ink::Solid(onset.color),
+                    alpha * boost * 0.7,
+                );
+            }
+        }
+        if look.peaks {
+            let peak = peaks.get(i).copied().unwrap_or_default();
+            if peak.level > level + 0.002 {
+                fill_disc(
+                    out,
+                    clip,
+                    cx,
+                    y_of(peak.level),
+                    (radius * 0.5).max(1.0),
+                    &ink_for(i, peak.level),
+                    alpha * (1.0 - peak.fade).clamp(0.0, 1.0),
+                );
+            }
+        }
+    }
+}
+
+/// One channel's frame into the waterfall: the rows of its area move
+/// `waterfall.speed` rows away from the base (the far edge with
+/// `waterfall.reverse`), and the levels are written as that many new rows
+/// at the base, a colour per column from its band: the palette by level in
+/// the gradient and level modes, the band's own colour at the level's
+/// opacity by index. An onset's flash tints the new rows.
+fn draw_waterfall(
+    history: &mut Frame,
+    look: &lead::Look,
+    palette: &lead::Palette,
+    area: &Area,
+    levels: &[f32],
+    alpha: f32,
+    onset: &OnsetFrame,
+) {
+    let n = levels.len();
+    let width = history.width as usize;
+    if n == 0 || area.w < 1.0 || area.h < 1.0 || width == 0 {
+        return;
+    }
+    let x0 = (area.x.round().max(0.0) as usize).min(width);
+    let x1 = ((area.x + area.w).round().max(0.0) as usize).min(width);
+    let y0 = (area.y.round().max(0.0) as usize).min(history.height as usize);
+    let y1 = ((area.y + area.h).round().max(0.0) as usize).min(history.height as usize);
+    if x1 <= x0 || y1 <= y0 {
+        return;
+    }
+    let rows = y1 - y0;
+    let speed = (look.waterfall_speed.max(1) as usize).min(rows);
+    // New rows at the base: the bottom of a rising area, the top of a
+    // hanging one; reversed, the other way.
+    let new_at_bottom = !area.hanging != look.waterfall_reverse;
+    let row_bytes = (x1 - x0) * 4;
+    if new_at_bottom {
+        // Everything moves up by `speed` rows.
+        for y in y0..y1 - speed {
+            let (dst, src) = ((y * width + x0) * 4, ((y + speed) * width + x0) * 4);
+            history.rgba.copy_within(src..src + row_bytes, dst);
+        }
+    } else {
+        for y in (y0 + speed..y1).rev() {
+            let (dst, src) = ((y * width + x0) * 4, ((y - speed) * width + x0) * 4);
+            history.rgba.copy_within(src..src + row_bytes, dst);
+        }
+    }
+    // The new rows: a colour per column from its band.
+    let pitch = area.w / n as f32;
+    let mut row: Vec<[u8; 4]> = Vec::with_capacity(x1 - x0);
+    for x in x0..x1 {
+        let mut slot = (((x as f32 + 0.5 - area.x) / pitch).floor().max(0.0) as usize).min(n - 1);
+        if area.reversed {
+            slot = n - 1 - slot;
+        }
+        let level = levels[slot].clamp(0.0, 1.0);
+        let (mut c, a) = match look.color_mode {
+            lead::ColorMode::Gradient => (palette.at(level), 1.0),
+            lead::ColorMode::Level => (palette.for_level(level), 1.0),
+            lead::ColorMode::Index => (
+                palette.at(if n > 1 {
+                    slot as f32 / (n - 1) as f32
+                } else {
+                    0.0
+                }),
+                level,
+            ),
+        };
+        if let Some(&boost) = onset.boost.get(slot) {
+            if boost > 0.0 {
+                for (channel, target) in c.iter_mut().zip(onset.color.iter()).take(3) {
+                    *channel = (*channel as f32 + (*target as f32 - *channel as f32) * boost * 0.7)
+                        .round() as u8;
+                }
+            }
+        }
+        c[3] = (c[3] as f32 * a * alpha * look.fill_alpha)
+            .round()
+            .clamp(0.0, 255.0) as u8;
+        row.push(c);
+    }
+    let new_rows = if new_at_bottom {
+        y1 - speed..y1
+    } else {
+        y0..y0 + speed
+    };
+    for y in new_rows {
+        let at = (y * width + x0) * 4;
+        for (k, c) in row.iter().enumerate() {
+            history.rgba[at + k * 4..at + k * 4 + 4].copy_from_slice(c);
+        }
+    }
+}
+
 /// A channel's area into `areas`, whole or as two halves mirrored: the
 /// bands one way and their mirror image, meeting in the middle.
 #[allow(clippy::too_many_arguments)]
@@ -5160,11 +5373,19 @@ fn render_analyser(
     fonts: Option<&Fonts>,
     labels: &mut LabelCache,
     onset: &OnsetFrame,
+    history: &mut Frame,
 ) {
     let (w, h) = (a.w.max(1), a.h.max(1));
     let look = &a.look;
     out.width = w;
     out.height = h;
+    // The waterfall keeps its rows between frames, in a frame of the box's size.
+    if look.style == lead::LookStyle::Waterfall && (history.width != w || history.height != h) {
+        history.width = w;
+        history.height = h;
+        history.rgba.clear();
+        history.rgba.resize((w * h * 4) as usize, 0);
+    }
     let bg = (look.bgr_alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
     out.rgba.clear();
     out.rgba.resize((w * h * 4) as usize, 0);
@@ -5295,6 +5516,40 @@ fn render_analyser(
                 *alpha,
                 onset,
             ),
+            lead::LookStyle::Dots => draw_dots(
+                out,
+                look,
+                palette,
+                area,
+                &smoothed[*ch],
+                &peaks[*ch],
+                *alpha,
+                onset,
+            ),
+            lead::LookStyle::Waterfall => {
+                // Two channels over each other would move the same rows
+                // twice: the first channel alone draws there.
+                if *ch == 0 || !matches!(look.layout, lead::Layout::DualCombined) {
+                    draw_waterfall(history, look, palette, area, &smoothed[*ch], *alpha, onset);
+                }
+            }
+        }
+    }
+    if look.style == lead::LookStyle::Waterfall {
+        // The rows so far over the background: copied where they are solid,
+        // blended where a level left them thin.
+        for (dst, src) in out
+            .rgba
+            .as_chunks_mut::<4>()
+            .0
+            .iter_mut()
+            .zip(history.rgba.as_chunks::<4>().0.iter())
+        {
+            match src[3] {
+                0 => {}
+                255 => *dst = *src,
+                a => blend_px(dst, *src, a as u32),
+            }
         }
     }
     // The onset rings: a line across each area on its way from the base to the top.
@@ -8754,6 +9009,68 @@ mod analyser_tests {
             pixel(picture, 75, 25)
         );
         assert!(sum(pixel(picture, 75, 10)) < 60, "and not above it");
+    }
+
+    /// Dots: a disc at the band's level and nothing above or below it;
+    /// waterfall: a frame's levels as a row at the base, moving up a row
+    /// a frame as new rows come.
+    #[test]
+    fn dots_sit_at_their_levels_and_a_waterfall_moves_its_rows_away() {
+        let dots = Look {
+            style: lead::LookStyle::Dots,
+            dot_size: 10.0,
+            smoothing: 0.0,
+            peaks: false,
+            bgr_alpha: 1.0,
+            color_mode: lead::ColorMode::Index,
+            ..Look::default()
+        };
+        let a = analyser(dots, 100, 50, vec![0.5, 0.0], vec![0.5, 0.0]);
+        let mut motion = AnalyserMotion::default();
+        let picture = motion.advance(&a, 0);
+        let lit = |p: [u8; 4]| p[0] as u32 + p[1] as u32 + p[2] as u32 > 100;
+        assert!(lit(pixel(picture, 25, 25)), "a dot at band 0's level");
+        assert!(
+            !lit(pixel(picture, 25, 12)) && !lit(pixel(picture, 25, 38)),
+            "and nothing above or below"
+        );
+        assert!(
+            lit(pixel(picture, 75, 47)),
+            "band 1's dot at the base, half of it in the box"
+        );
+        let waterfall = Look {
+            style: lead::LookStyle::Waterfall,
+            smoothing: 0.0,
+            peaks: false,
+            bgr_alpha: 1.0,
+            color_mode: lead::ColorMode::Index,
+            palette: lead::Palette::parse("#ff0000").expect("one stop"),
+            ..Look::default()
+        };
+        let loud = analyser(waterfall.clone(), 100, 50, vec![1.0, 0.0], vec![1.0, 0.0]);
+        let quiet = analyser(waterfall, 100, 50, vec![0.0, 0.0], vec![0.0, 0.0]);
+        let mut motion = AnalyserMotion::default();
+        let picture = motion.advance(&loud, 0);
+        assert!(
+            lit(pixel(picture, 25, 49)),
+            "the loud band's row at the base"
+        );
+        assert!(
+            !lit(pixel(picture, 75, 49)),
+            "the quiet band's row is clear"
+        );
+        motion.advance(&quiet, 16);
+        let picture = motion.advance(&quiet, 32);
+        assert!(
+            !lit(pixel(picture, 25, 49)),
+            "two quiet frames on, the base is clear"
+        );
+        assert!(lit(pixel(picture, 25, 47)), "the loud row has moved up two");
+        assert_eq!(
+            motion.bytes(),
+            100 * 50 * 4 * 3,
+            "two pictures and the waterfall's rows"
+        );
     }
 
     /// A dense graph frame, two channels of 256 bands with a line and a

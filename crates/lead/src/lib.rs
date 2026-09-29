@@ -971,6 +971,10 @@ pub enum LookStyle {
     Bars,
     /// The band levels joined into a line, the area under it filled.
     Graph,
+    /// A disc per band at its level.
+    Dots,
+    /// A spectrogram: each frame's levels a row of colour, moving away from the base.
+    Waterfall,
 }
 
 /// How the bands' colours are taken from the palette.
@@ -1401,6 +1405,19 @@ pub struct Look {
     pub onset_groups: u8,
     #[serde(default = "default_onset_color")]
     pub onset_color: [u8; 3],
+    /// `dot.size`: a dot's diameter in pixels; 0 takes seven tenths of a band's width.
+    #[serde(default)]
+    pub dot_size: f32,
+    /// `waterfall.speed`: rows a frame the spectrogram moves; `waterfall.reverse`
+    /// starts the rows at the far edge instead of the base.
+    #[serde(default = "default_waterfall_speed")]
+    pub waterfall_speed: u32,
+    #[serde(default)]
+    pub waterfall_reverse: bool,
+}
+
+fn default_waterfall_speed() -> u32 {
+    1
 }
 
 fn default_onset_decay() -> u32 {
@@ -1484,6 +1501,9 @@ impl Default for Look {
             onset_strength: default_onset_strength(),
             onset_groups: default_onset_groups(),
             onset_color: default_onset_color(),
+            dot_size: 0.0,
+            waterfall_speed: default_waterfall_speed(),
+            waterfall_reverse: false,
         }
     }
 }
@@ -1495,6 +1515,8 @@ fn look_from_section(get: &dyn Fn(&str) -> Option<String>) -> Option<Look> {
     let style = match style.trim().to_ascii_lowercase().as_str() {
         "bars" => LookStyle::Bars,
         "graph" | "area" | "line" => LookStyle::Graph,
+        "dots" => LookStyle::Dots,
+        "waterfall" | "spectrogram" => LookStyle::Waterfall,
         _ => return None,
     };
     let mut look = Look {
@@ -1679,6 +1701,15 @@ fn look_from_section(get: &dyn Fn(&str) -> Option<String>) -> Option<Look> {
     }
     if let Some(c) = get("onset.color").and_then(|v| color_triplet(&v)) {
         look.onset_color = c;
+    }
+    if let Some(v) = number("dot.size") {
+        look.dot_size = v.clamp(0.0, 200.0);
+    }
+    if let Some(v) = number("waterfall.speed") {
+        look.waterfall_speed = v.clamp(1.0, 16.0) as u32;
+    }
+    if let Some(v) = flag("waterfall.reverse") {
+        look.waterfall_reverse = v;
     }
     Some(look)
 }
