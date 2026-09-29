@@ -382,6 +382,20 @@ pub fn picture_size(path: &Path) -> Option<(u32, u32)> {
 /// by its alpha so edges do not fringe, resampled with Lanczos, and
 /// written back. The new size comes back, or why it could not be done.
 pub fn resample_picture(src: &Path, dst: &Path, sx: f32, sy: f32) -> Result<(u32, u32), String> {
+    resample_picture_onto(src, dst, sx, sy, None)
+}
+
+/// `resample_picture`, and with `canvas` the scaled picture laid at an
+/// offset on a sheet of the given size filled with the display's
+/// background: a theme's screen picture padded to the new screen's
+/// letterbox. The sheet's size comes back then.
+pub fn resample_picture_onto(
+    src: &Path,
+    dst: &Path,
+    sx: f32,
+    sy: f32,
+    canvas: Option<((u32, u32), (i32, i32))>,
+) -> Result<(u32, u32), String> {
     let bytes = read_file(src).ok_or_else(|| format!("{}: cannot be read", src.display()))?;
     let image = image::ImageReader::new(std::io::Cursor::new(bytes))
         .with_guessed_format()
@@ -410,6 +424,14 @@ pub fn resample_picture(src: &Path, dst: &Path, sx: f32, sy: f32) -> Result<(u32
             }
         }
     }
+    let mut size = (w, h);
+    if let Some((sheet, at)) = canvas {
+        let (cw, ch) = (sheet.0.max(1), sheet.1.max(1));
+        let mut sheet = image::RgbaImage::from_pixel(cw, ch, image::Rgba(BG));
+        image::imageops::overlay(&mut sheet, &scaled, i64::from(at.0), i64::from(at.1));
+        scaled = sheet;
+        size = (cw, ch);
+    }
     let ext = dst
         .extension()
         .and_then(|e| e.to_str())
@@ -426,7 +448,7 @@ pub fn resample_picture(src: &Path, dst: &Path, sx: f32, sy: f32) -> Result<(u32
             .save(dst)
             .map_err(|e| format!("{}: {e}", dst.display()))?,
     }
-    Ok((w, h))
+    Ok(size)
 }
 
 /// `background` is the theme picture. It is copied in place. It is not scaled.

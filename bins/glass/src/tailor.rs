@@ -77,6 +77,18 @@ fn cut_folder(
     report: &mut Report,
 ) -> Result<(), String> {
     fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
+    // The text first, for the pictures it calls the screen's own.
+    let mut prepared = match (!text_file.is_empty()).then(|| src.join(text_file)) {
+        Some(file) if file.is_file() => {
+            let text = fs::read_to_string(&file).map_err(|e| format!("{}: {e}", file.display()))?;
+            Some(tailor_text(&text, plan))
+        }
+        _ => None,
+    };
+    let backdrops: Vec<String> = prepared
+        .as_ref()
+        .map(|t| t.backdrops.clone())
+        .unwrap_or_default();
     let mut entries: Vec<_> = fs::read_dir(src)
         .map_err(|e| format!("{}: {e}", src.display()))?
         .filter_map(|e| e.ok())
@@ -93,8 +105,9 @@ fn cut_folder(
         if path.is_dir() {
             cut_folder(&path, &dst, "", plan, report)?;
         } else if !text_file.is_empty() && name_str == text_file {
-            let text = fs::read_to_string(&path).map_err(|e| format!("{}: {e}", path.display()))?;
-            let tailored = tailor_text(&text, plan);
+            let tailored = prepared
+                .take()
+                .ok_or_else(|| format!("{}: cannot be read", path.display()))?;
             fs::write(&dst, tailored.text).map_err(|e| format!("{}: {e}", dst.display()))?;
             for warning in tailored.warnings {
                 report.warnings.push(format!("{}: {warning}", name_str));
@@ -108,7 +121,13 @@ fn cut_folder(
                 }
             }
         } else if is_picture(&path) {
-            match expose::resample_picture(&path, &dst, plan.sx, plan.sy) {
+            // The screen's own picture is padded to the new screen with the
+            // letterbox, so the copy's backdrop fills it as the original's did.
+            let canvas = backdrops
+                .iter()
+                .any(|b| b == &*name_str)
+                .then_some((plan.to, (plan.ox.round() as i32, plan.oy.round() as i32)));
+            match expose::resample_picture_onto(&path, &dst, plan.sx, plan.sy, canvas) {
                 Ok(_) => report.pictures += 1,
                 Err(why) => {
                     report.warnings.push(format!("{why}; copied as it is"));
@@ -193,7 +212,7 @@ mod tests {
         fs::create_dir_all(&twin).unwrap();
         fs::write(
             theme.join("meters.txt"),
-            "[m]\nmeter.x = 10\nmeter.y = 5\nbgr.filename = bgr.png\nindicator.filename = gone.png\nleft.x = 4\n",
+            "[m]\nmeter.x = 10\nmeter.y = 5\nbgr.filename = bgr.png\nindicator.filename = gone.png\nleft.x = 4\nscreen.bgr = wall.png\n",
         )
         .unwrap();
         fs::write(theme.join("fonts").join("a.ttf"), b"font").unwrap();
@@ -204,6 +223,13 @@ mod tests {
             rgba: [200, 100, 50, 255].repeat(200),
         };
         expose::write_png(&theme.join("bgr.png"), &picture).unwrap();
+        let wall = expose::Frame {
+            blend: expose::Blend::Normal,
+            width: 100,
+            height: 50,
+            rgba: [10, 20, 200, 255].repeat(5000),
+        };
+        expose::write_png(&theme.join("wall.png"), &wall).unwrap();
         fs::write(
             twin.join("spectrum.txt"),
             "[s]\nspectrum.x = 1\nspectrum.y = 2\nbar.width = 3\n",
@@ -220,12 +246,12 @@ mod tests {
         })
         .expect("cut");
         assert_eq!(report.name, "200x120_tiny");
-        assert_eq!(report.pictures, 1);
+        assert_eq!(report.pictures, 2);
         let meters = fs::read_to_string(out.join("templates/200x120_tiny/meters.txt")).unwrap();
         // The factor is 2 (100 to 200, and 50 to 100 within 120), the theme centred: y offset 10.
         assert_eq!(
             meters,
-            "[m]\nmeter.x = 20\nmeter.y = 20\nbgr.filename = bgr.png\nindicator.filename = gone.png\nleft.x = 8\n"
+            "[m]\nmeter.x = 20\nmeter.y = 20\nbgr.filename = bgr.png\nindicator.filename = gone.png\nleft.x = 8\nscreen.bgr = wall.png\n"
         );
         let spectrum =
             fs::read_to_string(out.join("templates_spectrum/200x120_tiny/spectrum.txt")).unwrap();
@@ -237,6 +263,14 @@ mod tests {
             expose::picture_size(&out.join("templates/200x120_tiny/bgr.png")),
             Some((40, 20))
         );
+        // The screen's picture is padded to the new screen: the wall from the
+        // letterbox offset (y 10) down, the display's background above it.
+        let cut_wall =
+            expose::read_png(&out.join("templates/200x120_tiny/wall.png")).expect("wall");
+        assert_eq!((cut_wall.width, cut_wall.height), (200, 120));
+        let at = |x: usize, y: usize| &cut_wall.rgba[(y * 200 + x) * 4..(y * 200 + x) * 4 + 4];
+        assert_eq!(at(100, 60), [10, 20, 200, 255]);
+        assert_ne!(at(100, 2), [10, 20, 200, 255]);
         assert_eq!(
             fs::read(out.join("templates/200x120_tiny/fonts/a.ttf")).unwrap(),
             b"font"
