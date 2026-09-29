@@ -3823,17 +3823,75 @@ pub struct AnalyserMotion {
     onset_since: [Option<u64>; 4],
     /// The waterfall's rows so far, the box's size, kept between frames.
     waterfall: Frame,
+    /// The echo's ghost levels per channel, following the bars slowly.
+    ghost: [Vec<f32>; 2],
+    /// The sparkles' random state, carried from frame to frame.
+    rng: u32,
 }
 
-/// What the onsets do to this frame, decayed to now: a brightening per
-/// band (flash), a growth of every bar as a share (pulse), and rings on
-/// their way from the base to the tip with their alpha (ring), in a colour.
+/// The effects of this frame: what the onsets do, decayed to now (a
+/// brightening per band for a flash, a growth of every bar as a share for
+/// a pulse, rings on their way from the base to the tip with their alpha),
+/// in a colour; the echo's ghost levels per channel; and the random
+/// state the sparkles draw from.
 #[derive(Default)]
-struct OnsetFrame {
+struct FrameFx {
     boost: Vec<f32>,
     pulse: f32,
     rings: Vec<(f32, f32)>,
     color: [u8; 4],
+    ghost: [Vec<f32>; 2],
+    rng: std::cell::Cell<u32>,
+}
+
+impl FrameFx {
+    /// A random number from 0 to 1, xorshift.
+    fn random(&self) -> f32 {
+        let mut s = self.rng.get();
+        if s == 0 {
+            s = 0x9e37_79b9;
+        }
+        s ^= s << 13;
+        s ^= s >> 17;
+        s ^= s << 5;
+        self.rng.set(s);
+        (s >> 8) as f32 / (1u32 << 24) as f32
+    }
+}
+
+/// The box's picture at the start of a frame: the background alone, or,
+/// with a trail, the last frame with what its bars added over the
+/// background faded by the trail's share, so a wake follows the bars.
+fn begin_frame(out: &mut Frame, w: u32, h: u32, bg: u8, previous: Option<(&Frame, f32)>) {
+    out.width = w;
+    out.height = h;
+    match previous {
+        Some((last, trail)) if last.width == w && last.height == h && trail > 0.0 => {
+            // The colour dims towards the black background and what the
+            // bars added to the alpha thins, both by the trail's share.
+            out.rgba.clear();
+            out.rgba.extend_from_slice(&last.rgba);
+            let keep = (trail * 256.0) as u32;
+            for px in out.rgba.as_chunks_mut::<4>().0 {
+                px[0] = ((px[0] as u32 * keep) >> 8) as u8;
+                px[1] = ((px[1] as u32 * keep) >> 8) as u8;
+                px[2] = ((px[2] as u32 * keep) >> 8) as u8;
+                let a = px[3] as u32;
+                if a > bg as u32 {
+                    px[3] = (bg as u32 + (((a - bg as u32) * keep) >> 8)) as u8;
+                }
+            }
+        }
+        _ => {
+            out.rgba.clear();
+            out.rgba.resize((w * h * 4) as usize, 0);
+            if bg > 0 {
+                for px in out.rgba.as_chunks_mut::<4>().0 {
+                    px[3] = bg;
+                }
+            }
+        }
+    }
 }
 
 /// A band's group by its centre frequency: sub-bass below 60 Hz, bass
@@ -3943,14 +4001,14 @@ impl AnalyserMotion {
         }
         // The onsets: a group that fired starts its effect now; each
         // effect fades over the decay.
-        let mut onset = OnsetFrame {
+        let mut onset = FrameFx {
             color: [
                 look.onset_color[0],
                 look.onset_color[1],
                 look.onset_color[2],
                 255,
             ],
-            ..OnsetFrame::default()
+            ..FrameFx::default()
         };
         if look.onset != lead::OnsetLook::Off {
             for g in 0..4 {
@@ -3997,8 +4055,31 @@ impl AnalyserMotion {
         } else {
             &self.smoothed
         };
+        // The echo's ghost follows the bars by its share a frame.
+        if look.echo > 0.0 {
+            for (ghost, channel) in self.ghost.iter_mut().zip(levels.iter()) {
+                if ghost.len() != channel.len() {
+                    *ghost = channel.clone();
+                }
+                for (g, l) in ghost.iter_mut().zip(channel.iter()) {
+                    *g += (l - *g) * look.echo;
+                }
+            }
+            onset.ghost = self.ghost.clone();
+        }
+        onset.rng.set(self.rng);
         self.which = 1 - self.which;
-        let picture = &mut self.pictures[self.which];
+        let (first, second) = self.pictures.split_at_mut(1);
+        let (picture, last) = if self.which == 0 {
+            (&mut first[0], &second[0])
+        } else {
+            (&mut second[0], &first[0])
+        };
+        let previous = if look.trail > 0.0 && look.style != lead::LookStyle::Waterfall {
+            Some((last, look.trail))
+        } else {
+            None
+        };
         if look.radial {
             render_radial(
                 a,
@@ -4008,6 +4089,7 @@ impl AnalyserMotion {
                 &mut self.radial,
                 picture,
                 &onset,
+                previous,
             );
         } else {
             render_analyser(
@@ -4019,8 +4101,10 @@ impl AnalyserMotion {
                 &mut self.labels,
                 &onset,
                 &mut self.waterfall,
+                previous,
             );
         }
+        self.rng = onset.rng.get();
         picture
     }
 
@@ -4110,20 +4194,13 @@ fn render_radial(
     now_ms: u64,
     map: &mut Option<RadialMap>,
     out: &mut Frame,
-    onset: &OnsetFrame,
+    onset: &FrameFx,
+    previous: Option<(&Frame, f32)>,
 ) {
     let (w, h) = (a.w.max(1), a.h.max(1));
     let look = &a.look;
-    out.width = w;
-    out.height = h;
     let bg = (look.bgr_alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
-    out.rgba.clear();
-    out.rgba.resize((w * h * 4) as usize, 0);
-    if bg > 0 {
-        for px in out.rgba.as_chunks_mut::<4>().0 {
-            px[3] = bg;
-        }
-    }
+    begin_frame(out, w, h, bg, previous);
     let n = smoothed[0].len();
     if n == 0 {
         return;
@@ -4628,7 +4705,8 @@ fn draw_channel(
     levels: &[f32],
     peaks: &[Peak],
     alpha: f32,
-    onset: &OnsetFrame,
+    onset: &FrameFx,
+    ghost: &[f32],
 ) {
     let n = levels.len();
     // An onset's flash: the bar brightened towards the onset colour.
@@ -4658,6 +4736,69 @@ fn draw_channel(
                 );
             }
         }
+    };
+    let bar_clip = (
+        area.x.floor() as i32,
+        area.y.floor() as i32,
+        (area.x + area.w).ceil() as i32,
+        (area.y + area.h).ceil() as i32,
+    );
+    // A sparkle: a speck above a loud bar, some frames, in the tip's colour.
+    let sparkle = |out: &mut Frame, i: usize, level: f32, xa: f32, xb: f32| {
+        if !look.sparkle || level <= 0.55 {
+            return;
+        }
+        if onset.random() >= (level - 0.55) * 1.6 {
+            return;
+        }
+        let x = (xa + xb) / 2.0 + (onset.random() - 0.5) * (xb - xa) * 1.4;
+        let lift = 2.0 + onset.random() * 6.0;
+        let y = if area.hanging {
+            area.y + level * area.h + lift
+        } else {
+            area.y + area.h - level * area.h - lift
+        };
+        let radius = 1.0 + onset.random() * 1.2;
+        let tip = Ink::Solid(match look.color_mode {
+            lead::ColorMode::Index => palette.at(if levels.len() > 1 {
+                i as f32 / (levels.len() - 1) as f32
+            } else {
+                0.0
+            }),
+            _ => palette.at(level.clamp(0.0, 1.0)),
+        });
+        let sparkle_clip = (bar_clip.0, 0, bar_clip.2, out.height as i32);
+        fill_disc(
+            out,
+            sparkle_clip,
+            x,
+            y,
+            radius,
+            &tip,
+            alpha * (0.4 + onset.random() * 0.55),
+        );
+    };
+    // The echo's mark: a thin line at the ghost's level in the palette's top colour.
+    let echo_mark = |out: &mut Frame, i: usize, xa: f32, xb: f32| {
+        let Some(&g) = ghost.get(i) else {
+            return;
+        };
+        let g = g.clamp(0.0, 1.0);
+        let y = if area.hanging {
+            area.y + g * area.h
+        } else {
+            area.y + area.h - g * area.h
+        };
+        fill_rect(
+            out,
+            bar_clip,
+            xa,
+            y - 0.5,
+            xb,
+            y + 0.5,
+            &Ink::Solid(palette.at(1.0)),
+            alpha * 0.6,
+        );
     };
     if n == 0 || area.w < 1.0 || area.h < 1.0 {
         return;
@@ -4765,10 +4906,26 @@ fn draw_channel(
                         bar_alpha,
                     );
                 } else {
-                    fill_rect(out, clip, xa + inset, cy0, xb - inset, cy1, &ink, bar_alpha);
+                    let cell_alpha = if look.bar_fade {
+                        bar_alpha * (0.3 + 0.7 * (k as f32 + 0.5) / led_cells as f32)
+                    } else {
+                        bar_alpha
+                    };
+                    fill_rect(
+                        out,
+                        clip,
+                        xa + inset,
+                        cy0,
+                        xb - inset,
+                        cy1,
+                        &ink,
+                        cell_alpha,
+                    );
                 }
             }
             flash(out, i, level, xa, xb);
+            sparkle(out, i, level, xa, xb);
+            echo_mark(out, i, xa, xb);
         } else if bar_h >= 0.5 {
             let (top, bottom) = if area.hanging {
                 (area.y, area.y + bar_h)
@@ -4776,9 +4933,41 @@ fn draw_channel(
                 (area.y + area.h - bar_h, area.y + area.h)
             };
             let (y0, y1) = (top.round() as i32, bottom.round() as i32);
+            if look.bar_glow > 0.0 {
+                // A soft halo behind the bar, wider by the glow's share of the pitch.
+                let extra = pitch * look.bar_glow / 2.0;
+                fill_rect(
+                    out,
+                    clip,
+                    xa - extra,
+                    top,
+                    xb + extra,
+                    bottom,
+                    &ink,
+                    bar_alpha * 0.25,
+                );
+            }
             if !look.round && !look.outline {
-                fill_rect(out, clip, xa, top, xb, bottom, &ink, bar_alpha);
+                if look.bar_fade {
+                    // Dim at the base, bright at the tip: three slices.
+                    for (k, share) in [0.3f32, 0.6, 1.0].iter().enumerate() {
+                        let (s0, s1) = (k as f32 / 3.0, (k as f32 + 1.0) / 3.0);
+                        let (ya, yb) = if area.hanging {
+                            (
+                                top + (bottom - top) * (1.0 - s1),
+                                top + (bottom - top) * (1.0 - s0),
+                            )
+                        } else {
+                            (bottom - (bottom - top) * s1, bottom - (bottom - top) * s0)
+                        };
+                        fill_rect(out, clip, xa, ya, xb, yb, &ink, bar_alpha * share);
+                    }
+                } else {
+                    fill_rect(out, clip, xa, top, xb, bottom, &ink, bar_alpha);
+                }
                 flash(out, i, level, xa, xb);
+                sparkle(out, i, level, xa, xb);
+                echo_mark(out, i, xa, xb);
                 continue;
             }
             // A rounded or outlined bar: the straight body as rectangles,
@@ -4858,6 +5047,8 @@ fn draw_channel(
                 }
             }
             flash(out, i, level, sxa, sxb);
+            sparkle(out, i, level, sxa, sxb);
+            echo_mark(out, i, sxa, sxb);
         }
         // The peak: a thin mark at the peak's height, fading if it fades.
         if look.peaks && !look.lumi {
@@ -4901,7 +5092,8 @@ fn draw_graph(
     levels: &[f32],
     peaks: &[Peak],
     alpha: f32,
-    onset: &OnsetFrame,
+    onset: &FrameFx,
+    ghost: &[f32],
 ) {
     let n = levels.len();
     if n == 0 || area.w < 1.0 || area.h < 1.0 {
@@ -5016,22 +5208,63 @@ fn draw_graph(
         }
         // The line: from this column's height to the next one's, so a
         // steep slope stays joined, `line.width` thick.
-        if lw > 0.0 {
+        // A ribbon's width follows the level up to `line.width.max`.
+        let lw_here = if look.line_width_max > lw {
+            lw + (look.line_width_max - lw) * level
+        } else {
+            lw
+        };
+        if lw_here > 0.0 || look.line_glow > 0.0 {
             let next = across(&level_of, xf + 1.5);
             let (ya, yb) = (y_of(level), y_of(next));
             let line_ink = match look.color_mode {
                 lead::ColorMode::Gradient => Ink::Solid(palette.at(level)),
                 _ => ink_for(level),
             };
+            if look.line_glow > 0.0 {
+                // A soft band around the line: two passes, wide and faint, narrower and less faint.
+                for (share, band_alpha) in [(1.0f32, 0.18f32), (0.5, 0.3)] {
+                    let half = look.line_glow * share / 2.0;
+                    fill_rect(
+                        out,
+                        clip,
+                        xf,
+                        ya.min(yb) - half,
+                        xf + 1.0,
+                        ya.max(yb) + half,
+                        &line_ink,
+                        alpha * band_alpha,
+                    );
+                }
+            }
+            if lw_here > 0.0 {
+                fill_rect(
+                    out,
+                    clip,
+                    xf,
+                    ya.min(yb) - lw_here / 2.0,
+                    xf + 1.0,
+                    ya.max(yb) + lw_here / 2.0,
+                    &line_ink,
+                    alpha,
+                );
+            }
+        }
+        // The echo: the ghost's line, thin, in the palette's top colour.
+        if !ghost.is_empty() {
+            let ghost_of = |i: usize| ghost.get(i).copied().unwrap_or(0.0);
+            let g = across(&ghost_of, xf + 0.5);
+            let next = across(&ghost_of, xf + 1.5);
+            let (ya, yb) = (y_of(g), y_of(next));
             fill_rect(
                 out,
                 clip,
                 xf,
-                ya.min(yb) - lw / 2.0,
+                ya.min(yb) - 0.5,
                 xf + 1.0,
-                ya.max(yb) + lw / 2.0,
-                &line_ink,
-                alpha,
+                ya.max(yb) + 0.5,
+                &Ink::Solid(palette.at(1.0)),
+                alpha * 0.6,
             );
         }
         // The peaks as a line of their own.
@@ -5127,7 +5360,7 @@ fn draw_dots(
     levels: &[f32],
     peaks: &[Peak],
     alpha: f32,
-    onset: &OnsetFrame,
+    onset: &FrameFx,
 ) {
     let n = levels.len();
     if n == 0 || area.w < 1.0 || area.h < 1.0 {
@@ -5222,7 +5455,7 @@ fn draw_waterfall(
     area: &Area,
     levels: &[f32],
     alpha: f32,
-    onset: &OnsetFrame,
+    onset: &FrameFx,
 ) {
     let n = levels.len();
     let width = history.width as usize;
@@ -5372,13 +5605,12 @@ fn render_analyser(
     out: &mut Frame,
     fonts: Option<&Fonts>,
     labels: &mut LabelCache,
-    onset: &OnsetFrame,
+    onset: &FrameFx,
     history: &mut Frame,
+    previous: Option<(&Frame, f32)>,
 ) {
     let (w, h) = (a.w.max(1), a.h.max(1));
     let look = &a.look;
-    out.width = w;
-    out.height = h;
     // The waterfall keeps its rows between frames, in a frame of the box's size.
     if look.style == lead::LookStyle::Waterfall && (history.width != w || history.height != h) {
         history.width = w;
@@ -5387,13 +5619,7 @@ fn render_analyser(
         history.rgba.resize((w * h * 4) as usize, 0);
     }
     let bg = (look.bgr_alpha.clamp(0.0, 1.0) * 255.0).round() as u8;
-    out.rgba.clear();
-    out.rgba.resize((w * h * 4) as usize, 0);
-    if bg > 0 {
-        for px in out.rgba.as_chunks_mut::<4>().0 {
-            px[3] = bg;
-        }
-    }
+    begin_frame(out, w, h, bg, previous);
     let (fw, fh) = (w as f32, h as f32);
     // The frequency scale takes a strip at the bottom of the box.
     let strip = if look.scale_x {
@@ -5504,6 +5730,7 @@ fn render_analyser(
                 &peaks[*ch],
                 *alpha,
                 onset,
+                &onset.ghost[*ch],
             ),
             lead::LookStyle::Bars => draw_channel(
                 out,
@@ -5515,6 +5742,7 @@ fn render_analyser(
                 &peaks[*ch],
                 *alpha,
                 onset,
+                &onset.ghost[*ch],
             ),
             lead::LookStyle::Dots => draw_dots(
                 out,
@@ -9071,6 +9299,113 @@ mod analyser_tests {
             100 * 50 * 4 * 3,
             "two pictures and the waterfall's rows"
         );
+    }
+
+    /// The effects across styles: a trail keeps a fading wake of the last
+    /// frame; a halo widens a bar faintly; a fade dims a bar's base; the
+    /// ribbon thickens a graph's line with the level and the glow bands it;
+    /// an echo's ghost lags behind the bars; sparkles appear above loud
+    /// bars over a few frames.
+    #[test]
+    fn the_effects_trail_halo_fade_ribbon_glow_echo_and_sparkle() {
+        let base = Look {
+            smoothing: 0.0,
+            peaks: false,
+            bar_space: 0.5,
+            bgr_alpha: 1.0,
+            color_mode: lead::ColorMode::Index,
+            palette: lead::Palette::parse("#ffffff").expect("one stop"),
+            ..Look::default()
+        };
+        let sum = |p: [u8; 4]| p[0] as u32 + p[1] as u32 + p[2] as u32;
+        // Trail: a bar drawn, then silence; the wake stays, fainter.
+        let trail = Look {
+            trail: 0.8,
+            ..base.clone()
+        };
+        let loud = analyser(trail.clone(), 100, 50, vec![1.0, 0.0], vec![1.0, 0.0]);
+        let quiet = analyser(trail, 100, 50, vec![0.0, 0.0], vec![0.0, 0.0]);
+        let mut motion = AnalyserMotion::default();
+        motion.advance(&loud, 0);
+        let picture = motion.advance(&quiet, 16);
+        let wake = pixel(picture, 25, 25);
+        assert!(
+            sum(wake) > 300 && sum(wake) < 700,
+            "the wake, dimmed to eight tenths: {wake:?}"
+        );
+        // Halo: a pixel beside the bar, in the gap, has some ink.
+        let halo = Look {
+            bar_glow: 1.5,
+            ..base.clone()
+        };
+        let a = analyser(halo, 100, 50, vec![1.0, 0.0], vec![1.0, 0.0]);
+        let picture = AnalyserMotion::default().advance(&a, 0).clone();
+        assert!(
+            sum(pixel(picture_ref(&picture), 45, 25)) > 60,
+            "the halo beside the bar"
+        );
+        // Fade: the base dimmer than the tip.
+        let fade = Look {
+            bar_fade: true,
+            ..base.clone()
+        };
+        let a = analyser(fade, 100, 50, vec![1.0, 0.0], vec![1.0, 0.0]);
+        let picture = AnalyserMotion::default().advance(&a, 0).clone();
+        let (tip, foot) = (pixel(&picture, 25, 3), pixel(&picture, 25, 47));
+        assert!(
+            sum(foot) < sum(tip) / 2,
+            "dim at the base: {foot:?} against {tip:?}"
+        );
+        // Ribbon and glow on a graph: the line thick at the full band, thin at the empty one.
+        let ribbon = Look {
+            style: lead::LookStyle::Graph,
+            fill_alpha: 0.0,
+            line_width: 1.0,
+            line_width_max: 12.0,
+            line_glow: 20.0,
+            ..base.clone()
+        };
+        let a = analyser(ribbon, 100, 50, vec![0.5, 0.5], vec![0.5, 0.5]);
+        let picture = AnalyserMotion::default().advance(&a, 0).clone();
+        assert!(
+            sum(pixel(&picture, 50, 25)) > 600,
+            "the ribbon, six wide, at half height"
+        );
+        let band = sum(pixel(&picture, 50, 32));
+        assert!(band > 60 && band < 400, "the glow band below it: {band}");
+        // Echo: after one frame at rate 0.5 the ghost sits half way.
+        let echo = Look {
+            echo: 0.5,
+            ..base.clone()
+        };
+        let quiet = analyser(echo.clone(), 100, 50, vec![0.0, 0.0], vec![0.0, 0.0]);
+        let loud = analyser(echo, 100, 50, vec![1.0, 0.0], vec![1.0, 0.0]);
+        let mut motion = AnalyserMotion::default();
+        motion.advance(&quiet, 0);
+        let picture = motion.advance(&loud, 16).clone();
+        assert!(
+            sum(pixel(&picture, 25, 25)) > 600,
+            "the ghost's mark half way up the full bar"
+        );
+        // Sparkle: over twenty frames a loud bar throws at least one speck above its tip.
+        let sparkle = Look {
+            sparkle: true,
+            ..base
+        };
+        let a = analyser(sparkle, 100, 50, vec![1.0, 0.0], vec![1.0, 0.0]);
+        let mut motion = AnalyserMotion::default();
+        let mut seen = false;
+        for f in 0..20 {
+            let picture = motion.advance(&a, f * 16);
+            seen |= (10..40).any(|x| {
+                (0..6).any(|y| sum(pixel(picture, x, y)) > 60 && pixel(picture, x, y)[3] > 0)
+            });
+        }
+        assert!(seen, "a sparkle above the bar within twenty frames");
+    }
+
+    fn picture_ref(f: &Frame) -> &Frame {
+        f
     }
 
     /// A dense graph frame, two channels of 256 bands with a line and a
