@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.63] - 2026-09-29
+
+Two analyser keys close the last of the evo looks. `blend = add` makes the box's own drawing add its colour to what is under it within the box instead of covering it, so overlapping channels, a trail's wake or a glow's halo bloom and saturate as in evo's prism; the box still sits on the theme as its alpha says. `dot.hold = True` sits each dot of the dots style at the band's held peak and lets it fall with it, evo's peak constellation, with no separate peak mark. The fanart interval's help on the plugin's settings page says the seconds count from the last change and that a new track moves the picture on as well.
+
 ## [0.7.62] - 2026-09-29
 
 The Catalog installs a theme whose zip moved on since the index was fetched. A download is checked against the index as kept on the player; when the catalogue had been updated since, the install failed with "response larger than allowed" or a size mismatch. The Manager now fetches the index again and downloads once more against the entry as it stands, and the Catalog tab refreshes an index older than ten minutes on its own.
