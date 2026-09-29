@@ -5,7 +5,7 @@
     "TIMEOUT": "Screensaver timeout",
     "TIMEOUT_DOC": "Timeout in seconds until Glassmeter screensaver starts.<br /><br />Please set follow options in Touch Display plugin:<br />- The standard screensaver timeout in TouchScreen plugin should be set higher as than for Glass<br />- <br />- 'No Screensaver while playing' to 'ON'",
     "POSITION_TYPE": "Meter Position",
-    "POSITION_TYPE_DOC": "Position of Glass screen, if screen resolution higher then meter resolution",
+    "POSITION_TYPE_DOC": "Where a theme of another size goes on the screen: centred, at a position of your own, or fitted, scaled to the screen with its shape kept.",
     "POS_X": "Position X",
     "POS_X_DOC": "Horizontal position of Glass screen",
     "POS_Y": "Position Y",

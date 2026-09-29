@@ -491,7 +491,11 @@ fn session(
     if show_window {
         let mut options = match remote.as_deref() {
             Some(remote) => remote.window_options(),
-            None => WindowOptions::default(),
+            None => WindowOptions {
+                // `position.type = fit`: the theme scaled to the screen, its shape kept.
+                fit: skin.run.fit,
+                ..WindowOptions::default()
+            },
         };
         if run.dev {
             options.mode = WindowMode::Windowed;

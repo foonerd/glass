@@ -1691,7 +1691,10 @@ Glass.prototype.getUIConfig = function () {
             // Display and activation.
             C('timeout').value = self.config.get('timeout');
             minmax[0] = [C('timeout').attributes[2].min, C('timeout').attributes[3].max, C('timeout').attributes[0].placeholder];
-            if (meterConfig.current['position.type'] == 'center') {
+            if (meterConfig.current['position.type'] == 'fit') {
+                C('positionType').value.value = 2;
+                C('positionType').value.label = 'fit to screen';
+            } else if (meterConfig.current['position.type'] == 'center') {
                 C('positionType').value.value = 0;
                 C('positionType').value.label = 'centered';
             } else {
@@ -1906,7 +1909,7 @@ Glass.prototype.saveDisplayConf = function (confData) {
   if (fs.existsSync(MeterConfigFile)){
 
     // write position type
-    var pos_type = use_SDL2 ? confData.positionType.value == 0? 'center' : 'manual' : 'center';
+    var pos_type = use_SDL2 ? (confData.positionType.value == 0 ? 'center' : confData.positionType.value == 2 ? 'fit' : 'manual') : 'center';
     if (meterConfig.current['position.type'] !== pos_type) {
         meterConfig.current['position.type'] = pos_type;
         noChanges = false;

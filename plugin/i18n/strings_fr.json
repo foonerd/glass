@@ -5,7 +5,7 @@
     "TIMEOUT": "Délai d'attente de l'économiseur d'écran",
     "TIMEOUT_DOC": "Délai d'attente en secondes jusqu'au démarrage de l'économiseur d'écran Glassmeter.<br /><br />Veuillez définir les options de suivi dans le plug-in Touch Display:<br />- Le délai d'attente standard de l'économiseur d'écran dans le plug-in TouchScreen doit être supérieur à celui de Glass<br />- 'Durée avant économiseur d'écran' à 'ON'",
     "POSITION_TYPE": "Meter-Position",
-    "POSITION_TYPE_DOC": "Position de l'écran du Glassmeter, si la résolution de l'écran est supérieure à la résolution du Glassmètre",
+    "POSITION_TYPE_DOC": "Où va un thème d'une autre taille sur l'écran : centré, à une position choisie, ou ajusté, mis à l'échelle de l'écran en gardant ses proportions.",
     "POS_X": "Position X",
     "POS_X_DOC": "Position horizontale de l'écran du Glassmeter",
     "POS_Y": "Position Y",

@@ -2825,11 +2825,15 @@ pub struct RunSettings {
     /// `touch.interactive`: whether a theme's controls act.
     #[serde(default)]
     pub interactive: InteractiveMode,
-    /// `position.type`: `center` (default) centres the frame; anything else
+    /// `position.type`: `center` (default) centres the frame; `fit` scales
+    /// it to the screen, keeping its shape, and centres it; anything else
     /// puts its top left at `position.x`, `position.y`.
     pub centered: bool,
     pub x: i32,
     pub y: i32,
+    /// `position.type = fit`: the frame scaled to the screen, its shape kept.
+    #[serde(default)]
+    pub fit: bool,
 }
 
 impl Default for RunSettings {
@@ -2840,17 +2844,20 @@ impl Default for RunSettings {
             centered: true,
             x: 0,
             y: 0,
+            fit: false,
         }
     }
 }
 
 pub fn run_settings(text: &str) -> RunSettings {
+    let kind = current_value(text, "position.type").map(|v| v.trim().to_ascii_lowercase());
+    let fit = kind.as_deref() == Some("fit");
     RunSettings {
         exit_on_touch: truthy(current_value(text, "exit.on.touch").as_deref())
             || truthy(current_value(text, "stop.display.on.touch").as_deref()),
         interactive: InteractiveMode::parse(current_value(text, "touch.interactive").as_deref()),
-        centered: current_value(text, "position.type")
-            .is_none_or(|v| v.eq_ignore_ascii_case("center")),
+        centered: fit || kind.as_deref().is_none_or(|v| v == "center"),
+        fit,
         x: current_value(text, "position.x")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0),
@@ -5105,10 +5112,17 @@ mod tests {
                 exit_on_touch: true,
                 centered: false,
                 x: 10,
-                y: 20
+                y: 20,
+                fit: false,
             }
         );
         assert_eq!(run_settings(""), RunSettings::default());
+        let fitted = run_settings("[current]\nposition.type = Fit\nposition.x = 10\n");
+        assert!(
+            fitted.fit && fitted.centered,
+            "fit scales and centres: {fitted:?}"
+        );
+        assert!(!s.fit, "a manual position does not fit");
         assert!(should_mark_dismiss(Some("/tmp/glass_dismiss"), false, true));
         assert!(
             !should_mark_dismiss(Some("/tmp/glass_dismiss"), true, true),
