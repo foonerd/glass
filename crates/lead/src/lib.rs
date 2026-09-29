@@ -928,6 +928,10 @@ pub struct SpectrumSpec {
     /// `spectrum.x/y`: the box on screen. Everything is clipped to it.
     pub x: i32,
     pub y: i32,
+    /// `channel`: which channel of the bank this box draws in the analyser's
+    /// `single` layout: the two channels' mean, the left or the right.
+    #[serde(default)]
+    pub channel: SpectrumChannel,
     /// `spectrum.size` from the meter: the box.
     pub w: u32,
     pub h: u32,
@@ -1823,9 +1827,26 @@ pub fn spectrum_settings(text: &str) -> SpectrumSettings {
     }
 }
 
-/// `spectrum.name` and `spectrum.size` of a meter that shows a spectrum:
-/// `config.extend` and `spectrum.visible` both true.
+/// Which channel of the bank a spectrum box draws in the `single` layout.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum SpectrumChannel {
+    #[default]
+    Mean,
+    Left,
+    Right,
+}
+
+/// The first spectrum a meter shows: its name and box. See `meter_spectra`.
 pub fn meter_spectrum(meters_txt: &str, meter: &str) -> Option<(String, u32, u32)> {
+    meter_spectra(meters_txt, meter).into_iter().next()
+}
+
+/// The spectrum boxes of a meter that shows a spectrum, `config.extend`
+/// and `spectrum.visible` both true: `spectrum.name` names one section, or
+/// a comma list of them, each a box of `spectrum.size`, the second and
+/// later with their own `spectrum.<n>.size` when given (n from 2).
+pub fn meter_spectra(meters_txt: &str, meter: &str) -> Vec<(String, u32, u32)> {
     let values = section_values(meters_txt, meter);
     let get = |key: &str| {
         values
@@ -1834,16 +1855,34 @@ pub fn meter_spectrum(meters_txt: &str, meter: &str) -> Option<(String, u32, u32
             .map(|(_, v)| v.as_str())
     };
     if !truthy(get("config.extend")) || !truthy(get("spectrum.visible")) {
-        return None;
+        return Vec::new();
     }
-    let name = get("spectrum.name")?.trim().to_string();
-    let mut size = get("spectrum.size")?.split(',');
-    let w = size.next()?.trim().parse().ok()?;
-    let h = size.next()?.trim().parse().ok()?;
-    if name.is_empty() {
-        return None;
-    }
-    Some((name, w, h))
+    let size = |key: &str| -> Option<(u32, u32)> {
+        let mut parts = get(key)?.split(',');
+        let w = parts.next()?.trim().parse().ok()?;
+        let h = parts.next()?.trim().parse().ok()?;
+        Some((w, h))
+    };
+    let Some(names) = get("spectrum.name") else {
+        return Vec::new();
+    };
+    let Some(shared) = size("spectrum.size") else {
+        return Vec::new();
+    };
+    names
+        .split(',')
+        .map(str::trim)
+        .filter(|n| !n.is_empty())
+        .enumerate()
+        .map(|(i, name)| {
+            let (w, h) = if i > 0 {
+                size(&format!("spectrum.{}.size", i + 1)).unwrap_or(shared)
+            } else {
+                shared
+            };
+            (name.to_string(), w, h)
+        })
+        .collect()
 }
 
 fn color_quad(value: &str) -> Option<[u8; 4]> {
@@ -1910,6 +1949,14 @@ pub fn spectrum_from_theme(
     Some(SpectrumSpec {
         x: int("spectrum.x").unwrap_or(0),
         y: int("spectrum.y").unwrap_or(0),
+        channel: match get("channel")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("left") | Some("l") => SpectrumChannel::Left,
+            Some("right") | Some("r") => SpectrumChannel::Right,
+            _ => SpectrumChannel::Mean,
+        },
         w,
         h,
         origin_x: int("origin.x").unwrap_or(0),
@@ -2958,8 +3005,10 @@ pub struct SkinDesc {
     pub data_source: DataSourceSpec,
     #[serde(default)]
     pub meter: MeterSpec,
+    /// The spectrum boxes the meter shows, in the order `spectrum.name`
+    /// lists them: one, or one per channel.
     #[serde(default)]
-    pub spectrum: Option<SpectrumSpec>,
+    pub spectra: Vec<SpectrumSpec>,
     #[serde(default)]
     pub folder_layers: Vec<FolderLayerSpec>,
     #[serde(default)]
@@ -3024,7 +3073,7 @@ impl SkinDesc {
             time_total: None,
             data_source: DataSourceSpec::default(),
             meter: MeterSpec::default(),
-            spectrum: None,
+            spectra: Vec::new(),
             folder_layers: Vec::new(),
             fanart: None,
             vinyl: None,
@@ -4650,6 +4699,16 @@ mod tests {
         let meters = "[m]\nconfig.extend = True\nspectrum.visible = True\nspectrum.name = s.2\nspectrum.size = 1260,307\n[n]\nspectrum.visible = True\nspectrum.name = s.2\nspectrum.size = 1,1\n";
         assert_eq!(meter_spectrum(meters, "m"), Some(("s.2".into(), 1260, 307)));
         assert_eq!(meter_spectrum(meters, "n"), None, "needs config.extend");
+        let pair = "[p]\nconfig.extend = True\nspectrum.visible = True\nspectrum.name = left, right, mid\nspectrum.size = 400,200\nspectrum.2.size = 300,200\n";
+        assert_eq!(
+            meter_spectra(pair, "p"),
+            vec![
+                ("left".to_string(), 400, 200),
+                ("right".to_string(), 300, 200),
+                ("mid".to_string(), 400, 200)
+            ],
+            "a list of boxes, the second with its own size, the third the shared one"
+        );
         let settings = spectrum_settings("[current]\nspectrum = s.7\nbase.folder = /t\nspectrum.folder = 1280x720\nmax.value = 100\nsize = 20\n");
         assert_eq!(
             settings,

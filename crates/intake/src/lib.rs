@@ -20,7 +20,7 @@ use lead::{
     current_value, data_source_from_config, decode_meter, decode_spectrum, folder_candidates,
     fonts_from_config, format_key, frame_rate_from_config, meter_art, meter_at, meter_background,
     meter_fanart, meter_folder_layers, meter_indicator, meter_indicators, meter_layers,
-    meter_needle, meter_reels, meter_sections, meter_spec, meter_spectrum, meter_text_at,
+    meter_needle, meter_reels, meter_sections, meter_spec, meter_spectra, meter_text_at,
     meter_texts, meter_tonearm, meter_type, meter_vinyl, random_change_title_from_config,
     random_interval_from_config, rotation_settings, run_settings, screen_from_config,
     scroll_speeds_from_config, selection_from_config, spectrum_from_theme, spectrum_settings,
@@ -1844,7 +1844,13 @@ impl TapSource {
             ..Slideshow::default()
         });
         let spectrum_max = skin.spectrum_max.max(1.0) as u32;
-        if let Some(bins) = skin.spectrum.as_ref().map(|s| s.bins.max(1)) {
+        if let Some(bins) = skin
+            .spectra
+            .iter()
+            .filter(|s| s.look.is_none())
+            .map(|s| s.bins.max(1))
+            .max()
+        {
             if bins != self.spectrum_bins || spectrum_max != self.spectrum_max {
                 self.spectrum_bins = bins;
                 self.spectrum_max = spectrum_max;
@@ -2201,8 +2207,9 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
     // The spectrum configuration sits beside the meter configuration; the
     // meter names which of the theme's spectra it shows and how big.
     let placed = lead::read_to_string(&theme.join("meters.txt"))
-        .and_then(|meters| meter_spectrum(&meters, &skin.name));
-    if let Some((name, w, h)) = placed {
+        .map(|meters| meter_spectra(&meters, &skin.name))
+        .unwrap_or_default();
+    if !placed.is_empty() {
         if let Some(config) = lead::read_to_string(&spectrum_config_path()) {
             let settings = spectrum_settings(&config);
             // The spectrum theme carries the meter theme's folder name; the
@@ -2216,13 +2223,18 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
                 .filter(|dir| lead::is_file(&dir.join("spectrum.txt")));
             let folder = by_theme.unwrap_or_else(|| base.join(&settings.folder));
             if let Some(spectra) = lead::read_to_string(&folder.join("spectrum.txt")) {
-                skin.spectrum = spectrum_from_theme(
-                    &spectra,
-                    &name,
-                    (w, h),
-                    &settings,
-                    &folder.to_string_lossy(),
-                );
+                skin.spectra = placed
+                    .iter()
+                    .filter_map(|(name, w, h)| {
+                        spectrum_from_theme(
+                            &spectra,
+                            name,
+                            (*w, *h),
+                            &settings,
+                            &folder.to_string_lossy(),
+                        )
+                    })
+                    .collect();
                 skin.spectrum_max = settings.max_value;
             }
         }

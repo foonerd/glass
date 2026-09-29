@@ -814,6 +814,8 @@ Glass.prototype.spectrumDemand = function () {
         var sc = String(section.scale || '').trim().toLowerCase();
         if (b > 0) { bins = Math.max(bins, b); named = true; }
         if (c === 1 || c === 2) { channels = Math.max(channels, c); named = true; }
+        var side = String(section.channel || '').trim().toLowerCase();
+        if (side === 'left' || side === 'right' || side === 'l' || side === 'r') { channels = 2; named = true; }
         if (!scale && (sc === 'log' || sc === 'mel' || sc === 'linear')) { scale = sc; named = true; }
         if (w > 0) { window = Math.max(window, w); named = true; }
     });
