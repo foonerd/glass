@@ -4138,11 +4138,48 @@ struct RadialMap {
     w: u32,
     h: u32,
     entries: Vec<u32>,
+    /// Per channel, each angle step's band (the high half) and how far
+    /// across it the step lies (the low half), or outside for an angle
+    /// that is the other channel's side; built for `bands_key`.
+    bands: [Vec<u32>; 2],
+    /// The band count, mirror and layout kind the tables were built for.
+    bands_key: (usize, i8, u8),
 }
 
 const RADIAL_OUTSIDE: u32 = u32::MAX;
 
 impl RadialMap {
+    /// The angle tables for `n` bands, a mirror and a layout kind (1 for a
+    /// half of the circle per channel, else the whole circle for each),
+    /// kept until one of them changes.
+    fn bands_for(&mut self, n: usize, mirror: i8, layout: u8) {
+        let key = (n, mirror, layout);
+        if self.bands_key == key && !self.bands[0].is_empty() {
+            return;
+        }
+        self.bands_key = key;
+        for ch in 0..2 {
+            self.bands[ch] = (0..65536u32)
+                .map(|u| {
+                    let (band, frac) = if layout == 1 {
+                        let (side, v) = if u >= 32768 {
+                            (0usize, (65535 - u) * 2)
+                        } else {
+                            (1usize, u * 2)
+                        };
+                        if side != ch {
+                            return RADIAL_OUTSIDE;
+                        }
+                        radial_band(v, n, mirror)
+                    } else {
+                        radial_band(u, n, mirror)
+                    };
+                    ((band as u32) << 16) | ((frac * 65536.0) as u32).min(0xffff)
+                })
+                .collect();
+        }
+    }
+
     fn build(w: u32, h: u32) -> Self {
         let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
         let rmax = cx.min(cy);
@@ -4165,7 +4202,49 @@ impl RadialMap {
                 entries.push((rq << 16) | a);
             }
         }
-        Self { w, h, entries }
+        Self {
+            w,
+            h,
+            entries,
+            bands: [Vec::new(), Vec::new()],
+            bands_key: (0, 0, 0),
+        }
+    }
+}
+
+/// Every pixel of a `w` by `h` box whose centre lies within the ring
+/// between `rin` and `rout` around the box's centre, row by row, a pixel
+/// to spare on either edge so the caller's own test decides the rim.
+fn annulus_rows(w: u32, h: u32, rin: f32, rout: f32, mut each: impl FnMut(usize, usize)) {
+    let (cx, cy) = (w as f32 / 2.0, h as f32 / 2.0);
+    let rout = rout + 1.0;
+    let rin = (rin - 1.0).max(0.0);
+    let y0 = (cy - rout).floor().max(0.0) as usize;
+    let y1 = ((cy + rout).ceil().max(0.0) as usize).min(h as usize);
+    for y in y0..y1 {
+        let dy = y as f32 + 0.5 - cy;
+        let d2 = dy * dy;
+        if d2 >= rout * rout {
+            continue;
+        }
+        let half = (rout * rout - d2).sqrt();
+        let xa = (cx - half).floor().max(0.0) as usize;
+        let xb = ((cx + half).ceil().max(0.0) as usize).min(w as usize);
+        if d2 < rin * rin {
+            let inner = (rin * rin - d2).sqrt();
+            let ia = ((cx - inner).ceil().max(0.0) as usize).clamp(xa, xb);
+            let ib = ((cx + inner).floor().max(0.0) as usize).clamp(ia, xb);
+            for x in xa..ia {
+                each(x, y);
+            }
+            for x in ib..xb {
+                each(x, y);
+            }
+        } else {
+            for x in xa..xb {
+                each(x, y);
+            }
+        }
     }
 }
 
@@ -4195,11 +4274,12 @@ fn radial_band(u: u32, n: usize, mirror: i8) -> (usize, f32) {
     (band, (pos & 0xffff) as f32 / 65536.0)
 }
 
-/// The radial look: every pixel of the box's circle asks the polar map
-/// where it is, finds its band and channel by the layout, and takes the
-/// bar's colour when it lies between the base circle and the bar's tip,
-/// or the peak's when it lies on the peak's ring. The whole picture turns
-/// with `spin`.
+/// The radial look: each channel's ring between its base circle and the
+/// furthest tip of the frame is walked row by row, and every pixel of it
+/// asks the polar map where it is, finds its band by the angle table, and
+/// takes the bar's colour when it lies before the bar's tip, or the
+/// peak's when it lies on the peak's ring. The whole picture turns with
+/// `spin`.
 fn render_radial(
     a: &plot::Analyser,
     smoothed: &[Vec<f32>; 2],
@@ -4221,7 +4301,7 @@ fn render_radial(
     if map.as_ref().is_none_or(|m| m.w != w || m.h != h) {
         *map = Some(RadialMap::build(w, h));
     }
-    let Some(map) = map.as_ref() else {
+    let Some(map) = map.as_mut() else {
         return;
     };
     let stereo = a.stereo && smoothed[1].len() == n;
@@ -4285,97 +4365,122 @@ fn render_radial(
         lead::Layout::Single => &[0],
         _ => &[0, 1],
     };
+    let layout_kind: u8 = match layout {
+        lead::Layout::DualHorizontal => 1,
+        _ => 0,
+    };
+    let mirror = match layout {
+        lead::Layout::DualHorizontal => look.mirror,
+        _ if look.mirror == 0 => 0,
+        _ => 1,
+    };
+    map.bands_for(n, mirror, layout_kind);
+    let map: &RadialMap = map;
+    let gap_lo = (gap_lo * 65536.0) as u32;
+    let gap_hi = (gap_hi * 65536.0) as u32;
     let width = w as usize;
-    for y in 0..h as usize {
-        for x in 0..width {
+    for &ch in channels {
+        let (b, reach) = (base[ch], reach[ch]);
+        let span = reach.abs().max(1.0);
+        // The ring this frame: from the base circle to the loudest bar's
+        // tip, or its peak, and the peak ring's width beyond.
+        let mut top = 0.0f32;
+        for (i, &level) in smoothed[ch].iter().enumerate() {
+            top = top.max(level);
+            if look.peaks {
+                if let Some(peak) = peaks[ch].get(i) {
+                    top = top.max(peak.level);
+                }
+            }
+        }
+        let far = (top.clamp(0.0, 1.0) * span + 1.5).min(span);
+        if far <= 0.0 {
+            continue;
+        }
+        let (rin, rout) = if reach > 0.0 {
+            (b, b + far)
+        } else {
+            ((b - far).max(0.0), b)
+        };
+        let table = &map.bands[ch];
+        annulus_rows(w, h, rin, rout, |x, y| {
             let e = map.entries[y * width + x];
             if e == RADIAL_OUTSIDE {
-                continue;
+                return;
             }
             let r = (e >> 16) as f32 / 64.0;
+            let along = (r - b) * reach.signum();
+            if along < 0.0 || along >= span {
+                return;
+            }
             let u = ((e & 0xffff) + 65536 - spin) & 0xffff;
+            let entry = table[u as usize];
+            if entry == RADIAL_OUTSIDE {
+                return;
+            }
+            let band = (entry >> 16) as usize;
+            let frac = entry & 0xffff;
+            if frac < gap_lo || frac > gap_hi {
+                return;
+            }
             let at = (y * width + x) * 4;
-            for &ch in channels {
-                // First the reach: a pixel outside this channel's ring,
-                // between its base circle and its furthest tip, costs
-                // nothing more.
-                let (b, reach) = (base[ch], reach[ch]);
-                let along = (r - b) * reach.signum();
-                let span = reach.abs().max(1.0);
-                if along < 0.0 || along >= span {
-                    continue;
-                }
-                // Which band, by the layout: a half of the circle per
-                // channel side by side, else the whole circle for each.
-                let (band, frac) = match layout {
-                    lead::Layout::DualHorizontal => {
-                        let (side, v) = if u >= 32768 {
-                            (0usize, (65535 - u) * 2)
-                        } else {
-                            (1usize, u * 2)
-                        };
-                        if side != ch {
-                            continue;
-                        }
-                        radial_band(v, n, look.mirror)
+            let level = smoothed[ch][band].clamp(0.0, 1.0);
+            let bar_alpha =
+                channel_alpha[ch] * look.fill_alpha * if look.alpha_bars { level } else { 1.0 };
+            if along < level * span {
+                let c = match look.color_mode {
+                    lead::ColorMode::Gradient => {
+                        gradient[ch][((along / span) * 255.0).clamp(0.0, 255.0) as usize]
                     }
-                    _ => radial_band(u, n, if look.mirror == 0 { 0 } else { 1 }),
+                    _ => inks[ch][band],
                 };
-                if frac < gap_lo || frac > gap_hi {
-                    continue;
-                }
-                let level = smoothed[ch][band].clamp(0.0, 1.0);
-                let bar_alpha =
-                    channel_alpha[ch] * look.fill_alpha * if look.alpha_bars { level } else { 1.0 };
-                if along < level * span {
-                    let c = match look.color_mode {
-                        lead::ColorMode::Gradient => {
-                            gradient[ch][((along / span) * 255.0).clamp(0.0, 255.0) as usize]
-                        }
-                        _ => inks[ch][band],
-                    };
-                    let alpha = ((c[3] as f32 * bar_alpha).round().clamp(0.0, 255.0)) as u32;
-                    blend_px(&mut out.rgba[at..at + 4], c, alpha);
-                    if let Some(&boost) = onset.boost.get(band) {
-                        if boost > 0.0 {
-                            let a = (boost * 0.7 * 255.0).round() as u32;
-                            blend_px(&mut out.rgba[at..at + 4], onset.color, a);
-                        }
-                    }
-                }
-                if look.peaks {
-                    let peak = peaks[ch].get(band).copied().unwrap_or_default();
-                    if peak.level > level + 0.002 {
-                        let pr = peak.level.clamp(0.0, 1.0) * span;
-                        if (along - pr).abs() < 1.0 {
-                            let c = match look.color_mode {
-                                lead::ColorMode::Gradient => {
-                                    palettes[ch].at(peak.level.clamp(0.0, 1.0))
-                                }
-                                lead::ColorMode::Index => inks[ch][band],
-                                lead::ColorMode::Level => palettes[ch].for_level(peak.level),
-                            };
-                            let mark_alpha = channel_alpha[ch] * (1.0 - peak.fade).clamp(0.0, 1.0);
-                            let alpha =
-                                ((c[3] as f32 * mark_alpha).round().clamp(0.0, 255.0)) as u32;
-                            blend_px(&mut out.rgba[at..at + 4], c, alpha);
-                        }
+                let alpha = ((c[3] as f32 * bar_alpha).round().clamp(0.0, 255.0)) as u32;
+                blend_px(&mut out.rgba[at..at + 4], c, alpha);
+                if let Some(&boost) = onset.boost.get(band) {
+                    if boost > 0.0 {
+                        let a = (boost * 0.7 * 255.0).round() as u32;
+                        blend_px(&mut out.rgba[at..at + 4], onset.color, a);
                     }
                 }
             }
-            // The onset rings, on the first channel's reach.
-            if !onset.rings.is_empty() {
+            if look.peaks {
+                let peak = peaks[ch].get(band).copied().unwrap_or_default();
+                if peak.level > level + 0.002 {
+                    let pr = peak.level.clamp(0.0, 1.0) * span;
+                    if (along - pr).abs() < 1.0 {
+                        let c = match look.color_mode {
+                            lead::ColorMode::Gradient => {
+                                palettes[ch].at(peak.level.clamp(0.0, 1.0))
+                            }
+                            lead::ColorMode::Index => inks[ch][band],
+                            lead::ColorMode::Level => palettes[ch].for_level(peak.level),
+                        };
+                        let mark_alpha = channel_alpha[ch] * (1.0 - peak.fade).clamp(0.0, 1.0);
+                        let alpha = ((c[3] as f32 * mark_alpha).round().clamp(0.0, 255.0)) as u32;
+                        blend_px(&mut out.rgba[at..at + 4], c, alpha);
+                    }
+                }
+            }
+        });
+    }
+    // The onset rings, on the first channel's reach, each on its own thin ring.
+    if !onset.rings.is_empty() {
+        let span = reach[0].abs().max(1.0);
+        for &(t, ring_alpha) in &onset.rings {
+            let ring = base[0] + t * span * reach[0].signum();
+            let a = (ring_alpha * 255.0).round().clamp(0.0, 255.0) as u32;
+            annulus_rows(w, h, ring - 1.0, ring + 1.0, |x, y| {
+                let e = map.entries[y * width + x];
+                if e == RADIAL_OUTSIDE {
+                    return;
+                }
+                let r = (e >> 16) as f32 / 64.0;
                 let along = (r - base[0]) * reach[0].signum();
-                let span = reach[0].abs().max(1.0);
-                if along >= 0.0 && along < span {
-                    for &(t, ring_alpha) in &onset.rings {
-                        if (along - t * span).abs() < 1.0 {
-                            let a = (ring_alpha * 255.0).round().clamp(0.0, 255.0) as u32;
-                            blend_px(&mut out.rgba[at..at + 4], onset.color, a);
-                        }
-                    }
+                if along >= 0.0 && along < span && (along - t * span).abs() < 1.0 {
+                    let at = (y * width + x) * 4;
+                    blend_px(&mut out.rgba[at..at + 4], onset.color, a);
                 }
-            }
+            });
         }
     }
 }
