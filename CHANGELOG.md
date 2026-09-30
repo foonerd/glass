@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.76] - 2026-09-30
+
+The browser face tells the truth when the player stops. The persist countdown the player's screen shows after a stop or a pause now shows on the Face and on Anymote too: the plugin pushes the period as a line beside the file the display reads, and the engine counts it down on the page's own wall clock, which the page now hands it, so a theme's clocks are true there as well. When the period ends and the player's display has left the screen, the page says so in a banner over the picture, stopped or paused, until the player plays again. The red last ten seconds of a track, drawn by the engine from the position, reach the browser face now that its position is right.
+
 ## [0.7.75] - 2026-09-30
 
 A Face, an Anymote page or a display that attached while a track played showed it as just begun, until a pause or a play brought it in line: the plugin replayed the player's state as Volumio had last pushed it, with the position of that moment. The kept state is now stamped when it arrives, and a replay hands out the position moved on by the time since, no further than the track's end.
