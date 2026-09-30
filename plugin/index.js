@@ -859,7 +859,7 @@ Glass.prototype.launchEnv = function () {
     var self = this;
     var display = String(self.config.get('displayOutput') || '0').replace(/[^0-9]/g, '') || '0';
     var log = self.logSettings();
-    return Object.assign({}, process.env, {
+    var env = Object.assign({}, process.env, {
         DISPLAY: ':' + display,
         GLASS_HOME: PluginPath,
         GLASS_DISMISS_FILE: dismissFile,
@@ -867,6 +867,12 @@ Glass.prototype.launchEnv = function () {
         GLASS_LOG: log.level,
         GLASS_LOG_TARGETS: log.targets.join(',')
     });
+    // The screen by fact: X while a kiosk runs one, the screen itself while
+    // no kiosk uses it; otherwise no word, and the display opens no window.
+    var draws = null;
+    try { draws = screenprobe.wouldDraw(self.screenFact()); } catch (e) {}
+    if (draws) { env.SDL_VIDEODRIVER = draws; } else { delete env.SDL_VIDEODRIVER; }
+    return env;
 };
 
 // A command from the display, run through the player's command router.
@@ -945,8 +951,9 @@ Glass.prototype.onStart = function () {
     self.channel.onPush = function (message) { self.face.push(message); };
     // The pointer, resolved from the screen's choice and what the player has now.
     try { self.refreshPointerShown(); } catch (e) { self.logger.warn(id + 'screen: pointer not resolved: ' + (e && e.message ? e.message : e)); }
-    // A screen that is ours has its display up from now on.
-    try { self.keepScreen(); } catch (e) { self.logger.warn(id + 'screen: not kept: ' + (e && e.message ? e.message : e)); }
+    // The screen by fact, watched from now on; a driver key from the old choice goes back to Auto.
+    try { self.migrateScreenDriver(); } catch (e) { self.logger.warn(id + 'screen: driver key not migrated: ' + (e && e.message ? e.message : e)); }
+    try { self.watchScreen(); } catch (e) { self.logger.warn(id + 'screen: not watched: ' + (e && e.message ? e.message : e)); }
 
     self.loadConfigs();
     if (!meterConfig) {
@@ -1190,7 +1197,7 @@ Glass.prototype.checkAlsaChain = function () {
 Glass.prototype.onStop = function () {
     var self = this;
     if (self.carDashTimer) { clearTimeout(self.carDashTimer); self.carDashTimer = null; }
-    if (self.screenKeeper) { clearInterval(self.screenKeeper); self.screenKeeper = null; }
+    if (self.screenWatcher) { clearInterval(self.screenWatcher); self.screenWatcher = null; }
 
     self.commandRouter.stateMachine.stop().then(function () {
         if (self.Timeout) {
@@ -1354,6 +1361,10 @@ Glass.prototype.startDisplayOnce = function () {
                         if (self.config.get('headless') === true) {
                             return;
                         }
+                        // Stepping aside while the kiosk takes the screen: no window until then.
+                        if (self.screenYieldUntil && Date.now() < self.screenYieldUntil) {
+                            return;
+                        }
                         if (self.meterChild && self.meterChild.exitCode === null) {
                             return;
                         }
@@ -1366,6 +1377,9 @@ Glass.prototype.startDisplayOnce = function () {
                                 line = line.trim();
                                 if (!line) { return; }
                                 if (isErr) { lastErr.push(line); if (lastErr.length > 5) { lastErr.shift(); } }
+                                // The display names what it opened the screen with; the Screen tab shows it.
+                                var opened = /renderer (\S+) on ([A-Za-z0-9]+)/.exec(line);
+                                if (opened) { self.displayRenderer = { renderer: opened[1], driver: opened[2].toLowerCase(), at: Date.now() }; }
                                 // The display prefixes its lines as the plugin does; one prefix is enough.
                                 self.logger.info(id + line.replace(/^glass: /, ''));
                             });
@@ -1386,6 +1400,7 @@ Glass.prototype.startDisplayOnce = function () {
                             try { if (dismissMarkerPresent) fs.removeSync(dismissFile); } catch (e) {}
                             if (self.meterChild === child) {
                                 self.meterChild = null;
+                                self.displayRenderer = null;
                                 if (action === 'rearm') {
                                     clearInterval(self.Timeout);
                                     self.Timeout = setInterval(function () {
@@ -1412,29 +1427,97 @@ Glass.prototype.screenTimeoutMs = function () {
     return (parseInt(this.config.get('timeout'), 10) || 0) * 1000;
 };
 
-// Whether the screen is ours: no X server, the display drawing through
-// KMS/DRM, and so the only thing that must be on the screen.
-Glass.prototype.screenOurs = function () {
-    this.loadConfigs();
-    var cur = (meterConfig && meterConfig.current) || {};
-    return String(cur['screen.driver'] || '').trim().toLowerCase() === 'kmsdrm';
+// The fact of the screen, read afresh and cheaply: an X server up, the
+// kiosk unit's state and whether it is enabled at boot, the two plugins
+// that bring a kiosk, and whether a panel is connected (the DRM status
+// files alone, no probe).
+Glass.prototype.screenFact = function () {
+    var self = this;
+    var unit = function (what) {
+        try { return String(require('child_process').execFileSync('systemctl', [what, 'volumio-kiosk'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] })).trim(); }
+        catch (e) { return String(e && e.stdout ? e.stdout : '').trim() || 'inactive'; }
+    };
+    var enabled = function (name) { try { return self.commandRouter.pluginManager.isEnabled('user_interface', name) === true; } catch (e) { return false; } };
+    var panel = false;
+    try {
+        panel = fs.readdirSync('/sys/class/drm').filter(function (n) { return /^card\d+-/.test(n) && !/Writeback/.test(n); }).some(function (n) {
+            try { return fs.readFileSync('/sys/class/drm/' + n + '/status', 'utf8').trim() === 'connected'; } catch (e) { return false; }
+        });
+    } catch (e) {}
+    return {
+        xserver: fs.existsSync('/tmp/.X11-unix/X0'),
+        kiosk: unit('is-active'),
+        kioskEnabled: unit('is-enabled') === 'enabled',
+        touchDisplay: enabled('touch_display'),
+        displayConfiguration: enabled('display_configuration'),
+        panel: panel
+    };
 };
 
-// The screen is ours: the display runs whether or not the player plays,
-// started now and again whenever it is found gone, the console never shown.
-Glass.prototype.keepScreen = function () {
+// A driver key set through the choice the Screen tab offered up to 0.7.82
+// goes back to Auto: the screen is drawn by fact now.
+Glass.prototype.migrateScreenDriver = function () {
     var self = this;
-    if (self.screenKeeper) { clearInterval(self.screenKeeper); self.screenKeeper = null; }
-    if (!self.screenOurs()) { return; }
-    var up = function () {
-        if (!self.screenOurs()) { return; }
-        if (self.meterChild && self.meterChild.exitCode === null) { return; }
-        try { fs.writeFileSync(runFlag, ''); } catch (e) {}
-        self.startDisplayOnce();
+    self.loadConfigs();
+    if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return; }
+    var key = String(meterConfig.current['screen.driver'] || 'auto').trim().toLowerCase();
+    if (key !== 'kmsdrm' && key !== 'x11') { return; }
+    meterConfig.current['screen.driver'] = 'auto';
+    fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+    try { self.updateConfigVersion(); } catch (e) {}
+    self.logger.info(id + 'screen: drawn by fact now; the driver key ' + key + ' set back to auto');
+};
+
+// Whether the screen is Glass's by fact: free, with the driver key not
+// forcing X or Wayland. Then the display draws on the screen itself and
+// is the only thing that must be on it.
+Glass.prototype.screenOurs = function (fact) {
+    this.loadConfigs();
+    var cur = (meterConfig && meterConfig.current) || {};
+    var key = String(cur['screen.driver'] || 'auto').trim().toLowerCase();
+    if (key === 'x11' || key === 'wayland') { return false; }
+    return screenprobe.screenFree(fact || this.screenFact());
+};
+
+// The watcher of the screen: every two seconds the fact is read again.
+// Free, the display stays up whether or not the player plays, started now
+// and again whenever it is found gone, the console never shown. Not free
+// while the display draws on the screen itself, the kiosk wants the
+// screen: the display steps aside at once, and the kiosk unit is started
+// again if it failed against the display in the meantime, so the player's
+// interface is never lost to the screensaver.
+Glass.prototype.watchScreen = function () {
+    var self = this;
+    if (self.screenWatcher) { clearInterval(self.screenWatcher); self.screenWatcher = null; }
+    self.screenWasFree = null;
+    var tick = function () {
+        var fact;
+        try { fact = self.screenFact(); } catch (e) { return; }
+        var free = screenprobe.screenFree(fact);
+        var running = !!(self.meterChild && self.meterChild.exitCode === null);
+        if (free) {
+            if (self.screenWasFree !== true) { self.logger.info(id + 'screen: free (no kiosk, no X): the display draws on it and stays up'); }
+            if (!running && self.screenOurs(fact)) {
+                try { fs.writeFileSync(runFlag, ''); } catch (e) {}
+                self.startDisplayOnce();
+            }
+        } else {
+            if (self.screenWasFree === true) { self.logger.info(id + 'screen: the kiosk wants it, the display steps aside'); self.steppedAsideAt = Date.now(); }
+            if (running && self.displayRenderer && self.displayRenderer.driver === 'kmsdrm') {
+                self.screenYieldUntil = Date.now() + 15000;
+                try { if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); } } catch (e) {}
+            }
+            // The kiosk tried while the display held the screen: start it again, once.
+            if (!running && fact.kiosk === 'failed' && (fact.touchDisplay || fact.kioskEnabled) && self.steppedAsideAt && Date.now() - self.steppedAsideAt < 60000) {
+                self.steppedAsideAt = 0;
+                self.logger.info(id + 'screen: the kiosk failed against the display, starting it again');
+                exec('/usr/bin/sudo -n /bin/systemctl restart volumio-kiosk', { uid: 1000, gid: 1000 }, function (error) { if (error) { self.logger.warn(id + 'screen: the kiosk did not start: ' + error.message); } });
+            }
+        }
+        self.screenWasFree = free;
     };
-    self.logger.info(id + 'screen: ours, the display stays up');
-    up();
-    self.screenKeeper = setInterval(up, 5000);
+    tick();
+    self.screenWatcher = setInterval(tick, 2000);
 };
 
 // ---- The persist period, as a line -------------------------------------
@@ -1467,12 +1550,20 @@ Glass.prototype.screenSettings = function () {
     var pointer = String(cur['screen.pointer'] || 'auto').trim().toLowerCase();
     if (['auto', 'show', 'hide'].indexOf(pointer) === -1) { pointer = 'auto'; }
     var found = self.screenProbe(false);
+    var fact = self.screenFact();
+    var running = !!(self.meterChild && self.meterChild.exitCode === null);
     return {
         driver: driver,
         rotation: rotation,
         pointer: pointer,
         pointerShown: String(cur['screen.pointer.shown']).toLowerCase() === 'true',
-        kioskActive: found.holders.kiosk,
+        kioskActive: fact.kiosk === 'active',
+        free: self.screenOurs(fact),
+        fact: fact,
+        now: {
+            display: { running: running, driver: running && self.displayRenderer ? self.displayRenderer.driver : null },
+            wouldDraw: screenprobe.wouldDraw(fact)
+        },
         probe: found,
         touch: self.touchSettings()
     };
@@ -1627,13 +1718,12 @@ Glass.prototype.setScreenSettings = function (data) {
     self.loadConfigs();
     if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return { error: 'GLASS.NO_PEPPYCONFIG' }; }
     var now = self.screenSettings();
-    var driver = data.driver === undefined ? now.driver : String(data.driver).trim().toLowerCase();
-    if (['auto', 'x11', 'wayland', 'kmsdrm'].indexOf(driver) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    // The driver is drawn by fact since 0.7.83; the key stays as it is.
+    var driver = now.driver;
     var rotation = data.rotation === undefined ? now.rotation : parseInt(data.rotation, 10);
     if ([0, 90, 180, 270].indexOf(rotation) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
     var pointer = data.pointer === undefined ? now.pointer : String(data.pointer).trim().toLowerCase();
     if (['auto', 'show', 'hide'].indexOf(pointer) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
-    if (driver === 'kmsdrm' && now.driver !== 'kmsdrm' && now.kioskActive) { return { error: 'GLASS.MANAGER_SCREEN_KIOSK_HOLDS' }; }
     var shown = screenprobe.pointerShown(pointer, now.probe) ? 'True' : 'False';
     var wanted = { 'screen.driver': driver, 'screen.rotation': String(rotation), 'screen.pointer': pointer, 'screen.pointer.shown': shown };
     var changed = false;
@@ -1645,8 +1735,8 @@ Glass.prototype.setScreenSettings = function (data) {
         try { self.updateConfigVersion(); } catch (e) {}
         if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
         self.logger.info(id + 'screen: drawn by ' + driver + ', rotation ' + rotation + ', pointer ' + pointer + ' (shown ' + shown + ')');
-        // Ours now, or no longer: the keeper follows the driver.
-        setTimeout(function () { try { self.keepScreen(); } catch (e) {} }, 1500);
+        // The watcher reads the fact again and brings the display back as it is now.
+        setTimeout(function () { try { self.watchScreen(); } catch (e) {} }, 1500);
     }
     return { ok: true, changed: changed };
 };

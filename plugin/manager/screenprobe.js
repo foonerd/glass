@@ -184,4 +184,26 @@ function gather(deps) {
   return found;
 }
 
-module.exports = { parseInputDevices, parseUdev, classifyInputs, parseDrm, parseBacklights, suggest, pointerShown, gather };
+// The fact of the screen: whether it is free for the display to draw on
+// itself. Free means no X server up, the kiosk unit neither running nor
+// starting nor enabled at boot, neither the Touch Display nor the Display
+// Configuration plugin on (either brings the kiosk), and a panel connected
+// to draw on. Anything else, the kiosk is or will be the player's
+// interface on the screen, and the display leaves it be.
+function screenFree(fact) {
+  const f = fact || {};
+  const kiosk = String(f.kiosk || 'inactive');
+  return !f.xserver && kiosk !== 'active' && kiosk !== 'activating' && kiosk !== 'reloading'
+    && !f.kioskEnabled && !f.touchDisplay && !f.displayConfiguration && !!f.panel;
+}
+
+// What the display draws on: X while an X server is up, the screen itself
+// while the screen is free, else nothing (no window: the kiosk is on its
+// way, or there is no panel).
+function wouldDraw(fact) {
+  const f = fact || {};
+  if (f.xserver) return 'x11';
+  return screenFree(f) ? 'kmsdrm' : null;
+}
+
+module.exports = { parseInputDevices, parseUdev, classifyInputs, parseDrm, parseBacklights, suggest, pointerShown, screenFree, wouldDraw, gather };

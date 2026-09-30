@@ -55,6 +55,22 @@ test('the backlight is read and the suggestion follows the panel and the inputs'
   assert.equal(probe.pointerShown('hide', landscape), false);
 });
 
+test('the screen is free only with no X, no kiosk running, starting or enabled, no plugin that brings one, and a panel', () => {
+  const free = { xserver: false, kiosk: 'inactive', kioskEnabled: false, touchDisplay: false, displayConfiguration: false, panel: true };
+  assert.equal(probe.screenFree(free), true);
+  assert.equal(probe.screenFree(Object.assign({}, free, { xserver: true })), false, 'an X server holds it');
+  assert.equal(probe.screenFree(Object.assign({}, free, { kiosk: 'activating' })), false, 'a kiosk on its way holds it');
+  assert.equal(probe.screenFree(Object.assign({}, free, { kiosk: 'failed' })), true, 'a failed unit holds nothing');
+  assert.equal(probe.screenFree(Object.assign({}, free, { kioskEnabled: true })), false, 'enabled at boot, it will come');
+  assert.equal(probe.screenFree(Object.assign({}, free, { touchDisplay: true })), false, 'the plugin brings the kiosk');
+  assert.equal(probe.screenFree(Object.assign({}, free, { displayConfiguration: true })), false, 'so does that one');
+  assert.equal(probe.screenFree(Object.assign({}, free, { panel: false })), false, 'nothing to draw on');
+  assert.equal(probe.screenFree({}), false);
+  assert.equal(probe.wouldDraw(free), 'kmsdrm');
+  assert.equal(probe.wouldDraw(Object.assign({}, free, { xserver: true, kiosk: 'active' })), 'x11');
+  assert.equal(probe.wouldDraw(Object.assign({}, free, { touchDisplay: true })), null, 'no window while the kiosk is on its way');
+});
+
 test('gather reads the machine through its readers and never fails on what is missing', () => {
   const files = {
     '/proc/bus/input/devices': fixture('input-devices.txt'),

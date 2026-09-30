@@ -641,8 +641,10 @@ fn session(
     let mut pictures = Pictures::default();
     // A screen is there when the machine has one, when a display is set,
     // or when the settings name a driver that needs no display server.
-    let show_window =
-        (screen_available() || skin.run.driver == lead::ScreenDriver::KmsDrm) && !headless;
+    let show_window = (screen_available()
+        || screen_given().is_some()
+        || skin.run.driver == lead::ScreenDriver::KmsDrm)
+        && !headless;
     let write_file = output.is_some() || snapshot.is_some();
     let serving_remote = false;
     // The window: the player's is full screen at the theme's size; a
@@ -780,7 +782,11 @@ fn session(
     // The screen is ours when no X server holds it: the display never
     // leaves it, and after the countdown it shows black rather than the
     // console.
-    let screen_ours = skin.run.driver == lead::ScreenDriver::KmsDrm;
+    // The screen is ours when the display draws on it itself: by the driver
+    // key, or by the launcher's word when the key is Auto.
+    let screen_ours = skin.run.driver == lead::ScreenDriver::KmsDrm
+        || (skin.run.driver == lead::ScreenDriver::Auto
+            && screen_given().as_deref() == Some("kmsdrm"));
     let mut black_frame: Option<Frame> = None;
     loop {
         let frame_started = Instant::now();
@@ -1340,6 +1346,16 @@ pub(crate) fn screen_available() -> bool {
     cfg!(any(windows, target_os = "macos", target_os = "android"))
         || env::var_os("DISPLAY").is_some_and(|v| !v.is_empty())
         || env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
+}
+
+/// What the launcher named to draw on, `SDL_VIDEODRIVER`, from what the
+/// player has now: X while a kiosk runs one, the screen itself while no
+/// kiosk uses it. With the driver on Auto this stands.
+pub(crate) fn screen_given() -> Option<String> {
+    env::var("SDL_VIDEODRIVER")
+        .ok()
+        .map(|v| v.trim().to_ascii_lowercase())
+        .filter(|v| !v.is_empty())
 }
 
 /// A calibration of the touch panel in progress: the targets, in picture
