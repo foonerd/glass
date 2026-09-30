@@ -85,6 +85,47 @@ struct Recorded<'a> {
 /// binary calls this with its own arguments, the Android shell with the
 /// activity's.
 pub fn run(args: Vec<String>) -> ExitCode {
+    run_with(args, None)
+}
+
+/// What a face sees of the display each frame: the player's state as the
+/// source has it, the theme's fonts, the picture's size, the clock, and
+/// whether the screen is the display's own.
+pub struct View<'a> {
+    pub input: &'a Input,
+    pub fonts: &'a expose::Fonts,
+    pub width: u32,
+    pub height: u32,
+    pub now_ms: u64,
+    pub ours: bool,
+}
+
+/// A face drawn over the display: what glass-evo adds on top of the
+/// theme. The display calls it every frame, offers it every touch before
+/// the theme's controls, and sends the commands it hands back through the
+/// same path the theme's own buttons use. With no face nothing changes.
+pub trait Overlay {
+    /// Draw over the frame as shown, after the theme; `true` when anything
+    /// was drawn, and the whole picture is then shown again.
+    fn draw(&mut self, frame: &mut Frame, view: &View) -> bool;
+    /// A pointer event in picture pixels; `true` when taken, and the
+    /// theme's controls and the touch rules then do not see it.
+    fn pointer(&mut self, kind: PointerKind, x: i32, y: i32, view: &View) -> bool;
+    /// The commands for the player the face wants sent, taken every frame.
+    fn commands(&mut self) -> Vec<intake::Command>;
+}
+
+/// The types a face is written against, in one place.
+pub mod face {
+    pub use expose::{ui, Fonts, Frame};
+    pub use intake::Command;
+    pub use lead::{Input, Metadata, TextStyle};
+    pub use pane::PointerKind;
+}
+
+/// The display with a face over it: the same arguments and environment as
+/// `run`, the face drawn and asked as the loop goes.
+pub fn run_with(args: Vec<String>, mut face: Option<Box<dyn Overlay>>) -> ExitCode {
     logline::init("glass");
     let mut once = false;
     let mut headless = false;
@@ -415,7 +456,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
             ..run
         };
         shooting.once = false;
-        let code = match session(&shooting, None, &mut None) {
+        let code = match session(&shooting, None, &mut None, &mut None) {
             Outcome::Exit(code) => code,
             Outcome::Reload(_) => ExitCode::SUCCESS,
         };
@@ -454,7 +495,7 @@ pub fn run(args: Vec<String>) -> ExitCode {
         }
         return ExitCode::SUCCESS;
     }
-    match session(&run, None, &mut None) {
+    match session(&run, None, &mut None, &mut face) {
         Outcome::Exit(code) => code,
         Outcome::Reload(_) => ExitCode::SUCCESS,
     }
@@ -468,6 +509,7 @@ fn session(
     run: &Run,
     mut remote: Option<&mut RemoteSession>,
     window: &mut Option<(WindowOptions, Surface)>,
+    face: &mut Option<Box<dyn Overlay>>,
 ) -> Outcome {
     let Run {
         once,
@@ -801,6 +843,12 @@ fn session(
             }
         }
         let input = source.poll();
+        // The face's commands go the way the theme's buttons go.
+        if let Some(face) = face.as_deref_mut() {
+            for command in face.commands() {
+                source.command(&command);
+            }
+        }
         if let Some(points) = source.take_calibrate_request() {
             calibration = Some(Calibration::new(points, skin.width, skin.height));
             // Only lifts from now on count: a touch made before the targets
@@ -990,13 +1038,32 @@ fn session(
             if let Some(own) = overlay.as_ref() {
                 frame = own;
             }
+            // The face draws over the picture as shown, on its own copy.
+            let mut face_frame: Option<Frame> = None;
+            if let Some(face) = face.as_deref_mut() {
+                let view = View {
+                    input: &input,
+                    fonts: &assets.fonts,
+                    width: frame.width,
+                    height: frame.height,
+                    now_ms: started.elapsed().as_millis() as u64,
+                    ours: screen_ours,
+                };
+                let mut own = frame.clone();
+                if face.draw(&mut own, &view) {
+                    face_frame = Some(own);
+                }
+            }
+            if let Some(own) = face_frame.as_ref() {
+                frame = own;
+            }
             let whole = [Rect {
                 x: 0,
                 y: 0,
                 w: frame.width,
                 h: frame.height,
             }];
-            if idle_black || overlay.is_some() {
+            if idle_black || overlay.is_some() || face_frame.is_some() {
                 damage = &whole;
             }
             rastered_at = Instant::now();
@@ -1016,9 +1083,28 @@ fn session(
                 // The pointer: a tap on one of the theme's controls acts, a
                 // finger down on a bar drags its value until it lifts; any
                 // other touch does what the touch rules say.
-                let events = window.take_pointer();
+                let mut events = window.take_pointer();
                 let mut acted = false;
                 let mut dismiss = false;
+                // The face sees every touch first; what it takes, the
+                // theme's controls and the touch rules do not.
+                if let Some(face) = face.as_deref_mut() {
+                    let view = View {
+                        input: &input,
+                        fonts: &assets.fonts,
+                        width: skin.width,
+                        height: skin.height,
+                        now_ms: started.elapsed().as_millis() as u64,
+                        ours: screen_ours,
+                    };
+                    events.retain(|event| {
+                        let taken = face.pointer(event.kind, event.x, event.y, &view);
+                        if taken && event.kind == PointerKind::Up {
+                            acted = true;
+                        }
+                        !taken
+                    });
+                }
                 if let Some(cal) = calibration.as_mut() {
                     // Each finger lifted is a sample for the target on show.
                     for raw in window.take_raw_lifts() {
