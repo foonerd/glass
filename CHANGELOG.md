@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.90] - 2026-09-30
+
+A screen save goes through again. 0.7.89 read the face size of an unset key as the word "undefined", and its save path, which keeps the size as it stands unless one is given, then refused every save of rotation or pointer on the Screen tab; the size is read in one place now, normal unless the key says large or car. Also the Save row of the screen settings stood alone while the kiosk held the screen, its layout rule outranking the hidden flag; the flag outranks every display rule now.
+
 ## [0.7.89] - 2026-09-30
 
 The turn stays the screen's own. With a rotation set for a panel the display draws on itself, the display applied the same turn under X too, on top of the turn the X server already makes, and the theme came out turned twice; since 0.7.83 that was the state of any player with a rotation kept and the kiosk back on. The rotation applies only where the display draws on the screen itself now; under X it is 0, as the Screen page always said.
