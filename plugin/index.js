@@ -1971,6 +1971,9 @@ Glass.prototype.setScreenOwner = function (owner) {
                 self.writeRegister(register);
                 self.probeAt = 0;
                 self.logger.info(id + 'screen owner: glass-evo has the screen; ' + register.changes.length + ' change' + (register.changes.length === 1 ? '' : 's') + ' recorded');
+                // A display already on a free screen would stay as it is:
+                // it leaves now and comes back as the face.
+                try { if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); } } catch (e) {}
                 return { ok: true, changed: true };
             }, function (e) {
                 register.error = problem(e);
