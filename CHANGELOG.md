@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.89] - 2026-09-30
+
+The turn stays the screen's own. With a rotation set for a panel the display draws on itself, the display applied the same turn under X too, on top of the turn the X server already makes, and the theme came out turned twice; since 0.7.83 that was the state of any player with a rotation kept and the kiosk back on. The rotation applies only where the display draws on the screen itself now; under X it is 0, as the Screen page always said.
+
+A face size, for glass-evo. One key in the display's configuration, `face.size`, normal, large or car, that the display hands to a face as a scale, 1, 1.4 or 2, so a face draws its controls and its clock for a hand at arm's length or for a glance while driving; `GET` and `POST /api/screen` carry it as `faceSize`. The display itself draws nothing differently.
+
 ## [0.7.88] - 2026-09-30
 
 A track inside a cue sheet finds its folder's pictures. Volumio names such a track `cue://<path>@<track>`, and both the display and the Manager took anything with a scheme for a stream with no folder, so a theme's folder pictures, back.jpg among them, never showed for CUE albums; reported from the community with a CUE + FLAC test. The sheet's folder is the track's now, on the player and for remote displays alike. Also: the watcher restarts a kiosk unit only for a failure that happened after the display stepped aside, not for one left from before.
