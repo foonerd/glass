@@ -1954,6 +1954,8 @@ Glass.prototype.setScreenOwner = function (owner) {
         self.logger.info(id + 'screen owner: glass-evo takes the screen (' + pluginSteps.length + ' plugin' + (pluginSteps.length === 1 ? '' : 's') + ' to turn off)');
         return chain(pluginSteps, function (step) { return runTake(step).then(function () { register.changes.push(step); }); })
             .then(function () { return waitFor(function () { return !fs.existsSync('/tmp/.X11-unix/X0'); }, 20000); })
+            // A kiosk unit left "failed" by an earlier fight would read as a failure later; cleared, it reads as what it is.
+            .then(function () { return systemctl('reset-failed volumio-kiosk').catch(function () { return null; }); })
             .then(function () {
                 var unitSteps = screenowner.planTakeUnits(self.kioskUnitStates());
                 return chain(unitSteps, function (step) { return runTake(step).then(function () { register.changes.push(step); }); });
