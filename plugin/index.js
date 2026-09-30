@@ -1392,6 +1392,8 @@ Glass.prototype.startDisplayOnce = function () {
                             var error = (code === 0) ? null : new Error(signal ? 'signal ' + signal : 'exit ' + code);
                             if (error !== null) {
                                 self.logger.error(id + 'the display did not run: ' + error.message + (lastErr.length ? ' ' + lastErr.join(' | ') : ''));
+                                // Lost to an X server closing under it: no launch for a moment, the watcher brings it back where it belongs.
+                                if (/x11 not available|X server/.test(lastErr.join(' '))) { self.screenYieldUntil = Date.now() + 3000; }
                             } else {
                                 self.logger.info(id + 'the display ran and left');
                             }
@@ -1506,7 +1508,11 @@ Glass.prototype.watchScreen = function () {
         var free = screenprobe.screenFree(fact);
         var running = !!(self.meterChild && self.meterChild.exitCode === null);
         if (free) {
-            if (self.screenWasFree !== true) { self.logger.info(id + 'screen: free (no kiosk, no X): the display draws on it and stays up'); }
+            if (self.screenWasFree !== true) {
+                self.logger.info(id + 'screen: free (no kiosk, no X): the display draws on it and stays up');
+                // The kiosk's X may still be closing: no launch for a moment, so none is tried against it.
+                if (self.screenWasFree === false) { self.screenYieldUntil = Date.now() + 3000; }
+            }
             if (!running && self.screenOurs(fact)) {
                 try { fs.writeFileSync(runFlag, ''); } catch (e) {}
                 self.startDisplayOnce();
