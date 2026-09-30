@@ -2973,6 +2973,15 @@ pub fn apply_matrix(m: [f32; 6], point: (f32, f32)) -> (f32, f32) {
     )
 }
 
+/// How far a calibration's worst touch may miss its target, in window
+/// pixels, for the map to be kept: a twentieth of the window's diagonal.
+/// A finger's jitter sits well inside it; a touch that missed its target,
+/// or a lift the calibration did not ask for, sits far outside.
+pub fn calibration_tolerance(window: (u32, u32)) -> f32 {
+    let (w, h) = (window.0 as f32, window.1 as f32);
+    (w * w + h * h).sqrt() / 20.0
+}
+
 /// The affine map that takes each raw share to its expected share with
 /// the least squared error, from three or more pairs that do not lie on
 /// one line, and the worst distance left over; none when the pairs do not
@@ -5365,6 +5374,21 @@ mod tests {
             "points on one line pin nothing"
         );
         assert!(fit_affine(&pairs[..2]).is_none(), "two points are too few");
+        // A lift the calibration did not ask for, ahead of the five, puts
+        // every sample one target off: the fit is far past the tolerance.
+        let shifted: Vec<_> = std::iter::once((0.5, 0.5))
+            .chain(pairs.iter().map(|(raw, _)| *raw))
+            .zip(pairs.iter().map(|(_, expected)| *expected))
+            .collect();
+        let (_, off) = fit_affine(&shifted).expect("five points still pin a map");
+        let panel = (720u32, 1280u32);
+        assert!(
+            off * 1468.0 > calibration_tolerance(panel),
+            "a shifted set is refused: {off}"
+        );
+        assert!(worst * 1468.0 < calibration_tolerance(panel));
+        assert!((calibration_tolerance(panel) - 73.4).abs() < 0.1);
+        assert!((calibration_tolerance((320, 240)) - 20.0).abs() < 1e-3);
         assert_eq!(
             parse_matrix(Some("0, 1, 0, 1, 0, 0")),
             [0.0, 1.0, 0.0, 1.0, 0.0, 0.0]

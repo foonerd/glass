@@ -1657,7 +1657,7 @@
     var text = '';
     if (c.state === 'waiting') text = t('MANAGER_TOUCHMAP_WAITING');
     else if (c.state === 'done') text = t('MANAGER_TOUCHMAP_DONE') + (typeof c.worst === 'number' ? ' ' + t('MANAGER_TOUCHMAP_WORST') + ' ' + Math.round(c.worst) + ' px' : '');
-    else if (c.state === 'failed') text = t('MANAGER_TOUCHMAP_FAILED') + ' ' + t('MANAGER_TOUCHMAP_FAIL_' + String(c.error || 'unfit').toUpperCase().replace(/[^A-Z]/g, ''));
+    else if (c.state === 'failed') text = t('MANAGER_TOUCHMAP_FAILED') + ' ' + t('MANAGER_TOUCHMAP_FAIL_' + String(c.error || 'unfit').toUpperCase().replace(/[^A-Z]/g, '')) + (typeof c.worst === 'number' ? ' (' + t('MANAGER_TOUCHMAP_WORST') + ' ' + Math.round(c.worst) + ' px)' : '');
     $('touch-map-state').textContent = text + (tc.mapping === 'calibrated' && tc.matrix ? ' · ' + t('MANAGER_TOUCHMAP_MATRIX') + ' ' + tc.matrix.map(function (v) { return Math.round(v * 1000) / 1000; }).join(', ') : '');
     if (c.state === 'waiting') { if (!state.touchPoll) state.touchPoll = setTimeout(function () { state.touchPoll = null; api('GET', '/api/screen').then(function (sc) { renderTouch(sc.touch); }).catch(function () {}); }, 2000); }
   }
