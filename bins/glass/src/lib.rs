@@ -98,6 +98,8 @@ pub struct View<'a> {
     pub height: u32,
     pub now_ms: u64,
     pub ours: bool,
+    /// How large the face draws: 1 as designed, more for a hand at arm's length.
+    pub scale: f32,
 }
 
 /// A face drawn over the display: what glass-evo adds on top of the
@@ -701,7 +703,13 @@ fn session(
                 // `screen.driver` and `screen.rotation`: what draws, and the
                 // picture turned on a screen no X server turns.
                 driver: skin.run.driver.sdl_name().map(str::to_string),
-                rotation: skin.run.rotation.degrees(),
+                // The turn is the display's own only on the screen itself;
+                // under X the server turns the screen, and this stays 0.
+                rotation: if draws_on_kms(&skin.run.driver) {
+                    skin.run.rotation.degrees()
+                } else {
+                    0
+                },
                 // `screen.pointer.shown`: the pointer, as the plugin resolved it.
                 pointer: skin.run.pointer,
                 ..WindowOptions::default()
@@ -826,9 +834,7 @@ fn session(
     // console.
     // The screen is ours when the display draws on it itself: by the driver
     // key, or by the launcher's word when the key is Auto.
-    let screen_ours = skin.run.driver == lead::ScreenDriver::KmsDrm
-        || (skin.run.driver == lead::ScreenDriver::Auto
-            && screen_given().as_deref() == Some("kmsdrm"));
+    let screen_ours = draws_on_kms(&skin.run.driver);
     let mut black_frame: Option<Frame> = None;
     loop {
         let frame_started = Instant::now();
@@ -1048,6 +1054,7 @@ fn session(
                     height: frame.height,
                     now_ms: started.elapsed().as_millis() as u64,
                     ours: screen_ours,
+                    scale: skin.run.face_scale,
                 };
                 let mut own = frame.clone();
                 if face.draw(&mut own, &view) {
@@ -1096,6 +1103,7 @@ fn session(
                         height: skin.height,
                         now_ms: started.elapsed().as_millis() as u64,
                         ours: screen_ours,
+                        scale: skin.run.face_scale,
                     };
                     events.retain(|event| {
                         let taken = face.pointer(event.kind, event.x, event.y, &view);
@@ -1442,6 +1450,15 @@ pub(crate) fn screen_given() -> Option<String> {
         .ok()
         .map(|v| v.trim().to_ascii_lowercase())
         .filter(|v| !v.is_empty())
+}
+
+/// Whether the display draws on the screen itself, where the turn and the
+/// screen are its own: the driver key says so, or the launcher named
+/// kmsdrm, or the key is Auto with no X server to be had.
+fn draws_on_kms(driver: &lead::ScreenDriver) -> bool {
+    *driver == lead::ScreenDriver::KmsDrm
+        || screen_given().as_deref() == Some("kmsdrm")
+        || (*driver == lead::ScreenDriver::Auto && screen_given().is_none() && !screen_available())
 }
 
 /// A calibration of the touch panel in progress: the targets, in picture
