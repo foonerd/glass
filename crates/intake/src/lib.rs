@@ -760,6 +760,15 @@ impl Slideshow {
     }
 }
 
+/// The seconds left of a persist period of `seconds` that began at
+/// `started_ms`, at `now_ms` on the same clock: whole seconds passed come
+/// off, and the count never goes below zero or runs backwards from a
+/// clock behind the start.
+pub fn persist_left(seconds: u32, started_ms: u64, now_ms: u64) -> u32 {
+    let passed = now_ms.saturating_sub(started_ms) / 1000;
+    u64::from(seconds).saturating_sub(passed) as u32
+}
+
 /// The plugin's persist file: `duration:start_ms:mode`.
 pub const PERSIST_FILE: &str = "/tmp/glass_persist";
 
@@ -1511,6 +1520,9 @@ pub struct TapSource {
     pushed: Vec<Event>,
     /// Infinity playback, which only the channel reports.
     infinity_held: bool,
+    /// The persist period the plugin pushed as a line: mode, seconds and
+    /// when it began (epoch ms), for a source that cannot read the file.
+    persist_held: Option<(String, u32, u64)>,
     /// The last state, and whether the skin's needs are to be derived from
     /// it again.
     playing_held: NowPlaying,
@@ -1648,6 +1660,7 @@ impl TapSource {
             channel_was_live: false,
             pushed: Vec::new(),
             infinity_held: false,
+            persist_held: None,
             playing_held: NowPlaying::default(),
             rederive: false,
             conditioner: Conditioner::new(DataSourceSpec {
@@ -1992,6 +2005,13 @@ impl Source for TapSource {
                     self.queue_held = Some(items);
                     self.rederive = true;
                 }
+                Event::Persist {
+                    mode,
+                    seconds,
+                    started_ms,
+                } => {
+                    self.persist_held = (!mode.is_empty()).then_some((mode, seconds, started_ms));
+                }
                 Event::Hello { .. } => {}
             }
         }
@@ -2098,6 +2118,11 @@ impl Source for TapSource {
             let (mode, left) = persist_state(PERSIST_FILE, now_epoch_ms);
             metadata.persist_mode = mode;
             metadata.persist_left = left;
+        } else if let Some((mode, seconds, started_ms)) = &self.persist_held {
+            // The line the plugin pushed stands in for the file.
+            metadata.persist_mode = mode.clone();
+            metadata.persist_left =
+                persist_left(*seconds, *started_ms, lead::epoch_nanos() / 1_000_000);
         }
         if let Some(show) = self.fanart.as_mut() {
             if self
@@ -2632,6 +2657,24 @@ mod tests {
         let mut fixed = Selector::seeded(rotation(true, Vec::new()), 1);
         assert!(!fixed.rotates());
         assert_eq!(fixed.next(), None);
+    }
+
+    #[test]
+    fn the_persist_line_counts_down_on_the_plugin_clock() {
+        assert_eq!(persist_left(15, 1_000_000, 1_000_000), 15);
+        assert_eq!(persist_left(15, 1_000_000, 1_004_999), 11);
+        assert_eq!(persist_left(15, 1_000_000, 1_015_000), 0);
+        assert_eq!(
+            persist_left(15, 1_000_000, 1_999_000),
+            0,
+            "never below zero"
+        );
+        assert_eq!(
+            persist_left(15, 1_000_000, 900_000),
+            15,
+            "a clock behind the start counts nothing"
+        );
+        assert_eq!(persist_left(0, 1_000_000, 1_000_000), 0);
     }
 
     #[test]

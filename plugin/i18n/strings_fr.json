@@ -440,6 +440,8 @@
     "MANAGER_FACE_NO_FRAMES": "pas de trames : le service de trames ne tourne pas",
     "MANAGER_FACE_WAITING": "En attente du lecteur…",
     "MANAGER_FACE_FAILED": "La face n'a pas pu démarrer :",
+    "MANAGER_FACE_STOPPED": "Le lecteur est arrêté. L'affichage a quitté l'écran ; les instruments reviennent quand il joue.",
+    "MANAGER_FACE_PAUSED": "Le lecteur est en pause. L'affichage a quitté l'écran ; les instruments reviennent quand il joue.",
     "MANAGER_TAB_CATALOG": "Catalogue",
     "MANAGER_TAB_ARTWORK": "Apparence",
     "MANAGER_FONTS_TITLE": "Polices",

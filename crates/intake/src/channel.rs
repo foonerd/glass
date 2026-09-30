@@ -39,6 +39,15 @@ pub enum Event {
     /// The player's queue as the plugin pushes it, on connect and on every
     /// change: the tracks in order, for the next line and the queue's length.
     Queue(Vec<QueueItem>),
+    /// The persist period after a stop or a pause, as the plugin times it:
+    /// the mode (`countdown` or `freeze`, empty when cleared), its length
+    /// in seconds and when it began (epoch milliseconds), for a display
+    /// that cannot read the persist file, a browser face.
+    Persist {
+        mode: String,
+        seconds: u32,
+        started_ms: u64,
+    },
 }
 
 /// One track of the player's queue, as the plugin's `queue` line carries it.
@@ -427,7 +436,42 @@ pub fn decode(line: &[u8]) -> Option<Event> {
                 .map(|items| items.iter().map(queue_item).collect())
                 .unwrap_or_default(),
         )),
+        "persist" => Some(Event::Persist {
+            mode: text("mode"),
+            seconds: value.get("seconds").and_then(Value::as_u64).unwrap_or(0) as u32,
+            started_ms: value.get("startedAt").and_then(Value::as_u64).unwrap_or(0),
+        }),
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod decode_tests {
+    use super::*;
+
+    /// The persist line carries the mode, the seconds and when it began;
+    /// a cleared one has an empty mode; an unknown kind is nothing.
+    #[test]
+    fn the_persist_line_is_decoded_and_an_unknown_kind_is_not() {
+        assert_eq!(
+            decode(
+                br#"{"kind":"persist","mode":"countdown","seconds":15,"startedAt":1700000000000}"#
+            ),
+            Some(Event::Persist {
+                mode: "countdown".into(),
+                seconds: 15,
+                started_ms: 1_700_000_000_000
+            })
+        );
+        assert_eq!(
+            decode(br#"{"kind":"persist","mode":"","seconds":0,"startedAt":0}"#),
+            Some(Event::Persist {
+                mode: String::new(),
+                seconds: 0,
+                started_ms: 0
+            })
+        );
+        assert_eq!(decode(br#"{"kind":"whatever"}"#), None);
     }
 }
 

@@ -918,6 +918,7 @@ Glass.prototype.onStart = function () {
     if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
     try { if (fs.existsSync(dismissFile)) fs.removeSync(dismissFile); } catch (e) {}
     try { if (fs.existsSync(persistFile)) fs.removeSync(persistFile); } catch (e) {}
+        try { self.pushPersist('', 0, 0); } catch (e) {}
 
     // The channel the display reads the player's state from. A display that
     // connects gets fresh values asked of the player.
@@ -936,7 +937,7 @@ Glass.prototype.onStart = function () {
     // The feed behind the manager's Face tab: the frames from the daemon's
     // pages socket, and every line the displays hear, for browser pages.
     self.face = new FaceFeed({ socketPath: faceSocketPath, logger: self.logger, current: function () {
-        return self.channel ? { state: advanced(self.channel.state, self.channel.stateAt, Date.now()), infinity: self.channel.infinity, showing: self.channel.showing, queue: self.channel.queue } : {};
+        return self.channel ? { state: advanced(self.channel.state, self.channel.stateAt, Date.now()), infinity: self.channel.infinity, showing: self.channel.showing, queue: self.channel.queue, persist: self.channel.persist } : {};
     } });
     self.channel.onPush = function (message) { self.face.push(message); };
 
@@ -1047,6 +1048,7 @@ Glass.prototype.onStart = function () {
                 self.transitionGraceTimer = null;
             }
             try { if (fs.existsSync(persistFile)) fs.removeSync(persistFile); } catch (e) {}
+        try { self.pushPersist('', 0, 0); } catch (e) {}
             try { self.applyThemeTag(state); } catch (eTag) {
                 self.logger.warn(id + 'theme tag: ' + (eTag && eTag.message ? eTag.message : eTag));
             }
@@ -1135,9 +1137,11 @@ Glass.prototype.onStart = function () {
                     try {
                         fs.writeFileSync(persistFile, persistDuration + ':' + Date.now() + ':' + persistDisplay);
                     } catch (e) {}
+                    self.pushPersist(persistDisplay, persistDuration, Date.now());
                     self.persistTimer = setTimeout(function () {
                         self.persistTimer = null;
                         try { if (fs.existsSync(persistFile)) fs.removeSync(persistFile); } catch (e) {}
+        try { self.pushPersist('', 0, 0); } catch (e) {}
                         if (fs.existsSync(runFlag)) {
                             fs.removeSync(runFlag);
                             self.logger.info(id + 'persist timer expired, the display leaves');
@@ -1180,6 +1184,7 @@ Glass.prototype.onStart = function () {
                         fs.removeSync(persistFile);
                         self.logger.info(id + 'volatile stop, persist file cleared');
                     }
+                    self.pushPersist('', 0, 0);
                 } catch (e) {}
             }
         }
@@ -1251,6 +1256,7 @@ Glass.prototype.onStop = function () {
         if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
         try { if (fs.existsSync(dismissFile)) fs.removeSync(dismissFile); } catch (e) {}
         try { if (fs.existsSync(persistFile)) fs.removeSync(persistFile); } catch (e) {}
+        try { self.pushPersist('', 0, 0); } catch (e) {}
 
         self.commandRouter.removePluginRestEndpoint({ endpoint: 'glass_artistfanart' });
         socket.off('pushState');
@@ -1383,6 +1389,20 @@ Glass.prototype.setInteractiveMode = function (value) {
     self.pushRemoteConfig();
     self.logger.info(id + 'interactive controls: ' + wanted);
     return { changed: true, interactive: wanted };
+};
+
+// ---- The persist period, as a line -------------------------------------
+
+// The display learns the persist countdown from the persist file; a
+// browser face cannot read it, so the same goes down the lines: the mode,
+// the seconds, and when the period began (epoch ms). Cleared with an
+// empty mode.
+Glass.prototype.pushPersist = function (mode, seconds, startedAt) {
+    var self = this;
+    if (!self.channel) { return; }
+    var line = { kind: 'persist', mode: String(mode || ''), seconds: parseInt(seconds, 10) || 0, startedAt: parseInt(startedAt, 10) || 0 };
+    self.channel.persist = line;
+    self.channel.push(line);
 };
 
 // ---- The screen: what draws the window, and the picture's turn ----------

@@ -51,6 +51,15 @@ test('a page that connects gets the state as it stands now, not as it was last p
   p.req.emit('close');
 });
 
+test('the persist line is kept and replayed like the others', () => {
+  const feed = new FaceFeed({ socketPath: path.join(os.tmpdir(), 'glass-face-none2-' + process.pid + '.sock') });
+  feed.push({ kind: 'persist', mode: 'countdown', seconds: 15, startedAt: 1000 });
+  const p = page();
+  feed.attach(p.req, p.res);
+  assert.ok(p.res.out.indexOf('{"kind":"persist","mode":"countdown","seconds":15,"startedAt":1000}') !== -1);
+  p.req.emit('close');
+});
+
 test('a page gets the headers, the plugin\'s last words, then hops and lines as they come', async () => {
   const socketPath = path.join(os.tmpdir(), 'glass-face-test-' + process.pid + '.sock');
   const d = await daemon(socketPath);
