@@ -1523,6 +1523,9 @@ pub struct TapSource {
     /// The persist period the plugin pushed as a line: mode, seconds and
     /// when it began (epoch ms), for a source that cannot read the file.
     persist_held: Option<(String, u32, u64)>,
+    /// A calibration the plugin asked for, the number of targets, until
+    /// the display takes it.
+    calibrate_asked: Option<u32>,
     /// The last state, and whether the skin's needs are to be derived from
     /// it again.
     playing_held: NowPlaying,
@@ -1661,6 +1664,7 @@ impl TapSource {
             pushed: Vec::new(),
             infinity_held: false,
             persist_held: None,
+            calibrate_asked: None,
             playing_held: NowPlaying::default(),
             rederive: false,
             conditioner: Conditioner::new(DataSourceSpec {
@@ -1685,6 +1689,12 @@ impl TapSource {
     /// next poll.
     pub fn push_event(&mut self, event: Event) {
         self.pushed.push(event);
+    }
+
+    /// A calibration the plugin asked for since the last take: how many
+    /// targets to show.
+    pub fn take_calibrate_request(&mut self) -> Option<u32> {
+        self.calibrate_asked.take()
     }
 
     /// Derive again from the state held at the next poll: for a host that
@@ -2012,6 +2022,7 @@ impl Source for TapSource {
                 } => {
                     self.persist_held = (!mode.is_empty()).then_some((mode, seconds, started_ms));
                 }
+                Event::Calibrate { points } => self.calibrate_asked = Some(points),
                 Event::Hello { .. } => {}
             }
         }

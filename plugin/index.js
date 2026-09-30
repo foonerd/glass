@@ -878,6 +878,8 @@ Glass.prototype.runCommand = function (message) {
     var router = self.commandRouter;
     var name = String(message.name || '');
     var value = message.value;
+    // The display's answer to a calibration is not a command for the player.
+    if (name === 'calibration') { self.takeCalibration(value); return; }
     self.logger.info(id + 'channel: command ' + name + (value !== undefined ? ' ' + JSON.stringify(value) : ''));
     try {
         switch (name) {
@@ -943,6 +945,8 @@ Glass.prototype.onStart = function () {
     self.channel.onPush = function (message) { self.face.push(message); };
     // The pointer, resolved from the screen's choice and what the player has now.
     try { self.refreshPointerShown(); } catch (e) { self.logger.warn(id + 'screen: pointer not resolved: ' + (e && e.message ? e.message : e)); }
+    // A screen that is ours has its display up from now on.
+    try { self.keepScreen(); } catch (e) { self.logger.warn(id + 'screen: not kept: ' + (e && e.message ? e.message : e)); }
 
     self.loadConfigs();
     if (!meterConfig) {
@@ -1061,63 +1065,7 @@ Glass.prototype.onStart = function () {
                 var ScreenTimeout = (parseInt(self.config.get('timeout'), 10)) * 1000;
 
                 if (ScreenTimeout > 0) {
-                    var startDisplayOnce = function () {
-                        // A player with no screen of its own serves remote displays and opens no window.
-                        if (self.config.get('headless') === true) {
-                            return;
-                        }
-                        if (self.meterChild && self.meterChild.exitCode === null) {
-                            return;
-                        }
-                        // The display's lines reach the journal as it writes them,
-                        // through the same gate as the plugin's own.
-                        var child = spawn('/bin/sh', [LaunchScript], { uid: 1000, gid: 1000, env: self.launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
-                        var lastErr = [];
-                        var relay = function (chunk, isErr) {
-                            String(chunk).split('\n').forEach(function (line) {
-                                line = line.trim();
-                                if (!line) { return; }
-                                if (isErr) { lastErr.push(line); if (lastErr.length > 5) { lastErr.shift(); } }
-                                // The display prefixes its lines as the plugin does; one prefix is enough.
-                                self.logger.info(id + line.replace(/^glass: /, ''));
-                            });
-                        };
-                        child.stdout.on('data', function (chunk) { relay(chunk, false); });
-                        child.stderr.on('data', function (chunk) { relay(chunk, true); });
-                        child.on('error', function (e) { lastErr.push(String(e && e.message ? e.message : e)); });
-                        child.on('exit', function (code, signal) {
-                            var error = (code === 0) ? null : new Error(signal ? 'signal ' + signal : 'exit ' + code);
-                            if (error !== null) {
-                                self.logger.error(id + 'the display did not run: ' + error.message + (lastErr.length ? ' ' + lastErr.join(' | ') : ''));
-                            } else {
-                                self.logger.info(id + 'the display ran and left');
-                            }
-                            var dismissMarkerPresent = false;
-                            try { dismissMarkerPresent = fs.existsSync(dismissFile); } catch (e) {}
-                            var action = meterExitAction(error === null, !!self.Timeout, dismissMarkerPresent);
-                            try { if (dismissMarkerPresent) fs.removeSync(dismissFile); } catch (e) {}
-                            if (self.meterChild === child) {
-                                self.meterChild = null;
-                                if (action === 'rearm') {
-                                    clearInterval(self.Timeout);
-                                    self.Timeout = setInterval(function () {
-                                        startDisplayOnce();
-                                    }, ScreenTimeout);
-                                    self.logger.info(id + 'dismissed by touch, re-armed for ' + (ScreenTimeout / 1000) + ' s');
-                                } else if (action === 'restart') {
-                                    var ranMs = Date.now() - (child.startedAt || 0);
-                                    if (meterRestartNow(error === null, ranMs)) {
-                                        startDisplayOnce();
-                                    } else {
-                                        self.logger.warn(id + 'the display died ' + Math.round(ranMs / 1000) + ' s after launch; next attempt in ' + (ScreenTimeout / 1000) + ' s');
-                                    }
-                                }
-                            }
-                        });
-                        child.startedAt = Date.now();
-                        self.meterChild = child;
-                        self.displayStartedAt = new Date().toISOString();
-                    };
+                    var startDisplayOnce = function () { self.startDisplayOnce(); };
                     self.Timeout = setInterval(function () {
                         startDisplayOnce();
                     }, ScreenTimeout);
@@ -1145,14 +1093,16 @@ Glass.prototype.onStart = function () {
                         self.persistTimer = null;
                         try { if (fs.existsSync(persistFile)) fs.removeSync(persistFile); } catch (e) {}
         try { self.pushPersist('', 0, 0); } catch (e) {}
-                        if (fs.existsSync(runFlag)) {
+                        if (self.screenOurs()) {
+                            self.logger.info(id + 'persist timer expired; the screen is ours, the display stays');
+                        } else if (fs.existsSync(runFlag)) {
                             fs.removeSync(runFlag);
                             self.logger.info(id + 'persist timer expired, the display leaves');
                         }
                         lastStateIsPlaying = false;
                     }, persistDuration * 1000);
                 } else {
-                    if (fs.existsSync(runFlag)) {
+                    if (!self.screenOurs() && fs.existsSync(runFlag)) {
                         fs.removeSync(runFlag);
                     }
                     lastStateIsPlaying = false;
@@ -1240,6 +1190,7 @@ Glass.prototype.checkAlsaChain = function () {
 Glass.prototype.onStop = function () {
     var self = this;
     if (self.carDashTimer) { clearTimeout(self.carDashTimer); self.carDashTimer = null; }
+    if (self.screenKeeper) { clearInterval(self.screenKeeper); self.screenKeeper = null; }
 
     self.commandRouter.stateMachine.stop().then(function () {
         if (self.Timeout) {
@@ -1394,6 +1345,98 @@ Glass.prototype.setInteractiveMode = function (value) {
     return { changed: true, interactive: wanted };
 };
 
+// The display launched once: nothing when the player has no screen of its
+// own or the display already runs; its lines relayed to the journal; on
+// exit, re-armed, restarted or left, as the exit action says.
+Glass.prototype.startDisplayOnce = function () {
+    var self = this;
+                        // A player with no screen of its own serves remote displays and opens no window.
+                        if (self.config.get('headless') === true) {
+                            return;
+                        }
+                        if (self.meterChild && self.meterChild.exitCode === null) {
+                            return;
+                        }
+                        // The display's lines reach the journal as it writes them,
+                        // through the same gate as the plugin's own.
+                        var child = spawn('/bin/sh', [LaunchScript], { uid: 1000, gid: 1000, env: self.launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+                        var lastErr = [];
+                        var relay = function (chunk, isErr) {
+                            String(chunk).split('\n').forEach(function (line) {
+                                line = line.trim();
+                                if (!line) { return; }
+                                if (isErr) { lastErr.push(line); if (lastErr.length > 5) { lastErr.shift(); } }
+                                // The display prefixes its lines as the plugin does; one prefix is enough.
+                                self.logger.info(id + line.replace(/^glass: /, ''));
+                            });
+                        };
+                        child.stdout.on('data', function (chunk) { relay(chunk, false); });
+                        child.stderr.on('data', function (chunk) { relay(chunk, true); });
+                        child.on('error', function (e) { lastErr.push(String(e && e.message ? e.message : e)); });
+                        child.on('exit', function (code, signal) {
+                            var error = (code === 0) ? null : new Error(signal ? 'signal ' + signal : 'exit ' + code);
+                            if (error !== null) {
+                                self.logger.error(id + 'the display did not run: ' + error.message + (lastErr.length ? ' ' + lastErr.join(' | ') : ''));
+                            } else {
+                                self.logger.info(id + 'the display ran and left');
+                            }
+                            var dismissMarkerPresent = false;
+                            try { dismissMarkerPresent = fs.existsSync(dismissFile); } catch (e) {}
+                            var action = meterExitAction(error === null, !!self.Timeout, dismissMarkerPresent);
+                            try { if (dismissMarkerPresent) fs.removeSync(dismissFile); } catch (e) {}
+                            if (self.meterChild === child) {
+                                self.meterChild = null;
+                                if (action === 'rearm') {
+                                    clearInterval(self.Timeout);
+                                    self.Timeout = setInterval(function () {
+                                        self.startDisplayOnce();
+                                    }, self.screenTimeoutMs());
+                                    self.logger.info(id + 'dismissed by touch, re-armed for ' + (self.screenTimeoutMs() / 1000) + ' s');
+                                } else if (action === 'restart') {
+                                    var ranMs = Date.now() - (child.startedAt || 0);
+                                    if (meterRestartNow(error === null, ranMs)) {
+                                        self.startDisplayOnce();
+                                    } else {
+                                        self.logger.warn(id + 'the display died ' + Math.round(ranMs / 1000) + ' s after launch; next attempt in ' + (self.screenTimeoutMs() / 1000) + ' s');
+                                    }
+                                }
+                            }
+                        });
+                        child.startedAt = Date.now();
+                        self.meterChild = child;
+                        self.displayStartedAt = new Date().toISOString();
+};
+
+// The screensaver's start delay in milliseconds, as the settings say.
+Glass.prototype.screenTimeoutMs = function () {
+    return (parseInt(this.config.get('timeout'), 10) || 0) * 1000;
+};
+
+// Whether the screen is ours: no X server, the display drawing through
+// KMS/DRM, and so the only thing that must be on the screen.
+Glass.prototype.screenOurs = function () {
+    this.loadConfigs();
+    var cur = (meterConfig && meterConfig.current) || {};
+    return String(cur['screen.driver'] || '').trim().toLowerCase() === 'kmsdrm';
+};
+
+// The screen is ours: the display runs whether or not the player plays,
+// started now and again whenever it is found gone, the console never shown.
+Glass.prototype.keepScreen = function () {
+    var self = this;
+    if (self.screenKeeper) { clearInterval(self.screenKeeper); self.screenKeeper = null; }
+    if (!self.screenOurs()) { return; }
+    var up = function () {
+        if (!self.screenOurs()) { return; }
+        if (self.meterChild && self.meterChild.exitCode === null) { return; }
+        try { fs.writeFileSync(runFlag, ''); } catch (e) {}
+        self.startDisplayOnce();
+    };
+    self.logger.info(id + 'screen: ours, the display stays up');
+    up();
+    self.screenKeeper = setInterval(up, 5000);
+};
+
 // ---- The persist period, as a line -------------------------------------
 
 // The display learns the persist countdown from the persist file; a
@@ -1430,7 +1473,8 @@ Glass.prototype.screenSettings = function () {
         pointer: pointer,
         pointerShown: String(cur['screen.pointer.shown']).toLowerCase() === 'true',
         kioskActive: found.holders.kiosk,
-        probe: found
+        probe: found,
+        touch: self.touchSettings()
     };
 };
 
@@ -1442,6 +1486,109 @@ Glass.prototype.screenProbe = function (fresh) {
     self.probeHeld = screenprobe.gather();
     self.probeAt = Date.now();
     return self.probeHeld;
+};
+
+// The touch mapping: how a finger's share of the panel is set right
+// before it becomes a pixel. `auto` leaves it as the panel reports;
+// `overrides` composes a swap and flips; `calibrated` keeps the matrix
+// the display found. The display reads `touch.matrix` alone.
+var IDENTITY_MATRIX = [1, 0, 0, 0, 1, 0];
+function composeOverrides(swap, flipX, flipY) {
+    // Applied in this order: swap, then flip X, then flip Y, each on a share in 0..1.
+    var m = IDENTITY_MATRIX.slice();
+    var mul = function (a, b) { // a after b
+        return [a[0] * b[0] + a[1] * b[3], a[0] * b[1] + a[1] * b[4], a[0] * b[2] + a[1] * b[5] + a[2],
+                a[3] * b[0] + a[4] * b[3], a[3] * b[1] + a[4] * b[4], a[3] * b[2] + a[4] * b[5] + a[5]];
+    };
+    if (swap) m = mul([0, 1, 0, 1, 0, 0], m);
+    if (flipX) m = mul([-1, 0, 1, 0, 1, 0], m);
+    if (flipY) m = mul([1, 0, 0, 0, -1, 1], m);
+    return m;
+}
+function matrixText(m) { return m.map(function (v) { return String(Math.round(v * 100000) / 100000); }).join(','); }
+function parseMatrixText(text) {
+    var n = String(text || '').split(/[,\s]+/).filter(Boolean).map(Number);
+    return n.length === 6 && n.every(isFinite) ? n : IDENTITY_MATRIX.slice();
+}
+
+Glass.prototype.touchSettings = function () {
+    var self = this;
+    var cur = (meterConfig && meterConfig.current) || {};
+    var mapping = String(cur['touch.mapping'] || 'auto').trim().toLowerCase();
+    if (['auto', 'overrides', 'calibrated'].indexOf(mapping) === -1) { mapping = 'auto'; }
+    var truthy = function (v) { return String(v).toLowerCase() === 'true'; };
+    return {
+        mapping: mapping,
+        swap: truthy(cur['touch.swap']),
+        flipX: truthy(cur['touch.flip.x']),
+        flipY: truthy(cur['touch.flip.y']),
+        matrix: parseMatrixText(cur['touch.matrix']),
+        calibration: self.calibration || { state: 'none' }
+    };
+};
+
+// Set the mapping and the overrides; the matrix follows (a calibrated
+// matrix is kept as it is), and the display starts again with it.
+Glass.prototype.setTouchSettings = function (data) {
+    var self = this;
+    self.loadConfigs();
+    if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return { error: 'GLASS.NO_PEPPYCONFIG' }; }
+    var now = self.touchSettings();
+    var mapping = data.mapping === undefined ? now.mapping : String(data.mapping).trim().toLowerCase();
+    if (['auto', 'overrides', 'calibrated'].indexOf(mapping) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    var swap = data.swap === undefined ? now.swap : (data.swap === true || data.swap === 'true');
+    var flipX = data.flipX === undefined ? now.flipX : (data.flipX === true || data.flipX === 'true');
+    var flipY = data.flipY === undefined ? now.flipY : (data.flipY === true || data.flipY === 'true');
+    var calibrated = String(meterConfig.current['touch.calibrated'] || '');
+    if (mapping === 'calibrated' && !calibrated) { return { error: 'GLASS.MANAGER_TOUCH_NOT_CALIBRATED' }; }
+    var matrix = mapping === 'auto' ? IDENTITY_MATRIX : mapping === 'overrides' ? composeOverrides(swap, flipX, flipY) : parseMatrixText(calibrated);
+    var wanted = { 'touch.mapping': mapping, 'touch.swap': swap ? 'True' : 'False', 'touch.flip.x': flipX ? 'True' : 'False', 'touch.flip.y': flipY ? 'True' : 'False', 'touch.matrix': matrixText(matrix) };
+    var changed = false;
+    Object.keys(wanted).forEach(function (k) {
+        if (String(meterConfig.current[k]) !== wanted[k]) { meterConfig.current[k] = wanted[k]; changed = true; }
+    });
+    if (changed) {
+        fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+        try { self.updateConfigVersion(); } catch (e) {}
+        if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+        self.logger.info(id + 'touch: mapping ' + mapping + ', matrix ' + wanted['touch.matrix']);
+    }
+    return { ok: true, changed: changed };
+};
+
+// Ask the display to calibrate: it shows targets, reads the fingers and
+// answers with the matrix as a `calibration` command.
+Glass.prototype.startCalibration = function () {
+    var self = this;
+    if (!self.channel || !self.channel.remotes || self.channel.connections === 0) { /* the display connects when it runs */ }
+    self.calibration = { state: 'waiting', at: Date.now(), points: 5 };
+    self.channel.push({ kind: 'calibrate', points: 5 });
+    setTimeout(function () {
+        if (self.calibration && self.calibration.state === 'waiting' && Date.now() - self.calibration.at > 118000) { self.calibration = { state: 'failed', error: 'timeout', at: Date.now() }; }
+    }, 120000);
+    return { ok: true, calibration: self.calibration };
+};
+
+// The display's answer: the matrix, or why there is none. A matrix is
+// kept as the calibrated one and put to use at once.
+Glass.prototype.takeCalibration = function (value) {
+    var self = this;
+    var v = value && typeof value === 'object' ? value : {};
+    if (v.error || !Array.isArray(v.matrix) || v.matrix.length !== 6) {
+        self.calibration = { state: 'failed', error: String(v.error || 'unfit'), at: Date.now() };
+        self.logger.warn(id + 'touch: calibration failed: ' + self.calibration.error);
+        return;
+    }
+    self.loadConfigs();
+    if (!meterConfig || !fs.existsSync(MeterConfigFile)) { self.calibration = { state: 'failed', error: 'no-config', at: Date.now() }; return; }
+    var text = matrixText(v.matrix.map(Number));
+    meterConfig.current['touch.calibrated'] = text;
+    meterConfig.current['touch.mapping'] = 'calibrated';
+    meterConfig.current['touch.matrix'] = text;
+    fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+    try { self.updateConfigVersion(); } catch (e) {}
+    self.calibration = { state: 'done', error: null, worst: typeof v.error_px === 'number' ? v.error_px : null, at: Date.now() };
+    self.logger.info(id + 'touch: calibrated, matrix ' + text + (self.calibration.worst !== null ? ', worst ' + self.calibration.worst + ' px' : ''));
 };
 
 // The pointer as the display reads it, resolved from the choice and what
@@ -1498,6 +1645,8 @@ Glass.prototype.setScreenSettings = function (data) {
         try { self.updateConfigVersion(); } catch (e) {}
         if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
         self.logger.info(id + 'screen: drawn by ' + driver + ', rotation ' + rotation + ', pointer ' + pointer + ' (shown ' + shown + ')');
+        // Ours now, or no longer: the keeper follows the driver.
+        setTimeout(function () { try { self.keepScreen(); } catch (e) {} }, 1500);
     }
     return { ok: true, changed: changed };
 };

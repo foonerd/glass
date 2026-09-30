@@ -397,6 +397,18 @@ class Manager {
       res.json(self.plugin.screenProbe(true));
     });
 
+    // The touch mapping: as the panel reports, overrides, or calibrated.
+    app.post('/api/screen/touch', wrap(async function (req, res) {
+      const result = await self.exclusive(function () { return self.plugin.setTouchSettings(req.body || {}); });
+      if (result.error) return res.status(400).json(result);
+      res.json(Object.assign({ ok: true }, self.plugin.touchSettings()));
+    }));
+
+    // Calibrate: the display shows targets and answers with the matrix.
+    app.post('/api/screen/calibrate', wrap(async function (req, res) {
+      res.json(self.plugin.startCalibration());
+    }));
+
     app.post('/api/screen', wrap(async function (req, res) {
       const result = await self.exclusive(function () { return self.plugin.setScreenSettings(req.body || {}); });
       if (result.error) return res.status(400).json(result);

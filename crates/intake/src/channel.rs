@@ -48,6 +48,9 @@ pub enum Event {
         seconds: u32,
         started_ms: u64,
     },
+    /// The plugin asks the display to calibrate its touch panel: the
+    /// display shows targets, reads the fingers and reports the map.
+    Calibrate { points: u32 },
 }
 
 /// One track of the player's queue, as the plugin's `queue` line carries it.
@@ -441,6 +444,13 @@ pub fn decode(line: &[u8]) -> Option<Event> {
             seconds: value.get("seconds").and_then(Value::as_u64).unwrap_or(0) as u32,
             started_ms: value.get("startedAt").and_then(Value::as_u64).unwrap_or(0),
         }),
+        "calibrate" => Some(Event::Calibrate {
+            points: value
+                .get("points")
+                .and_then(Value::as_u64)
+                .unwrap_or(5)
+                .clamp(3, 9) as u32,
+        }),
         _ => None,
     }
 }
@@ -472,6 +482,20 @@ mod decode_tests {
             })
         );
         assert_eq!(decode(br#"{"kind":"whatever"}"#), None);
+        assert_eq!(
+            decode(br#"{"kind":"calibrate","points":5}"#),
+            Some(Event::Calibrate { points: 5 })
+        );
+        assert_eq!(
+            decode(br#"{"kind":"calibrate"}"#),
+            Some(Event::Calibrate { points: 5 }),
+            "five targets unless said"
+        );
+        assert_eq!(
+            decode(br#"{"kind":"calibrate","points":99}"#),
+            Some(Event::Calibrate { points: 9 }),
+            "nine at most"
+        );
     }
 }
 

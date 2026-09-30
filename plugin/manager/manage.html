@@ -344,6 +344,17 @@
         <div class="full row"><button class="primary" id="btn-screen-apply"></button></div>
       </div>
     </div>
+    <div class="panel" id="touch-map-panel">
+      <h2 id="touch-map-title" style="margin:0 0 10px"></h2>
+      <div class="help" id="touch-map-help" style="margin-bottom:10px"></div>
+      <div class="form">
+        <div><label id="touch-map-label"></label><select id="touch-map"><option value="auto"></option><option value="overrides"></option><option value="calibrated"></option></select></div>
+        <div class="full row" id="touch-overrides" style="gap:18px"><label><input type="checkbox" id="touch-swap"> <span id="touch-swap-label"></span></label><label><input type="checkbox" id="touch-flip-x"> <span id="touch-flip-x-label"></span></label><label><input type="checkbox" id="touch-flip-y"> <span id="touch-flip-y-label"></span></label></div>
+        <div class="full help" id="touch-map-state"></div>
+        <div class="full row"><button class="primary" id="btn-touch-map-apply"></button><button id="btn-touch-calibrate"></button></div>
+        <div class="full help" id="touch-calibrate-help"></div>
+      </div>
+    </div>
   </section>
   <section class="view" id="view-system">
     <div class="panel" id="upd-panel">
@@ -642,6 +653,8 @@
     ['auto', 'x11', 'wayland', 'kmsdrm'].forEach(function (d, i) { $('screen-driver').options[i].textContent = t('MANAGER_SCREEN_DRIVER_' + d.toUpperCase()); });
     $('screen-found-title').textContent = t('MANAGER_SCREEN_FOUND_TITLE'); $('screen-found-help').textContent = t('MANAGER_SCREEN_FOUND_HELP'); $('btn-screen-probe').textContent = t('MANAGER_SCREEN_PROBE'); $('screen-pointer-label').textContent = t('MANAGER_SCREEN_POINTER');
     ['auto', 'show', 'hide'].forEach(function (p, i) { $('screen-pointer').options[i].textContent = t('MANAGER_SCREEN_POINTER_' + p.toUpperCase()); });
+    $('touch-map-title').textContent = t('MANAGER_TOUCHMAP_TITLE'); $('touch-map-help').textContent = t('MANAGER_TOUCHMAP_HELP'); $('touch-map-label').textContent = t('MANAGER_TOUCHMAP_MAPPING'); $('touch-swap-label').textContent = t('MANAGER_TOUCHMAP_SWAP'); $('touch-flip-x-label').textContent = t('MANAGER_TOUCHMAP_FLIP_X'); $('touch-flip-y-label').textContent = t('MANAGER_TOUCHMAP_FLIP_Y'); $('btn-touch-map-apply').textContent = t('MANAGER_SAVE'); $('btn-touch-calibrate').textContent = t('MANAGER_TOUCHMAP_CALIBRATE'); $('touch-calibrate-help').textContent = t('MANAGER_TOUCHMAP_CALIBRATE_HELP');
+    ['auto', 'overrides', 'calibrated'].forEach(function (m, i) { $('touch-map').options[i].textContent = t('MANAGER_TOUCHMAP_' + m.toUpperCase()); });
     $('cd-title').textContent = t('MANAGER_CD_TITLE'); $('cd-help').textContent = t('MANAGER_CD_HELP'); $('cd-on-label').textContent = t('MANAGER_CD_ON');
     $('cd-day-theme-label').textContent = t('MANAGER_CD_DAY_THEME'); $('cd-night-theme-label').textContent = t('MANAGER_CD_NIGHT_THEME');
     $('cd-day-at-label').textContent = t('MANAGER_CD_DAY_AT'); $('cd-night-at-label').textContent = t('MANAGER_CD_NIGHT_AT'); $('btn-cd-save').textContent = t('MANAGER_SAVE');
@@ -1602,6 +1615,7 @@
     $('screen-pointer').options[0].textContent = t('MANAGER_SCREEN_POINTER_AUTO') + ' (' + t(sc.pointerShown ? 'MANAGER_SCREEN_POINTER_SHOW' : 'MANAGER_SCREEN_POINTER_HIDE').toLowerCase() + ' ' + t('MANAGER_SCREEN_POINTER_NOW') + ')';
     $('screen-kiosk').textContent = sc.kioskActive ? t('MANAGER_SCREEN_KIOSK_ACTIVE') : t('MANAGER_SCREEN_KIOSK_INACTIVE');
     if (sc.probe) renderProbe(sc.probe);
+    if (sc.touch) renderTouch(sc.touch);
   }
   // What the player has, in plain words: one row per thing found.
   function renderProbe(p) {
@@ -1633,6 +1647,27 @@
     var s = p.suggestion || {};
     $('screen-suggested').textContent = t('MANAGER_SCREEN_SUGGESTED') + ': ' + t('MANAGER_SCREEN_ROTATION').toLowerCase() + ' ' + (s.rotation || 0) + ', ' + t('MANAGER_SCREEN_POINTER').toLowerCase() + ' ' + t(s.pointer === 'show' ? 'MANAGER_SCREEN_POINTER_SHOW' : 'MANAGER_SCREEN_POINTER_HIDE').toLowerCase() + (s.panel ? ' (' + s.panel + ')' : '');
   }
+  function renderTouch(tc) {
+    if (!tc) return;
+    $('touch-map').value = tc.mapping || 'auto';
+    $('touch-swap').checked = !!tc.swap; $('touch-flip-x').checked = !!tc.flipX; $('touch-flip-y').checked = !!tc.flipY;
+    var overrides = $('touch-map').value === 'overrides';
+    ['touch-swap', 'touch-flip-x', 'touch-flip-y'].forEach(function (id) { $(id).disabled = !overrides; });
+    var c = tc.calibration || { state: 'none' };
+    var text = '';
+    if (c.state === 'waiting') text = t('MANAGER_TOUCHMAP_WAITING');
+    else if (c.state === 'done') text = t('MANAGER_TOUCHMAP_DONE') + (typeof c.worst === 'number' ? ' ' + t('MANAGER_TOUCHMAP_WORST') + ' ' + Math.round(c.worst) + ' px' : '');
+    else if (c.state === 'failed') text = t('MANAGER_TOUCHMAP_FAILED') + ' ' + t('MANAGER_TOUCHMAP_FAIL_' + String(c.error || 'unfit').toUpperCase().replace(/[^A-Z]/g, ''));
+    $('touch-map-state').textContent = text + (tc.mapping === 'calibrated' && tc.matrix ? ' · ' + t('MANAGER_TOUCHMAP_MATRIX') + ' ' + tc.matrix.map(function (v) { return Math.round(v * 1000) / 1000; }).join(', ') : '');
+    if (c.state === 'waiting') { if (!state.touchPoll) state.touchPoll = setTimeout(function () { state.touchPoll = null; api('GET', '/api/screen').then(function (sc) { renderTouch(sc.touch); }).catch(function () {}); }, 2000); }
+  }
+  $('touch-map').onchange = function () { var overrides = $('touch-map').value === 'overrides'; ['touch-swap', 'touch-flip-x', 'touch-flip-y'].forEach(function (id) { $(id).disabled = !overrides; }); };
+  $('btn-touch-map-apply').onclick = function () {
+    api('POST', '/api/screen/touch', { mapping: $('touch-map').value, swap: $('touch-swap').checked, flipX: $('touch-flip-x').checked, flipY: $('touch-flip-y').checked }).then(function (tc) { renderTouch(tc); toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
+  $('btn-touch-calibrate').onclick = function () {
+    api('POST', '/api/screen/calibrate', {}).then(function (r) { renderTouch({ mapping: $('touch-map').value, calibration: r.calibration }); toast(t('MANAGER_TOUCHMAP_STARTED')); }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
   $('btn-screen-probe').onclick = function () {
     api('GET', '/api/screen/probe').then(function (p) { renderProbe(p); toast(t('MANAGER_SCREEN_PROBED')); }).catch(function (e) { toast(errorText(e), 'error'); });
   };
