@@ -2922,6 +2922,11 @@ pub struct RunSettings {
     /// KMS/DRM driver; 0 unless said.
     #[serde(default)]
     pub rotation: Rotation,
+    /// `screen.pointer.shown`: the pointer drawn on the player's window,
+    /// as the plugin resolved it from the screen's choice and what the
+    /// player has; hidden unless said.
+    #[serde(default)]
+    pub pointer: bool,
 }
 
 impl Default for RunSettings {
@@ -2935,6 +2940,7 @@ impl Default for RunSettings {
             fit: false,
             driver: ScreenDriver::Auto,
             rotation: Rotation::R0,
+            pointer: false,
         }
     }
 }
@@ -2951,6 +2957,7 @@ pub fn run_settings(text: &str) -> RunSettings {
         fit,
         driver: ScreenDriver::parse(current_value(text, "screen.driver").as_deref()),
         rotation: Rotation::parse(current_value(text, "screen.rotation").as_deref()),
+        pointer: truthy(current_value(text, "screen.pointer.shown").as_deref()),
         x: current_value(text, "position.x")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0),
@@ -5235,9 +5242,15 @@ mod tests {
                 fit: false,
                 driver: ScreenDriver::Auto,
                 rotation: Rotation::R0,
+                pointer: false,
             }
         );
         assert_eq!(run_settings(""), RunSettings::default());
+        assert!(run_settings("[current]\nscreen.pointer.shown = True\n").pointer);
+        assert!(
+            !run_settings("[current]\nscreen.pointer = show\n").pointer,
+            "the choice alone shows nothing; the plugin resolves it"
+        );
         let screen = run_settings("[current]\nscreen.driver = KMS\nscreen.rotation = 270\n");
         assert_eq!(
             (screen.driver, screen.rotation),

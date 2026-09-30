@@ -1,0 +1,33 @@
+## /dev/input/event0
+DEVNAME=/dev/input/event0
+ID_INPUT=1
+ID_INPUT_KEY=1
+ID_PATH=platform-pwr_button
+## /dev/input/event1
+DEVNAME=/dev/input/event1
+ID_INPUT=1
+ID_INPUT_POINTINGSTICK=1
+ID_INPUT_KEY=1
+ID_PATH=platform-107c701400.hdmi
+## /dev/input/event2
+DEVNAME=/dev/input/event2
+ID_INPUT=1
+ID_INPUT_SWITCH=1
+ID_PATH=platform-107c701400.hdmi
+## /dev/input/event3
+DEVNAME=/dev/input/event3
+ID_INPUT=1
+ID_INPUT_POINTINGSTICK=1
+ID_INPUT_KEY=1
+ID_PATH=platform-107c706400.hdmi
+## /dev/input/event4
+DEVNAME=/dev/input/event4
+ID_INPUT=1
+ID_INPUT_SWITCH=1
+ID_PATH=platform-107c706400.hdmi
+## /dev/input/event5
+DEVNAME=/dev/input/event5
+ID_INPUT=1
+ID_INPUT_TOUCHSCREEN=1
+ID_INPUT_KEY=1
+ID_PATH=platform-1f00080000.i2c

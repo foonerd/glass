@@ -129,6 +129,7 @@
     <button class="tab" data-view="catalog"></button>
     <button class="tab" data-view="artwork"></button>
     <button class="tab" data-view="backups"></button>
+    <button class="tab" data-view="screen"></button>
     <button class="tab" data-view="system"></button>
     <button class="tab" data-view="remotes"></button>
     <button class="tab" data-view="status"></button>
@@ -322,6 +323,28 @@
   </section>
 
   <!-- Remotes -->
+  <section class="view" id="view-screen">
+    <div class="panel" id="screen-found-panel">
+      <div class="row" style="justify-content:space-between">
+        <h2 id="screen-found-title" style="margin:0"></h2>
+        <button class="small" id="btn-screen-probe"></button>
+      </div>
+      <div class="help" id="screen-found-help" style="margin:6px 0 10px"></div>
+      <div id="screen-found"></div>
+      <div class="help" id="screen-suggested" style="margin-top:10px"></div>
+    </div>
+    <div class="panel" id="screen-panel">
+      <h2 id="screen-title" style="margin:0 0 10px"></h2>
+      <div class="help" id="screen-help" style="margin-bottom:10px"></div>
+      <div class="form">
+        <div><label id="screen-driver-label"></label><select id="screen-driver"><option value="auto"></option><option value="x11"></option><option value="wayland"></option><option value="kmsdrm"></option></select></div>
+        <div><label id="screen-rotation-label"></label><select id="screen-rotation"><option value="0">0</option><option value="90">90</option><option value="180">180</option><option value="270">270</option></select></div>
+        <div><label id="screen-pointer-label"></label><select id="screen-pointer"><option value="auto"></option><option value="show"></option><option value="hide"></option></select></div>
+        <div class="full help" id="screen-kiosk"></div>
+        <div class="full row"><button class="primary" id="btn-screen-apply"></button></div>
+      </div>
+    </div>
+  </section>
   <section class="view" id="view-system">
     <div class="panel" id="upd-panel">
       <div class="row" style="justify-content:space-between">
@@ -354,16 +377,6 @@
       <div class="form">
         <div><label id="touch-mode-label"></label><select id="touch-mode"><option value="theme"></option><option value="on"></option><option value="off"></option></select></div>
         <div class="full row"><button class="primary" id="btn-touch-apply"></button></div>
-      </div>
-    </div>
-    <div class="panel" id="screen-panel">
-      <h2 id="screen-title" style="margin:0 0 10px"></h2>
-      <div class="help" id="screen-help" style="margin-bottom:10px"></div>
-      <div class="form">
-        <div><label id="screen-driver-label"></label><select id="screen-driver"><option value="auto"></option><option value="x11"></option><option value="wayland"></option><option value="kmsdrm"></option></select></div>
-        <div><label id="screen-rotation-label"></label><select id="screen-rotation"><option value="0">0</option><option value="90">90</option><option value="180">180</option><option value="270">270</option></select></div>
-        <div class="full help" id="screen-kiosk"></div>
-        <div class="full row"><button class="primary" id="btn-screen-apply"></button></div>
       </div>
     </div>
     <div class="panel" id="share-panel">
@@ -585,7 +598,7 @@
     document.title = t('MANAGER_TITLE');
     $('title').textContent = t('MANAGER_TITLE');
     $('btn-close').textContent = t('MANAGER_CLOSE');
-    var tabs = { themes: 'MANAGER_TAB_THEMES', face: 'MANAGER_TAB_FACE', catalog: 'MANAGER_TAB_CATALOG', artwork: 'MANAGER_TAB_ARTWORK', backups: 'MANAGER_TAB_BACKUPS', system: 'MANAGER_TAB_SYSTEM', remotes: 'MANAGER_TAB_REMOTES', status: 'MANAGER_TAB_STATUS' };
+    var tabs = { themes: 'MANAGER_TAB_THEMES', face: 'MANAGER_TAB_FACE', catalog: 'MANAGER_TAB_CATALOG', artwork: 'MANAGER_TAB_ARTWORK', backups: 'MANAGER_TAB_BACKUPS', screen: 'MANAGER_TAB_SCREEN', system: 'MANAGER_TAB_SYSTEM', remotes: 'MANAGER_TAB_REMOTES', status: 'MANAGER_TAB_STATUS' };
     $('face-title').textContent = t('MANAGER_FACE_TITLE');
     $('face-help').textContent = t('MANAGER_FACE_HELP');
     $('btn-face-full').textContent = t('MANAGER_FACE_FULL');
@@ -627,6 +640,8 @@
     $('touch-mode').options[0].textContent = t('INTERACTIVE_THEME'); $('touch-mode').options[1].textContent = t('INTERACTIVE_ON'); $('touch-mode').options[2].textContent = t('INTERACTIVE_OFF');
     $('screen-title').textContent = t('MANAGER_SCREEN_TITLE'); $('screen-help').textContent = t('MANAGER_SCREEN_HELP'); $('screen-driver-label').textContent = t('MANAGER_SCREEN_DRIVER'); $('screen-rotation-label').textContent = t('MANAGER_SCREEN_ROTATION'); $('btn-screen-apply').textContent = t('MANAGER_SAVE');
     ['auto', 'x11', 'wayland', 'kmsdrm'].forEach(function (d, i) { $('screen-driver').options[i].textContent = t('MANAGER_SCREEN_DRIVER_' + d.toUpperCase()); });
+    $('screen-found-title').textContent = t('MANAGER_SCREEN_FOUND_TITLE'); $('screen-found-help').textContent = t('MANAGER_SCREEN_FOUND_HELP'); $('btn-screen-probe').textContent = t('MANAGER_SCREEN_PROBE'); $('screen-pointer-label').textContent = t('MANAGER_SCREEN_POINTER');
+    ['auto', 'show', 'hide'].forEach(function (p, i) { $('screen-pointer').options[i].textContent = t('MANAGER_SCREEN_POINTER_' + p.toUpperCase()); });
     $('cd-title').textContent = t('MANAGER_CD_TITLE'); $('cd-help').textContent = t('MANAGER_CD_HELP'); $('cd-on-label').textContent = t('MANAGER_CD_ON');
     $('cd-day-theme-label').textContent = t('MANAGER_CD_DAY_THEME'); $('cd-night-theme-label').textContent = t('MANAGER_CD_NIGHT_THEME');
     $('cd-day-at-label').textContent = t('MANAGER_CD_DAY_AT'); $('cd-night-at-label').textContent = t('MANAGER_CD_NIGHT_AT'); $('btn-cd-save').textContent = t('MANAGER_SAVE');
@@ -719,7 +734,8 @@
     if (name === 'artwork') { loadDisplay(); loadArtwork(); } loadFonts();
     if (name === 'backups') loadBackups();
     if (name === 'status') { loadStatus(); }
-    if (name === 'system') { loadUpdate(false); loadPerformance(); loadSharing(); loadTouch(); loadScreen(); loadLogging(); loadLegacy(); }
+    if (name === 'system') { loadUpdate(false); loadPerformance(); loadSharing(); loadTouch(); loadLogging(); loadLegacy(); }
+    if (name === 'screen') { loadScreen(); }
     if (name === 'remotes') loadRemotes();
     if (window.GlassFace) { if (name === 'face') { GlassFace.show(); } else { GlassFace.hide(); } }
   }
@@ -1582,10 +1598,46 @@
   function renderScreen(sc) {
     $('screen-driver').value = sc.driver || 'auto';
     $('screen-rotation').value = String(sc.rotation || 0);
+    $('screen-pointer').value = sc.pointer || 'auto';
+    $('screen-pointer').options[0].textContent = t('MANAGER_SCREEN_POINTER_AUTO') + ' (' + t(sc.pointerShown ? 'MANAGER_SCREEN_POINTER_SHOW' : 'MANAGER_SCREEN_POINTER_HIDE').toLowerCase() + ' ' + t('MANAGER_SCREEN_POINTER_NOW') + ')';
     $('screen-kiosk').textContent = sc.kioskActive ? t('MANAGER_SCREEN_KIOSK_ACTIVE') : t('MANAGER_SCREEN_KIOSK_INACTIVE');
+    if (sc.probe) renderProbe(sc.probe);
   }
+  // What the player has, in plain words: one row per thing found.
+  function renderProbe(p) {
+    var rows = [];
+    var none = t('MANAGER_SCREEN_NONE');
+    if (p.board) rows.push([t('MANAGER_SCREEN_BOARD'), p.board]);
+    var panels = (p.connectors || []).map(function (c) {
+      if (c.status !== 'connected') return c.name + ': ' + t('MANAGER_SCREEN_DISCONNECTED');
+      var size = c.native ? c.native.width + '×' + c.native.height : '';
+      return c.name + ': ' + t('MANAGER_SCREEN_CONNECTED') + (size ? ', ' + size : '') + (c.portrait ? ', ' + t('MANAGER_SCREEN_PORTRAIT') : '');
+    });
+    rows.push([t('MANAGER_SCREEN_PANELS'), panels.length ? panels.join(' · ') : none]);
+    var inputs = p.inputs || { touch: [], mice: [], keyboards: [], remotes: [] };
+    var names = function (list) { return list.length ? list.map(function (d) { return d.name; }).join(', ') : none; };
+    rows.push([t('MANAGER_SCREEN_TOUCH'), names(inputs.touch)]);
+    rows.push([t('MANAGER_SCREEN_MICE'), names(inputs.mice)]);
+    rows.push([t('MANAGER_SCREEN_KEYBOARDS'), names(inputs.keyboards)]);
+    if (inputs.remotes.length) rows.push([t('MANAGER_SCREEN_REMOTES'), names(inputs.remotes)]);
+    var lights = (p.backlights || []).map(function (b) { return b.name + ': ' + b.brightness + ' / ' + b.max; });
+    rows.push([t('MANAGER_SCREEN_BACKLIGHT'), lights.length ? lights.join(' · ') : none]);
+    var h = p.holders || {};
+    var holder = h.kiosk ? t('MANAGER_SCREEN_HOLDER_KIOSK') : t('MANAGER_SCREEN_HOLDER_NONE');
+    var more = [];
+    if (h.touchDisplay) more.push(t('MANAGER_SCREEN_HOLDER_TOUCH_DISPLAY'));
+    if (h.displayConfiguration) more.push(t('MANAGER_SCREEN_HOLDER_DISPLAY_CONF'));
+    if (h.xserver) more.push(t('MANAGER_SCREEN_HOLDER_X'));
+    rows.push([t('MANAGER_SCREEN_HOLDER'), holder + (more.length ? ' (' + more.join(', ') + ')' : '')]);
+    $('screen-found').innerHTML = '<table class="kv">' + rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('') + '</table>';
+    var s = p.suggestion || {};
+    $('screen-suggested').textContent = t('MANAGER_SCREEN_SUGGESTED') + ': ' + t('MANAGER_SCREEN_ROTATION').toLowerCase() + ' ' + (s.rotation || 0) + ', ' + t('MANAGER_SCREEN_POINTER').toLowerCase() + ' ' + t(s.pointer === 'show' ? 'MANAGER_SCREEN_POINTER_SHOW' : 'MANAGER_SCREEN_POINTER_HIDE').toLowerCase() + (s.panel ? ' (' + s.panel + ')' : '');
+  }
+  $('btn-screen-probe').onclick = function () {
+    api('GET', '/api/screen/probe').then(function (p) { renderProbe(p); toast(t('MANAGER_SCREEN_PROBED')); }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
   $('btn-screen-apply').onclick = function () {
-    api('POST', '/api/screen', { driver: $('screen-driver').value, rotation: parseInt($('screen-rotation').value, 10) }).then(function (sc) { renderScreen(sc); toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); });
+    api('POST', '/api/screen', { driver: $('screen-driver').value, rotation: parseInt($('screen-rotation').value, 10), pointer: $('screen-pointer').value }).then(function (sc) { renderScreen(sc); toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); });
   };
   $('btn-share-apply').onclick = function () {
     api('POST', '/api/sharing', { shared: $('share-on').checked }).then(function (sh) { $('share-on').checked = !!sh.shared; toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); });
