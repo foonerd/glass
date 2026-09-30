@@ -86,6 +86,8 @@
   .meters .m img { width: 100%; display: block; aspect-ratio: 16 / 9; object-fit: contain; background: #0a0a0a; }
   .meters .m div { padding: 6px 8px; font-size: 13px; color: #ddd; word-break: break-word; }
   .checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 14px; }
+  /* A row or a flex box hidden by script stays hidden: the flag outranks every display rule. */
+  [hidden] { display: none !important; }
   .modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.65); display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
   .modal-back.open { display: flex; }
   .modal { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; width: min(1000px, 100%); max-height: 92vh; overflow: auto; padding: 18px 20px 20px; box-shadow: 0 10px 40px rgba(0,0,0,.6); }
