@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.87] - 2026-09-30
+
+The display can carry a face. This is the library surface glass-evo is built on, and nothing changes for the display itself: `glass::run_with` takes an `Overlay`, drawn over the picture after the theme, offered every touch before the theme's controls, and sending the commands it hands back the way the theme's buttons go; `expose::ui` gives a face its primitives: a fill with an alpha, a blit with an alpha, a line of text in the theme's fonts. With no face, which is every player today, the loop is as it was.
+
 ## [0.7.86] - 2026-09-30
 
 The screen watcher, lighter. It read the kiosk unit's two facts with two processes at every tick; one `systemctl show` answers both, and answers for a unit in any state. It ticks every two seconds only while the display draws on the screen itself, where it must step aside fast, and every five seconds otherwise.
