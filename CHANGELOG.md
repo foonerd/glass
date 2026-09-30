@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.85] - 2026-09-30
+
+No launch against an X server that is closing. When the kiosk went, the display could be started twice on X in the second before the fact said the screen was free, each try failing with "x11 not available" in the log. A display lost to an X server closing under it, and the moment the screen turns free, both hold launches for three seconds; the watcher then brings the display up where it belongs.
+
 ## [0.7.84] - 2026-09-30
 
 The kiosk's plugin counts by its running state. Volumio keeps a plugin's enabled flag and its running status apart: the flag set on its own brings nothing until the next boot, and 0.7.83 read the flag, so a flag set without a start left the screen dark for a kiosk that was not coming. The fact now takes the Touch Display or Display Configuration plugin as bringing the kiosk when it is started or starting; the flag alone counts only in the first two minutes after Glass starts, when plugins come up one after another at boot.
