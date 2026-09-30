@@ -74,6 +74,12 @@ pub struct WindowOptions {
     pub title: String,
     /// The screen the window opens on, by SDL's count from 0.
     pub display: u32,
+    /// What SDL draws with, by its name (`x11`, `wayland`, `kmsdrm`);
+    /// none lets SDL choose.
+    pub driver: Option<String>,
+    /// The picture turned on the screen, clockwise, by 0, 90, 180 or 270
+    /// degrees; touch is turned the same way.
+    pub rotation: u32,
 }
 
 impl Default for WindowOptions {
@@ -86,6 +92,8 @@ impl Default for WindowOptions {
             keys: false,
             title: "Glass".to_string(),
             display: 0,
+            driver: None,
+            rotation: 0,
         }
     }
 }
@@ -110,6 +118,14 @@ pub struct Surface {
     /// pixels to frame pixels.
     last_offset: (i32, i32),
     last_scale: f32,
+    /// The window's own size at the last show, in its own pixels.
+    last_window: (u32, u32),
+    /// The picture's turn on the screen, clockwise degrees.
+    rotation: u32,
+    /// Shows so far, for the grab.
+    shows: u32,
+    /// A file to write the window's pixels to, once, at that show.
+    grab: Option<(std::path::PathBuf, u32)>,
 }
 
 impl Surface {
@@ -148,6 +164,7 @@ impl Surface {
     /// Keep a pointer event in frame pixels: the frame's offset comes off,
     /// and a fitted frame's scale.
     fn push_pointer(&mut self, kind: PointerKind, x: i32, y: i32) {
+        let (x, y) = unrotate_point((x, y), self.rotation, self.last_window);
         let (x, y) = (x - self.last_offset.0, y - self.last_offset.1);
         let (x, y) = if self.fit && self.last_scale > 0.0 {
             (
@@ -185,6 +202,15 @@ impl Surface {
 
     /// Open a window as the options say. Fails when SDL cannot start.
     pub fn open_with(width: u32, height: u32, options: &WindowOptions) -> Result<Self, String> {
+        // The driver is chosen before SDL starts; a name from the settings
+        // beats what the launcher's environment says.
+        if let Some(name) = options.driver.as_deref() {
+            std::env::set_var("SDL_VIDEODRIVER", name);
+        }
+        let rotation = match options.rotation {
+            90 | 180 | 270 => options.rotation,
+            _ => 0,
+        };
         let sdl = sdl2::init()?;
         let video = sdl.video()?;
         let (width, height) = (width.max(1), height.max(1));
@@ -227,9 +253,14 @@ impl Surface {
         // the upload goes through hardware.
         let info = canvas.info();
         println!(
-            "glass: renderer {} on {}",
+            "glass: renderer {} on {}{}",
             info.name,
-            video.current_video_driver()
+            video.current_video_driver(),
+            if rotation == 0 {
+                String::new()
+            } else {
+                format!(", turned {rotation}")
+            }
         );
         let creator = canvas.texture_creator();
         let pump = sdl.event_pump()?;
@@ -246,7 +277,18 @@ impl Surface {
             pointer: Vec::new(),
             last_offset: (0, 0),
             last_scale: 1.0,
+            last_window: (width, height),
+            rotation,
+            shows: 0,
+            grab: None,
         })
+    }
+
+    /// Write the window's pixels, as shown, to a PNG at the given show
+    /// (counted from now), once: the picture on a screen with no X server
+    /// can be looked at from a terminal.
+    pub fn grab_after(&mut self, shows: u32, path: std::path::PathBuf) {
+        self.grab = Some((path, self.shows.wrapping_add(shows.max(1))));
     }
 
     /// Name the window.
@@ -363,25 +405,78 @@ impl Surface {
             .canvas
             .output_size()
             .unwrap_or((frame.width, frame.height));
+        // The picture is placed in its own orientation; a quarter turn
+        // means the window is as tall as the picture is wide.
+        let (logical_w, logical_h) = if matches!(self.rotation, 90 | 270) {
+            (window_h, window_w)
+        } else {
+            (window_w, window_h)
+        };
         let (x, y, w, h, scale) = if self.fit {
             fitted_rect(
                 (frame.width, frame.height),
-                (window_w, window_h),
+                (logical_w, logical_h),
                 self.placement,
             )
         } else {
             let (x, y) = self.placement.unwrap_or((
-                (window_w as i32 - frame.width as i32) / 2,
-                (window_h as i32 - frame.height as i32) / 2,
+                (logical_w as i32 - frame.width as i32) / 2,
+                (logical_h as i32 - frame.height as i32) / 2,
             ));
             (x, y, frame.width, frame.height, 1.0)
         };
         self.last_offset = (x, y);
         self.last_scale = scale;
-        let dest = sdl2::rect::Rect::new(x, y, w.max(1), h.max(1));
-        self.canvas
-            .copy(texture, None, dest)
-            .map_err(|err| err.to_string())?;
+        self.last_window = (window_w, window_h);
+        if self.rotation == 0 {
+            let dest = sdl2::rect::Rect::new(x, y, w.max(1), h.max(1));
+            self.canvas
+                .copy(texture, None, dest)
+                .map_err(|err| err.to_string())?;
+        } else {
+            // SDL turns the picture about the centre of the rectangle it is
+            // given, so that centre goes where the turned picture's centre lands.
+            let centre = rotated_center(
+                (x as f32 + w as f32 / 2.0, y as f32 + h as f32 / 2.0),
+                self.rotation,
+                (window_w, window_h),
+            );
+            let turned = sdl2::rect::Rect::from_center(
+                (centre.0.round() as i32, centre.1.round() as i32),
+                w.max(1),
+                h.max(1),
+            );
+            self.canvas
+                .copy_ex(
+                    texture,
+                    None,
+                    turned,
+                    self.rotation as f64,
+                    None,
+                    false,
+                    false,
+                )
+                .map_err(|err| err.to_string())?;
+        }
+        self.shows = self.shows.wrapping_add(1);
+        if self.grab.as_ref().is_some_and(|(_, at)| self.shows >= *at) {
+            let (path, _) = self.grab.take().expect("the grab is set");
+            match self.canvas.read_pixels(None, PixelFormatEnum::RGBA32) {
+                Ok(rgba) => {
+                    let shown = Frame {
+                        blend: expose::Blend::Normal,
+                        width: window_w,
+                        height: window_h,
+                        rgba,
+                    };
+                    match expose::write_png(&path, &shown) {
+                        Ok(()) => println!("glass: grab {}", path.display()),
+                        Err(err) => eprintln!("glass: grab: {err}"),
+                    }
+                }
+                Err(err) => eprintln!("glass: grab: {err}"),
+            }
+        }
         self.canvas.present();
         Ok(if touched { Shown::Touched } else { Shown::Kept })
     }
@@ -405,6 +500,33 @@ pub fn fitted_rect(
         (window.1 as i32 - h as i32) / 2,
     ));
     (x, y, w, h, scale)
+}
+
+/// Where a point of the picture, in the picture's own orientation, lands
+/// on a window of `window` pixels when the picture is turned clockwise by
+/// `rotation` degrees (0, 90, 180 or 270): the top left of the picture
+/// goes to the top right at 90 and to the bottom left at 270.
+pub fn rotated_center(point: (f32, f32), rotation: u32, window: (u32, u32)) -> (f32, f32) {
+    let (x, y) = point;
+    let (w, h) = (window.0 as f32, window.1 as f32);
+    match rotation {
+        90 => (w - y, x),
+        180 => (w - x, h - y),
+        270 => (y, h - x),
+        _ => (x, y),
+    }
+}
+
+/// A window pixel back to the picture's own pixel, the turn undone.
+pub fn unrotate_point(point: (i32, i32), rotation: u32, window: (u32, u32)) -> (i32, i32) {
+    let (px, py) = point;
+    let (w, h) = (window.0 as i32, window.1 as i32);
+    match rotation {
+        90 => (py, w - 1 - px),
+        180 => (w - 1 - px, h - 1 - py),
+        270 => (h - 1 - py, px),
+        _ => (px, py),
+    }
 }
 
 /// Publish a scene to a remote glass. No pixels cross this call.
@@ -431,7 +553,30 @@ pub fn write_ppm(path: impl AsRef<Path>, frame: &Frame) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::fitted_rect;
+    use super::{fitted_rect, rotated_center, unrotate_point};
+
+    /// A landscape picture on a portrait panel turned 270, the picture's top
+    /// on the left as X's "left" puts it: the centre stays in the middle, the
+    /// top left lands at the bottom left, at 90 at the top right; and a
+    /// finger on a window pixel maps back to the picture pixel under it.
+    #[test]
+    fn a_turned_picture_and_a_turned_finger_meet() {
+        assert_eq!(
+            rotated_center((640.0, 360.0), 270, (720, 1280)),
+            (360.0, 640.0)
+        );
+        assert_eq!(rotated_center((0.0, 0.0), 270, (720, 1280)), (0.0, 1280.0));
+        assert_eq!(rotated_center((0.0, 0.0), 90, (720, 1280)), (720.0, 0.0));
+        assert_eq!(
+            rotated_center((0.0, 0.0), 180, (1280, 720)),
+            (1280.0, 720.0)
+        );
+        assert_eq!(rotated_center((5.0, 6.0), 0, (1280, 720)), (5.0, 6.0));
+        assert_eq!(unrotate_point((662, 1224), 270, (720, 1280)), (55, 662));
+        assert_eq!(unrotate_point((664, 55), 90, (720, 1280)), (55, 55));
+        assert_eq!(unrotate_point((10, 20), 180, (1280, 720)), (1269, 699));
+        assert_eq!(unrotate_point((10, 20), 0, (1280, 720)), (10, 20));
+    }
 
     /// A 1024x600 frame on a 1280x720 screen fills the height at 1.2 and
     /// sits centred with a bar each side, or where a placement says; a

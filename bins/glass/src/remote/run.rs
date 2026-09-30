@@ -54,6 +54,9 @@ fn window_options_of(display: &super::config::Display, title: String) -> WindowO
         keys: true,
         title,
         display: display.monitor,
+        // A remote draws where its window manager puts it; no driver or turn of its own.
+        driver: None,
+        rotation: 0,
     }
 }
 

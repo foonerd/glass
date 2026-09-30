@@ -387,6 +387,17 @@ class Manager {
       res.json(Object.assign({ ok: true, changed: !!result.changed }, self.plugin.sharingInfo()));
     }));
 
+    // The screen: what draws the window, and the picture's turn.
+    app.get('/api/screen', function (req, res) {
+      res.json(self.plugin.screenSettings());
+    });
+
+    app.post('/api/screen', wrap(async function (req, res) {
+      const result = await self.exclusive(function () { return self.plugin.setScreenSettings(req.body || {}); });
+      if (result.error) return res.status(400).json(result);
+      res.json(Object.assign({ ok: true }, self.plugin.screenSettings()));
+    }));
+
     // Interactive controls: as the theme says, on, or off.
     app.get('/api/touch', function (req, res) {
       res.json({ interactive: self.plugin.interactiveMode() });
