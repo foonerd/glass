@@ -2939,6 +2939,9 @@ pub struct RunSettings {
     /// picture's: swapped, flipped, offset or scaled. Identity unless said.
     #[serde(default = "identity_matrix")]
     pub touch_matrix: [f32; 6],
+    /// How large a face draws its controls and its clock: 1 as designed,
+    /// more for a hand at arm's length; `face.size` normal, large or car.
+    pub face_scale: f32,
 }
 
 /// The matrix that changes nothing.
@@ -2969,6 +2972,17 @@ pub fn parse_matrix(value: Option<&str>) -> [f32; 6] {
         return IDENTITY_MATRIX;
     }
     m
+}
+
+/// How large a face draws, from `face.size`: normal as designed, large
+/// for a hand at arm's length, car for a glance while driving; anything
+/// else, or nothing, is normal.
+pub fn face_scale(size: Option<&str>) -> f32 {
+    match size.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
+        Some("large") => 1.4,
+        Some("car") => 2.0,
+        _ => 1.0,
+    }
 }
 
 /// A point through the matrix.
@@ -3092,6 +3106,7 @@ impl Default for RunSettings {
             rotation: Rotation::R0,
             pointer: false,
             touch_matrix: IDENTITY_MATRIX,
+            face_scale: 1.0,
         }
     }
 }
@@ -3110,6 +3125,7 @@ pub fn run_settings(text: &str) -> RunSettings {
         rotation: Rotation::parse(current_value(text, "screen.rotation").as_deref()),
         pointer: truthy(current_value(text, "screen.pointer.shown").as_deref()),
         touch_matrix: parse_matrix(current_value(text, "touch.matrix").as_deref()),
+        face_scale: face_scale(current_value(text, "face.size").as_deref()),
         x: current_value(text, "position.x")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0),
@@ -5448,6 +5464,10 @@ mod tests {
             [0.0, 1.0, 0.0, 1.0, 0.0, 0.0]
         );
         assert_eq!(parse_matrix(Some("nonsense")), IDENTITY_MATRIX);
+        assert_eq!(face_scale(None), 1.0);
+        assert_eq!(face_scale(Some("Large")), 1.4);
+        assert_eq!(face_scale(Some(" car ")), 2.0);
+        assert_eq!(face_scale(Some("huge")), 1.0, "anything else is normal");
     }
 
     #[test]
@@ -5466,6 +5486,7 @@ mod tests {
                 rotation: Rotation::R0,
                 pointer: false,
                 touch_matrix: IDENTITY_MATRIX,
+                face_scale: 1.0,
             }
         );
         assert_eq!(run_settings(""), RunSettings::default());
