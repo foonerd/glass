@@ -952,6 +952,7 @@ Glass.prototype.onStart = function () {
     // The pointer, resolved from the screen's choice and what the player has now.
     try { self.refreshPointerShown(); } catch (e) { self.logger.warn(id + 'screen: pointer not resolved: ' + (e && e.message ? e.message : e)); }
     // The screen by fact, watched from now on; a driver key from the old choice goes back to Auto.
+    self.pluginStartedAt = Date.now();
     try { self.migrateScreenDriver(); } catch (e) { self.logger.warn(id + 'screen: driver key not migrated: ' + (e && e.message ? e.message : e)); }
     try { self.watchScreen(); } catch (e) { self.logger.warn(id + 'screen: not watched: ' + (e && e.message ? e.message : e)); }
 
@@ -1437,7 +1438,16 @@ Glass.prototype.screenFact = function () {
         try { return String(require('child_process').execFileSync('systemctl', [what, 'volumio-kiosk'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] })).trim(); }
         catch (e) { return String(e && e.stdout ? e.stdout : '').trim() || 'inactive'; }
     };
-    var enabled = function (name) { try { return self.commandRouter.pluginManager.isEnabled('user_interface', name) === true; } catch (e) { return false; } };
+    // A plugin brings the kiosk when it runs or is starting; its enabled
+    // flag alone counts only in the first two minutes after this plugin
+    // started, when plugins come up one after another at boot. Volumio's
+    // own toggle sets the flag and the status apart: a flag set without a
+    // start brings nothing until the next boot.
+    var pm = self.commandRouter.pluginManager;
+    var status = function (name) { try { return String(pm.config.get('user_interface.' + name + '.status') || ''); } catch (e) { return ''; } };
+    var flagged = function (name) { try { return pm.isEnabled('user_interface', name) === true; } catch (e) { return false; } };
+    var booting = Date.now() - (self.pluginStartedAt || 0) < 120000;
+    var enabled = function (name) { var st = status(name); return st === 'STARTED' || st === 'STARTING' || (booting && flagged(name)); };
     var panel = false;
     try {
         panel = fs.readdirSync('/sys/class/drm').filter(function (n) { return /^card\d+-/.test(n) && !/Writeback/.test(n); }).some(function (n) {
