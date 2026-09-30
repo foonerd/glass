@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.79] - 2026-09-30
+
+Touch set right, and a screen that is never empty. A finger's share of the panel now goes through a matrix before it becomes a pixel, `touch.matrix`, so a panel whose touch frame is swapped, mirrored, offset or scaled against the picture is set right without X. The Screen tab's Touch section offers three ways: as the panel reports, swap or mirror switches, or calibrated: the display shows five targets on the screen, one touch each, computes the map with the least error, keeps it and uses it at once, and the tab says the worst error left or why it could not fit. When the display draws through KMS/DRM the screen is Glass's alone, so it never lands on the console: the display is started with the plugin and again whenever it is found gone, it stays on the screen with the player stopped, black after the countdown, and a touch outside a control does nothing there.
+
 ## [0.7.78] - 2026-09-30
 
 The Screen tab. The Manager reads what the player has for a screen from the kernel and the system when the tab opens: the panels and their native sizes, with a portrait panel named as such; the touch panels, mice and keyboards, an HDMI remote told apart from a mouse; the backlights; and who holds the screen, the kiosk, the Touch Display or Display Configuration plugin, an X server. From that it suggests the rotation and the pointer. The settings moved here from the System tab and gained the pointer: shown, hidden, or Auto, which shows it with a mouse and hides it with a touch panel alone, resolved by the plugin from what the player has, at every save and at every start. `screen.pointer` and `screen.pointer.shown` are the keys. The probe's parsers are tested on texts captured from a player.
