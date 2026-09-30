@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.78] - 2026-09-30
+
+The Screen tab. The Manager reads what the player has for a screen from the kernel and the system when the tab opens: the panels and their native sizes, with a portrait panel named as such; the touch panels, mice and keyboards, an HDMI remote told apart from a mouse; the backlights; and who holds the screen, the kiosk, the Touch Display or Display Configuration plugin, an X server. From that it suggests the rotation and the pointer. The settings moved here from the System tab and gained the pointer: shown, hidden, or Auto, which shows it with a mouse and hides it with a touch panel alone, resolved by the plugin from what the player has, at every save and at every start. `screen.pointer` and `screen.pointer.shown` are the keys. The probe's parsers are tested on texts captured from a player.
+
 ## [0.7.77] - 2026-09-30
 
 Touch on a screen with no X server. The display took its taps from the mouse events SDL makes of a finger, and on KMS/DRM none reach it, so every touch counted as a bare touch and the display left. A finger now arrives as a finger, its place a share of the window turned back the same way as the picture, and the mouse SDL makes of a touch is dropped once a finger has been seen as one, so a touch counts once under X and once on KMS/DRM. A real mouse counts as before.
