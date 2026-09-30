@@ -11,8 +11,16 @@ const EXTENSIONS = ['.png', '.jpg', '.jpeg', '.gif', '.webp'];
 
 function trackFolder(uri) {
   let s = String(uri || '').trim();
-  // A stream has no folder.
-  if (!s || s.includes('://')) return null;
+  // A track inside a cue sheet is named cue://<path>@<track>: the sheet's folder is the track's.
+  const cue = /^cue:\/\/(.*)$/.exec(s);
+  if (cue) {
+    s = cue[1];
+    const at = s.lastIndexOf('@');
+    if (at > 0) s = s.slice(0, at);
+  } else if (!s || s.includes('://')) {
+    // A stream has no folder.
+    return null;
+  }
   s = s.replace(/^music-library\/?/, '').replace(/^mnt\/?/, '');
   const base = s.startsWith('/') ? '/mnt' + s : '/mnt/' + s;
   const slash = base.lastIndexOf('/');
