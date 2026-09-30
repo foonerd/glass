@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.88] - 2026-09-30
+
+A track inside a cue sheet finds its folder's pictures. Volumio names such a track `cue://<path>@<track>`, and both the display and the Manager took anything with a scheme for a stream with no folder, so a theme's folder pictures, back.jpg among them, never showed for CUE albums; reported from the community with a CUE + FLAC test. The sheet's folder is the track's now, on the player and for remote displays alike. Also: the watcher restarts a kiosk unit only for a failure that happened after the display stepped aside, not for one left from before.
+
 ## [0.7.87] - 2026-09-30
 
 The display can carry a face. This is the library surface glass-evo is built on, and nothing changes for the display itself: `glass::run_with` takes an `Overlay`, drawn over the picture after the theme, offered every touch before the theme's controls, and sending the commands it hands back the way the theme's buttons go; `expose::ui` gives a face its primitives: a fill with an alpha, a blit with an alpha, a line of text in the theme's fonts. With no face, which is every player today, the loop is as it was.
