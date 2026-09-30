@@ -275,6 +275,32 @@
     say(text);
   }
 
+  // ---- the truth after the period ----------------------------------------
+  // The player's own display leaves the screen when the persist period ends
+  // after a stop or a pause; a page stays, and says so instead of standing
+  // still: a banner over the picture until the player plays again.
+  function truth() {
+    var banner = $('face-truth');
+    if (!banner) {
+      banner = document.createElement('div');
+      banner.id = 'face-truth';
+      banner.style.cssText = 'position:absolute;left:0;right:0;bottom:12%;text-align:center;padding:10px 16px;font:600 clamp(14px,2.2vw,22px) sans-serif;color:#fff;background:rgba(0,0,0,.55);display:none;pointer-events:none;';
+      var canvas = $('face-canvas');
+      if (canvas && canvas.parentNode) { canvas.parentNode.style.position = canvas.parentNode.style.position || 'relative'; canvas.parentNode.appendChild(banner); }
+    }
+    if (face.truthTimer) { clearTimeout(face.truthTimer); face.truthTimer = null; }
+    var stopped = face.status && face.status !== 'play';
+    var persist = face.persist || {};
+    var left = stopped && persist.startedAt ? persist.seconds * 1000 - (Date.now() - persist.startedAt) : 0;
+    if (stopped && (!persist.startedAt || left <= 0)) {
+      banner.textContent = face.t(face.status === 'pause' ? 'MANAGER_FACE_PAUSED' : 'MANAGER_FACE_STOPPED');
+      banner.style.display = 'block';
+    } else {
+      banner.style.display = 'none';
+      if (stopped && left > 0) face.truthTimer = setTimeout(truth, left + 200);
+    }
+  }
+
   // ---- the manager's stream: frames and the plugin's lines -----------------
   function connect() {
     if (face.stream) return;
@@ -292,6 +318,8 @@
       var message = null;
       try { message = JSON.parse(line); } catch (err) { return; }
       if (message && message.kind === 'showing' && message.meter) face.playerMeter = message.meter;
+      if (message && message.kind === 'state' && message.state) { face.status = String(message.state.status || ''); truth(); }
+      if (message && message.kind === 'persist') { face.persist = { mode: message.mode || '', seconds: message.seconds || 0, startedAt: message.startedAt || 0 }; truth(); }
       // Before the module is up the lines are kept for it: the feed
       // replays the player's state at once, ahead of the module's load.
       if (!face.ex) { face.earlyLines.push(line); return; }
@@ -338,7 +366,8 @@
     if (now - face.frameAt < period * 0.9) return;
     face.frameAt = now;
     var ptr;
-    try { ptr = guarded(function () { return face.ex.frame(BigInt(Math.round(now))); }); } catch (err) { say(face.t('MANAGER_FACE_FAILED') + ' ' + err.message, true); return; }
+    // The engine's clock is the wall clock, so the theme's clocks and the persist countdown are true.
+  try { ptr = guarded(function () { return face.ex.frame(BigInt(Date.now())); }); } catch (err) { say(face.t('MANAGER_FACE_FAILED') + ' ' + err.message, true); return; }
     if (!ptr) return;
     var size = face.width * face.height * 4;
     face.image.data.set(memory().subarray(ptr, ptr + size));

@@ -440,6 +440,8 @@
     "MANAGER_FACE_NO_FRAMES": "no frames: the frames daemon is not running",
     "MANAGER_FACE_WAITING": "Waiting for the player…",
     "MANAGER_FACE_FAILED": "The face could not start:",
+    "MANAGER_FACE_STOPPED": "The player is stopped. The display has left the screen; the meters return when it plays.",
+    "MANAGER_FACE_PAUSED": "The player is paused. The display has left the screen; the meters return when it plays.",
     "MANAGER_TAB_CATALOG": "Catalog",
     "MANAGER_TAB_ARTWORK": "Appearance",
     "MANAGER_FONTS_TITLE": "Fonts",

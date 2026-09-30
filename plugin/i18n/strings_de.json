@@ -440,6 +440,8 @@
     "MANAGER_FACE_NO_FRAMES": "keine Frames: der Frames-Dienst läuft nicht",
     "MANAGER_FACE_WAITING": "Warten auf den Player…",
     "MANAGER_FACE_FAILED": "Die Anzeige konnte nicht starten:",
+    "MANAGER_FACE_STOPPED": "Der Player ist gestoppt. Die Anzeige hat den Bildschirm verlassen; die Instrumente kehren zurück, sobald er spielt.",
+    "MANAGER_FACE_PAUSED": "Der Player ist pausiert. Die Anzeige hat den Bildschirm verlassen; die Instrumente kehren zurück, sobald er spielt.",
     "MANAGER_TAB_CATALOG": "Katalog",
     "MANAGER_TAB_ARTWORK": "Erscheinungsbild",
     "MANAGER_FONTS_TITLE": "Schriften",
