@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.81] - 2026-09-30
+
+The touch calibration reads only the touches it asked for. A finger lifted before the targets appeared, a tap to see whether the display stays, say, was kept and paired with the first target, so every sample sat one target off, the map came out wrong with an error in the hundreds of pixels, and the display took it anyway. The display now keeps lifts only while the targets are on the screen, and a map whose worst miss is past a twentieth of the screen's diagonal is refused: the Screen tab says so with the error, and the mapping in force stays.
+
 ## [0.7.80] - 2026-09-30
 
 Two reports from the community. The settings page's "Fit to screen" switch could turn the fit off but never on: the page did not send the switch with its section, so a save read it as off; it is sent now. A rotation of one meter, a theme with one, or one chosen from the list, with a change interval set, loaded that same meter again at every interval, a visible reload; the display now moves on only to a meter that is not the one on show, and a rotation of one stays put.
