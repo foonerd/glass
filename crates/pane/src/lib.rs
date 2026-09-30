@@ -142,6 +142,9 @@ pub struct Surface {
     /// Where fingers lifted, as raw shares of the panel before the matrix,
     /// since the last take: what a calibration reads.
     raw_lifts: Vec<(f32, f32)>,
+    /// Whether lifts are being kept: only while a calibration asks, so a
+    /// touch from before its targets appeared is never taken for one.
+    recording_lifts: bool,
 }
 
 impl Surface {
@@ -300,6 +303,7 @@ impl Surface {
             fingers_seen: false,
             touch_matrix: options.touch_matrix,
             raw_lifts: Vec::new(),
+            recording_lifts: false,
         })
     }
 
@@ -318,6 +322,13 @@ impl Surface {
     /// before the matrix, for a calibration.
     pub fn take_raw_lifts(&mut self) -> Vec<(f32, f32)> {
         std::mem::take(&mut self.raw_lifts)
+    }
+
+    /// Start or stop keeping lifts for a calibration. Starting drops any
+    /// lift kept before, so only touches made at the targets count.
+    pub fn record_lifts(&mut self, on: bool) {
+        self.raw_lifts.clear();
+        self.recording_lifts = on;
     }
 
     /// The share of the panel a finger must report, through the identity,
@@ -411,7 +422,7 @@ impl Surface {
                     raw.push((PointerKind::Move, px, py));
                 }
                 Event::FingerUp { x, y, .. } => {
-                    if self.raw_lifts.len() < 64 {
+                    if self.recording_lifts && self.raw_lifts.len() < 64 {
                         self.raw_lifts.push((x, y));
                     }
                     let (px, py) =

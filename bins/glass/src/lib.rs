@@ -797,6 +797,11 @@ fn session(
         let input = source.poll();
         if let Some(points) = source.take_calibrate_request() {
             calibration = Some(Calibration::new(points, skin.width, skin.height));
+            // Only lifts from now on count: a touch made before the targets
+            // appeared would sit one target off and spoil the map.
+            if let Some(s) = surface.as_mut() {
+                s.record_lifts(true);
+            }
             logline::say!(Info, "display", "touch: calibrating with {points} targets");
         }
         let polled_at = Instant::now();
@@ -1036,21 +1041,36 @@ fn session(
                         } else {
                             match lead::fit_affine(&cal.samples) {
                                 Some((matrix, worst)) => {
-                                    window.set_touch_matrix(matrix);
                                     let (ww, wh) = window.window_size();
                                     let error_px = worst * ((ww * ww + wh * wh) as f32).sqrt();
-                                    logline::say!(
-                                        Info,
-                                        "display",
-                                        "touch: calibrated, matrix {:?}, worst {:.1} px",
-                                        matrix,
-                                        error_px
-                                    );
-                                    serde_json::json!({ "matrix": matrix, "error_px": error_px, "samples": cal.samples.len() })
+                                    let tolerance = lead::calibration_tolerance((ww, wh));
+                                    if error_px > tolerance {
+                                        // A touch missed its target: the map
+                                        // in force stays, the tab says why.
+                                        logline::say!(
+                                            Info,
+                                            "display",
+                                            "touch: calibration refused, worst {:.1} px past {:.1}",
+                                            error_px,
+                                            tolerance
+                                        );
+                                        serde_json::json!({ "error": "unfit", "error_px": error_px })
+                                    } else {
+                                        window.set_touch_matrix(matrix);
+                                        logline::say!(
+                                            Info,
+                                            "display",
+                                            "touch: calibrated, matrix {:?}, worst {:.1} px",
+                                            matrix,
+                                            error_px
+                                        );
+                                        serde_json::json!({ "matrix": matrix, "error_px": error_px, "samples": cal.samples.len() })
+                                    }
                                 }
                                 None => serde_json::json!({ "error": "unfit" }),
                             }
                         };
+                        window.record_lifts(false);
                         source.command(&intake::Command::with("calibration", answer));
                         calibration = None;
                     }

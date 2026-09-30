@@ -1575,8 +1575,8 @@ Glass.prototype.takeCalibration = function (value) {
     var self = this;
     var v = value && typeof value === 'object' ? value : {};
     if (v.error || !Array.isArray(v.matrix) || v.matrix.length !== 6) {
-        self.calibration = { state: 'failed', error: String(v.error || 'unfit'), at: Date.now() };
-        self.logger.warn(id + 'touch: calibration failed: ' + self.calibration.error);
+        self.calibration = { state: 'failed', error: String(v.error || 'unfit'), worst: typeof v.error_px === 'number' ? v.error_px : null, at: Date.now() };
+        self.logger.warn(id + 'touch: calibration failed: ' + self.calibration.error + (self.calibration.worst !== null ? ', worst ' + self.calibration.worst + ' px' : ''));
         return;
     }
     self.loadConfigs();
