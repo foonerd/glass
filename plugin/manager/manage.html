@@ -1781,12 +1781,15 @@
     var acts = [];
     if (o.owner === 'glass-evo') acts.push(['kiosk', 'MANAGER_OWNER_BACK', 'MANAGER_OWNER_CONFIRM_BACK']);
     else if (evo.available) acts.push(['glass-evo', 'MANAGER_OWNER_USE_EVO', 'MANAGER_OWNER_CONFIRM_TAKE']);
-    $('screen-owner-actions').innerHTML = acts.map(function (a) { return '<button class="small" data-owner="' + a[0] + '" data-ask="' + a[2] + '">' + esc(t(a[1])) + '</button>'; }).join(' ');
+    $('screen-owner-actions').innerHTML = acts.map(function (a) { return '<button class="small" data-owner="' + a[0] + '" data-label="' + a[1] + '" data-ask="' + a[2] + '">' + esc(t(a[1])) + '</button>'; }).join(' ');
     Array.prototype.forEach.call($('screen-owner-actions').querySelectorAll('button'), function (b) {
       b.onclick = function () {
-        if (!window.confirm(t(b.getAttribute('data-ask')))) return;
-        b.disabled = true; b.textContent = t('MANAGER_OWNER_BUSY');
-        api('POST', '/api/screen/owner', { owner: b.getAttribute('data-owner') }).then(function (r) { renderScreen(r.screen || {}); toast(t('MANAGER_OWNER_DONE')); }).catch(function (e) { toast(errorText(e), 'error'); loadScreen(); });
+        var label = t(b.getAttribute('data-label'));
+        confirmDialog(label, t(b.getAttribute('data-ask')), label).then(function (yes) {
+          if (!yes) return;
+          b.disabled = true; b.textContent = t('MANAGER_OWNER_BUSY');
+          api('POST', '/api/screen/owner', { owner: b.getAttribute('data-owner') }).then(function (r) { renderScreen(r.screen || {}); toast(t('MANAGER_OWNER_DONE')); }).catch(function (e) { toast(errorText(e), 'error'); loadScreen(); });
+        });
       };
     });
   }
