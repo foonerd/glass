@@ -43,6 +43,9 @@ pub struct Fonts {
 /// reads the configuration and the theme.
 pub use lead::{read_file, vfs};
 
+/// Primitives for a face drawn over the theme.
+pub mod ui;
+
 /// The clock the stages and the painters are timed by: `lead`'s, the
 /// process's own or the host's where the target has none.
 pub use lead::clock_us;

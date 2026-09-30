@@ -825,7 +825,7 @@ pub fn remote_main(
                 }
             );
         }
-        match session(&run, Some(&mut remote), &mut window) {
+        match session(&run, Some(&mut remote), &mut window, &mut None) {
             Outcome::Exit(code) => return code,
             Outcome::Reload(why) => {
                 logline::say!(Info, "remotes", "around again ({why})");
