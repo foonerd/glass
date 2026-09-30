@@ -119,6 +119,7 @@
         "label": "TRANSLATE.GLASS.APPLY",
         "data": [
           "timeout",
+          "positionFit",
           "positionType",
           "position_x",
           "position_y",
