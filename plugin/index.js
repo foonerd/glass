@@ -918,6 +918,13 @@ Glass.prototype.launchEnv = function () {
     var draws = null;
     try { draws = screenprobe.wouldDraw(self.screenFact()); } catch (e) {}
     if (draws) { env.SDL_VIDEODRIVER = draws; } else { delete env.SDL_VIDEODRIVER; }
+    // When glass-evo owns the screen and its component is here, the face
+    // runs in the display's place: the same launcher, another binary.
+    delete env.GLASS_BIN;
+    try {
+        var owner = self.screenOwnerState();
+        if (owner.owner === 'glass-evo' && owner.evo.available) { env.GLASS_BIN = owner.evo.binary; }
+    } catch (e) {}
     return env;
 };
 
