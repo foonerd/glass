@@ -1381,6 +1381,59 @@ Glass.prototype.setInteractiveMode = function (value) {
     return { changed: true, interactive: wanted };
 };
 
+// ---- The screen: what draws the window, and the picture's turn ----------
+
+// The values the display reads: `screen.driver` (auto, x11, wayland or
+// kmsdrm) and `screen.rotation` (0, 90, 180 or 270), and whether the
+// kiosk holds the screen now.
+Glass.prototype.screenSettings = function () {
+    var self = this;
+    self.loadConfigs();
+    var cur = (meterConfig && meterConfig.current) || {};
+    var driver = String(cur['screen.driver'] || 'auto').trim().toLowerCase();
+    if (['auto', 'x11', 'wayland', 'kmsdrm'].indexOf(driver) === -1) { driver = 'auto'; }
+    var rotation = parseInt(cur['screen.rotation'], 10);
+    if ([90, 180, 270].indexOf(rotation) === -1) { rotation = 0; }
+    return { driver: driver, rotation: rotation, kioskActive: self.kioskActive() };
+};
+
+// Whether the kiosk, the Touch Display plugin's X session and browser,
+// holds the screen: a display drawing through KMS/DRM would fight it.
+Glass.prototype.kioskActive = function () {
+    try {
+        var out = require('child_process').execFileSync('systemctl', ['is-active', 'volumio-kiosk'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] });
+        return String(out).trim() === 'active';
+    } catch (e) {
+        return false;
+    }
+};
+
+// The same, set: KMS/DRM is refused while the kiosk holds the screen; the
+// meter configuration is written and the display starts again with it.
+Glass.prototype.setScreenSettings = function (data) {
+    var self = this;
+    self.loadConfigs();
+    if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return { error: 'GLASS.NO_PEPPYCONFIG' }; }
+    var now = self.screenSettings();
+    var driver = data.driver === undefined ? now.driver : String(data.driver).trim().toLowerCase();
+    if (['auto', 'x11', 'wayland', 'kmsdrm'].indexOf(driver) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    var rotation = data.rotation === undefined ? now.rotation : parseInt(data.rotation, 10);
+    if ([0, 90, 180, 270].indexOf(rotation) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    if (driver === 'kmsdrm' && now.driver !== 'kmsdrm' && now.kioskActive) { return { error: 'GLASS.MANAGER_SCREEN_KIOSK_HOLDS' }; }
+    var wanted = { 'screen.driver': driver, 'screen.rotation': String(rotation) };
+    var changed = false;
+    Object.keys(wanted).forEach(function (k) {
+        if (String(meterConfig.current[k]) !== wanted[k]) { meterConfig.current[k] = wanted[k]; changed = true; }
+    });
+    if (changed) {
+        fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+        try { self.updateConfigVersion(); } catch (e) {}
+        if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+        self.logger.info(id + 'screen: drawn by ' + driver + ', rotation ' + rotation);
+    }
+    return { ok: true, changed: changed };
+};
+
 // ---- Car Dash: a day theme and a night theme by the clock ---------------
 
 // The place Car Dash reckons the sun from: the coordinates set by hand,

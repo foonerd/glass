@@ -2818,6 +2818,83 @@ pub fn transition_settings(text: &str) -> TransitionSettings {
     }
 }
 
+/// What draws the player's window: chosen by the machine, or named.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ScreenDriver {
+    /// X when a display is set, Wayland when one is set, else KMS/DRM: what
+    /// SDL would pick by itself, said out loud.
+    #[default]
+    Auto,
+    X11,
+    Wayland,
+    /// The screen itself, with no X server: SDL's KMS/DRM driver.
+    KmsDrm,
+}
+
+impl ScreenDriver {
+    /// `auto`, `x11`, `wayland`, `kmsdrm` (also `kms`, `drm`); anything else is auto.
+    pub fn parse(value: Option<&str>) -> Self {
+        match value.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+            Some("x11") => Self::X11,
+            Some("wayland") => Self::Wayland,
+            Some("kmsdrm") | Some("kms") | Some("drm") => Self::KmsDrm,
+            _ => Self::Auto,
+        }
+    }
+
+    /// The name SDL knows the driver by; none for auto.
+    pub fn sdl_name(self) -> Option<&'static str> {
+        match self {
+            Self::Auto => None,
+            Self::X11 => Some("x11"),
+            Self::Wayland => Some("wayland"),
+            Self::KmsDrm => Some("kmsdrm"),
+        }
+    }
+
+    pub fn as_str(self) -> &'static str {
+        self.sdl_name().unwrap_or("auto")
+    }
+}
+
+/// How far the picture is turned on the screen, clockwise, in quarter
+/// turns; touch is turned the same way.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum Rotation {
+    #[default]
+    R0,
+    R90,
+    R180,
+    R270,
+}
+
+impl Rotation {
+    /// `0`, `90`, `180` or `270`; anything else is 0.
+    pub fn parse(value: Option<&str>) -> Self {
+        match value.map(|v| v.trim()) {
+            Some("90") => Self::R90,
+            Some("180") => Self::R180,
+            Some("270") => Self::R270,
+            _ => Self::R0,
+        }
+    }
+
+    pub fn degrees(self) -> u32 {
+        match self {
+            Self::R0 => 0,
+            Self::R90 => 90,
+            Self::R180 => 180,
+            Self::R270 => 270,
+        }
+    }
+
+    /// A quarter turn swaps the picture's width and height on the screen.
+    pub fn quarter(self) -> bool {
+        matches!(self, Self::R90 | Self::R270)
+    }
+}
+
 /// How the player runs on the glass: whether a touch ends it, and where
 /// the frame sits in the window.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -2837,6 +2914,14 @@ pub struct RunSettings {
     /// where the position says; `position.type = fit` says the same.
     #[serde(default)]
     pub fit: bool,
+    /// `screen.driver`: what draws the window, `auto` unless said.
+    #[serde(default)]
+    pub driver: ScreenDriver,
+    /// `screen.rotation`: the picture and touch turned by 0, 90, 180 or 270
+    /// degrees clockwise. Read where no X server turns the screen, the
+    /// KMS/DRM driver; 0 unless said.
+    #[serde(default)]
+    pub rotation: Rotation,
 }
 
 impl Default for RunSettings {
@@ -2848,6 +2933,8 @@ impl Default for RunSettings {
             x: 0,
             y: 0,
             fit: false,
+            driver: ScreenDriver::Auto,
+            rotation: Rotation::R0,
         }
     }
 }
@@ -2862,6 +2949,8 @@ pub fn run_settings(text: &str) -> RunSettings {
         interactive: InteractiveMode::parse(current_value(text, "touch.interactive").as_deref()),
         centered: kind.as_deref().is_none_or(|v| v == "center" || v == "fit"),
         fit,
+        driver: ScreenDriver::parse(current_value(text, "screen.driver").as_deref()),
+        rotation: Rotation::parse(current_value(text, "screen.rotation").as_deref()),
         x: current_value(text, "position.x")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0),
@@ -5144,9 +5233,23 @@ mod tests {
                 x: 10,
                 y: 20,
                 fit: false,
+                driver: ScreenDriver::Auto,
+                rotation: Rotation::R0,
             }
         );
         assert_eq!(run_settings(""), RunSettings::default());
+        let screen = run_settings("[current]\nscreen.driver = KMS\nscreen.rotation = 270\n");
+        assert_eq!(
+            (screen.driver, screen.rotation),
+            (ScreenDriver::KmsDrm, Rotation::R270)
+        );
+        assert_eq!(screen.driver.sdl_name(), Some("kmsdrm"));
+        assert!(screen.rotation.quarter() && screen.rotation.degrees() == 270);
+        let odd = run_settings("[current]\nscreen.driver = fbdev\nscreen.rotation = 45\n");
+        assert_eq!(
+            (odd.driver, odd.rotation),
+            (ScreenDriver::Auto, Rotation::R0)
+        );
         let fitted = run_settings("[current]\nposition.type = Fit\nposition.x = 10\n");
         assert!(
             fitted.fit && fitted.centered,

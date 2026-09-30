@@ -639,7 +639,10 @@ fn session(
     let mut profile_window = Instant::now();
     // Every picture the scene names, decoded once per file and box.
     let mut pictures = Pictures::default();
-    let show_window = screen_available() && !headless;
+    // A screen is there when the machine has one, when a display is set,
+    // or when the settings name a driver that needs no display server.
+    let show_window =
+        (screen_available() || skin.run.driver == lead::ScreenDriver::KmsDrm) && !headless;
     let write_file = output.is_some() || snapshot.is_some();
     let serving_remote = false;
     // The window: the player's is full screen at the theme's size; a
@@ -651,6 +654,10 @@ fn session(
             None => WindowOptions {
                 // `position.type = fit`: the theme scaled to the screen, its shape kept.
                 fit: skin.run.fit,
+                // `screen.driver` and `screen.rotation`: what draws, and the
+                // picture turned on a screen no X server turns.
+                driver: skin.run.driver.sdl_name().map(str::to_string),
+                rotation: skin.run.rotation.degrees(),
                 ..WindowOptions::default()
             },
         };
@@ -683,6 +690,12 @@ fn session(
                 Ok(mut surface) => {
                     if remote.is_none() && !skin.run.centered {
                         surface.place_at(skin.run.x, skin.run.y);
+                    }
+                    // `GLASS_GRAB=PATH`: the window's pixels written once,
+                    // after the first frames have settled, so a screen with
+                    // no X server can be looked at from a terminal.
+                    if let Some(path) = env::var_os("GLASS_GRAB").filter(|v| !v.is_empty()) {
+                        surface.grab_after(30, std::path::PathBuf::from(path));
                     }
                     if let Some(remote) = remote.as_deref() {
                         remote
