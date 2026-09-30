@@ -1198,7 +1198,7 @@ Glass.prototype.checkAlsaChain = function () {
 Glass.prototype.onStop = function () {
     var self = this;
     if (self.carDashTimer) { clearTimeout(self.carDashTimer); self.carDashTimer = null; }
-    if (self.screenWatcher) { clearInterval(self.screenWatcher); self.screenWatcher = null; }
+    if (self.screenWatcher) { clearTimeout(self.screenWatcher); self.screenWatcher = null; }
 
     self.commandRouter.stateMachine.stop().then(function () {
         if (self.Timeout) {
@@ -1436,10 +1436,18 @@ Glass.prototype.screenTimeoutMs = function () {
 // files alone, no probe).
 Glass.prototype.screenFact = function () {
     var self = this;
-    var unit = function (what) {
-        try { return String(require('child_process').execFileSync('systemctl', [what, 'volumio-kiosk'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] })).trim(); }
-        catch (e) { return String(e && e.stdout ? e.stdout : '').trim() || 'inactive'; }
-    };
+    // One call for the unit's two facts: `show` answers for a unit in any
+    // state and exits 0, where is-active and is-enabled would cost a
+    // process each and exit non-zero for the states that matter.
+    var unit = { state: 'inactive', enabled: false };
+    try {
+        String(require('child_process').execFileSync('systemctl', ['show', '-p', 'ActiveState', '-p', 'UnitFileState', 'volumio-kiosk'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }))
+            .split('\n').forEach(function (line) {
+                var kv = /^(ActiveState|UnitFileState)=(.*)$/.exec(line.trim());
+                if (kv && kv[1] === 'ActiveState') { unit.state = kv[2] || 'inactive'; }
+                if (kv && kv[1] === 'UnitFileState') { unit.enabled = kv[2] === 'enabled'; }
+            });
+    } catch (e) { /* no systemd, or none such unit: inactive */ }
     // A plugin brings the kiosk when it runs or is starting; its enabled
     // flag alone counts only in the first two minutes after this plugin
     // started, when plugins come up one after another at boot. Volumio's
@@ -1458,8 +1466,8 @@ Glass.prototype.screenFact = function () {
     } catch (e) {}
     return {
         xserver: fs.existsSync('/tmp/.X11-unix/X0'),
-        kiosk: unit('is-active'),
-        kioskEnabled: unit('is-enabled') === 'enabled',
+        kiosk: unit.state,
+        kioskEnabled: unit.enabled,
         touchDisplay: enabled('touch_display'),
         displayConfiguration: enabled('display_configuration'),
         panel: panel
@@ -1500,7 +1508,7 @@ Glass.prototype.screenOurs = function (fact) {
 // interface is never lost to the screensaver.
 Glass.prototype.watchScreen = function () {
     var self = this;
-    if (self.screenWatcher) { clearInterval(self.screenWatcher); self.screenWatcher = null; }
+    if (self.screenWatcher) { clearTimeout(self.screenWatcher); self.screenWatcher = null; }
     self.screenWasFree = null;
     var tick = function () {
         var fact;
@@ -1532,8 +1540,14 @@ Glass.prototype.watchScreen = function () {
         }
         self.screenWasFree = free;
     };
-    tick();
-    self.screenWatcher = setInterval(tick, 2000);
+    // Two seconds while the display draws on the screen itself, where it
+    // must step aside fast; five otherwise, where nothing is urgent.
+    var again = function () {
+        tick();
+        var period = self.displayRenderer && self.displayRenderer.driver === 'kmsdrm' ? 2000 : 5000;
+        self.screenWatcher = setTimeout(again, period);
+    };
+    again();
 };
 
 // ---- The persist period, as a line -------------------------------------
