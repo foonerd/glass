@@ -888,8 +888,11 @@ fn session(
                 switched_at.elapsed() >= selector.interval()
             };
             if due {
-                if let Some(name) = selector.next() {
-                    switch_meter!(name);
+                // The next meter that is not the one on show: a rotation of
+                // one meter is not loaded again every interval.
+                match selector.next_other(&skin.name) {
+                    Some(name) => switch_meter!(name),
+                    None => switched_at = Instant::now(),
                 }
             }
         }

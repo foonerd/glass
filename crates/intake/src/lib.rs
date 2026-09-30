@@ -172,6 +172,33 @@ impl Selector {
         }
     }
 
+    /// The next meter that is not `current`: none when the rotation holds
+    /// no other, so a fixed meter or a rotation of one meter stays as it is
+    /// instead of being loaded again on every interval or title.
+    pub fn next_other(&mut self, current: &str) -> Option<String> {
+        if self.rotation.names.iter().all(|n| n == current) {
+            return None;
+        }
+        if !self.rotation.random {
+            // A list holds another name within one turn of it.
+            return (0..self.rotation.names.len())
+                .filter_map(|_| self.next())
+                .find(|n| n != current);
+        }
+        // Random: draw from the round's pool leaving the current one aside,
+        // and start a new round when the pool holds nothing else; the pool
+        // is never refilled behind a draw, so a round's end cannot hand the
+        // current one back.
+        if !self.remaining.iter().any(|n| n != current) {
+            self.remaining = self.rotation.names.clone();
+        }
+        let others: Vec<usize> = (0..self.remaining.len())
+            .filter(|&i| self.remaining[i] != current)
+            .collect();
+        let i = others[(self.rand() % others.len() as u64) as usize];
+        Some(self.remaining.remove(i))
+    }
+
     /// The meter before the one on show in a list rotation; in a random
     /// rotation another meter, since the order has none.
     pub fn previous(&mut self) -> Option<String> {
@@ -2647,15 +2674,52 @@ mod tests {
         assert_eq!(with_current("", "meter", "a"), "[current]\nmeter = a\n");
     }
 
-    #[test]
-    fn the_selector_draws_every_name_before_repeating_and_cycles_a_list() {
-        let names: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
-        let rotation = |random: bool, names: Vec<String>| Rotation {
+    /// A rotation as the meter engine reads one, a second apart, not on the
+    /// title.
+    fn rotation(random: bool, names: Vec<String>) -> Rotation {
+        Rotation {
             names,
             random,
             interval: Duration::from_secs(1),
             on_title: false,
-        };
+        }
+    }
+
+    /// A rotation of one meter, or of the meter on show alone, moves on to
+    /// nothing; a rotation of two moves on to the other, random or listed.
+    #[test]
+    fn a_rotation_of_one_meter_has_nothing_to_move_on_to() {
+        let mut one = Selector::seeded(rotation(false, vec!["a".into()]), 1);
+        assert_eq!(one.next_other("a"), None);
+        assert_eq!(
+            one.next_other("z"),
+            Some("a".into()),
+            "a fixed meter moves on to the rotation's one"
+        );
+        let mut list = Selector::seeded(rotation(false, vec!["a".into(), "b".into()]), 1);
+        for _ in 0..6 {
+            assert_eq!(list.next_other("a"), Some("b".into()));
+        }
+        let mut random = Selector::seeded(rotation(true, vec!["a".into(), "b".into()]), 7);
+        for _ in 0..20 {
+            assert_eq!(random.next_other("a"), Some("b".into()));
+        }
+        let mut three =
+            Selector::seeded(rotation(true, vec!["a".into(), "b".into(), "c".into()]), 3);
+        let drawn: Vec<String> = (0..30).filter_map(|_| three.next_other("a")).collect();
+        assert_eq!(drawn.len(), 30, "a rotation of three always has another");
+        assert!(
+            drawn.iter().all(|n| n != "a"),
+            "the meter on show is never handed back"
+        );
+        assert!(drawn.iter().any(|n| n == "b") && drawn.iter().any(|n| n == "c"));
+        let mut none = Selector::seeded(rotation(true, Vec::new()), 7);
+        assert_eq!(none.next_other("a"), None);
+    }
+
+    #[test]
+    fn the_selector_draws_every_name_before_repeating_and_cycles_a_list() {
+        let names: Vec<String> = ["a", "b", "c"].map(String::from).to_vec();
         let mut random = Selector::seeded(rotation(true, names.clone()), 7);
         for round in 0..3 {
             let mut drawn: Vec<String> = (0..3).map(|_| random.next().unwrap()).collect();
