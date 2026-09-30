@@ -31,7 +31,7 @@ for arch in arm armv7 armv8 x64; do
   fi
 done
 
-# The multi-script text fonts, from the peppy_fonts repository at a pinned
+# The multi-script text fonts, from the glass_fonts repository at a pinned
 # commit, checked by digest: 16 MB each, fetched at packaging rather than
 # kept in this repository. PeppyFont-Italic and the DSEG7 set are in git.
 FONTS_COMMIT=6693040
@@ -41,7 +41,7 @@ fetch_font() {
   local cache="$ROOT/target/sysroot/fonts/$name"
   if [ ! -f "$cache" ] || ! echo "$sha  $cache" | sha256sum -c - >/dev/null 2>&1; then
     mkdir -p "$ROOT/target/sysroot/fonts"
-    curl -fsSL -o "$cache" "https://raw.githubusercontent.com/foonerd/peppy_fonts/$FONTS_COMMIT/fonts/$name"
+    curl -fsSL -o "$cache" "https://raw.githubusercontent.com/foonerd/glass_fonts/$FONTS_COMMIT/fonts/$name"
     echo "$sha  $cache" | sha256sum -c - >/dev/null
   fi
   cp "$cache" "$file"

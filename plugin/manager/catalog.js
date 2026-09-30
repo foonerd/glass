@@ -1,5 +1,5 @@
 'use strict';
-// The theme catalog: the index peppy_templates publishes, kept on the
+// The theme catalog: the index glass_templates publishes, kept on the
 // player with its ETag, the thumbnails it names fetched as they are looked
 // at, and the zips downloaded and checked against the index's checksum
 // before anything is unpacked. A zip that no longer matches the index as
@@ -14,7 +14,7 @@ const http = require('http');
 const https = require('https');
 const path = require('path');
 
-const INDEX_URL = 'https://raw.githubusercontent.com/foonerd/peppy_templates/main/catalog/index.json';
+const INDEX_URL = 'https://raw.githubusercontent.com/foonerd/glass_templates/main/catalog/index.json';
 const INDEX_VERSION = 1;
 const FETCH_TIMEOUT_MS = 20000;
 const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000;
