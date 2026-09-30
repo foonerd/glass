@@ -392,6 +392,11 @@ class Manager {
       res.json(self.plugin.screenSettings());
     });
 
+    // The probe again, fresh, for the tab's "look again".
+    app.get('/api/screen/probe', function (req, res) {
+      res.json(self.plugin.screenProbe(true));
+    });
+
     app.post('/api/screen', wrap(async function (req, res) {
       const result = await self.exclusive(function () { return self.plugin.setScreenSettings(req.body || {}); });
       if (result.error) return res.status(400).json(result);

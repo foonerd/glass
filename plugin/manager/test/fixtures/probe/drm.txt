@@ -1,0 +1,30 @@
+## card1-DSI-2
+status=connected
+enabled=enabled
+dpms=On
+modes=720x1280 
+edid_bytes=0
+## card2-HDMI-A-1
+status=disconnected
+enabled=disabled
+dpms=On
+modes=
+edid_bytes=0
+## card2-HDMI-A-2
+status=disconnected
+enabled=disabled
+dpms=On
+modes=
+edid_bytes=0
+## card2-Writeback-1
+status=unknown
+enabled=disabled
+dpms=On
+modes=
+edid_bytes=0
+## card2-Writeback-2
+status=unknown
+enabled=disabled
+dpms=On
+modes=
+edid_bytes=0

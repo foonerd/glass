@@ -1,0 +1,65 @@
+I: Bus=0019 Vendor=0001 Product=0001 Version=0100
+N: Name="pwr_button"
+P: Phys=gpio-keys/input0
+S: Sysfs=/devices/platform/pwr_button/input/input0
+U: Uniq=
+H: Handlers=kbd event0 
+B: PROP=0
+B: EV=3
+B: KEY=100000 0 0 0
+
+I: Bus=001e Vendor=0000 Product=0000 Version=0001
+N: Name="vc4-hdmi-0"
+P: Phys=vc4-hdmi-0/input0
+S: Sysfs=/devices/platform/soc@107c000000/107c701400.hdmi/rc/rc0/input1
+U: Uniq=
+H: Handlers=kbd event1 
+B: PROP=20
+B: EV=100017
+B: KEY=ffffc0 0 0 3ff 0 0 400000 320fc200 40830c9 0 0 0 0 210300 49d2 c040ec00 1e3780 0 80100000 10000000
+B: REL=3
+B: MSC=10
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="vc4-hdmi-0 HDMI Jack"
+P: Phys=ALSA
+S: Sysfs=/devices/platform/soc@107c000000/107c701400.hdmi/sound/card0/input2
+U: Uniq=
+H: Handlers=event2 
+B: PROP=0
+B: EV=21
+B: SW=40
+
+I: Bus=001e Vendor=0000 Product=0000 Version=0001
+N: Name="vc4-hdmi-1"
+P: Phys=vc4-hdmi-1/input0
+S: Sysfs=/devices/platform/soc@107c000000/107c706400.hdmi/rc/rc1/input3
+U: Uniq=
+H: Handlers=kbd event3 
+B: PROP=20
+B: EV=100017
+B: KEY=ffffc0 0 0 3ff 0 0 400000 320fc200 40830c9 0 0 0 0 210300 49d2 c040ec00 1e3780 0 80100000 10000000
+B: REL=3
+B: MSC=10
+
+I: Bus=0000 Vendor=0000 Product=0000 Version=0000
+N: Name="vc4-hdmi-1 HDMI Jack"
+P: Phys=ALSA
+S: Sysfs=/devices/platform/soc@107c000000/107c706400.hdmi/sound/card1/input4
+U: Uniq=
+H: Handlers=event4 
+B: PROP=0
+B: EV=21
+B: SW=40
+
+I: Bus=0018 Vendor=0416 Product=038f Version=1060
+N: Name="Goodix Capacitive TouchScreen"
+P: Phys=input/ts
+S: Sysfs=/devices/platform/axi/1000120000.pcie/1f00080000.i2c/i2c-11/11-005d/input/input5
+U: Uniq=
+H: Handlers=kbd mouse0 event5 
+B: PROP=2
+B: EV=b
+B: KEY=400 0 0 0 0 0 0 20000000 1 f8000000 0
+B: ABS=2658000 3
+

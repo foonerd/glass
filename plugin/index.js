@@ -23,6 +23,7 @@ const os = require('os');
 const { Manager, DEFAULT_PORT: MANAGER_DEFAULT_PORT } = require('./manager/server');
 const { FaceFeed } = require('./manager/facefeed');
 const { advanced } = require('./manager/statenow');
+const screenprobe = require('./manager/screenprobe');
 const { compact: compactQueue } = require('./manager/queue');
 const legacyThemes = require('./manager/legacy');
 const { safeFolderName, sections: configSections } = require('./manager/zip');
@@ -940,6 +941,8 @@ Glass.prototype.onStart = function () {
         return self.channel ? { state: advanced(self.channel.state, self.channel.stateAt, Date.now()), infinity: self.channel.infinity, showing: self.channel.showing, queue: self.channel.queue, persist: self.channel.persist } : {};
     } });
     self.channel.onPush = function (message) { self.face.push(message); };
+    // The pointer, resolved from the screen's choice and what the player has now.
+    try { self.refreshPointerShown(); } catch (e) { self.logger.warn(id + 'screen: pointer not resolved: ' + (e && e.message ? e.message : e)); }
 
     self.loadConfigs();
     if (!meterConfig) {
@@ -1418,7 +1421,45 @@ Glass.prototype.screenSettings = function () {
     if (['auto', 'x11', 'wayland', 'kmsdrm'].indexOf(driver) === -1) { driver = 'auto'; }
     var rotation = parseInt(cur['screen.rotation'], 10);
     if ([90, 180, 270].indexOf(rotation) === -1) { rotation = 0; }
-    return { driver: driver, rotation: rotation, kioskActive: self.kioskActive() };
+    var pointer = String(cur['screen.pointer'] || 'auto').trim().toLowerCase();
+    if (['auto', 'show', 'hide'].indexOf(pointer) === -1) { pointer = 'auto'; }
+    var found = self.screenProbe(false);
+    return {
+        driver: driver,
+        rotation: rotation,
+        pointer: pointer,
+        pointerShown: String(cur['screen.pointer.shown']).toLowerCase() === 'true',
+        kioskActive: found.holders.kiosk,
+        probe: found
+    };
+};
+
+// What the player has for a screen, read from the kernel and the system
+// (manager/screenprobe.js), kept for a few seconds between readers.
+Glass.prototype.screenProbe = function (fresh) {
+    var self = this;
+    if (!fresh && self.probeHeld && Date.now() - self.probeAt < 5000) { return self.probeHeld; }
+    self.probeHeld = screenprobe.gather();
+    self.probeAt = Date.now();
+    return self.probeHeld;
+};
+
+// The pointer as the display reads it, resolved from the choice and what
+// the player has; written when it differs, without a restart: the display
+// starts with it next time.
+Glass.prototype.refreshPointerShown = function () {
+    var self = this;
+    self.loadConfigs();
+    if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return false; }
+    var cur = meterConfig.current || {};
+    var choice = String(cur['screen.pointer'] || 'auto').trim().toLowerCase();
+    var shown = screenprobe.pointerShown(choice, self.screenProbe(true)) ? 'True' : 'False';
+    if (String(cur['screen.pointer.shown']) === shown) { return false; }
+    meterConfig.current['screen.pointer.shown'] = shown;
+    fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+    try { self.updateConfigVersion(); } catch (e) {}
+    self.logger.info(id + 'screen: pointer ' + choice + ', shown ' + shown);
+    return true;
 };
 
 // Whether the kiosk, the Touch Display plugin's X session and browser,
@@ -1443,8 +1484,11 @@ Glass.prototype.setScreenSettings = function (data) {
     if (['auto', 'x11', 'wayland', 'kmsdrm'].indexOf(driver) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
     var rotation = data.rotation === undefined ? now.rotation : parseInt(data.rotation, 10);
     if ([0, 90, 180, 270].indexOf(rotation) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    var pointer = data.pointer === undefined ? now.pointer : String(data.pointer).trim().toLowerCase();
+    if (['auto', 'show', 'hide'].indexOf(pointer) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
     if (driver === 'kmsdrm' && now.driver !== 'kmsdrm' && now.kioskActive) { return { error: 'GLASS.MANAGER_SCREEN_KIOSK_HOLDS' }; }
-    var wanted = { 'screen.driver': driver, 'screen.rotation': String(rotation) };
+    var shown = screenprobe.pointerShown(pointer, now.probe) ? 'True' : 'False';
+    var wanted = { 'screen.driver': driver, 'screen.rotation': String(rotation), 'screen.pointer': pointer, 'screen.pointer.shown': shown };
     var changed = false;
     Object.keys(wanted).forEach(function (k) {
         if (String(meterConfig.current[k]) !== wanted[k]) { meterConfig.current[k] = wanted[k]; changed = true; }
@@ -1453,7 +1497,7 @@ Glass.prototype.setScreenSettings = function (data) {
         fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
         try { self.updateConfigVersion(); } catch (e) {}
         if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
-        self.logger.info(id + 'screen: drawn by ' + driver + ', rotation ' + rotation);
+        self.logger.info(id + 'screen: drawn by ' + driver + ', rotation ' + rotation + ', pointer ' + pointer + ' (shown ' + shown + ')');
     }
     return { ok: true, changed: changed };
 };

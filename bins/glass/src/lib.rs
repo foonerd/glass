@@ -658,6 +658,8 @@ fn session(
                 // picture turned on a screen no X server turns.
                 driver: skin.run.driver.sdl_name().map(str::to_string),
                 rotation: skin.run.rotation.degrees(),
+                // `screen.pointer.shown`: the pointer, as the plugin resolved it.
+                pointer: skin.run.pointer,
                 ..WindowOptions::default()
             },
         };

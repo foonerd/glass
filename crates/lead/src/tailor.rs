@@ -391,6 +391,8 @@ const KEPT: &[&str] = &[
     "tonearm.drop.duration",
     "tonearm.lift.duration",
     "screen.driver",
+    "screen.pointer",
+    "screen.pointer.shown",
     "screen.rotation",
     "touch.interactive",
     "trail",
