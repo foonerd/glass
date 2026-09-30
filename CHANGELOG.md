@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.84] - 2026-09-30
+
+The kiosk's plugin counts by its running state. Volumio keeps a plugin's enabled flag and its running status apart: the flag set on its own brings nothing until the next boot, and 0.7.83 read the flag, so a flag set without a start left the screen dark for a kiosk that was not coming. The fact now takes the Touch Display or Display Configuration plugin as bringing the kiosk when it is started or starting; the flag alone counts only in the first two minutes after Glass starts, when plugins come up one after another at boot.
+
 ## [0.7.83] - 2026-09-30
 
 The screen by fact, and the kiosk always first. Since 0.7.74 the Screen tab offered "Drawn by: the screen itself" and told users to turn the Touch Display plugin off to get it. That could leave a player with a screensaver and no interface, and the kiosk is the interface, at times the only way into the player. The choice is gone. The plugin reads the fact at every start and every two seconds: an X server up, the kiosk unit running, starting or enabled at boot, the Touch Display or the Display Configuration plugin on, a panel connected. While the kiosk runs or is on its way, Glass draws on X as a screensaver and shows no screen controls. Only when no kiosk uses the screen at all does Glass draw on the screen itself, stay on it, and offer rotation, pointer and touch; and the moment the kiosk comes back, the display steps aside, starting the kiosk again if it failed against the display. The Screen tab says what the display draws on now and why. A driver key set through the old choice goes back to Auto.
