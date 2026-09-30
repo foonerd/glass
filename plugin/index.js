@@ -22,6 +22,7 @@ const pluginVersion = require('./package.json').version;
 const os = require('os');
 const { Manager, DEFAULT_PORT: MANAGER_DEFAULT_PORT } = require('./manager/server');
 const { FaceFeed } = require('./manager/facefeed');
+const { advanced } = require('./manager/statenow');
 const { compact: compactQueue } = require('./manager/queue');
 const legacyThemes = require('./manager/legacy');
 const { safeFolderName, sections: configSections } = require('./manager/zip');
@@ -72,6 +73,8 @@ function Channel(logger, onAttach, onCommand) {
     this.server = null;
     this.clients = [];
     this.state = null;
+    // The clock when the state arrived, for a replay that moves the position on.
+    this.stateAt = null;
     this.infinity = null;
     this.queue = null;
 }
@@ -96,7 +99,7 @@ Channel.prototype.attach = function (conn) {
     self.clients.push(conn);
     self.logger.info(id + 'channel: a display connected');
     self.tell(conn, { kind: 'hello', protocol: CHANNEL_PROTOCOL, plugin: pluginVersion });
-    if (self.state) { self.tell(conn, { kind: 'state', state: self.state }); }
+    if (self.state) { self.tell(conn, { kind: 'state', state: advanced(self.state, self.stateAt, Date.now()) }); }
     if (self.queue) { self.tell(conn, { kind: 'queue', items: self.queue }); }
     if (self.showing) { self.tell(conn, { kind: 'showing', theme: self.showing.theme, meter: self.showing.meter }); }
     if (self.infinity !== null) { self.tell(conn, { kind: 'infinity', on: self.infinity }); }
@@ -933,7 +936,7 @@ Glass.prototype.onStart = function () {
     // The feed behind the manager's Face tab: the frames from the daemon's
     // pages socket, and every line the displays hear, for browser pages.
     self.face = new FaceFeed({ socketPath: faceSocketPath, logger: self.logger, current: function () {
-        return self.channel ? { state: self.channel.state, infinity: self.channel.infinity, showing: self.channel.showing, queue: self.channel.queue } : {};
+        return self.channel ? { state: advanced(self.channel.state, self.channel.stateAt, Date.now()), infinity: self.channel.infinity, showing: self.channel.showing, queue: self.channel.queue } : {};
     } });
     self.channel.onPush = function (message) { self.face.push(message); };
 
@@ -1020,6 +1023,7 @@ Glass.prototype.onStart = function () {
         self.lastState = state;
         if (self.channel) {
             self.channel.state = state;
+            self.channel.stateAt = Date.now();
             self.channel.push({ kind: 'state', state: state });
         }
         self.logger.info(id + 'pushState: status=' + status + ' service=' + state.service + ' volatile=' + state.volatile);
