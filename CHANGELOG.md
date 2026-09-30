@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.73] - 2026-09-30
+
+The theme collection and the fonts repository carry Glass's name: the Manager's Catalog reads `glass_templates`, and the package fetches its fonts from `glass_fonts`. Players on earlier releases keep working, since GitHub serves the old names as well.
+
 ## [0.7.72] - 2026-09-29
 
 A cut theme's disc and reels turn about the right point: `vinyl.center` and the reels' centres are points on the screen and take the letterbox offset like the pictures' positions, where the cutter had scaled them alone, so a disc could be drawn twice, once at its place and once about the wrong centre. A theme's `screen.bgr`, which the engine puts at the screen's top left whatever the meter's place, is set on a canvas of the new size at the offset instead of scaled alone, so it stays under the theme.
