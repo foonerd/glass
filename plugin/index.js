@@ -1434,6 +1434,12 @@ Glass.prototype.screenTimeoutMs = function () {
 // kiosk unit's state and whether it is enabled at boot, the two plugins
 // that bring a kiosk, and whether a panel is connected (the DRM status
 // files alone, no probe).
+// The face size as kept, normal unless the key says large or car.
+function faceSizeOf(value) {
+    var size = String(value === undefined || value === null ? 'normal' : value).trim().toLowerCase();
+    return ['normal', 'large', 'car'].indexOf(size) === -1 ? 'normal' : size;
+}
+
 Glass.prototype.screenFact = function () {
     var self = this;
     // One call for the unit's two facts: `show` answers for a unit in any
@@ -1592,7 +1598,7 @@ Glass.prototype.screenSettings = function () {
         rotation: rotation,
         pointer: pointer,
         pointerShown: String(cur['screen.pointer.shown']).toLowerCase() === 'true',
-        faceSize: ['normal', 'large', 'car'].indexOf(String(cur['face.size'] || 'normal').trim().toLowerCase()) === -1 ? 'normal' : String(cur['face.size']).trim().toLowerCase(),
+        faceSize: faceSizeOf(cur['face.size']),
         kioskActive: fact.kiosk === 'active',
         free: self.screenOurs(fact),
         fact: fact,
