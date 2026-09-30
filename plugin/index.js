@@ -24,6 +24,7 @@ const { Manager, DEFAULT_PORT: MANAGER_DEFAULT_PORT } = require('./manager/serve
 const { FaceFeed } = require('./manager/facefeed');
 const { advanced } = require('./manager/statenow');
 const screenprobe = require('./manager/screenprobe');
+const screenowner = require('./manager/screenowner');
 const { compact: compactQueue } = require('./manager/queue');
 const legacyThemes = require('./manager/legacy');
 const { safeFolderName, sections: configSections } = require('./manager/zip');
@@ -1497,6 +1498,18 @@ function unitFacts(name) {
     return unit;
 }
 
+// Wait for a condition, polled every half second, up to a limit; answers
+// with whether it came true.
+function waitFor(test, ms) {
+    return new Promise(function (resolve) {
+        var started = Date.now();
+        (function poll() {
+            if (test() || Date.now() - started > ms) { return resolve(test()); }
+            setTimeout(poll, 500);
+        })();
+    });
+}
+
 // The fact of the screen, read afresh and cheaply: an X server up, the
 // kiosk unit's state and whether it is enabled at boot, the two plugins
 // that bring a kiosk, and whether a panel is connected (the DRM status
@@ -1656,6 +1669,7 @@ Glass.prototype.screenSettings = function () {
             display: { running: running, driver: running && self.displayRenderer ? self.displayRenderer.driver : null, renderer: running && self.displayRenderer ? self.displayRenderer.renderer : null },
             wouldDraw: screenprobe.wouldDraw(fact)
         },
+        owner: self.screenOwnerState(),
         probe: found,
         touch: self.touchSettings()
     };
@@ -1833,6 +1847,152 @@ Glass.prototype.setScreenSettings = function (data) {
         setTimeout(function () { try { self.watchScreen(); } catch (e) {} }, 1500);
     }
     return { ok: true, changed: changed };
+};
+
+// ---- The screen's owner: the kiosk, or glass-evo ------------------------
+
+// glass-evo as a component the Manager keeps under the data folder: a
+// manifest and the binaries by architecture. Available means the manifest
+// and the binary for this player's architecture are there.
+const EVO_DIR = DATA_DIR + '/evo';
+const REGISTER_FILE = DATA_DIR + '/screen-owner.json';
+
+Glass.prototype.evoComponent = function () {
+    var self = this;
+    try {
+        var m = JSON.parse(fs.readFileSync(EVO_DIR + '/manifest.json', 'utf8'));
+        var arch = self.volumioArch();
+        var rel = m.binaries && m.binaries[arch] && m.binaries[arch].path;
+        var bin = rel ? EVO_DIR + '/' + String(rel).replace(/^\/+/, '') : null;
+        var available = !!(bin && fs.existsSync(bin));
+        return { installed: true, available: available, version: String(m.version || ''), binary: available ? bin : null, arch: arch };
+    } catch (e) {
+        return { installed: false, available: false, version: null, binary: null };
+    }
+};
+
+// The register: who owns the screen, since when, what was found, and what
+// the take changed in order, each with what it was before; the way back
+// adds when it happened and what it restored.
+Glass.prototype.readRegister = function () {
+    try { return JSON.parse(fs.readFileSync(REGISTER_FILE, 'utf8')); } catch (e) { return null; }
+};
+
+Glass.prototype.writeRegister = function (register) {
+    try { fs.mkdirSync(DATA_DIR, { recursive: true }); } catch (e) {}
+    fs.writeFileSync(REGISTER_FILE, JSON.stringify(register, null, 2));
+};
+
+// The kiosk plugins as they stand: installed, their enabled flag and their
+// running status, which Volumio keeps apart.
+Glass.prototype.kioskPluginStates = function () {
+    var self = this;
+    var pm = self.commandRouter.pluginManager;
+    var out = {};
+    screenowner.KIOSK_PLUGINS.forEach(function (name) {
+        var enabled = false;
+        var status = '';
+        try { enabled = pm.isEnabled('user_interface', name) === true; } catch (e) {}
+        try { status = String(pm.config.get('user_interface.' + name + '.status') || ''); } catch (e) {}
+        out[name] = { installed: fs.existsSync('/data/plugins/user_interface/' + name), enabled: enabled, status: status };
+    });
+    return out;
+};
+
+Glass.prototype.kioskUnitStates = function () {
+    var out = {};
+    screenowner.KIOSK_UNITS.forEach(function (name) { out[name] = unitFacts(name); });
+    return out;
+};
+
+Glass.prototype.screenOwnerState = function () {
+    var self = this;
+    var register = self.readRegister();
+    return { owner: screenowner.ownedByEvo(register) ? 'glass-evo' : 'kiosk', evo: self.evoComponent(), register: register };
+};
+
+// glass-evo takes the screen, or the kiosk gets it back. A take turns the
+// kiosk plugins off through their own lifecycles, waits for X to go, then
+// stops and disables the units behind the kiosk, recording each change as
+// it lands so that a take that fails halfway can still be undone. The way
+// back has the display step aside first, so the kiosk's X never starts
+// against it, then restores in reverse order only what is still as the
+// take left it. The watcher does the rest by fact.
+Glass.prototype.setScreenOwner = function (owner) {
+    var self = this;
+    var systemctl = function (args) {
+        return new Promise(function (resolve, reject) {
+            exec('/usr/bin/sudo -n /bin/systemctl ' + args, { uid: 1000, gid: 1000 }, function (error) { if (error) { reject(error); } else { resolve(); } });
+        });
+    };
+    var chain = function (steps, fn) {
+        return steps.reduce(function (p, step) { return p.then(function () { return fn(step); }); }, Promise.resolve());
+    };
+    var problem = function (e) { return String(e && e.message ? e.message : e); };
+    var runTake = function (step) {
+        if (step.kind === 'plugin') {
+            self.logger.info(id + 'screen owner: ' + step.name + ' off');
+            return Promise.resolve(self.commandRouter.disableAndStopPlugin(step.category, step.name));
+        }
+        self.logger.info(id + 'screen owner: ' + step.name + ' stopped' + (step.was.enabled ? ' and disabled' : ''));
+        return systemctl('stop ' + step.name).then(function () { return step.was.enabled ? systemctl('disable ' + step.name) : null; });
+    };
+    var runBack = function (step) {
+        if (step.kind === 'plugin') {
+            self.logger.info(id + 'screen owner: ' + step.name + ' on');
+            return Promise.resolve(self.commandRouter.enableAndStartPlugin(step.category, step.name));
+        }
+        self.logger.info(id + 'screen owner: ' + step.name + (step.enable ? ' enabled' : '') + (step.start ? ' started' : ''));
+        return (step.enable ? systemctl('enable ' + step.name) : Promise.resolve()).then(function () { return step.start ? systemctl('start ' + step.name) : null; });
+    };
+    var state = self.screenOwnerState();
+    if (owner === 'glass-evo') {
+        if (state.owner === 'glass-evo') { return Promise.resolve({ ok: true, changed: false }); }
+        if (!state.evo.available) { return Promise.resolve({ error: 'GLASS.MANAGER_OWNER_EVO_ABSENT' }); }
+        var register = { owner: 'glass-evo', takenAt: new Date().toISOString(), evo: state.evo.version, found: self.screenFact(), changes: [] };
+        var pluginSteps = screenowner.planTakePlugins(self.kioskPluginStates());
+        self.logger.info(id + 'screen owner: glass-evo takes the screen (' + pluginSteps.length + ' plugin' + (pluginSteps.length === 1 ? '' : 's') + ' to turn off)');
+        return chain(pluginSteps, function (step) { return runTake(step).then(function () { register.changes.push(step); }); })
+            .then(function () { return waitFor(function () { return !fs.existsSync('/tmp/.X11-unix/X0'); }, 20000); })
+            .then(function () {
+                var unitSteps = screenowner.planTakeUnits(self.kioskUnitStates());
+                return chain(unitSteps, function (step) { return runTake(step).then(function () { register.changes.push(step); }); });
+            })
+            .then(function () {
+                self.writeRegister(register);
+                self.probeAt = 0;
+                self.logger.info(id + 'screen owner: glass-evo has the screen; ' + register.changes.length + ' change' + (register.changes.length === 1 ? '' : 's') + ' recorded');
+                return { ok: true, changed: true };
+            }, function (e) {
+                register.error = problem(e);
+                self.writeRegister(register);
+                self.logger.warn(id + 'screen owner: the take did not finish: ' + register.error);
+                return { error: 'GLASS.MANAGER_OWNER_FAILED', data: { message: register.error } };
+            });
+    }
+    if (owner === 'kiosk') {
+        if (state.owner !== 'glass-evo') { return Promise.resolve({ ok: true, changed: false }); }
+        var reg = state.register;
+        var steps = screenowner.planGiveBack(reg, { plugins: self.kioskPluginStates(), units: self.kioskUnitStates() });
+        self.logger.info(id + 'screen owner: the kiosk gets the screen back (' + steps.length + ' to restore); the display steps aside');
+        self.screenYieldUntil = Date.now() + 30000;
+        try { if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); } } catch (e) {}
+        return waitFor(function () { return !(self.meterChild && self.meterChild.exitCode === null); }, 10000)
+            .then(function () { return chain(steps, runBack); })
+            .then(function () {
+                reg.gaveBackAt = new Date().toISOString();
+                reg.restored = steps;
+                self.writeRegister(reg);
+                self.screenYieldUntil = 0;
+                self.probeAt = 0;
+                return { ok: true, changed: true };
+            }, function (e) {
+                self.screenYieldUntil = 0;
+                self.logger.warn(id + 'screen owner: the way back did not finish: ' + problem(e));
+                return { error: 'GLASS.MANAGER_OWNER_FAILED', data: { message: problem(e) } };
+            });
+    }
+    return Promise.resolve({ error: 'GLASS.MANAGER_BAD_REQUEST' });
 };
 
 // ---- Car Dash: a day theme and a night theme by the clock ---------------
