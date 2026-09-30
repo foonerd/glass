@@ -43,6 +43,7 @@ jobs:
           if-no-files-found: error
 
   windows:
+    if: github.ref == 'refs/heads/main'
     name: windows cross build
     runs-on: ubuntu-24.04
     needs: check
@@ -60,6 +61,7 @@ jobs:
           if-no-files-found: error
 
   android:
+    if: github.ref == 'refs/heads/main'
     name: android build
     runs-on: ubuntu-24.04
     needs: check
