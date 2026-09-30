@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.80] - 2026-09-30
+
+Two reports from the community. The settings page's "Fit to screen" switch could turn the fit off but never on: the page did not send the switch with its section, so a save read it as off; it is sent now. A rotation of one meter, a theme with one, or one chosen from the list, with a change interval set, loaded that same meter again at every interval, a visible reload; the display now moves on only to a meter that is not the one on show, and a rotation of one stays put.
+
 ## [0.7.79] - 2026-09-30
 
 Touch set right, and a screen that is never empty. A finger's share of the panel now goes through a matrix before it becomes a pixel, `touch.matrix`, so a panel whose touch frame is swapped, mirrored, offset or scaled against the picture is set right without X. The Screen tab's Touch section offers three ways: as the panel reports, swap or mirror switches, or calibrated: the display shows five targets on the screen, one touch each, computes the map with the least error, keeps it and uses it at once, and the tab says the worst error left or why it could not fit. When the display draws through KMS/DRM the screen is Glass's alone, so it never lands on the console: the display is started with the plugin and again whenever it is found gone, it stays on the screen with the player stopped, black after the countdown, and a touch outside a control does nothing there.
