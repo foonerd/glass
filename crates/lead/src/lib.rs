@@ -2159,6 +2159,12 @@ pub fn folder_candidates(uri: &str, files: &[String]) -> Vec<String> {
     if uri.is_empty() {
         return Vec::new();
     }
+    // A track inside a cue sheet is named `cue://<path>@<track>`: the
+    // sheet's folder is the track's.
+    let uri = match uri.strip_prefix("cue://") {
+        Some(rest) => rest.rsplit_once('@').map(|(path, _)| path).unwrap_or(rest),
+        None => uri,
+    };
     let stripped = uri
         .strip_prefix("music-library/")
         .or_else(|| uri.strip_prefix("music-library"))
@@ -5089,6 +5095,11 @@ mod tests {
             "/mnt/NAS/a/back.png"
         );
         assert!(folder_candidates("", &files).is_empty());
+        assert_eq!(
+            folder_candidates("cue://NAS/Music/Songs Without Words/CD1.cue@5", &files)[0],
+            "/mnt/NAS/Music/Songs Without Words/back.png",
+            "a track inside a cue sheet is in the sheet's folder"
+        );
         assert_eq!(
             folder_candidates("rp2/channel@id=0", &files),
             ["/mnt/rp2/back.png", "/mnt/rp2/Logo.JPG"],

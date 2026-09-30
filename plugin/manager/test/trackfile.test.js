@@ -17,6 +17,8 @@ test('a track location becomes its folder under /mnt', () => {
   assert.strictEqual(trackFolder('mnt/NAS/music/a/b.mp3'), '/mnt/NAS/music/a');
   assert.strictEqual(trackFolder('mnt/USB/x/y.wav'), '/mnt/USB/x');
   assert.strictEqual(trackFolder('http://stream.example/radio'), null);
+  assert.strictEqual(trackFolder('cue://NAS/Music/Songs Without Words/CD1.cue@5'), '/mnt/NAS/Music/Songs Without Words', 'a track inside a cue sheet is in the sheet\'s folder');
+  assert.strictEqual(trackFolder('cue://INTERNAL/Album/disc.cue'), '/mnt/INTERNAL/Album');
   assert.strictEqual(trackFolder(''), null);
 });
 
