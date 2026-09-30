@@ -126,6 +126,9 @@ pub struct Surface {
     shows: u32,
     /// A file to write the window's pixels to, once, at that show.
     grab: Option<(std::path::PathBuf, u32)>,
+    /// A finger has arrived as a finger: from then on the mouse events SDL
+    /// makes up from touches are dropped, so a touch counts once.
+    fingers_seen: bool,
 }
 
 impl Surface {
@@ -281,6 +284,7 @@ impl Surface {
             rotation,
             shows: 0,
             grab: None,
+            fingers_seen: false,
         })
     }
 
@@ -343,17 +347,44 @@ impl Surface {
                     keycode: Some(Keycode::F),
                     ..
                 } if self.keys => return Ok(Shown::EnterFullscreen),
-                // A finger arrives as a mouse too; the mouse events carry the
-                // position, scaled to the frame when it is fitted.
-                Event::MouseButtonDown { x, y, .. } => raw.push((PointerKind::Down, x, y)),
-                Event::MouseButtonUp { x, y, .. } => {
+                // A finger arrives as a finger, with its place as a share of
+                // the window, and SDL may make a mouse of it as well; once a
+                // finger has been seen, those made-up mouse events are
+                // dropped, so a touch counts once. A real mouse counts always.
+                Event::FingerDown { x, y, .. } => {
+                    self.fingers_seen = true;
+                    let (px, py) = finger_pixel((x, y), self.last_window);
+                    raw.push((PointerKind::Down, px, py));
+                }
+                Event::FingerMotion { x, y, .. } => {
+                    let (px, py) = finger_pixel((x, y), self.last_window);
+                    raw.push((PointerKind::Move, px, py));
+                }
+                Event::FingerUp { x, y, .. } => {
+                    let (px, py) = finger_pixel((x, y), self.last_window);
+                    raw.push((PointerKind::Up, px, py));
+                    touched = true;
+                }
+                Event::MouseButtonDown { which, x, y, .. }
+                    if keep_mouse(which, self.fingers_seen) =>
+                {
+                    raw.push((PointerKind::Down, x, y))
+                }
+                Event::MouseButtonUp { which, x, y, .. }
+                    if keep_mouse(which, self.fingers_seen) =>
+                {
                     raw.push((PointerKind::Up, x, y));
                     touched = true;
                 }
                 Event::MouseMotion {
-                    x, y, mousestate, ..
-                } if mousestate.left() => raw.push((PointerKind::Move, x, y)),
-                Event::FingerUp { .. } => touched = true,
+                    which,
+                    x,
+                    y,
+                    mousestate,
+                    ..
+                } if mousestate.left() && keep_mouse(which, self.fingers_seen) => {
+                    raw.push((PointerKind::Move, x, y))
+                }
                 _ => {}
             }
         }
@@ -517,6 +548,24 @@ pub fn rotated_center(point: (f32, f32), rotation: u32, window: (u32, u32)) -> (
     }
 }
 
+/// A finger's place, a share of the window each way, as a window pixel.
+pub fn finger_pixel(share: (f32, f32), window: (u32, u32)) -> (i32, i32) {
+    (
+        (share.0 * window.0 as f32).round() as i32,
+        (share.1 * window.1 as f32).round() as i32,
+    )
+}
+
+/// The mouse SDL makes up from touches, `SDL_TOUCH_MOUSEID`: all ones.
+pub const TOUCH_MOUSEID: u32 = u32::MAX;
+
+/// Whether a mouse event counts: always from a real mouse; from a touch
+/// SDL made a mouse of, only until the first finger has arrived as a
+/// finger, after which the finger events carry the touch.
+pub fn keep_mouse(which: u32, fingers_seen: bool) -> bool {
+    which != TOUCH_MOUSEID || !fingers_seen
+}
+
 /// A window pixel back to the picture's own pixel, the turn undone.
 pub fn unrotate_point(point: (i32, i32), rotation: u32, window: (u32, u32)) -> (i32, i32) {
     let (px, py) = point;
@@ -553,7 +602,21 @@ pub fn write_ppm(path: impl AsRef<Path>, frame: &Frame) -> io::Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use super::{fitted_rect, rotated_center, unrotate_point};
+    use super::{
+        finger_pixel, fitted_rect, keep_mouse, rotated_center, unrotate_point, TOUCH_MOUSEID,
+    };
+
+    /// A finger at 92% across and 96% down a 720x1280 panel is window pixel
+    /// (662, 1229); a real mouse always counts, a mouse made from a touch
+    /// only until a finger has been seen as one.
+    #[test]
+    fn a_finger_is_a_window_pixel_and_a_made_up_mouse_counts_once() {
+        assert_eq!(finger_pixel((0.92, 0.96), (720, 1280)), (662, 1229));
+        assert_eq!(finger_pixel((0.0, 1.0), (720, 1280)), (0, 1280));
+        assert!(keep_mouse(0, false) && keep_mouse(0, true));
+        assert!(keep_mouse(TOUCH_MOUSEID, false));
+        assert!(!keep_mouse(TOUCH_MOUSEID, true));
+    }
 
     /// A landscape picture on a portrait panel turned 270, the picture's top
     /// on the left as X's "left" puts it: the centre stays in the middle, the
