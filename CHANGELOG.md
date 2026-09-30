@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.77] - 2026-09-30
+
+Touch on a screen with no X server. The display took its taps from the mouse events SDL makes of a finger, and on KMS/DRM none reach it, so every touch counted as a bare touch and the display left. A finger now arrives as a finger, its place a share of the window turned back the same way as the picture, and the mouse SDL makes of a touch is dropped once a finger has been seen as one, so a touch counts once under X and once on KMS/DRM. A real mouse counts as before.
+
 ## [0.7.76] - 2026-09-30
 
 The browser face tells the truth when the player stops. The persist countdown the player's screen shows after a stop or a pause now shows on the Face and on Anymote too: the plugin pushes the period as a line beside the file the display reads, and the engine counts it down on the page's own wall clock, which the page now hands it, so a theme's clocks are true there as well. When the period ends and the player's display has left the screen, the page says so in a banner over the picture, stopped or paused, until the player plays again. The red last ten seconds of a track, drawn by the engine from the position, reach the browser face now that its position is right.
