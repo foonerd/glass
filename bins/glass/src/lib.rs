@@ -11,7 +11,7 @@ use std::thread;
 use std::time::Instant;
 
 use controls::{controls_of, interactive_now, override_scene, Act, Pointer, Touch};
-use expose::{fit_art, raster_over, write_png, Frame, MeterAssets, Motion, Pictures, Stack};
+use expose::{fit_art, raster_over, write_png, Frame, MeterAssets, Motion, Pictures, Rect, Stack};
 use intake::{Overrides, Selector, Source, TapSource};
 use lead::{
     frame_period, should_mark_dismiss, Input, InteractiveMode, SkinDesc, DISMISS_FILE_VAR, RUN_FLAG,
@@ -775,6 +775,13 @@ fn session(
     let mut meter_step: Option<i8> = None;
     // A bar being dragged: its value follows the finger until it lifts.
     let mut touch = Touch::new();
+    // A calibration of the touch panel, while the plugin asks for one.
+    let mut calibration: Option<Calibration> = None;
+    // The screen is ours when no X server holds it: the display never
+    // leaves it, and after the countdown it shows black rather than the
+    // console.
+    let screen_ours = skin.run.driver == lead::ScreenDriver::KmsDrm;
+    let mut black_frame: Option<Frame> = None;
     loop {
         let frame_started = Instant::now();
         if let Some(step) = meter_step.take() {
@@ -788,6 +795,10 @@ fn session(
             }
         }
         let input = source.poll();
+        if let Some(points) = source.take_calibrate_request() {
+            calibration = Some(Calibration::new(points, skin.width, skin.height));
+            logline::say!(Info, "display", "touch: calibrating with {points} targets");
+        }
         let polled_at = Instant::now();
         // On a remote: the player's theme changed and this one follows it,
         // or the settings changed on the page. The session starts again.
@@ -937,7 +948,43 @@ fn session(
                 &mut motion,
                 started.elapsed().as_millis() as u64,
             );
-            let frame = painted.frame;
+            let mut frame = painted.frame;
+            // The screen is ours and the player has stopped past the
+            // countdown: black, never the console.
+            let idle_black = screen_ours
+                && input.metadata.status != "play"
+                && input.metadata.persist_mode == "countdown"
+                && input.metadata.persist_left == 0;
+            if idle_black {
+                let black = black_frame.get_or_insert_with(|| Frame {
+                    blend: expose::Blend::Normal,
+                    width: frame.width,
+                    height: frame.height,
+                    rgba: vec![0; frame.width as usize * frame.height as usize * 4],
+                });
+                frame = &*black;
+            }
+            let mut overlay: Option<Frame> = None;
+            let mut damage: &[Rect] = painted.damage;
+            if let Some(cal) = calibration.as_ref() {
+                if let Some(target) = cal.targets.get(cal.samples.len()) {
+                    let mut own = frame.clone();
+                    draw_target(&mut own, target.0, target.1);
+                    overlay = Some(own);
+                }
+            }
+            if let Some(own) = overlay.as_ref() {
+                frame = own;
+            }
+            let whole = [Rect {
+                x: 0,
+                y: 0,
+                w: frame.width,
+                h: frame.height,
+            }];
+            if idle_black || overlay.is_some() {
+                damage = &whole;
+            }
             rastered_at = Instant::now();
             if let Some(window) = surface.as_mut() {
                 if let Some(mode) = remote.as_deref().and_then(|r| r.app.take_window_request()) {
@@ -945,7 +992,7 @@ fn session(
                         eprintln!("glass: window: {err}");
                     }
                 }
-                let shown = match window.show(frame, painted.damage) {
+                let shown = match window.show(frame, damage) {
                     Ok(shown) => shown,
                     Err(err) => {
                         eprintln!("glass: {err}");
@@ -958,7 +1005,53 @@ fn session(
                 let events = window.take_pointer();
                 let mut acted = false;
                 let mut dismiss = false;
-                if !events.is_empty() && interactive_now(&skin) {
+                if let Some(cal) = calibration.as_mut() {
+                    // Each finger lifted is a sample for the target on show.
+                    for raw in window.take_raw_lifts() {
+                        if let Some(target) = cal.targets.get(cal.samples.len()).copied() {
+                            let expected = window.expected_share(target);
+                            cal.samples.push((raw, expected));
+                            logline::say!(
+                                Verbose,
+                                "display",
+                                "touch: target {} of {} read at {:.3},{:.3}, expected {:.3},{:.3}",
+                                cal.samples.len(),
+                                cal.targets.len(),
+                                raw.0,
+                                raw.1,
+                                expected.0,
+                                expected.1
+                            );
+                        }
+                    }
+                    acted = true;
+                    let done = cal.samples.len() >= cal.targets.len();
+                    let timed_out = cal.started.elapsed() > Duration::from_secs(90);
+                    if done || timed_out {
+                        let answer = if timed_out {
+                            serde_json::json!({ "error": "timeout" })
+                        } else {
+                            match lead::fit_affine(&cal.samples) {
+                                Some((matrix, worst)) => {
+                                    window.set_touch_matrix(matrix);
+                                    let (ww, wh) = window.window_size();
+                                    let error_px = worst * ((ww * ww + wh * wh) as f32).sqrt();
+                                    logline::say!(
+                                        Info,
+                                        "display",
+                                        "touch: calibrated, matrix {:?}, worst {:.1} px",
+                                        matrix,
+                                        error_px
+                                    );
+                                    serde_json::json!({ "matrix": matrix, "error_px": error_px, "samples": cal.samples.len() })
+                                }
+                                None => serde_json::json!({ "error": "unfit" }),
+                            }
+                        };
+                        source.command(&intake::Command::with("calibration", answer));
+                        calibration = None;
+                    }
+                } else if !events.is_empty() && interactive_now(&skin) {
                     if let Some(indicators) = scene.indicators.as_ref() {
                         let controls = controls_of(indicators, assets.indicators.as_ref());
                         let margin = indicators.spec.touch_margin;
@@ -1030,6 +1123,8 @@ fn session(
                             if let Some(remote) = remote.as_deref() {
                                 remote.touched(&mut source);
                             }
+                        } else if screen_ours {
+                            // The screen is ours: a touch outside a control does nothing.
                         } else if skin.run.exit_on_touch || dismiss {
                             let marker = env::var(DISMISS_FILE_VAR).ok();
                             if should_mark_dismiss(
@@ -1214,6 +1309,80 @@ pub(crate) fn screen_available() -> bool {
     cfg!(any(windows, target_os = "macos", target_os = "android"))
         || env::var_os("DISPLAY").is_some_and(|v| !v.is_empty())
         || env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
+}
+
+/// A calibration of the touch panel in progress: the targets, in picture
+/// pixels, and the samples read so far, each a raw share of the panel
+/// paired with the share that would have landed on the target.
+struct Calibration {
+    targets: Vec<(i32, i32)>,
+    samples: Vec<((f32, f32), (f32, f32))>,
+    started: Instant,
+}
+
+impl Calibration {
+    /// The targets: the four corners a tenth in, then the centre, then the
+    /// middles of the edges, as many as asked (three to nine).
+    fn new(points: u32, width: u32, height: u32) -> Self {
+        let shares: [(f32, f32); 9] = [
+            (0.1, 0.1),
+            (0.9, 0.1),
+            (0.9, 0.9),
+            (0.1, 0.9),
+            (0.5, 0.5),
+            (0.5, 0.1),
+            (0.9, 0.5),
+            (0.5, 0.9),
+            (0.1, 0.5),
+        ];
+        let targets = shares
+            .iter()
+            .take(points.clamp(3, 9) as usize)
+            .map(|(sx, sy)| {
+                (
+                    (sx * width.max(1) as f32).round() as i32,
+                    (sy * height.max(1) as f32).round() as i32,
+                )
+            })
+            .collect();
+        Self {
+            targets,
+            samples: Vec::new(),
+            started: Instant::now(),
+        }
+    }
+}
+
+/// A target for a finger: a cross with a ring, white on a black edge, at
+/// a picture pixel, drawn straight onto the frame.
+fn draw_target(frame: &mut Frame, cx: i32, cy: i32) {
+    let (w, h) = (frame.width as i32, frame.height as i32);
+    let mut put = |x: i32, y: i32, px: [u8; 4]| {
+        if x >= 0 && y >= 0 && x < w && y < h {
+            let at = ((y * w + x) * 4) as usize;
+            frame.rgba[at..at + 4].copy_from_slice(&px);
+        }
+    };
+    let black = [0, 0, 0, 255];
+    let white = [255, 255, 255, 255];
+    for (thick, colour) in [(3, black), (1, white)] {
+        for d in -30..=30 {
+            for t in -thick..=thick {
+                put(cx + d, cy + t, colour);
+                put(cx + t, cy + d, colour);
+            }
+        }
+        for deg in 0..360 {
+            let a = (deg as f32).to_radians();
+            for r in [18.0 - thick as f32, 18.0, 18.0 + thick as f32] {
+                put(
+                    cx + (a.cos() * r).round() as i32,
+                    cy + (a.sin() * r).round() as i32,
+                    colour,
+                );
+            }
+        }
+    }
 }
 
 /// Where a remote display keeps what it brought from players: `--cache`,

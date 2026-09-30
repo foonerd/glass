@@ -59,7 +59,7 @@ pub enum WindowMode {
 }
 
 /// What a window is opened with.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct WindowOptions {
     pub mode: WindowMode,
     /// Where the window goes in windowed and frameless modes; centred otherwise.
@@ -80,6 +80,10 @@ pub struct WindowOptions {
     /// The picture turned on the screen, clockwise, by 0, 90, 180 or 270
     /// degrees; touch is turned the same way.
     pub rotation: u32,
+    /// A finger's share of the panel through this before it becomes a
+    /// pixel: `(ax + by + c, dx + ey + f)`, for a panel whose touch frame
+    /// is not the picture's. The identity changes nothing.
+    pub touch_matrix: [f32; 6],
 }
 
 impl Default for WindowOptions {
@@ -94,9 +98,13 @@ impl Default for WindowOptions {
             display: 0,
             driver: None,
             rotation: 0,
+            touch_matrix: IDENTITY,
         }
     }
 }
+
+/// The matrix that changes nothing.
+pub const IDENTITY: [f32; 6] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
 
 /// One window. The binary keeps it for the life of the player, with one
 /// streaming texture the frames are uploaded into.
@@ -129,6 +137,11 @@ pub struct Surface {
     /// A finger has arrived as a finger: from then on the mouse events SDL
     /// makes up from touches are dropped, so a touch counts once.
     fingers_seen: bool,
+    /// The panel's touch frame set right, applied to every finger's share.
+    touch_matrix: [f32; 6],
+    /// Where fingers lifted, as raw shares of the panel before the matrix,
+    /// since the last take: what a calibration reads.
+    raw_lifts: Vec<(f32, f32)>,
 }
 
 impl Surface {
@@ -285,7 +298,42 @@ impl Surface {
             shows: 0,
             grab: None,
             fingers_seen: false,
+            touch_matrix: options.touch_matrix,
+            raw_lifts: Vec::new(),
         })
+    }
+
+    /// Set the panel's touch frame right from now on, as a calibration
+    /// found it or the settings say.
+    pub fn set_touch_matrix(&mut self, matrix: [f32; 6]) {
+        self.touch_matrix = matrix;
+    }
+
+    /// The window's own size at the last show, in its own pixels.
+    pub fn window_size(&self) -> (u32, u32) {
+        self.last_window
+    }
+
+    /// Where fingers lifted since the last take, as raw shares of the panel
+    /// before the matrix, for a calibration.
+    pub fn take_raw_lifts(&mut self) -> Vec<(f32, f32)> {
+        std::mem::take(&mut self.raw_lifts)
+    }
+
+    /// The share of the panel a finger must report, through the identity,
+    /// to land on a point of the picture as it is shown now: the picture's
+    /// point placed and turned as the window has it. What a calibration
+    /// pairs with the raw share it read.
+    pub fn expected_share(&self, picture: (i32, i32)) -> (f32, f32) {
+        let (x, y) = (
+            self.last_offset.0 as f32 + picture.0 as f32 * self.last_scale,
+            self.last_offset.1 as f32 + picture.1 as f32 * self.last_scale,
+        );
+        let (px, py) = rotated_center((x, y), self.rotation, self.last_window);
+        (
+            px / self.last_window.0.max(1) as f32,
+            py / self.last_window.1.max(1) as f32,
+        )
     }
 
     /// Write the window's pixels, as shown, to a PNG at the given show
@@ -353,15 +401,21 @@ impl Surface {
                 // dropped, so a touch counts once. A real mouse counts always.
                 Event::FingerDown { x, y, .. } => {
                     self.fingers_seen = true;
-                    let (px, py) = finger_pixel((x, y), self.last_window);
+                    let (px, py) =
+                        finger_pixel(through(self.touch_matrix, (x, y)), self.last_window);
                     raw.push((PointerKind::Down, px, py));
                 }
                 Event::FingerMotion { x, y, .. } => {
-                    let (px, py) = finger_pixel((x, y), self.last_window);
+                    let (px, py) =
+                        finger_pixel(through(self.touch_matrix, (x, y)), self.last_window);
                     raw.push((PointerKind::Move, px, py));
                 }
                 Event::FingerUp { x, y, .. } => {
-                    let (px, py) = finger_pixel((x, y), self.last_window);
+                    if self.raw_lifts.len() < 64 {
+                        self.raw_lifts.push((x, y));
+                    }
+                    let (px, py) =
+                        finger_pixel(through(self.touch_matrix, (x, y)), self.last_window);
                     raw.push((PointerKind::Up, px, py));
                     touched = true;
                 }
@@ -548,6 +602,14 @@ pub fn rotated_center(point: (f32, f32), rotation: u32, window: (u32, u32)) -> (
     }
 }
 
+/// A share of the panel through the touch matrix.
+pub fn through(m: [f32; 6], share: (f32, f32)) -> (f32, f32) {
+    (
+        m[0] * share.0 + m[1] * share.1 + m[2],
+        m[3] * share.0 + m[4] * share.1 + m[5],
+    )
+}
+
 /// A finger's place, a share of the window each way, as a window pixel.
 pub fn finger_pixel(share: (f32, f32), window: (u32, u32)) -> (i32, i32) {
     (
@@ -603,7 +665,8 @@ pub fn write_ppm(path: impl AsRef<Path>, frame: &Frame) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        finger_pixel, fitted_rect, keep_mouse, rotated_center, unrotate_point, TOUCH_MOUSEID,
+        finger_pixel, fitted_rect, keep_mouse, rotated_center, through, unrotate_point, IDENTITY,
+        TOUCH_MOUSEID,
     };
 
     /// A finger at 92% across and 96% down a 720x1280 panel is window pixel
@@ -616,6 +679,17 @@ mod tests {
         assert!(keep_mouse(0, false) && keep_mouse(0, true));
         assert!(keep_mouse(TOUCH_MOUSEID, false));
         assert!(!keep_mouse(TOUCH_MOUSEID, true));
+        assert_eq!(through(IDENTITY, (0.3, 0.7)), (0.3, 0.7));
+        assert_eq!(
+            through([0.0, 1.0, 0.0, 1.0, 0.0, 0.0], (0.3, 0.7)),
+            (0.7, 0.3),
+            "a swap"
+        );
+        assert_eq!(
+            through([-1.0, 0.0, 1.0, 0.0, 1.0, 0.0], (0.3, 0.7)),
+            (0.7, 0.7),
+            "x flipped"
+        );
     }
 
     /// A landscape picture on a portrait panel turned 270, the picture's top

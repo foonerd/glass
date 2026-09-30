@@ -57,6 +57,8 @@ fn window_options_of(display: &super::config::Display, title: String) -> WindowO
         // A remote draws where its window manager puts it; no driver or turn of its own.
         driver: None,
         rotation: 0,
+
+        touch_matrix: pane::IDENTITY,
     }
 }
 

@@ -395,6 +395,8 @@ const KEPT: &[&str] = &[
     "screen.pointer.shown",
     "screen.rotation",
     "touch.interactive",
+    "touch.matrix",
+    "touch.matrix",
     "trail",
     "transition.color",
     "transition.duration",

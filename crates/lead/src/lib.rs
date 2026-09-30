@@ -2927,6 +2927,116 @@ pub struct RunSettings {
     /// player has; hidden unless said.
     #[serde(default)]
     pub pointer: bool,
+    /// `touch.matrix`: six numbers `a,b,c,d,e,f` mapping a finger's share
+    /// of the panel `(x, y)` to `(ax + by + c, dx + ey + f)` before it
+    /// becomes a pixel, for a panel whose touch frame is not the
+    /// picture's: swapped, flipped, offset or scaled. Identity unless said.
+    #[serde(default = "identity_matrix")]
+    pub touch_matrix: [f32; 6],
+}
+
+/// The matrix that changes nothing.
+pub const IDENTITY_MATRIX: [f32; 6] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+
+fn identity_matrix() -> [f32; 6] {
+    IDENTITY_MATRIX
+}
+
+/// `touch.matrix` as six numbers separated by commas or spaces; anything
+/// else, or a matrix that maps everything to one point, is the identity.
+pub fn parse_matrix(value: Option<&str>) -> [f32; 6] {
+    let Some(text) = value else {
+        return IDENTITY_MATRIX;
+    };
+    let numbers: Vec<f32> = text
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|s| !s.is_empty())
+        .filter_map(|s| s.parse::<f32>().ok())
+        .collect();
+    if numbers.len() != 6 || numbers.iter().any(|n| !n.is_finite()) {
+        return IDENTITY_MATRIX;
+    }
+    let m = [
+        numbers[0], numbers[1], numbers[2], numbers[3], numbers[4], numbers[5],
+    ];
+    if (m[0] * m[4] - m[1] * m[3]).abs() < 1e-6 {
+        return IDENTITY_MATRIX;
+    }
+    m
+}
+
+/// A point through the matrix.
+pub fn apply_matrix(m: [f32; 6], point: (f32, f32)) -> (f32, f32) {
+    (
+        m[0] * point.0 + m[1] * point.1 + m[2],
+        m[3] * point.0 + m[4] * point.1 + m[5],
+    )
+}
+
+/// The affine map that takes each raw share to its expected share with
+/// the least squared error, from three or more pairs that do not lie on
+/// one line, and the worst distance left over; none when the pairs do not
+/// pin the map down.
+pub fn fit_affine(pairs: &[((f32, f32), (f32, f32))]) -> Option<([f32; 6], f32)> {
+    if pairs.len() < 3 {
+        return None;
+    }
+    // Normal equations for x' = ax + by + c and y' = dx + ey + f, with the
+    // same 3x3 on the left for both, in f64 so the sums do not lose bits.
+    let mut ata = [[0f64; 3]; 3];
+    let mut atx = [0f64; 3];
+    let mut aty = [0f64; 3];
+    for ((x, y), (ex, ey)) in pairs {
+        let row = [*x as f64, *y as f64, 1.0];
+        for i in 0..3 {
+            for j in 0..3 {
+                ata[i][j] += row[i] * row[j];
+            }
+            atx[i] += row[i] * *ex as f64;
+            aty[i] += row[i] * *ey as f64;
+        }
+    }
+    let abc = solve3(ata, atx)?;
+    let def = solve3(ata, aty)?;
+    let m = [
+        abc[0] as f32,
+        abc[1] as f32,
+        abc[2] as f32,
+        def[0] as f32,
+        def[1] as f32,
+        def[2] as f32,
+    ];
+    let worst = pairs
+        .iter()
+        .map(|(raw, expected)| {
+            let got = apply_matrix(m, *raw);
+            ((got.0 - expected.0).powi(2) + (got.1 - expected.1).powi(2)).sqrt()
+        })
+        .fold(0f32, f32::max);
+    Some((m, worst))
+}
+
+/// A 3x3 system by Cramer's rule; none when its determinant is nothing,
+/// the points all on one line.
+fn solve3(a: [[f64; 3]; 3], b: [f64; 3]) -> Option<[f64; 3]> {
+    let det = |m: [[f64; 3]; 3]| {
+        m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1])
+            - m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0])
+            + m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0])
+    };
+    let d = det(a);
+    if d.abs() < 1e-9 {
+        return None;
+    }
+    let mut out = [0f64; 3];
+    for (k, slot) in out.iter_mut().enumerate() {
+        let mut m = a;
+        for (i, row) in m.iter_mut().enumerate() {
+            row[k] = b[i];
+        }
+        *slot = det(m) / d;
+    }
+    Some(out)
 }
 
 impl Default for RunSettings {
@@ -2941,6 +3051,7 @@ impl Default for RunSettings {
             driver: ScreenDriver::Auto,
             rotation: Rotation::R0,
             pointer: false,
+            touch_matrix: IDENTITY_MATRIX,
         }
     }
 }
@@ -2958,6 +3069,7 @@ pub fn run_settings(text: &str) -> RunSettings {
         driver: ScreenDriver::parse(current_value(text, "screen.driver").as_deref()),
         rotation: Rotation::parse(current_value(text, "screen.rotation").as_deref()),
         pointer: truthy(current_value(text, "screen.pointer.shown").as_deref()),
+        touch_matrix: parse_matrix(current_value(text, "touch.matrix").as_deref()),
         x: current_value(text, "position.x")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0),
@@ -5228,6 +5340,38 @@ mod tests {
         );
     }
 
+    /// Four corners and the centre, read through a swapped and flipped
+    /// panel: the fit finds the map that undoes it, to within rounding,
+    /// and points on one line pin nothing.
+    #[test]
+    fn the_affine_fit_undoes_a_swapped_and_flipped_panel() {
+        let panel = |x: f32, y: f32| (1.0 - y, x);
+        let targets = [(0.1, 0.1), (0.9, 0.1), (0.9, 0.9), (0.1, 0.9), (0.5, 0.5)];
+        let pairs: Vec<_> = targets
+            .iter()
+            .map(|&(x, y)| (panel(x, y), (x, y)))
+            .collect();
+        let (m, worst) = fit_affine(&pairs).expect("five points pin the map");
+        assert!(worst < 1e-5, "worst {worst}");
+        let back = apply_matrix(m, panel(0.3, 0.7));
+        assert!((back.0 - 0.3).abs() < 1e-5 && (back.1 - 0.7).abs() < 1e-5);
+        assert_eq!(apply_matrix(IDENTITY_MATRIX, (0.25, 0.75)), (0.25, 0.75));
+        let flat: Vec<_> = [(0.1, 0.5), (0.5, 0.5), (0.9, 0.5)]
+            .iter()
+            .map(|&p| (p, p))
+            .collect();
+        assert!(
+            fit_affine(&flat).is_none(),
+            "points on one line pin nothing"
+        );
+        assert!(fit_affine(&pairs[..2]).is_none(), "two points are too few");
+        assert_eq!(
+            parse_matrix(Some("0, 1, 0, 1, 0, 0")),
+            [0.0, 1.0, 0.0, 1.0, 0.0, 0.0]
+        );
+        assert_eq!(parse_matrix(Some("nonsense")), IDENTITY_MATRIX);
+    }
+
     #[test]
     fn the_run_settings_and_the_dismiss_rule_follow_the_player() {
         let s = run_settings("[current]\nexit.on.touch = False\nstop.display.on.touch = True\nposition.type = custom\nposition.x = 10\nposition.y = 20\n");
@@ -5243,9 +5387,25 @@ mod tests {
                 driver: ScreenDriver::Auto,
                 rotation: Rotation::R0,
                 pointer: false,
+                touch_matrix: IDENTITY_MATRIX,
             }
         );
         assert_eq!(run_settings(""), RunSettings::default());
+        assert_eq!(
+            run_settings("[current]\ntouch.matrix = 0,1,0,1,0,0\n").touch_matrix,
+            [0.0, 1.0, 0.0, 1.0, 0.0, 0.0],
+            "a swap"
+        );
+        assert_eq!(
+            run_settings("[current]\ntouch.matrix = 1,2,3\n").touch_matrix,
+            IDENTITY_MATRIX,
+            "six numbers or nothing"
+        );
+        assert_eq!(
+            run_settings("[current]\ntouch.matrix = 0,0,0,0,0,0\n").touch_matrix,
+            IDENTITY_MATRIX,
+            "a matrix that flattens everything is nothing"
+        );
         assert!(run_settings("[current]\nscreen.pointer.shown = True\n").pointer);
         assert!(
             !run_settings("[current]\nscreen.pointer = show\n").pointer,
