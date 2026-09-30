@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.82] - 2026-09-30
+
+The calibration judges each touch against the map made from the others. A single touch that missed its target was spread over every sample by the fit from all five, so a miss of a tenth of the panel left a worst error under the tolerance and the map was kept. Each touch is now also held against the map fitted from the other four, where its own miss shows in full, and that miss must be inside the tolerance too; a refused calibration reports it.
+
 ## [0.7.81] - 2026-09-30
 
 The touch calibration reads only the touches it asked for. A finger lifted before the targets appeared, a tap to see whether the display stays, say, was kept and paired with the first target, so every sample sat one target off, the map came out wrong with an error in the hundreds of pixels, and the display took it anyway. The display now keeps lifts only while the targets are on the screen, and a map whose worst miss is past a twentieth of the screen's diagonal is refused: the Screen tab says so with the error, and the mapping in force stays.
