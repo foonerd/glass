@@ -41,6 +41,16 @@ function daemon(socketPath) {
 const wait = (ms) => new Promise(r => setTimeout(r, ms));
 const until = async (fn, ms = 2000) => { const end = Date.now() + ms; while (!fn()) { if (Date.now() > end) throw new Error('timed out'); await wait(10); } };
 
+test('a page that connects gets the state as it stands now, not as it was last pushed', () => {
+  const feed = new FaceFeed({ socketPath: path.join(os.tmpdir(), 'glass-face-none-' + process.pid + '.sock'), current() { return { state: { status: 'play', title: 'One', seek: 15000 } }; } });
+  feed.push({ kind: 'state', state: { status: 'play', title: 'One', seek: 10000 } });
+  const p = page();
+  feed.attach(p.req, p.res);
+  const opening = p.res.out.split('\n\n').map(function (block) { const data = block.split('\n').find(l => l.indexOf('data: ') === 0); return data ? data.slice(6) : ''; }).filter(d => d.indexOf('"kind":"state"') !== -1).map(d => JSON.parse(d))[0];
+  assert.equal(opening.state.seek, 15000);
+  p.req.emit('close');
+});
+
 test('a page gets the headers, the plugin\'s last words, then hops and lines as they come', async () => {
   const socketPath = path.join(os.tmpdir(), 'glass-face-test-' + process.pid + '.sock');
   const d = await daemon(socketPath);

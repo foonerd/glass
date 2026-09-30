@@ -9,7 +9,8 @@
 // Events, as the page sees them:
 //   event: hop      data: <the frames datagram, base64>
 //   event: plugin   data: <a line of the plugin's, the JSON object with its kind>
-// A page that connects gets the plugin's last config, state, showing,
+// A page that connects gets the plugin's last config, the state as it
+// stands now (the position moved on while the player plays), showing,
 // infinity and queue first, so its first frame is not painted from nothing.
 
 const http = require('http');
@@ -49,7 +50,7 @@ class FaceFeed {
     try { now = self.current() || {}; } catch (e) { /* nothing held */ }
     var opening = {
       config: self.last.config,
-      state: self.last.state || (now.state ? JSON.stringify({ kind: 'state', state: now.state }) : null),
+      state: now.state ? JSON.stringify({ kind: 'state', state: now.state }) : self.last.state,
       showing: self.last.showing || (now.showing ? JSON.stringify({ kind: 'showing', theme: now.showing.theme, meter: now.showing.meter }) : null),
       infinity: self.last.infinity || (now.infinity !== undefined && now.infinity !== null ? JSON.stringify({ kind: 'infinity', on: !!now.infinity }) : null),
       queue: self.last.queue || (Array.isArray(now.queue) ? JSON.stringify({ kind: 'queue', items: now.queue }) : null)
