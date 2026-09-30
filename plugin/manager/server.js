@@ -505,6 +505,15 @@ class Manager {
       res.json(Object.assign({ ok: true }, self.plugin.screenSettings()));
     }));
 
+    // The screen's owner: glass-evo takes the screen, or the kiosk gets it
+    // back, through the plugins' own lifecycles, with the register kept.
+    app.post('/api/screen/owner', wrap(async function (req, res) {
+      const owner = String((req.body || {}).owner || '');
+      const result = await self.exclusive(function () { return self.plugin.setScreenOwner(owner); });
+      if (result && result.error) return res.status(400).json(result);
+      res.json(Object.assign({ ok: true }, result, { screen: self.plugin.screenSettings() }));
+    }));
+
     // Interactive controls: as the theme says, on, or off.
     app.get('/api/touch', function (req, res) {
       res.json({ interactive: self.plugin.interactiveMode() });

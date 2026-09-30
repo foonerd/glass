@@ -339,6 +339,8 @@
       <div class="form">
         <div class="full" id="screen-now"></div>
         <div class="full"><button class="small" id="btn-screen-details"></button></div>
+        <div class="full" id="screen-owner" style="margin-top:10px"></div>
+        <div class="full row" id="screen-owner-actions"></div>
         <div class="screen-controls"><label id="screen-rotation-label"></label><select id="screen-rotation"><option value="0">0</option><option value="90">90</option><option value="180">180</option><option value="270">270</option></select></div>
         <div class="screen-controls"><label id="screen-pointer-label"></label><select id="screen-pointer"><option value="auto"></option><option value="show"></option><option value="hide"></option></select></div>
         <div class="full help screen-controls" id="screen-suggested"></div>
@@ -1760,9 +1762,38 @@
     lines.push(free ? t('MANAGER_SCREEN_FREE') : t('MANAGER_SCREEN_NOT_FREE'));
     $('screen-now').innerHTML = lines.map(function (l, i) { return '<div' + (i === 1 ? ' class="help"' : '') + '>' + esc(l) + '</div>'; }).join('');
   }
+  // The screen's owner: the kiosk, or glass-evo; the register in plain
+  // words; and the one action that fits. A take or a way back changes the
+  // player's interface, so each asks once before it goes.
+  function renderScreenOwner(o) {
+    o = o || {};
+    var evo = o.evo || {};
+    var r = o.register;
+    var when = function (iso) { try { return new Date(iso).toLocaleString(); } catch (e) { return String(iso); } };
+    var lines = [t(o.owner === 'glass-evo' ? 'MANAGER_OWNER_EVO' : 'MANAGER_OWNER_KIOSK')];
+    lines.push(t('MANAGER_OWNER_EVO_STATE') + ': ' + (evo.available ? t('MANAGER_OWNER_AVAILABLE') + (evo.version ? ' ' + evo.version : '') : evo.installed ? t('MANAGER_OWNER_NO_BINARY') : t('MANAGER_OWNER_NOT_INSTALLED')));
+    if (r && r.takenAt) {
+      var names = (r.changes || []).map(function (c) { return c.kind === 'plugin' ? t('MANAGER_OWNER_PLUGIN_' + String(c.name).toUpperCase()) : c.name; });
+      lines.push(t('MANAGER_OWNER_TOOK') + ' ' + when(r.takenAt) + (names.length ? '; ' + t('MANAGER_OWNER_TURNED_OFF') + ' ' + names.join(', ') : '') + '.' + (r.gaveBackAt ? ' ' + t('MANAGER_OWNER_GAVE_BACK') + ' ' + when(r.gaveBackAt) + '.' : ''));
+      if (r.error) lines.push(t('MANAGER_OWNER_ERROR') + ' ' + r.error);
+    }
+    $('screen-owner').innerHTML = lines.map(function (l, i) { return '<div' + (i ? ' class="help"' : '') + '>' + esc(l) + '</div>'; }).join('');
+    var acts = [];
+    if (o.owner === 'glass-evo') acts.push(['kiosk', 'MANAGER_OWNER_BACK', 'MANAGER_OWNER_CONFIRM_BACK']);
+    else if (evo.available) acts.push(['glass-evo', 'MANAGER_OWNER_USE_EVO', 'MANAGER_OWNER_CONFIRM_TAKE']);
+    $('screen-owner-actions').innerHTML = acts.map(function (a) { return '<button class="small" data-owner="' + a[0] + '" data-ask="' + a[2] + '">' + esc(t(a[1])) + '</button>'; }).join(' ');
+    Array.prototype.forEach.call($('screen-owner-actions').querySelectorAll('button'), function (b) {
+      b.onclick = function () {
+        if (!window.confirm(t(b.getAttribute('data-ask')))) return;
+        b.disabled = true; b.textContent = t('MANAGER_OWNER_BUSY');
+        api('POST', '/api/screen/owner', { owner: b.getAttribute('data-owner') }).then(function (r) { renderScreen(r.screen || {}); toast(t('MANAGER_OWNER_DONE')); }).catch(function (e) { toast(errorText(e), 'error'); loadScreen(); });
+      };
+    });
+  }
   function renderScreen(sc) {
     var free = !!sc.free;
     renderScreenNow(sc.now || {}, free);
+    renderScreenOwner(sc.owner);
     Array.prototype.forEach.call(document.querySelectorAll('.screen-controls'), function (el) { el.hidden = !free; });
     $('touch-map-panel').hidden = !free;
     $('screen-rotation').value = String(sc.rotation || 0);
