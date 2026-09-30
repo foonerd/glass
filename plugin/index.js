@@ -1526,13 +1526,18 @@ Glass.prototype.watchScreen = function () {
                 self.startDisplayOnce();
             }
         } else {
-            if (self.screenWasFree === true) { self.logger.info(id + 'screen: the kiosk wants it, the display steps aside'); self.steppedAsideAt = Date.now(); }
+            if (self.screenWasFree === true) {
+                self.logger.info(id + 'screen: the kiosk wants it, the display steps aside');
+                self.steppedAsideAt = Date.now();
+                // A unit already failed before has nothing to do with the display: only a failure from now on is ours to repair.
+                self.kioskFailedBefore = fact.kiosk === 'failed';
+            }
             if (running && self.displayRenderer && self.displayRenderer.driver === 'kmsdrm') {
                 self.screenYieldUntil = Date.now() + 15000;
                 try { if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); } } catch (e) {}
             }
             // The kiosk tried while the display held the screen: start it again, once.
-            if (!running && fact.kiosk === 'failed' && (fact.touchDisplay || fact.kioskEnabled) && self.steppedAsideAt && Date.now() - self.steppedAsideAt < 60000) {
+            if (!running && fact.kiosk === 'failed' && !self.kioskFailedBefore && (fact.touchDisplay || fact.kioskEnabled) && self.steppedAsideAt && Date.now() - self.steppedAsideAt < 60000) {
                 self.steppedAsideAt = 0;
                 self.logger.info(id + 'screen: the kiosk failed against the display, starting it again');
                 exec('/usr/bin/sudo -n /bin/systemctl restart volumio-kiosk', { uid: 1000, gid: 1000 }, function (error) { if (error) { self.logger.warn(id + 'screen: the kiosk did not start: ' + error.message); } });
