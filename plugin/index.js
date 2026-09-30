@@ -1592,6 +1592,7 @@ Glass.prototype.screenSettings = function () {
         rotation: rotation,
         pointer: pointer,
         pointerShown: String(cur['screen.pointer.shown']).toLowerCase() === 'true',
+        faceSize: ['normal', 'large', 'car'].indexOf(String(cur['face.size'] || 'normal').trim().toLowerCase()) === -1 ? 'normal' : String(cur['face.size']).trim().toLowerCase(),
         kioskActive: fact.kiosk === 'active',
         free: self.screenOurs(fact),
         fact: fact,
@@ -1759,8 +1760,10 @@ Glass.prototype.setScreenSettings = function (data) {
     if ([0, 90, 180, 270].indexOf(rotation) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
     var pointer = data.pointer === undefined ? now.pointer : String(data.pointer).trim().toLowerCase();
     if (['auto', 'show', 'hide'].indexOf(pointer) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    var faceSize = data.faceSize === undefined ? now.faceSize : String(data.faceSize).trim().toLowerCase();
+    if (['normal', 'large', 'car'].indexOf(faceSize) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
     var shown = screenprobe.pointerShown(pointer, now.probe) ? 'True' : 'False';
-    var wanted = { 'screen.driver': driver, 'screen.rotation': String(rotation), 'screen.pointer': pointer, 'screen.pointer.shown': shown };
+    var wanted = { 'screen.driver': driver, 'screen.rotation': String(rotation), 'screen.pointer': pointer, 'screen.pointer.shown': shown, 'face.size': faceSize };
     var changed = false;
     Object.keys(wanted).forEach(function (k) {
         if (String(meterConfig.current[k]) !== wanted[k]) { meterConfig.current[k] = wanted[k]; changed = true; }
@@ -1769,7 +1772,7 @@ Glass.prototype.setScreenSettings = function (data) {
         fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
         try { self.updateConfigVersion(); } catch (e) {}
         if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
-        self.logger.info(id + 'screen: drawn by ' + driver + ', rotation ' + rotation + ', pointer ' + pointer + ' (shown ' + shown + ')');
+        self.logger.info(id + 'screen: drawn by ' + driver + ', rotation ' + rotation + ', pointer ' + pointer + ' (shown ' + shown + '), face ' + faceSize);
         // The watcher reads the fact again and brings the display back as it is now.
         setTimeout(function () { try { self.watchScreen(); } catch (e) {} }, 1500);
     }

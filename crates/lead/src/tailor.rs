@@ -393,6 +393,7 @@ const KEPT: &[&str] = &[
     "screen.driver",
     "screen.pointer",
     "screen.pointer.shown",
+    "face.size",
     "screen.rotation",
     "touch.interactive",
     "touch.matrix",
