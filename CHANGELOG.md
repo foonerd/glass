@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.86] - 2026-09-30
+
+The screen watcher, lighter. It read the kiosk unit's two facts with two processes at every tick; one `systemctl show` answers both, and answers for a unit in any state. It ticks every two seconds only while the display draws on the screen itself, where it must step aside fast, and every five seconds otherwise.
+
 ## [0.7.85] - 2026-09-30
 
 No launch against an X server that is closing. When the kiosk went, the display could be started twice on X in the second before the fact said the screen was free, each try failing with "x11 not available" in the log. A display lost to an X server closing under it, and the moment the screen turns free, both hold launches for three seconds; the watcher then brings the display up where it belongs.
