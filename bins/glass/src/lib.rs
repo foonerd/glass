@@ -1042,19 +1042,27 @@ fn session(
                             match lead::fit_affine(&cal.samples) {
                                 Some((matrix, worst)) => {
                                     let (ww, wh) = window.window_size();
-                                    let error_px = worst * ((ww * ww + wh * wh) as f32).sqrt();
+                                    let diagonal = ((ww * ww + wh * wh) as f32).sqrt();
+                                    let error_px = worst * diagonal;
                                     let tolerance = lead::calibration_tolerance((ww, wh));
-                                    if error_px > tolerance {
+                                    // Each touch held against the map from the
+                                    // others shows its own miss in full, where
+                                    // the fit from all of them spreads it.
+                                    let miss_px = lead::calibration_miss(&cal.samples)
+                                        .unwrap_or(worst)
+                                        .max(worst)
+                                        * diagonal;
+                                    if miss_px > tolerance {
                                         // A touch missed its target: the map
                                         // in force stays, the tab says why.
                                         logline::say!(
                                             Info,
                                             "display",
-                                            "touch: calibration refused, worst {:.1} px past {:.1}",
-                                            error_px,
+                                            "touch: calibration refused, a touch missed by {:.1} px, past {:.1}",
+                                            miss_px,
                                             tolerance
                                         );
-                                        serde_json::json!({ "error": "unfit", "error_px": error_px })
+                                        serde_json::json!({ "error": "unfit", "error_px": miss_px })
                                     } else {
                                         window.set_touch_matrix(matrix);
                                         logline::say!(

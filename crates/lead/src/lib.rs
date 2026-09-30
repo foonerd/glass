@@ -2982,6 +2982,31 @@ pub fn calibration_tolerance(window: (u32, u32)) -> f32 {
     (w * w + h * h).sqrt() / 20.0
 }
 
+/// The worst miss of one touch against the map fitted from the others, in
+/// share units. A touch that missed its target stands out in full here,
+/// where the map fitted from all of them spreads the miss over every
+/// sample and can hide it; none with fewer than four pairs, or when
+/// leaving one out leaves the rest on one line.
+pub fn calibration_miss(pairs: &[((f32, f32), (f32, f32))]) -> Option<f32> {
+    if pairs.len() < 4 {
+        return None;
+    }
+    let mut worst = 0f32;
+    for (i, (raw, expected)) in pairs.iter().enumerate() {
+        let others: Vec<_> = pairs
+            .iter()
+            .enumerate()
+            .filter(|(j, _)| *j != i)
+            .map(|(_, pair)| *pair)
+            .collect();
+        let (matrix, _) = fit_affine(&others)?;
+        let got = apply_matrix(matrix, *raw);
+        let miss = ((got.0 - expected.0).powi(2) + (got.1 - expected.1).powi(2)).sqrt();
+        worst = worst.max(miss);
+    }
+    Some(worst)
+}
+
 /// The affine map that takes each raw share to its expected share with
 /// the least squared error, from three or more pairs that do not lie on
 /// one line, and the worst distance left over; none when the pairs do not
@@ -5387,6 +5412,24 @@ mod tests {
             "a shifted set is refused: {off}"
         );
         assert!(worst * 1468.0 < calibration_tolerance(panel));
+        assert!(calibration_miss(&pairs).expect("five pairs") * 1468.0 < 0.01);
+        // One target missed by a tenth of the panel: the fit from all five
+        // spreads it under the tolerance, held against the other four it
+        // shows in full and is refused.
+        let mut missed = pairs.clone();
+        missed[2].0 .1 -= 0.1;
+        let (_, spread) = fit_affine(&missed).expect("five points pin a map");
+        let miss = calibration_miss(&missed).expect("five pairs");
+        assert!(
+            spread * 1468.0 < calibration_tolerance(panel),
+            "spread {spread}"
+        );
+        assert!(miss * 1468.0 > calibration_tolerance(panel), "miss {miss}");
+        assert!(miss > 0.09, "the miss shows in full: {miss}");
+        assert!(
+            calibration_miss(&pairs[..3]).is_none(),
+            "three pairs leave nothing to hold one against"
+        );
         assert!((calibration_tolerance(panel) - 73.4).abs() < 0.1);
         assert!((calibration_tolerance((320, 240)) - 20.0).abs() < 1e-3);
         assert_eq!(
