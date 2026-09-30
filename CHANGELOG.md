@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.75] - 2026-09-30
+
+A Face, an Anymote page or a display that attached while a track played showed it as just begun, until a pause or a play brought it in line: the plugin replayed the player's state as Volumio had last pushed it, with the position of that moment. The kept state is now stamped when it arrives, and a replay hands out the position moved on by the time since, no further than the track's end.
+
 ## [0.7.74] - 2026-09-30
 
 The screen without X. Two settings the display reads, `screen.driver` (`auto`, `x11`, `wayland`, `kmsdrm`) and `screen.rotation` (0, 90, 180, 270), set on a Screen panel of the Manager's System tab: with `kmsdrm` the display draws through the kernel's KMS/DRM directly, with no X server and no kiosk browser on the device, and turns the picture and touch by the rotation, the same angle the Touch Display plugin uses, for panels that are portrait by nature. The panel refuses KMS/DRM while the kiosk holds the screen. Both settings default to what the display did before, so nothing changes for a player that does not choose them. `GLASS_GRAB=PATH` writes the window's pixels, as shown, to a PNG after the first frames, so a screen with no X server can be checked from a terminal. Measured on a Pi 5 with the same theme and music: 903 MB used with the kiosk browser and X, 609 MB with the display alone on KMS/DRM.
