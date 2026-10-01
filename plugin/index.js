@@ -1430,30 +1430,35 @@ Glass.prototype.screenTimeoutMs = function () {
     return (parseInt(this.config.get('timeout'), 10) || 0) * 1000;
 };
 
-// The fact of the screen, read afresh and cheaply: an X server up, the
-// kiosk unit's state and whether it is enabled at boot, the two plugins
-// that bring a kiosk, and whether a panel is connected (the DRM status
-// files alone, no probe).
 // The face size as kept, normal unless the key says large or car.
 function faceSizeOf(value) {
     var size = String(value === undefined || value === null ? 'normal' : value).trim().toLowerCase();
     return ['normal', 'large', 'car'].indexOf(size) === -1 ? 'normal' : size;
 }
 
-Glass.prototype.screenFact = function () {
-    var self = this;
-    // One call for the unit's two facts: `show` answers for a unit in any
-    // state and exits 0, where is-active and is-enabled would cost a
-    // process each and exit non-zero for the states that matter.
+// A systemd unit's two facts in one process: `show` answers for a unit in
+// any state and exits 0, where is-active and is-enabled would cost a
+// process each and exit non-zero for the states that matter.
+function unitFacts(name) {
     var unit = { state: 'inactive', enabled: false };
     try {
-        String(require('child_process').execFileSync('systemctl', ['show', '-p', 'ActiveState', '-p', 'UnitFileState', 'volumio-kiosk'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }))
+        String(require('child_process').execFileSync('systemctl', ['show', '-p', 'ActiveState', '-p', 'UnitFileState', name], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }))
             .split('\n').forEach(function (line) {
                 var kv = /^(ActiveState|UnitFileState)=(.*)$/.exec(line.trim());
                 if (kv && kv[1] === 'ActiveState') { unit.state = kv[2] || 'inactive'; }
                 if (kv && kv[1] === 'UnitFileState') { unit.enabled = kv[2] === 'enabled'; }
             });
     } catch (e) { /* no systemd, or none such unit: inactive */ }
+    return unit;
+}
+
+// The fact of the screen, read afresh and cheaply: an X server up, the
+// kiosk unit's state and whether it is enabled at boot, the two plugins
+// that bring a kiosk, and whether a panel is connected (the DRM status
+// files alone, no probe).
+Glass.prototype.screenFact = function () {
+    var self = this;
+    var unit = unitFacts('volumio-kiosk');
     // A plugin brings the kiosk when it runs or is starting; its enabled
     // flag alone counts only in the first two minutes after this plugin
     // started, when plugins come up one after another at boot. Volumio's
