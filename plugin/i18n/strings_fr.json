@@ -790,6 +790,7 @@
     "MANAGER_SCREEN_ON_WAYLAND": "Wayland",
     "MANAGER_SCREEN_ON_KMSDRM": "l'écran lui-même (KMS/DRM)",
     "MANAGER_SCREEN_FREE": "L'écran est à Glass : pas de kiosque, pas de serveur X. L'affichage y reste, et les réglages ci-dessous s'appliquent.",
+    "MANAGER_SCREEN_OWN_X": "L'écran est à Glass, par un serveur X démarré pour lui : pas de kiosque, pas de navigateur. L'affichage y reste, et les réglages ci-dessous s'appliquent.",
     "MANAGER_SCREEN_NOT_FREE": "Le kiosque est l'interface du lecteur sur cet écran. Glass tourne en économiseur par-dessus et le laisse tranquille ; les réglages de l'écran ne s'appliquent que lorsqu'aucun kiosque ne l'utilise.",
     "MANAGER_SCREEN_KIOSK_SERVICE": "Service kiosque",
     "MANAGER_SCREEN_ENABLED_AT_BOOT": "activé au démarrage",

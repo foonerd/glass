@@ -2136,13 +2136,13 @@
   // opened the screen, else what it will draw on when it starts) and
   // whether the screen is Glass's or the kiosk's. The facts behind that
   // are on the status sheet.
-  function renderScreenNow(now, free) {
+  function renderScreenNow(now, free, ownX) {
     var d = now.display || {};
     var lines = [];
     if (d.running && d.driver) lines.push(t('MANAGER_SCREEN_DRAWS') + ' ' + screenOn(d.driver) + '.');
     else if (now.wouldDraw) lines.push(t('MANAGER_SCREEN_WOULD_DRAW') + ' ' + screenOn(now.wouldDraw) + '.');
     else lines.push(t('MANAGER_SCREEN_WOULD_DRAW_NOTHING'));
-    lines.push(free ? t('MANAGER_SCREEN_FREE') : t('MANAGER_SCREEN_NOT_FREE'));
+    lines.push(free ? t(ownX ? 'MANAGER_SCREEN_OWN_X' : 'MANAGER_SCREEN_FREE') : t('MANAGER_SCREEN_NOT_FREE'));
     $('screen-now').innerHTML = lines.map(function (l, i) { return '<div' + (i === 1 ? ' class="help"' : '') + '>' + esc(l) + '</div>'; }).join('');
   }
   // The screen's owner: the kiosk, or glass-evo; the register in plain
@@ -2192,7 +2192,7 @@
   }
   function renderScreen(sc) {
     var free = !!sc.free;
-    renderScreenNow(sc.now || {}, free);
+    renderScreenNow(sc.now || {}, free, !!sc.ownX);
     renderScreenOwner(sc.owner);
     // The face's size: shown once glass-evo is here to draw at it; saved as it is chosen.
     // The face's size and look are for a face that can be on this screen: glass-evo here,

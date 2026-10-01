@@ -197,6 +197,16 @@ function screenFree(fact) {
     && !f.kioskEnabled && !f.touchDisplay && !f.displayConfiguration && !!f.panel;
 }
 
+// The screen as Glass's own through an X server brought up for it (`ownX`:
+// that server's unit runs): its socket is there and no kiosk is on it or
+// on its way. The display draws on it and stays up, as on a free screen.
+function screenOwn(fact) {
+  const f = fact || {};
+  const kiosk = String(f.kiosk || 'inactive');
+  return !!f.ownX && !!f.xserver && kiosk !== 'active' && kiosk !== 'activating' && kiosk !== 'reloading'
+    && !f.touchDisplay && !f.displayConfiguration;
+}
+
 // What the display draws on: X while an X server is up, the screen itself
 // while the screen is free, else nothing (no window: the kiosk is on its
 // way, or there is no panel).
@@ -206,4 +216,4 @@ function wouldDraw(fact) {
   return screenFree(f) ? 'kmsdrm' : null;
 }
 
-module.exports = { parseInputDevices, parseUdev, classifyInputs, parseDrm, parseBacklights, suggest, pointerShown, screenFree, wouldDraw, gather };
+module.exports = { parseInputDevices, parseUdev, classifyInputs, parseDrm, parseBacklights, suggest, pointerShown, screenFree, screenOwn, wouldDraw, gather };

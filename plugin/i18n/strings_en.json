@@ -790,6 +790,7 @@
     "MANAGER_SCREEN_ON_WAYLAND": "Wayland",
     "MANAGER_SCREEN_ON_KMSDRM": "the screen itself (KMS/DRM)",
     "MANAGER_SCREEN_FREE": "The screen is Glass's: no kiosk, no X server. The display stays on it, and the controls below apply.",
+    "MANAGER_SCREEN_OWN_X": "The screen is Glass's, through an X server brought up for it: no kiosk, no browser. The display stays on it, and the controls below apply.",
     "MANAGER_SCREEN_NOT_FREE": "The kiosk is the player's interface on this screen. Glass runs as a screensaver over it and leaves it be; the screen's own controls apply only when no kiosk uses it.",
     "MANAGER_SCREEN_KIOSK_SERVICE": "Kiosk service",
     "MANAGER_SCREEN_ENABLED_AT_BOOT": "enabled at boot",

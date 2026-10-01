@@ -64,6 +64,9 @@ function planGiveBack(register, now) {
       if (p.enabled || running(p.status)) return; // turned on again by someone else
       if (!c.was || !c.was.enabled) return; // was off before the take too
       steps.push({ kind: 'plugin', category: c.category || 'user_interface', name: c.name, action: 'on' });
+    } else if (c.kind === 'own-x') {
+      // The X server brought up for the face goes first, whatever its state: the kiosk starts its own.
+      steps.push({ kind: 'own-x', name: c.name, action: 'stop' });
     } else if (c.kind === 'unit') {
       const u = ((now || {}).units || {})[c.name];
       if (!u) return;
@@ -89,13 +92,27 @@ function here(register, evo) {
   return !!(evo && evo.installed) || ownedByEvo(register);
 }
 
-// Whether glass-evo can hold the screen of this player. With the kiosk
-// off there is no X server, and the face draws on the screen itself: it
-// needs one the kernel drives, a DRM connector that is not unplugged. A
-// player whose picture comes only through the kiosk's X server (a
-// graphics card with no kernel driver of its own) has none.
+// Whether the face can draw on the screen itself: it needs one the kernel
+// drives, a DRM connector that is not unplugged. A player whose picture
+// comes only through an X server (a graphics card with no kernel driver
+// of its own) has none.
 function holdable(probe) {
   return ((probe && probe.connectors) || []).some(function (c) { return c.status !== 'disconnected'; });
+}
+
+// The X server Glass brings up for the face, as a unit of its own.
+const OWN_X_UNIT = 'glass-x';
+
+// How glass-evo holds the screen of this player: on the screen itself
+// ('kms'), on an X server of its own with no kiosk on it ('x'), or not at
+// all (null). An x86 player keeps X: its graphics may have no kernel
+// driver at all, X is there with the image, and it has the power to
+// spare. Elsewhere the screen itself where the kernel drives one, X where
+// it does not and X is installed.
+function holdMode(arch, probe, xInstalled) {
+  if (arch === 'x64' && xInstalled) return 'x';
+  if (holdable(probe)) return 'kms';
+  return xInstalled ? 'x' : null;
 }
 
 // How many times in a row the face may fail to start before the screen
@@ -122,4 +139,4 @@ function guard(state) {
   return null;
 }
 
-module.exports = { KIOSK_PLUGINS, KIOSK_UNITS, FACE_TRIES, planTakePlugins, planTakeUnits, planGiveBack, ownedByEvo, here, holdable, faceFailures, guard };
+module.exports = { KIOSK_PLUGINS, KIOSK_UNITS, OWN_X_UNIT, FACE_TRIES, holdMode, planTakePlugins, planTakeUnits, planGiveBack, ownedByEvo, here, holdable, faceFailures, guard };
