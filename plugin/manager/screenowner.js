@@ -82,4 +82,11 @@ function ownedByEvo(register) {
   return !!(register && register.owner === 'glass-evo' && !register.gaveBackAt);
 }
 
-module.exports = { KIOSK_PLUGINS, KIOSK_UNITS, planTakePlugins, planTakeUnits, planGiveBack, ownedByEvo };
+// Whether glass-evo is on this player at all: its component installed, or
+// the screen its own. Where it is not, the Manager says nothing of it and
+// the plugin keeps nothing for it.
+function here(register, evo) {
+  return !!(evo && evo.installed) || ownedByEvo(register);
+}
+
+module.exports = { KIOSK_PLUGINS, KIOSK_UNITS, planTakePlugins, planTakeUnits, planGiveBack, ownedByEvo, here };

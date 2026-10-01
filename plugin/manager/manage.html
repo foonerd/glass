@@ -2149,6 +2149,9 @@
   function renderScreenOwner(o) {
     o = o || {};
     var evo = o.evo || {};
+    // A player with no glass-evo is told nothing of it.
+    $('screen-owner').hidden = !o.here;
+    $('screen-owner-actions').hidden = !o.here;
     $('screen-owner').innerHTML = ownerLines(o).map(function (l, i) { return '<div' + (i ? ' class="help"' : '') + '>' + esc(l) + '</div>'; }).join('');
     var acts = [];
     if (o.owner === 'glass-evo') acts.push(['kiosk', 'MANAGER_OWNER_BACK', 'MANAGER_OWNER_CONFIRM_BACK']);
@@ -2244,7 +2247,7 @@
       ['MANAGER_ST_INPUTS', found.join(' · ')],
       ['MANAGER_SCREEN_BACKLIGHT', lights.length ? lights.join(' · ') : none]
     ];
-    if (sc.owner) rows.splice(1, 0, ['MANAGER_ST_OWNER', ownerLines(sc.owner).concat([t('MANAGER_FACE_SIZE') + ': ' + (sc.faceSize || 'normal')]).join(' · ')]);
+    if (sc.owner && sc.owner.here) rows.splice(1, 0, ['MANAGER_ST_OWNER', ownerLines(sc.owner).concat([t('MANAGER_FACE_SIZE') + ': ' + (sc.faceSize || 'normal')]).join(' · ')]);
     return rows;
   }
   function renderTouch(tc) {
