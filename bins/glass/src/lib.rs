@@ -88,6 +88,13 @@ pub fn run(args: Vec<String>) -> ExitCode {
     run_with(args, None)
 }
 
+/// Whether a frame is shown whole rather than by what the theme changed:
+/// while anything is drawn over the theme, and once more when it has
+/// gone, so nothing of it is left behind.
+fn shows_whole(covered: bool, was_covered: bool) -> bool {
+    covered || was_covered
+}
+
 /// What a face sees of the display each frame: the player's state as the
 /// source has it (the cover's file among it, once fetched), the theme's
 /// fonts, the picture's size, the clock, whether the screen is the
@@ -751,9 +758,15 @@ fn session(
                     }
                     // `GLASS_GRAB=PATH`: the window's pixels written once,
                     // after the first frames have settled, so a screen with
-                    // no X server can be looked at from a terminal.
+                    // no X server can be looked at from a terminal;
+                    // `GLASS_GRAB_AFTER=N` waits N frames rather than thirty,
+                    // to look at the screen later in a run.
                     if let Some(path) = env::var_os("GLASS_GRAB").filter(|v| !v.is_empty()) {
-                        surface.grab_after(30, std::path::PathBuf::from(path));
+                        let after = env::var("GLASS_GRAB_AFTER")
+                            .ok()
+                            .and_then(|v| v.trim().parse::<u32>().ok())
+                            .unwrap_or(30);
+                        surface.grab_after(after, std::path::PathBuf::from(path));
                     }
                     if let Some(remote) = remote.as_deref() {
                         remote
@@ -786,6 +799,8 @@ fn session(
     }
     let mut run_flag_checked = Instant::now();
     let mut leave: Option<&'static str> = None;
+    // Whether the frame before this one had anything drawn over the theme.
+    let mut was_covered = false;
     // Move to another meter of the theme: its skin, pictures and motion start afresh.
     macro_rules! switch_meter {
         ($name:expr) => {{
@@ -1075,9 +1090,14 @@ fn session(
                 w: frame.width,
                 h: frame.height,
             }];
-            if idle_black || overlay.is_some() || face_frame.is_some() {
+            // Something drawn over the theme shows the whole picture; so
+            // does the frame after it is gone, or what it left on the
+            // screen would stay wherever the theme does not move.
+            let covered = idle_black || overlay.is_some() || face_frame.is_some();
+            if shows_whole(covered, was_covered) {
                 damage = &whole;
             }
+            was_covered = covered;
             rastered_at = Instant::now();
             if let Some(window) = surface.as_mut() {
                 if let Some(mode) = remote.as_deref().and_then(|r| r.app.take_window_request()) {
@@ -1570,4 +1590,18 @@ fn memory_line(stores: &[(&'static str, usize)]) -> String {
         .map(|(name, b)| format!("{name} {}", b / 1024))
         .collect();
     format!("{} kB ({})", total / 1024, parts.join(", "))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn a_frame_is_shown_whole_while_the_theme_is_covered_and_once_after() {
+        // The theme alone: by what changed.
+        assert!(!super::shows_whole(false, false));
+        // A face over it: whole.
+        assert!(super::shows_whole(true, false));
+        assert!(super::shows_whole(true, true));
+        // The face gone this frame: whole once more, so its last frame does not stay.
+        assert!(super::shows_whole(false, true));
+    }
 }
