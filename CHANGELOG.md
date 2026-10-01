@@ -8,6 +8,8 @@ The one-line installer no longer leaves Glass installed and off. `get-glass.sh` 
 
 On a player whose image runs its own kiosk (x86, and the products with a built-in screen), the display shows without a restart of the kiosk. There the X server runs as root and admits only root; Glass's install adds the player's own user for every session to come, and the session already running was left out, so the display was refused ("Authorization required") and nothing showed until the kiosk started again or the player was restarted. The install now admits the user to the running session as well.
 
+The display no longer runs with nothing to draw on. On a player with no X server, no Wayland and no KMS/DRM device, the graphics library fell back to a driver that draws to nowhere: the display ran, reported itself as running, and the screen stayed empty. It now stops with "no screen to draw on", which the log and the Manager show; a driver of that kind is still taken when it is asked for by name (`SDL_VIDEODRIVER`).
+
 ## [0.7.97] - 2026-10-01
 
 The plugin's side of glass-evo, the Glass interface for the player's own screen. Nothing shows and nothing changes on a player that does not have the glass-evo component; the kiosk stays the player's interface there, as before.
