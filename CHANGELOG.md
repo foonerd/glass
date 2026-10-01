@@ -2,7 +2,9 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.98] - 2026-10-01
+
+Three faults found on an x86 player with the image's own kiosk.
 
 The one-line installer no longer leaves Glass installed and off. `get-glass.sh` restarted the player's backend as soon as the plugin manager said Glass was enabled, and the manager writes that to its registry a moment later; on a fast player the restart came first and the player came back with Glass installed but not enabled, its Manager unreachable. The installer now waits until the registry on disk says enabled before it restarts, and says so if it never does.
 
