@@ -82,6 +82,14 @@ test('the register says who owns the screen', () => {
   assert.equal(owner.ownedByEvo(null), false);
 });
 
+test('glass-evo can hold a screen the kernel drives, and no other', () => {
+  assert.equal(owner.holdable({ connectors: [{ name: 'DSI-2', status: 'connected' }, { name: 'HDMI-A-1', status: 'disconnected' }] }), true);
+  assert.equal(owner.holdable({ connectors: [{ name: 'LVDS-1', status: 'unknown' }] }), true, 'a panel that does not say is not ruled out');
+  assert.equal(owner.holdable({ connectors: [{ name: 'HDMI-A-1', status: 'disconnected' }] }), false, 'nothing plugged in');
+  assert.equal(owner.holdable({ connectors: [] }), false, 'a card with no kernel driver: the picture comes through X alone');
+  assert.equal(owner.holdable(null), false);
+});
+
 test('the face\'s failures in a row are counted, and cleared by a run that holds', () => {
   const quick = { clean: false, ranMs: 800, windowMs: 10000 };
   assert.equal(owner.faceFailures(0, quick), 1);

@@ -89,6 +89,15 @@ function here(register, evo) {
   return !!(evo && evo.installed) || ownedByEvo(register);
 }
 
+// Whether glass-evo can hold the screen of this player. With the kiosk
+// off there is no X server, and the face draws on the screen itself: it
+// needs one the kernel drives, a DRM connector that is not unplugged. A
+// player whose picture comes only through the kiosk's X server (a
+// graphics card with no kernel driver of its own) has none.
+function holdable(probe) {
+  return ((probe && probe.connectors) || []).some(function (c) { return c.status !== 'disconnected'; });
+}
+
 // How many times in a row the face may fail to start before the screen
 // goes back to the kiosk.
 const FACE_TRIES = 3;
@@ -113,4 +122,4 @@ function guard(state) {
   return null;
 }
 
-module.exports = { KIOSK_PLUGINS, KIOSK_UNITS, FACE_TRIES, planTakePlugins, planTakeUnits, planGiveBack, ownedByEvo, here, faceFailures, guard };
+module.exports = { KIOSK_PLUGINS, KIOSK_UNITS, FACE_TRIES, planTakePlugins, planTakeUnits, planGiveBack, ownedByEvo, here, holdable, faceFailures, guard };

@@ -848,6 +848,7 @@
     "MANAGER_EVO_ERR_NO_BINARY": "Ce glass-evo n'a pas de programme pour ce lecteur.",
     "MANAGER_EVO_ERR_PAIR": "Glass et glass-evo n'ont pas pu être amenés à des versions qui fonctionnent ensemble.",
     "MANAGER_EVO_ERR_MANIFEST": "Le téléchargement n'est pas un composant glass-evo.",
+    "MANAGER_OWNER_NO_SCREEN": "Ce lecteur n'a pas d'écran sur lequel glass-evo puisse dessiner par lui-même : son image ne passe que par le kiosque. Le kiosque reste ici l'interface.",
     "MANAGER_OWNER_BACK_FACE_FAILED": "glass-evo n'a pas pu démarrer, l'écran est donc revenu au kiosque.",
     "MANAGER_OWNER_BACK_COMPONENT_MISSING": "Le composant glass-evo avait disparu, l'écran est donc revenu au kiosque.",
     "MANAGER_OWNER_BACK_PLUGIN_STOPPED": "Glass a été désactivé, l'écran est donc revenu au kiosque.",
