@@ -1,0 +1,24 @@
+# An X server for the Glass interface, with nothing else on it. Where the
+# kernel does not drive the player's screen the picture comes through X
+# alone; when glass-evo takes the screen there, the kiosk and its browser
+# are stopped and this plain X server is started in their place, for the
+# face to draw on. The Glass plugin enables it by this path on a take and
+# disables it on the way back; it is no part of a player whose screen
+# glass-evo does not own.
+[Unit]
+Description=X server for the Glass interface
+Conflicts=volumio-kiosk.service
+After=systemd-user-sessions.service
+
+[Service]
+Type=simple
+User=root
+Group=root
+# The session's one client lets the player's user draw, keeps the screen
+# from blanking, and waits: the face is started by the plugin.
+ExecStart=/usr/bin/xinit /bin/sh -c 'xhost +SI:localuser:volumio; xset -dpms; xset s off; xset s noblank; exec sleep infinity' -- :0 -keeptty
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

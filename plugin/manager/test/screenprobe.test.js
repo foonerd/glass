@@ -104,3 +104,15 @@ test('gather reads the machine through its readers and never fails on what is mi
   assert.deepEqual(bare.holders, { kiosk: false, xserver: false, touchDisplay: false, displayConfiguration: false });
   assert.deepEqual(bare.suggestion, { rotation: 0, pointer: 'hide', panel: null });
 });
+
+test('an X server brought up for the face is Glass\'s own screen while no kiosk is on it', () => {
+  const own = { ownX: true, xserver: true, kiosk: 'inactive', kioskEnabled: false, touchDisplay: false, displayConfiguration: false, panel: false };
+  assert.equal(probe.screenOwn(own), true);
+  assert.equal(probe.screenFree(own), false, 'not free: an X server is up');
+  assert.equal(probe.wouldDraw(own), 'x11');
+  assert.equal(probe.screenOwn(Object.assign({}, own, { xserver: false })), false, 'its socket is not there yet');
+  assert.equal(probe.screenOwn(Object.assign({}, own, { ownX: false })), false, 'a kiosk\'s X server');
+  assert.equal(probe.screenOwn(Object.assign({}, own, { kiosk: 'activating' })), false, 'the kiosk is on its way');
+  assert.equal(probe.screenOwn(Object.assign({}, own, { touchDisplay: true })), false);
+  assert.equal(probe.screenOwn(null), false);
+});

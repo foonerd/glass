@@ -924,8 +924,11 @@ Glass.prototype.launchEnv = function () {
     // The screen by fact: X while a kiosk runs one, the screen itself while
     // no kiosk uses it; otherwise no word, and the display opens no window.
     var draws = null;
-    try { draws = screenprobe.wouldDraw(self.screenFact()); } catch (e) {}
+    var ours = false;
+    try { var fact = self.screenFact(); draws = screenprobe.wouldDraw(fact); ours = screenprobe.screenOwn(fact); } catch (e) {}
     if (draws) { env.SDL_VIDEODRIVER = draws; } else { delete env.SDL_VIDEODRIVER; }
+    // An X server brought up for the face is the display's own screen: it stays on it and turns the picture itself.
+    if (ours) { env.GLASS_SCREEN_OURS = '1'; } else { delete env.GLASS_SCREEN_OURS; }
     // When glass-evo owns the screen and its component is here, the face
     // runs in the display's place: the same launcher, another binary.
     delete env.GLASS_BIN;
@@ -1569,8 +1572,12 @@ Glass.prototype.screenFact = function () {
             try { return fs.readFileSync('/sys/class/drm/' + n + '/status', 'utf8').trim() === 'connected'; } catch (e) { return false; }
         });
     } catch (e) {}
+    // The X server brought up for the face: asked after only where a take has linked its unit.
+    var ownX = false;
+    try { ownX = fs.existsSync('/etc/systemd/system/' + screenowner.OWN_X_UNIT + '.service') && unitFacts(screenowner.OWN_X_UNIT).state === 'active'; } catch (e) {}
     return {
         xserver: fs.existsSync('/tmp/.X11-unix/X0'),
+        ownX: ownX,
         kiosk: unit.state,
         kioskEnabled: unit.enabled,
         touchDisplay: enabled('touch_display'),
@@ -1601,7 +1608,8 @@ Glass.prototype.screenOurs = function (fact) {
     var cur = (meterConfig && meterConfig.current) || {};
     var key = String(cur['screen.driver'] || 'auto').trim().toLowerCase();
     if (key === 'x11' || key === 'wayland') { return false; }
-    return screenprobe.screenFree(fact || this.screenFact());
+    fact = fact || this.screenFact();
+    return screenprobe.screenFree(fact) || screenprobe.screenOwn(fact);
 };
 
 // The watcher of the screen: every two seconds the fact is read again.
@@ -1618,11 +1626,12 @@ Glass.prototype.watchScreen = function () {
     var tick = function () {
         var fact;
         try { fact = self.screenFact(); } catch (e) { return; }
-        var free = screenprobe.screenFree(fact);
+        // Glass's own: free, or an X server brought up for the face with no kiosk on it.
+        var free = screenprobe.screenFree(fact) || screenprobe.screenOwn(fact);
         var running = !!(self.meterChild && self.meterChild.exitCode === null);
         if (free) {
             if (self.screenWasFree !== true) {
-                self.logger.info(id + 'screen: free (no kiosk, no X): the display draws on it and stays up');
+                self.logger.info(id + (fact.ownX ? 'screen: ours through an X server of its own (no kiosk): the display draws on it and stays up' : 'screen: free (no kiosk, no X): the display draws on it and stays up'));
                 // The kiosk's X may still be closing: no launch for a moment, so none is tried against it.
                 if (self.screenWasFree === false) { self.screenYieldUntil = Date.now() + 3000; }
             }
@@ -1700,6 +1709,7 @@ Glass.prototype.screenSettings = function () {
         faceSize: faceSizeOf(cur['face.size']),
         kioskActive: fact.kiosk === 'active',
         free: self.screenOurs(fact),
+        ownX: screenprobe.screenOwn(fact),
         fact: fact,
         now: {
             display: { running: running, driver: running && self.displayRenderer ? self.displayRenderer.driver : null, renderer: running && self.displayRenderer ? self.displayRenderer.renderer : null },
@@ -1895,6 +1905,8 @@ const EVO_DIR = DATA_DIR + '/evo';
 // user's own, and the looks the glass-evo component ships.
 const FACES_DIR = DATA_DIR + '/faces';
 const EVO_LOOKS_DIR = EVO_DIR + '/themes';
+// The unit of the X server brought up for the face, shipped with the plugin and enabled by this path on a take.
+const OWN_X_UNIT_FILE = PluginPath + '/' + screenowner.OWN_X_UNIT + '.service';
 
 // The face's own settings, as the display's configuration has them: the
 // look's keys by name, the face themes installed, and the plugin's word on
@@ -2007,9 +2019,9 @@ Glass.prototype.screenOwnerState = function () {
     var self = this;
     var register = self.readRegister();
     var evo = self.evoComponent();
-    var holdable = false;
-    try { holdable = screenowner.holdable(self.screenProbe()); } catch (e) {}
-    return { owner: screenowner.ownedByEvo(register) ? 'glass-evo' : 'kiosk', evo: evo, register: register, here: screenowner.here(register, evo), holdable: holdable };
+    var mode = null;
+    try { mode = self.holdMode(false); } catch (e) {}
+    return { owner: screenowner.ownedByEvo(register) ? 'glass-evo' : 'kiosk', evo: evo, register: register, here: screenowner.here(register, evo), holdable: mode !== null, mode: mode };
 };
 
 // The component was installed, updated or put back: the board's word on
@@ -2023,6 +2035,13 @@ Glass.prototype.componentChanged = function () {
     try {
         if (self.screenOwnerState().owner === 'glass-evo' && fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
     } catch (e) {}
+};
+
+// How glass-evo would hold this player's screen: on the screen itself, on
+// an X server of its own, or not at all.
+Glass.prototype.holdMode = function (fresh) {
+    var xInstalled = fs.existsSync('/usr/bin/xinit') && (fs.existsSync('/usr/bin/X') || fs.existsSync('/usr/bin/Xorg'));
+    return screenowner.holdMode(this.volumioArch(), this.screenProbe(fresh), xInstalled);
 };
 
 // The screen back to the kiosk without being asked, where glass-evo owns it
@@ -2090,6 +2109,16 @@ Glass.prototype.setScreenOwner = function (owner) {
         return systemctl('stop ' + step.name).then(function () { return step.was.enabled ? systemctl('disable ' + step.name) : null; });
     };
     var runBack = function (step) {
+        if (step.kind === 'own-x') {
+            // Stopped and unlinked whatever its state, then gone before the kiosk starts its own.
+            self.logger.info(id + 'screen owner: ' + step.name + ' stopped');
+            var quiet = function () { return null; };
+            return systemctl('stop ' + step.name).catch(quiet)
+                .then(function () { return systemctl('disable ' + step.name).catch(quiet); })
+                // xinit leaves with an error when stopped; nothing of the unit is left standing as failed.
+                .then(function () { return systemctl('reset-failed ' + step.name).catch(quiet); })
+                .then(function () { return waitFor(function () { return !fs.existsSync('/tmp/.X11-unix/X0'); }, 10000); });
+        }
         if (step.kind === 'plugin') {
             self.logger.info(id + 'screen owner: ' + step.name + ' on');
             return Promise.resolve(self.commandRouter.enableAndStartPlugin(step.category, step.name));
@@ -2102,8 +2131,9 @@ Glass.prototype.setScreenOwner = function (owner) {
         if (state.owner === 'glass-evo') { return Promise.resolve({ ok: true, changed: false }); }
         if (!state.evo.available) { return Promise.resolve({ error: 'GLASS.MANAGER_OWNER_EVO_ABSENT' }); }
         // Nothing is turned off for a face that would have no screen to draw on.
-        if (!screenowner.holdable(self.screenProbe(true))) { return Promise.resolve({ error: 'GLASS.MANAGER_OWNER_NO_SCREEN' }); }
-        var register = { owner: 'glass-evo', takenAt: new Date().toISOString(), evo: state.evo.version, found: self.screenFact(), changes: [] };
+        var mode = self.holdMode(true);
+        if (!mode) { return Promise.resolve({ error: 'GLASS.MANAGER_OWNER_NO_SCREEN' }); }
+        var register = { owner: 'glass-evo', takenAt: new Date().toISOString(), evo: state.evo.version, mode: mode, found: self.screenFact(), changes: [] };
         var pluginSteps = screenowner.planTakePlugins(self.kioskPluginStates());
         self.logger.info(id + 'screen owner: glass-evo takes the screen (' + pluginSteps.length + ' plugin' + (pluginSteps.length === 1 ? '' : 's') + ' to turn off)');
         return chain(pluginSteps, function (step) { return runTake(step).then(function () { register.changes.push(step); }); })
@@ -2113,6 +2143,19 @@ Glass.prototype.setScreenOwner = function (owner) {
             .then(function () {
                 var unitSteps = screenowner.planTakeUnits(self.kioskUnitStates());
                 return chain(unitSteps, function (step) { return runTake(step).then(function () { register.changes.push(step); }); });
+            })
+            .then(function () {
+                // Where the face draws through X: a plain X server in the kiosk's place, once the kiosk's own has gone.
+                if (mode !== 'x') { return null; }
+                self.logger.info(id + 'screen owner: an X server of its own for the face (' + screenowner.OWN_X_UNIT + ')');
+                return waitFor(function () { return !fs.existsSync('/tmp/.X11-unix/X0'); }, 10000)
+                    .then(function () { return systemctl('enable ' + OWN_X_UNIT_FILE); })
+                    .then(function () {
+                        register.changes.push({ kind: 'own-x', name: screenowner.OWN_X_UNIT, action: 'start' });
+                        return systemctl('start ' + screenowner.OWN_X_UNIT);
+                    })
+                    .then(function () { return waitFor(function () { return fs.existsSync('/tmp/.X11-unix/X0'); }, 20000); })
+                    .then(function (up) { if (!up) { throw new Error('the X server for the face did not come up'); } });
             })
             .then(function () {
                 self.writeRegister(register);

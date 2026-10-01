@@ -90,6 +90,28 @@ test('glass-evo can hold a screen the kernel drives, and no other', () => {
   assert.equal(owner.holdable(null), false);
 });
 
+test('an x86 player keeps X for the face; elsewhere the screen itself, X where the kernel drives none', () => {
+  const live = { connectors: [{ name: 'DSI-2', status: 'connected' }] };
+  const none = { connectors: [] };
+  assert.equal(owner.holdMode('x64', none, true), 'x', 'a card with no kernel driver');
+  assert.equal(owner.holdMode('x64', live, true), 'x', 'X all the same on x86');
+  assert.equal(owner.holdMode('x64', live, false), 'kms', 'an x86 image with no X installed');
+  assert.equal(owner.holdMode('arm', live, true), 'kms', 'a Pi with the Touch Display plugin\'s X installed draws on the screen itself');
+  assert.equal(owner.holdMode('arm', none, true), 'x');
+  assert.equal(owner.holdMode('arm', none, false), null, 'nothing to draw on');
+  assert.equal(owner.holdMode('x64', none, false), null);
+});
+
+test('the way back stops the X server of the face before the kiosk starts its own', () => {
+  const register = { owner: 'glass-evo', changes: [
+    { kind: 'unit', name: 'volumio-kiosk', action: 'stop', was: { active: true, enabled: true } },
+    { kind: 'unit', name: 'getty@tty1', action: 'stop', was: { active: true, enabled: true } },
+    { kind: 'own-x', name: owner.OWN_X_UNIT, action: 'start' }
+  ] };
+  const steps = owner.planGiveBack(register, { plugins: {}, units: { 'volumio-kiosk': { state: 'inactive', enabled: false }, 'getty@tty1': { state: 'inactive', enabled: false } } });
+  assert.deepEqual(steps.map((s) => s.kind + ' ' + s.name + ' ' + s.action), ['own-x glass-x stop', 'unit getty@tty1 start', 'unit volumio-kiosk start']);
+});
+
 test('the face\'s failures in a row are counted, and cleared by a run that holds', () => {
   const quick = { clean: false, ranMs: 800, windowMs: 10000 };
   assert.equal(owner.faceFailures(0, quick), 1);
