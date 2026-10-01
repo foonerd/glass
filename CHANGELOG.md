@@ -2,6 +2,18 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.97] - 2026-10-01
+
+The plugin's side of glass-evo, the Glass interface for the player's own screen. Nothing shows and nothing changes on a player that does not have the glass-evo component; the kiosk stays the player's interface there, as before.
+
+- **The screen's owner.** Where the component is installed, the Manager's Screen tab says who owns the screen, the kiosk or glass-evo, and hands it over and back. A take turns the kiosk's plugins off through the player's own plugin manager, stops the kiosk's units, and records each change with what it was before; the way back restores exactly what the take changed, and only where it is still as the take left it. While glass-evo owns the screen the launcher runs its binary in the display's place.
+- **The face size.** Normal, large for a hand at arm's length, or car for a glance while driving.
+- **How the screen looks.** A row of looks to choose from, the one that follows the artwork and every face theme, the user's own and those glass-evo ships; a likeness of the player's screen, when nothing plays and while music plays; and the adjustments in plain words, a section each for colours, backgrounds, the clock, the date and the buttons, each saying in a line how it stands. A click on a part of the likeness opens its section. Nothing reaches the player until the save, and only what differs from the look is kept.
+- **The status sheet** names the screen's owner, the component and what the last take changed.
+- **Routes.** `GET` and `POST /api/face` for the face's settings, `POST /api/screen/owner` for the take and the way back; `GET /api/screen` carries the owner and the face size.
+
+The continuous build also covers the `evo` branch, where the next stages of this work are made.
+
 ## [0.7.96] - 2026-10-01
 
 A letter no longer comes out as a grey smear. The outline rasteriser Glass sets its text with miscounts a glyph whose points land exactly on pixel edges, which a pen standing at a quarter or a half of a pixel can bring about: the bold face's w at 25 pixels with the pen three quarters of a pixel across, the w of "The Show Must Go On" in a theme's title, was drawn as a grey block with a faint letter in it, on the player's screen, on remotes and on the Face alike; the regular face's T and backslash did the same at 25 and 50 pixels. Six such cases in four million tried over the built-in faces. Every glyph is now set a 1024th of a pixel to the right of its pen, which nothing sees and which takes the points off the edges; none of the four million is miscounted with it.
