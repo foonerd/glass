@@ -440,7 +440,7 @@
     "MANAGER_DIAG_S_REMOTES": "A remote display, the Face or Anymote does not show or move",
     "MANAGER_DIAG_S_SLOW": "It is slow, or the player is busy",
     "MANAGER_DIAG_S_OTHER": "Something else",
-    "MANAGER_DIAG_FOUND": "The checks found a likely cause.",
+    "MANAGER_DIAG_FOUND": "The checks found a likely cause. If that is not it, post the status sheet with what you did and what you saw: Copy as text carries these findings too.",
     "MANAGER_DIAG_NOTHING": "The checks found no cause. Post the status sheet with what you did and what you saw: Copy as text carries these findings too.",
     "MANAGER_DIAG_KIND_CAUSE": "Likely cause",
     "MANAGER_DIAG_KIND_NOTE": "Worth knowing",

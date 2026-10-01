@@ -440,7 +440,7 @@
     "MANAGER_DIAG_S_REMOTES": "Un écran distant, la Face ou Anymote ne montre rien ou ne bouge pas",
     "MANAGER_DIAG_S_SLOW": "C'est lent, ou le lecteur est surchargé",
     "MANAGER_DIAG_S_OTHER": "Autre chose",
-    "MANAGER_DIAG_FOUND": "Les vérifications ont trouvé une cause probable.",
+    "MANAGER_DIAG_FOUND": "Les vérifications ont trouvé une cause probable. Si ce n'est pas cela, publiez la fiche d'état avec ce que vous avez fait et vu : « Copier en texte » emporte aussi ces constats.",
     "MANAGER_DIAG_NOTHING": "Les vérifications n'ont trouvé aucune cause. Publiez la fiche d'état avec ce que vous avez fait et vu : « Copier en texte » emporte aussi ces constats.",
     "MANAGER_DIAG_KIND_CAUSE": "Cause probable",
     "MANAGER_DIAG_KIND_NOTE": "Bon à savoir",
