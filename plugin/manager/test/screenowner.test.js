@@ -81,3 +81,11 @@ test('the register says who owns the screen', () => {
   assert.equal(owner.ownedByEvo({ owner: 'glass-evo', takenAt: 1, gaveBackAt: 2 }), false);
   assert.equal(owner.ownedByEvo(null), false);
 });
+
+test('glass-evo is here where its component is installed or the screen is its own', () => {
+  assert.equal(owner.here(null, { installed: false }), false, 'a player that never had it');
+  assert.equal(owner.here({ owner: 'glass-evo', takenAt: 1, gaveBackAt: 2 }, { installed: false }), false, 'a register of the past alone is not it');
+  assert.equal(owner.here(null, { installed: true, available: false }), true, 'installed, even with no binary for this player');
+  assert.equal(owner.here({ owner: 'glass-evo', takenAt: 1 }, { installed: false }), true, 'the screen its own with the component gone: the way back must show');
+  assert.equal(owner.here(null, undefined), false);
+});

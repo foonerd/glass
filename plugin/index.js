@@ -1012,7 +1012,8 @@ Glass.prototype.onStart = function () {
     self.pluginStartedAt = Date.now();
     try { self.migrateScreenDriver(); } catch (e) { self.logger.warn(id + 'screen: driver key not migrated: ' + (e && e.message ? e.message : e)); }
     try { self.watchScreen(); } catch (e) { self.logger.warn(id + 'screen: not watched: ' + (e && e.message ? e.message : e)); }
-    try { self.noteFrostSuits(); } catch (e) { self.logger.warn(id + 'face: the board not noted: ' + (e && e.message ? e.message : e)); }
+    // The board's word on frost is kept for the face, on a player that has one.
+    try { if (self.screenOwnerState().here) { self.noteFrostSuits(); } } catch (e) { self.logger.warn(id + 'face: the board not noted: ' + (e && e.message ? e.message : e)); }
 
     self.loadConfigs();
     if (!meterConfig) {
@@ -1992,7 +1993,8 @@ Glass.prototype.kioskUnitStates = function () {
 Glass.prototype.screenOwnerState = function () {
     var self = this;
     var register = self.readRegister();
-    return { owner: screenowner.ownedByEvo(register) ? 'glass-evo' : 'kiosk', evo: self.evoComponent(), register: register };
+    var evo = self.evoComponent();
+    return { owner: screenowner.ownedByEvo(register) ? 'glass-evo' : 'kiosk', evo: evo, register: register, here: screenowner.here(register, evo) };
 };
 
 // glass-evo takes the screen, or the kiosk gets it back. A take turns the
