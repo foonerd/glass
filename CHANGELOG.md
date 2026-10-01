@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.96] - 2026-10-01
+
+A letter no longer comes out as a grey smear. The outline rasteriser Glass sets its text with miscounts a glyph whose points land exactly on pixel edges, which a pen standing at a quarter or a half of a pixel can bring about: the bold face's w at 25 pixels with the pen three quarters of a pixel across, the w of "The Show Must Go On" in a theme's title, was drawn as a grey block with a faint letter in it, on the player's screen, on remotes and on the Face alike; the regular face's T and backslash did the same at 25 and 50 pixels. Six such cases in four million tried over the built-in faces. Every glyph is now set a 1024th of a pixel to the right of its pen, which nothing sees and which takes the points off the edges; none of the four million is miscounted with it.
+
+For a face over the display: what a face drew is no longer left behind when it stops drawing. The display showed the whole picture while a face drew and went back to showing what the theme changed when it stopped, so the last frame of a bar fading out stayed, faintly, wherever the theme stood still; the frame after is shown whole now. `GLASS_GRAB_AFTER=N` makes the grab aid (`GLASS_GRAB`) wait N frames rather than thirty, to look at a screen later in a run.
+
 ## [0.7.95] - 2026-10-01
 
 A face is handed its own settings. Every `face.<name>` key of the display's configuration reaches a face drawn over the display through its view, by name and as written, the writer's backslash before a `#` taken off so a colour arrives as `#rrggbb`; the display reads none of them but the size, and their meaning is the face's, so a new setting of glass-evo needs no change in Glass. The library surface a face is built on also carries the renderer's picture reading, scaling and blur, for a face that takes its colours from the cover and frosts what lies under its glass. Nothing changes for the display itself.
