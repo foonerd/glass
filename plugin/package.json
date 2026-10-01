@@ -16,6 +16,9 @@
     "line-reader": "^0.4.0",
     "express": "^4.19.2"
   },
+  "glassEvo": {
+    "least": "0.1.9"
+  },
   "volumio_info": {
     "prettyName": "Glass",
     "icon": "fa-lightbulb-o",

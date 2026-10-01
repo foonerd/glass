@@ -438,6 +438,22 @@
       </div>
       <pre id="upd-notes" class="hidden" style="white-space:pre-wrap;margin-top:10px;font:inherit;font-size:13px;color:#ccc;background:#1a1a1a;border:1px solid var(--line);border-radius:8px;padding:10px"></pre>
     </div>
+    <div class="panel" id="evo-panel">
+      <div class="row" style="justify-content:space-between">
+        <h2 id="evo-title" style="margin:0"></h2>
+        <button class="small" id="btn-evo-check"></button>
+      </div>
+      <div class="help" id="evo-lead" style="margin-top:6px"></div>
+      <div id="evo-body" style="margin-top:10px"></div>
+      <div class="jobs" id="jobs-evo" style="margin-top:10px"></div>
+      <div class="row" style="margin-top:10px">
+        <button class="primary hidden" id="btn-evo-install"></button>
+        <button class="hidden" id="btn-evo-rollback"></button>
+        <button class="hidden" id="btn-evo-remove"></button>
+        <button class="small hidden" id="btn-evo-notes"></button>
+      </div>
+      <pre id="evo-notes" class="hidden" style="white-space:pre-wrap;margin-top:10px;font:inherit;font-size:13px;color:#ccc;background:#1a1a1a;border:1px solid var(--line);border-radius:8px;padding:10px"></pre>
+    </div>
     <div class="panel" id="perf-panel">
       <h2 id="perf-title" style="margin:0 0 10px"></h2>
       <div class="help" id="perf-help" style="margin-bottom:10px"></div>
@@ -655,6 +671,7 @@
       return t(key) + (e.data && e.data.message ? ' ' + e.data.message : '');
     }
     var known = { 'checksum': 'MANAGER_ERR_CHECKSUM', 'size': 'MANAGER_ERR_SIZE', 'units-differ': 'MANAGER_ERR_UNITS', 'bad-theme': 'MANAGER_ERR_BAD_THEME', 'not-a-zip': 'MANAGER_ERR_NOT_ZIP', 'timeout': 'MANAGER_ERR_NETWORK', 'network': 'MANAGER_ERR_NETWORK', 'too-large': 'MANAGER_ERR_TOO_LARGE', 'render-failed': 'MANAGER_ERR_RENDER',
+      'owns-screen': 'MANAGER_EVO_ERR_OWNS_SCREEN', 'needs-glass': 'MANAGER_EVO_ERR_NEEDS_GLASS', 'too-old': 'MANAGER_EVO_ERR_TOO_OLD', 'no-binary': 'MANAGER_EVO_ERR_NO_BINARY', 'pair': 'MANAGER_EVO_ERR_PAIR', 'bad-manifest': 'MANAGER_EVO_ERR_MANIFEST',
       'no-release': 'MANAGER_ERR_NO_RELEASE', 'bad-release': 'MANAGER_ERR_NO_RELEASE', 'up-to-date': 'MANAGER_UPD_UPTODATE', 'no-previous': 'MANAGER_UPD_NONE', 'no-digest': 'MANAGER_ERR_NO_DIGEST', 'apply': 'MANAGER_ERR_APPLY', 'busy': 'MANAGER_ERR_BUSY', 'bad-backup': 'MANAGER_ERR_BAD_BACKUP', 'not-a-font': 'MANAGER_FONTS_NOT_A_FONT', 'bad-font': 'MANAGER_FONTS_BAD_CHOICE', 'empty': 'MANAGER_FONTS_NOT_A_FONT', 'bad-time': 'MANAGER_CD_ERR_TIME', 'same-time': 'MANAGER_CD_ERR_SAME', 'bad-theme': 'MANAGER_CD_ERR_THEME', 'bad-location': 'MANAGER_CD_ERR_LOCATION', 'no-location': 'MANAGER_CD_ERR_NO_LOCATION', 'bad-offset': 'MANAGER_CD_ERR_OFFSET' };
     if (known[code]) return t(known[code]) + (e.message && e.message !== code ? ' (' + e.message + ')' : '');
     return e.message || t('MANAGER_ERROR');
@@ -825,7 +842,7 @@
     if (name === 'artwork') { loadDisplay(); loadArtwork(); } loadFonts();
     if (name === 'backups') loadBackups();
     if (name === 'status') { loadStatus(); }
-    if (name === 'system') { loadUpdate(false); loadPerformance(); loadSharing(); loadTouch(); loadLogging(); loadLegacy(); }
+    if (name === 'system') { loadUpdate(false); loadEvo(false); loadPerformance(); loadSharing(); loadTouch(); loadLogging(); loadLegacy(); }
     if (name === 'screen') { loadScreen(); }
     if (name === 'remotes') loadRemotes();
     if (window.GlassFace) { if (name === 'face') { GlassFace.show(); } else { GlassFace.hide(); } }
@@ -2143,6 +2160,9 @@
       var names = (r.changes || []).map(function (c) { return c.kind === 'plugin' ? t('MANAGER_OWNER_PLUGIN_' + String(c.name).toUpperCase()) : c.name; });
       lines.push(t('MANAGER_OWNER_TOOK') + ' ' + when(r.takenAt) + (names.length ? '; ' + t('MANAGER_OWNER_TURNED_OFF') + ' ' + names.join(', ') : '') + '.' + (r.gaveBackAt ? ' ' + t('MANAGER_OWNER_GAVE_BACK') + ' ' + when(r.gaveBackAt) + '.' : ''));
       if (r.error) lines.push(t('MANAGER_OWNER_ERROR') + ' ' + r.error);
+      // Given back without being asked: why.
+      var because = { 'face-failed': 'MANAGER_OWNER_BACK_FACE_FAILED', 'component-missing': 'MANAGER_OWNER_BACK_COMPONENT_MISSING', 'plugin-stopped': 'MANAGER_OWNER_BACK_PLUGIN_STOPPED' }[r.gaveBackAt && r.gaveBackBecause];
+      if (because) lines.push(t(because) + (r.failure ? ' (' + r.failure + ')' : ''));
     }
     return lines;
   }
@@ -2358,6 +2378,101 @@
     $('btn-upd-notes').classList.toggle('hidden', !(u.latest && u.latest.notes));
     $('upd-notes').textContent = u.latest && u.latest.notes ? u.latest.notes : '';
   }
+  // ---- glass-evo, the component -------------------------------------------
+  // Got, updated, put back and removed here, the way Glass's own release
+  // is; whether it has the screen is the Screen tab's.
+  function loadEvo(force) {
+    var call = force ? api('POST', '/api/evo/check') : api('GET', '/api/evo');
+    return call.then(renderEvo).catch(function (e) {
+      if (e.data && e.data.glass) renderEvo(e.data);
+      else $('evo-body').textContent = errorText(e);
+    });
+  }
+  function renderEvo(v) {
+    state.evo = v;
+    var here = v.installed;
+    var owns = v.owner === 'glass-evo';
+    $('evo-title').textContent = t('MANAGER_EVO_TITLE');
+    $('evo-lead').textContent = t('MANAGER_EVO_LEAD');
+    $('btn-evo-check').textContent = t('MANAGER_UPD_CHECK');
+    $('btn-evo-notes').textContent = t('MANAGER_UPD_NOTES');
+    var badge = function (kind, key) { return ' <span class="badge ' + kind + '">' + esc(t(key)) + '</span>'; };
+    var lines = [];
+    lines.push(here ? '<div>' + esc(t('MANAGER_UPD_CURRENT')) + ' <b>' + esc(here.version) + '</b></div>' : '<div>' + esc(t('MANAGER_EVO_NOT_INSTALLED')) + '</div>');
+    if (v.latest) {
+      lines.push('<div>' + esc(t('MANAGER_UPD_LATEST')) + ' <b>' + esc(v.latest.version) + '</b>' + (v.latest.publishedAt ? ' <span class="muted">(' + esc(fmtDate(v.latest.publishedAt)) + ')</span>' : '') +
+        (here ? (v.available ? badge('orange', 'MANAGER_STATE_UPDATE') : (v.behind || v.outdated ? '' : badge('green', 'MANAGER_UPD_UPTODATE'))) : '') + '</div>');
+    }
+    if (v.outdated) lines.push('<div>' + esc(t('MANAGER_EVO_OUTDATED') + ' ' + v.least + '.') + '</div>');
+    if (v.behind) lines.push('<div class="help">' + esc(t('MANAGER_EVO_BEHIND') + ' ' + v.least + '.') + '</div>');
+    if (here && !here.available) lines.push('<div class="help">' + esc(t('MANAGER_EVO_ERR_NO_BINARY')) + '</div>');
+    if (here) lines.push('<div class="help">' + esc(t(owns ? 'MANAGER_EVO_OWNS' : 'MANAGER_EVO_KIOSK')) + '</div>');
+    if (v.checkedAt) lines.push('<div class="help">' + esc(t('MANAGER_CATALOG_FETCHED')) + ' ' + esc(fmtDate(v.checkedAt)) + '</div>');
+    if (v.error) lines.push('<div class="help">' + esc(t('MANAGER_UPD_CHECK_FAILED')) + ' ' + esc(v.error.message || v.error.error) + '</div>');
+    if (v.previous) lines.push('<div class="help">' + esc(t('MANAGER_UPD_PREVIOUS') + ' ' + v.previous.version) + '</div>');
+    $('evo-body').innerHTML = lines.join('');
+    $('btn-evo-install').classList.toggle('hidden', !v.available);
+    $('btn-evo-install').textContent = v.available ? t(here ? 'MANAGER_EVO_UPDATE' : 'MANAGER_EVO_GET') + ' ' + v.latest.version : '';
+    $('btn-evo-rollback').classList.toggle('hidden', !v.previous);
+    $('btn-evo-rollback').textContent = v.previous ? t('MANAGER_UPD_ROLLBACK') + ' ' + v.previous.version : '';
+    $('btn-evo-remove').classList.toggle('hidden', !here);
+    $('btn-evo-remove').textContent = t('MANAGER_EVO_REMOVE');
+    // Not taken from under a player whose interface it is.
+    $('btn-evo-remove').disabled = owns;
+    $('btn-evo-remove').title = owns ? t('MANAGER_EVO_ERR_OWNS_SCREEN') : '';
+    $('btn-evo-notes').classList.toggle('hidden', !(v.latest && v.latest.notes));
+    $('evo-notes').textContent = v.latest && v.latest.notes ? v.latest.notes : '';
+  }
+  $('btn-evo-check').onclick = function () { $('evo-body').textContent = t('MANAGER_LOADING'); loadEvo(true); };
+  $('btn-evo-notes').onclick = function () { $('evo-notes').classList.toggle('hidden'); };
+  $('btn-evo-install').onclick = function () {
+    var v = state.evo;
+    if (!v || !v.available) return;
+    var label = t(v.installed ? 'MANAGER_EVO_UPDATE' : 'MANAGER_EVO_GET') + ' ' + v.latest.version;
+    confirmDialog(label, t('MANAGER_EVO_INSTALL_MSG'), label).then(function (ok) {
+      if (!ok) return;
+      api('POST', '/api/evo/install').then(function (data) { followEvo(data.job); }).catch(function (e) { toast(errorText(e), 'error'); });
+    });
+  };
+  $('btn-evo-rollback').onclick = function () {
+    var v = state.evo;
+    if (!v || !v.previous) return;
+    var label = t('MANAGER_UPD_ROLLBACK') + ' ' + v.previous.version;
+    confirmDialog(label, t('MANAGER_EVO_ROLLBACK_MSG'), label).then(function (ok) {
+      if (!ok) return;
+      api('POST', '/api/evo/rollback').then(function (data) { followEvo(data.job); }).catch(function (e) { toast(errorText(e), 'error'); });
+    });
+  };
+  $('btn-evo-remove').onclick = function () {
+    confirmDialog(t('MANAGER_EVO_REMOVE') + ' glass-evo', t('MANAGER_EVO_REMOVE_MSG'), t('MANAGER_EVO_REMOVE')).then(function (ok) {
+      if (!ok) return;
+      api('POST', '/api/evo/remove').then(function (v) { renderEvo(v); toast(t('MANAGER_EVO_REMOVED')); }).catch(function (e) { toast(errorText(e), 'error'); loadEvo(false); });
+    });
+  };
+  // The job is the Manager's own: no restart, the page reads it to its end.
+  function followEvo(job) {
+    var buttons = ['btn-evo-install', 'btn-evo-rollback', 'btn-evo-remove'];
+    buttons.forEach(function (b) { $(b).disabled = true; });
+    var draw = function (j) {
+      var pct = j.progress && j.progress.total ? Math.round(j.progress.done * 100 / j.progress.total) : 0;
+      var label = { queued: 'MANAGER_JOB_QUEUED', downloading: 'MANAGER_JOB_DOWNLOADING', verifying: 'MANAGER_JOB_CHECKING', applying: 'MANAGER_EVO_JOB_APPLYING', failed: 'MANAGER_JOB_FAILED' }[j.state] || j.state;
+      $('jobs-evo').innerHTML = '<div class="job"><b>' + esc(j.name) + '</b> · ' + esc(t(label)) +
+        (j.state === 'downloading' ? ' ' + pct + '%<div class="progress"><div style="width:' + pct + '%"></div></div>' : '') +
+        (j.state === 'failed' && j.error ? ' <span class="muted">' + esc(errorText({ code: j.error.error, message: j.error.message })) + '</span>' : '') + '</div>';
+    };
+    draw(job);
+    var tick = function () {
+      api('GET', '/api/jobs/' + job.id).then(function (data) {
+        var j = data.job;
+        if (j.state === 'done') { $('jobs-evo').innerHTML = ''; buttons.forEach(function (b) { $(b).disabled = false; }); toast(t('MANAGER_EVO_DONE') + ' ' + j.name.replace(/^glass-evo /, '')); loadEvo(false); return; }
+        draw(j);
+        if (j.state === 'failed') { buttons.forEach(function (b) { $(b).disabled = false; }); loadEvo(false); return; }
+        setTimeout(tick, 700);
+      }).catch(function (e) { buttons.forEach(function (b) { $(b).disabled = false; }); toast(errorText(e), 'error'); loadEvo(false); });
+    };
+    setTimeout(tick, 400);
+  }
+
   $('btn-upd-check').onclick = function () { loadUpdate(true); };
   $('btn-upd-notes').onclick = function () { $('upd-notes').classList.toggle('hidden'); };
   $('btn-upd-install').onclick = function () {

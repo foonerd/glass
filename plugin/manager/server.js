@@ -20,7 +20,8 @@ const { trackFileFor } = require('./trackfile');
 const logging = require('./logging');
 const { Catalog, CatalogError } = require('./catalog');
 const { Previews } = require('./previews');
-const { Updater, UpdateError } = require('./update');
+const { Updater, UpdateError, compareVersions } = require('./update');
+const { Component, ComponentError, leastOf, pairPlan } = require('./component');
 const { zipDirectory } = require('./zipwrite');
 const tailor = require('./tailor');
 const { SYMPTOMS, diagnose } = require('./diagnose');
@@ -69,6 +70,16 @@ class Manager {
       plugin: plugin,
       logger: this.logger
     });
+    let packageText = '';
+    try { packageText = fs.readFileSync(path.join(paths.pluginPath, 'package.json'), 'utf8'); } catch (e) { /* no least named */ }
+    this.component = new Component({
+      dir: paths.evoDir,
+      stateDir: path.join(paths.dataDir, 'evo-state'),
+      glass: paths.version,
+      least: leastOf(packageText),
+      arch: function () { return plugin.volumioArch(); },
+      logger: this.logger
+    });
     this.capture = new Capture({
       file: path.join(paths.dataDir, 'capture.json'),
       now: Date.now,
@@ -94,6 +105,7 @@ class Manager {
     await self.catalog.init();
     await self.previews.init();
     await self.updater.init();
+    await self.component.init();
     // A capture the backend went down under goes on, or ends if its time passed.
     try {
       if (self.capture.resume().state !== 'idle') self.logger.info('glass: manager: a report\'s capture goes on after the restart');
@@ -884,6 +896,63 @@ class Manager {
       res.status(202).json({ ok: true, job: job });
     }));
 
+    // glass-evo, the component: what is here, the latest release, and
+    // whether the screen is its own.
+    const evoView = function (extra) {
+      return Object.assign(self.component.view(), { owner: self.plugin.screenOwnerState().owner }, extra || {});
+    };
+    const componentBusy = function () {
+      return upgrading() || self.jobs.some(function (j) { return j.kind === 'component' && j.state !== 'done' && j.state !== 'failed'; });
+    };
+
+    app.get('/api/evo', wrap(async function (req, res) {
+      try {
+        await self.component.check(false);
+        res.json(evoView());
+      } catch (e) {
+        res.json(evoView({ error: failure(e) }));
+      }
+    }));
+
+    app.post('/api/evo/check', wrap(async function (req, res) {
+      try {
+        await self.component.check(true);
+        res.json(evoView());
+      } catch (e) {
+        res.status(502).json(evoView({ error: failure(e) }));
+      }
+    }));
+
+    app.post('/api/evo/install', wrap(async function (req, res) {
+      const view = self.component.view();
+      if (!view.available) return res.status(400).json({ error: view.behind ? 'too-old' : 'up-to-date' });
+      if (componentBusy()) return res.status(409).json({ error: 'busy' });
+      const job = self.newJob('component', 'glass-evo ' + view.latest.version);
+      self.runComponent(job, false);
+      res.status(202).json({ ok: true, job: job });
+    }));
+
+    app.post('/api/evo/rollback', wrap(async function (req, res) {
+      const previous = self.component.previous();
+      if (!previous) return res.status(400).json({ error: 'no-previous' });
+      if (componentBusy()) return res.status(409).json({ error: 'busy' });
+      const job = self.newJob('component', 'glass-evo ' + previous.version);
+      self.runComponent(job, true);
+      res.status(202).json({ ok: true, job: job });
+    }));
+
+    // Removed only while the kiosk owns the screen: the face is not taken
+    // from under a player whose interface it is.
+    app.post('/api/evo/remove', wrap(async function (req, res) {
+      if (componentBusy()) return res.status(409).json({ error: 'busy' });
+      const result = await self.exclusive(async function () {
+        if (self.plugin.screenOwnerState().owner === 'glass-evo') return { error: 'owns-screen' };
+        return self.component.remove();
+      });
+      if (result.error) return res.status(409).json(result);
+      res.json(evoView({ ok: true }));
+    }));
+
     app.use('/api', function (req, res) {
       res.status(404).json({ error: 'not-found' });
     });
@@ -1038,7 +1107,7 @@ class Manager {
       this.logger.warn('glass: manager ' + job.kind + ' ' + job.name + ' failed: ' + job.error.message);
     } else {
       job.state = 'done';
-      if (!error && job.kind !== 'upgrade' && this.plugin && typeof this.plugin.themesWritten === 'function') { try { this.plugin.themesWritten(); } catch (e) {} }
+      if (!error && job.kind !== 'upgrade' && job.kind !== 'component' && this.plugin && typeof this.plugin.themesWritten === 'function') { try { this.plugin.themesWritten(); } catch (e) {} }
       this.logger.info('glass: manager ' + job.kind + ' ' + job.name + ' done: ' + job.folders.map(function (f) { return f.install + '/' + f.folder; }).join(', '));
     }
   }
@@ -1155,9 +1224,69 @@ class Manager {
     self.exclusive(async function () {
       try {
         const staged = rollback ? await self.updater.stagePrevious(job) : await self.updater.download(job);
-        const result = await self.updater.apply(job, staged);
+        const paired = await self.pairComponent(job, staged);
+        let result;
+        try {
+          result = await self.updater.apply(job, staged);
+        } catch (e) {
+          // The Glass did not go in: the component it was brought forward for goes back.
+          if (paired) {
+            try { await self.component.rollback(); } catch (e2) { self.logger.warn('glass: manager component: not put back after the upgrade failed: ' + e2.message); }
+          }
+          throw e;
+        }
         job.endedAt = new Date().toISOString();
         self.logger.info('glass: manager ' + job.kind + ' from ' + result.from + ' to ' + result.to + ': plugin replaced, backend restarting');
+      } catch (e) {
+        self.finish(job, e);
+      }
+    });
+  }
+
+  // Before a Glass goes in, the component that is here is brought to what
+  // that Glass works with: the staged zip's package names the least
+  // glass-evo, and an older one is updated first, held to that Glass. A
+  // Glass older than the component needs is not installed at all. Answers
+  // whether the component was changed.
+  async pairComponent(job, staged) {
+    const here = this.component.installed();
+    if (!here.installed) return false;
+    let least = null;
+    const zip = await Zip.open(staged.file);
+    try {
+      const entry = zip.entries.find(function (e) { return e.isRegular && e.name === 'package.json'; });
+      if (entry && entry.size <= 1024 * 1024) least = leastOf((await zip.read(entry)).toString('utf8'));
+    } finally {
+      await zip.close();
+    }
+    const plan = pairPlan(here, { version: staged.version, least: least });
+    if (plan.action === 'none') return false;
+    if (plan.action === 'refuse') {
+      throw new UpdateError('pair', 'glass-evo ' + here.version + ' needs Glass ' + plan.needs + ' or later; put glass-evo back to its previous version first');
+    }
+    try {
+      const view = await this.component.check(true);
+      if (!view.latest || compareVersions(view.latest.version, plan.least) < 0) {
+        throw new ComponentError('too-old', 'the latest glass-evo released is ' + (view.latest ? view.latest.version : 'not known'));
+      }
+      await this.component.install(job, { glass: staged.version, least: plan.least });
+    } catch (e) {
+      throw new UpdateError('pair', 'Glass ' + staged.version + ' needs glass-evo ' + plan.least + ' or later, which could not be installed (' + (e && e.message ? e.message : e) + '); nothing was changed');
+    }
+    this.logger.info('glass: manager upgrade: glass-evo brought to ' + this.component.installed().version + ' for Glass ' + staged.version);
+    return true;
+  }
+
+  // Get or update the component, or put the one before back; a face on
+  // the screen then comes back as the one now in place.
+  runComponent(job, rollback) {
+    const self = this;
+    self.exclusive(async function () {
+      try {
+        if (rollback) await self.component.rollback();
+        else await self.component.install(job);
+        self.plugin.componentChanged();
+        self.finish(job, null);
       } catch (e) {
         self.finish(job, e);
       }

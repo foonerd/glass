@@ -82,6 +82,25 @@ test('the register says who owns the screen', () => {
   assert.equal(owner.ownedByEvo(null), false);
 });
 
+test('the face\'s failures in a row are counted, and cleared by a run that holds', () => {
+  const quick = { clean: false, ranMs: 800, windowMs: 10000 };
+  assert.equal(owner.faceFailures(0, quick), 1);
+  assert.equal(owner.faceFailures(2, quick), 3);
+  assert.equal(owner.faceFailures(2, { clean: true, ranMs: 800, windowMs: 10000 }), 0, 'a relaunch is not a failure');
+  assert.equal(owner.faceFailures(2, { clean: false, ranMs: 10000, windowMs: 10000 }), 0, 'it ran: a later death starts the count again');
+});
+
+test('the screen goes back by itself only where glass-evo owns it and cannot hold it', () => {
+  const holds = { owner: 'glass-evo', available: true, failures: 0, stopping: false, updating: false };
+  assert.equal(owner.guard(holds), null);
+  assert.equal(owner.guard(Object.assign({}, holds, { failures: owner.FACE_TRIES - 1 })), null);
+  assert.equal(owner.guard(Object.assign({}, holds, { failures: owner.FACE_TRIES })), 'face-failed');
+  assert.equal(owner.guard(Object.assign({}, holds, { available: false })), 'component-missing');
+  assert.equal(owner.guard(Object.assign({}, holds, { stopping: true })), 'plugin-stopped');
+  assert.equal(owner.guard(Object.assign({}, holds, { stopping: true, updating: true })), null, 'an update stops the plugin and starts it again');
+  assert.equal(owner.guard({ owner: 'kiosk', available: false, failures: 9, stopping: true, updating: false }), null, 'the kiosk\'s screen is not Glass\'s to hand anywhere');
+});
+
 test('glass-evo is here where its component is installed or the screen is its own', () => {
   assert.equal(owner.here(null, { installed: false }), false, 'a player that never had it');
   assert.equal(owner.here({ owner: 'glass-evo', takenAt: 1, gaveBackAt: 2 }, { installed: false }), false, 'a register of the past alone is not it');
