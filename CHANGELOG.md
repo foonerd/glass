@@ -6,6 +6,8 @@ All notable changes to Glass are recorded here. The format follows [Keep a Chang
 
 The one-line installer no longer leaves Glass installed and off. `get-glass.sh` restarted the player's backend as soon as the plugin manager said Glass was enabled, and the manager writes that to its registry a moment later; on a fast player the restart came first and the player came back with Glass installed but not enabled, its Manager unreachable. The installer now waits until the registry on disk says enabled before it restarts, and says so if it never does.
 
+On a player whose image runs its own kiosk (x86, and the products with a built-in screen), the display shows without a restart of the kiosk. There the X server runs as root and admits only root; Glass's install adds the player's own user for every session to come, and the session already running was left out, so the display was refused ("Authorization required") and nothing showed until the kiosk started again or the player was restarted. The install now admits the user to the running session as well.
+
 ## [0.7.97] - 2026-10-01
 
 The plugin's side of glass-evo, the Glass interface for the player's own screen. Nothing shows and nothing changes on a player that does not have the glass-evo component; the kiosk stays the player's interface there, as before.

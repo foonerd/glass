@@ -137,6 +137,19 @@ if [ "$KIOSK_DEVICE" = "true" ] || [ "$ARCH" = "x64" ]; then
 xhost +SI:localuser:volumio >/dev/null 2>&1 || xhost +local: >/dev/null 2>&1
 XHOSTEOF
   chmod 644 /etc/X11/Xsession.d/50-glass-xhost
+  # The helper is read when an X session starts. The session running now
+  # gets the same at once, or the display would be refused until the kiosk
+  # starts again: the image's kiosk runs X as root and admits only root.
+  X_PID=$(pgrep -xo Xorg 2>/dev/null || pgrep -xo X 2>/dev/null || true)
+  if [ -n "$X_PID" ] && [ -r "/proc/$X_PID/cmdline" ] && command -v xhost >/dev/null 2>&1; then
+    X_AUTH=$(tr '\0' '\n' < "/proc/$X_PID/cmdline" | sed -n '/^-auth$/{n;p;}')
+    X_DISPLAY=$(tr '\0' '\n' < "/proc/$X_PID/cmdline" | grep -m1 '^:[0-9]' || true)
+    if DISPLAY=${X_DISPLAY:-:0} XAUTHORITY=$X_AUTH xhost +SI:localuser:volumio >/dev/null 2>&1; then
+      echo "The running X session admits the volumio user"
+    else
+      echo "The running X session did not take the change: the display shows once the kiosk has started again"
+    fi
+  fi
   if getent group render >/dev/null 2>&1; then
     if ! id -nG volumio | tr ' ' '\n' | grep -qx render; then
       usermod -aG render volumio
