@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.1] - 2026-10-01
+
+On x86 a theme of another size than the screen fills the screen under glass-evo. The plain X server brought up for glass-evo ran no window manager, and it is the window manager that makes a full screen window the size of the screen: the face's window kept the theme's size, so a 1920x1080 theme on a 1280x720 screen was cut off, a smaller one stood small, and "fit the theme to the screen" did nothing. The session now runs the window manager the kiosk's own session runs (openbox). Give the screen back and hand it over again for it to take effect.
+
 ## [0.8.0] - 2026-10-01
 
 glass-evo, the Glass interface for the player's own screen, can be got and chosen from the Manager. It is a preview: verified on a Raspberry Pi 5 with a DSI screen and the Touch Display plugin, and on an x86 player; other screens are untried. Nothing changes on a player that does not get it, where the kiosk stays the interface as before.

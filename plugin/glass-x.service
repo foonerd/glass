@@ -1,4 +1,4 @@
-# An X server for the Glass interface, with nothing else on it. Where the
+# An X server for the Glass interface, with no browser on it. Where the
 # kernel does not drive the player's screen the picture comes through X
 # alone; when glass-evo takes the screen there, the kiosk and its browser
 # are stopped and this plain X server is started in their place, for the
@@ -14,10 +14,14 @@ After=systemd-user-sessions.service
 Type=simple
 User=root
 Group=root
-# The session's one client lets the player's user draw, makes the pointer
-# an arrow in place of the server's own cross, keeps the screen from
-# blanking, and waits: the face is started by the plugin.
-ExecStart=/usr/bin/xinit /bin/sh -c 'xhost +SI:localuser:volumio; xsetroot -cursor_name left_ptr; xset -dpms; xset s off; xset s noblank; exec sleep infinity' -- :0 -keeptty
+# The session lets the player's user draw, makes the pointer an arrow in
+# place of the server's own cross, keeps the screen from blanking, runs
+# the window manager the kiosk's session runs, and waits: the face is
+# started by the plugin. The window manager is what makes a full screen
+# window the size of the screen; without one the face's window keeps the
+# theme's size, and a theme of another size than the screen is cut off or
+# stands small, fitted or not.
+ExecStart=/usr/bin/xinit /bin/sh -c 'xhost +SI:localuser:volumio; xsetroot -cursor_name left_ptr; xset -dpms; xset s off; xset s noblank; if command -v openbox >/dev/null 2>&1; then openbox & fi; exec sleep infinity' -- :0 -keeptty
 Restart=always
 RestartSec=3
 
