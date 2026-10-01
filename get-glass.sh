@@ -83,6 +83,24 @@ socket.on('connect', () => {
 });
 JS
 
+# The plugin manager writes its registry a moment after it enables the
+# plugin; a restart before that brings the player back with Glass installed
+# and off. The restart waits until the registry on disk says enabled.
+enabled() {
+  "$NODE" -e '
+    try {
+      const p = JSON.parse(require("fs").readFileSync("/data/configuration/plugins.json", "utf8"));
+      const g = (p.user_interface || {}).glass || {};
+      process.exit(g.enabled && g.enabled.value === true ? 0 : 1);
+    } catch (e) { process.exit(1); }'
+}
+waited=0
+until enabled; do
+  waited=$((waited + 1))
+  [ "$waited" -le 30 ] || fail "Glass is installed, but the player has not recorded it as enabled: enable it under Settings, Plugins, Installed Plugins"
+  sleep 1
+done
+
 say "Restarting the player's backend so the audio tap joins the sound path"
 volumio vrestart >/dev/null 2>&1 || true
 say ""
