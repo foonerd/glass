@@ -2,6 +2,19 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.0] - 2026-10-01
+
+glass-evo, the Glass interface for the player's own screen, can be got and chosen from the Manager. It is a preview: verified on a Raspberry Pi 5 with a DSI screen and the Touch Display plugin, and on an x86 player; other screens are untried. Nothing changes on a player that does not get it, where the kiosk stays the interface as before.
+
+- **Getting it.** The System tab has glass-evo under Glass's own release: get it, update it, go back to the version before, remove it. The release is read from GitHub, its zip checked against the release's checksum, and this player's binary checked against the component's own list; the version in place is kept for going back. It is removed only while the kiosk owns the screen.
+- **Versions that go together.** The two name the least of each other they work with: the component the least Glass, Glass the least glass-evo (0.1.10 for this release). A component outside either is not installed. An upgrade of Glass that needs a newer glass-evo installs that first, and puts it back if the upgrade does not go in.
+- **The screen's owner.** On the Screen tab the screen is handed to glass-evo and back. A take turns the kiosk off, with every change recorded, and the way back restores exactly what was changed.
+- **On x86 the X server stays.** There the picture may reach the screen through X alone, with no kernel driver for the graphics card. A take stops the kiosk and its browser and brings up a plain X server in their place, with glass-evo as its only client; the way back stops it before the kiosk starts its own. A Raspberry Pi keeps drawing on the screen itself, with no X server at all.
+- **No take where there is nothing to draw on.** A player with neither a screen the kernel drives nor an X server is told so, and nothing is turned off.
+- **A screen that goes back by itself.** While glass-evo owns the screen the kiosk is off, so the screen returns to the kiosk without being asked when the face cannot hold it: it failed to start three times in a row, its component is gone, or Glass was turned off or removed. An upgrade of Glass keeps the screen. The Screen tab says why it went back.
+- **How the screen looks**, the face size and the owner on the status sheet, as 0.7.97 brought them, on a player that has glass-evo.
+- **Routes.** `GET /api/evo`, `POST /api/evo/check`, `/api/evo/install`, `/api/evo/rollback`, `/api/evo/remove`; `GET /api/screen` carries how the screen would be held (`owner.mode`, `owner.holdable`) and whether an X server of Glass's own is up (`ownX`).
+
 ## [0.7.99] - 2026-10-01
 
 An X server of the display's own. Where the kernel does not drive the screen, the picture comes through an X server; `GLASS_SCREEN_OURS=1` from the launcher tells the display that the X server it draws on is there for it alone, with no kiosk on it. The display then treats that screen as it does one it draws on itself: it never leaves it, shows black after the countdown rather than what lies under it, a touch outside a control does not end it, and it turns the picture itself. Nothing changes under a kiosk's X server.
