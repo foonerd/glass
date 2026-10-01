@@ -77,10 +77,27 @@ function resetPlan(current) {
   return { changes };
 }
 
+// A request with a reset: the look removed, then the request laid over
+// what is left, so a key the reset removes and the request names again is
+// set, whatever its value was before.
+function planAll(current, set, reset) {
+  const changes = reset ? resetPlan(current).changes : {};
+  const left = Object.assign({}, current || {});
+  Object.keys(changes).forEach(function (key) { delete left[key]; });
+  const planned = plan(left, set || {});
+  if (planned.error) return planned;
+  Object.keys(planned.changes).forEach(function (key) { changes[key] = planned.changes[key]; });
+  // Removed and set again to what it was: no change at all.
+  Object.keys(changes).forEach(function (key) {
+    if (changes[key] !== null && current && String(current[key]) === changes[key]) delete changes[key];
+  });
+  return { changes };
+}
+
 // Whether frost over a moving theme suits a board: where a frame has room
 // for it. The user's switch decides either way.
 function frostSuits(boardClass) {
   return ['pi4', 'pi5', 'x64'].indexOf(String(boardClass)) !== -1;
 }
 
-module.exports = { PREFIX, settingsOf, plan, resetPlan, frostSuits, themeKeys };
+module.exports = { PREFIX, settingsOf, plan, planAll, resetPlan, frostSuits, themeKeys };
