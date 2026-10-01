@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.91] - 2026-10-01
+
+Theme previews render again on a player whose log level is below Info. The Manager learned which pictures a preview render had made from the display's own lines on its output, and those lines are held back below Info, so such a player rendered every theme and was told there were no pictures, at every upgrade that made the previews stale; reported from the community after 0.7.90. The pictures the render wrote are read from their folder now, shown in the display's order where it says one, else the theme's.
+
 ## [0.7.90] - 2026-09-30
 
 A screen save goes through again. 0.7.89 read the face size of an unset key as the word "undefined", and its save path, which keeps the size as it stands unless one is given, then refused every save of rotation or pointer on the Screen tab; the size is read in one place now, normal unless the key says large or car. Also the Save row of the screen settings stood alone while the kiosk held the screen, its layout rule outranking the hidden flag; the flag outranks every display rule now.
