@@ -2,7 +2,7 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.7.99] - 2026-10-01
 
 An X server of the display's own. Where the kernel does not drive the screen, the picture comes through an X server; `GLASS_SCREEN_OURS=1` from the launcher tells the display that the X server it draws on is there for it alone, with no kiosk on it. The display then treats that screen as it does one it draws on itself: it never leaves it, shows black after the countdown rather than what lies under it, a touch outside a control does not end it, and it turns the picture itself. Nothing changes under a kiosk's X server.
 
