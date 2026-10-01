@@ -26,6 +26,7 @@ const { advanced } = require('./manager/statenow');
 const screenprobe = require('./manager/screenprobe');
 const screenowner = require('./manager/screenowner');
 const facelook = require('./manager/facelook');
+const component = require('./manager/component');
 const { compact: compactQueue } = require('./manager/queue');
 const legacyThemes = require('./manager/legacy');
 const { safeFolderName, sections: configSections } = require('./manager/zip');
@@ -819,8 +820,10 @@ Glass.prototype.onVolumioStart = function () {
 
 // The player's architecture as the image names it: arm, armv7, armv8 or x64.
 Glass.prototype.volumioArch = function () {
+    // The player's architecture does not change under a running plugin.
+    if (this.archKnown) { return this.archKnown; }
     try {
-        return execSync('cat /etc/os-release | grep ^VOLUMIO_ARCH | tr -d \'VOLUMIO_ARCH="\'').toString().trim();
+        return this.archKnown = execSync('cat /etc/os-release | grep ^VOLUMIO_ARCH | tr -d \'VOLUMIO_ARCH="\'').toString().trim();
     } catch (e) {
         return '';
     }
@@ -1256,6 +1259,10 @@ Glass.prototype.checkAlsaChain = function () {
 
 Glass.prototype.onStop = function () {
     var self = this;
+    // glass-evo's screen goes back to the kiosk with the plugin; the stop
+    // waits for it, so the player's interface is back before Glass is gone.
+    var back = null;
+    try { back = self.guardScreen(true); } catch (e) {}
     if (self.carDashTimer) { clearTimeout(self.carDashTimer); self.carDashTimer = null; }
     if (self.screenWatcher) { clearTimeout(self.screenWatcher); self.screenWatcher = null; }
 
@@ -1295,7 +1302,12 @@ Glass.prototype.onStop = function () {
         self.stopManager();
     });
 
-    return libQ.resolve();
+    if (!back) { return libQ.resolve(); }
+    var defer = libQ.defer();
+    var limit = setTimeout(function () { defer.resolve(); }, 30000);
+    var done = function () { clearTimeout(limit); defer.resolve(); };
+    back.then(done, done);
+    return defer.promise;
 };
 
 Glass.prototype.onRestart = function () {
@@ -1430,7 +1442,10 @@ Glass.prototype.startDisplayOnce = function () {
                         }
                         // The display's lines reach the journal as it writes them,
                         // through the same gate as the plugin's own.
-                        var child = spawn('/bin/sh', [LaunchScript], { uid: 1000, gid: 1000, env: self.launchEnv(), stdio: ['ignore', 'pipe', 'pipe'] });
+                        var env = self.launchEnv();
+                        var child = spawn('/bin/sh', [LaunchScript], { uid: 1000, gid: 1000, env: env, stdio: ['ignore', 'pipe', 'pipe'] });
+                        // The face, when glass-evo owns the screen: its failures to start are counted.
+                        child.face = !!env.GLASS_BIN;
                         var lastErr = [];
                         var relay = function (chunk, isErr) {
                             String(chunk).split('\n').forEach(function (line) {
@@ -1455,6 +1470,11 @@ Glass.prototype.startDisplayOnce = function () {
                                 if (/x11 not available|X server/.test(lastErr.join(' '))) { self.screenYieldUntil = Date.now() + 3000; }
                             } else {
                                 self.logger.info(id + 'the display ran and left');
+                            }
+                            if (child.face) {
+                                self.faceFailures = screenowner.faceFailures(self.faceFailures || 0, { clean: error === null, ranMs: Date.now() - (child.startedAt || 0), windowMs: METER_CRASH_BACKOFF_MS });
+                                self.faceError = error === null ? '' : error.message + (lastErr.length ? ' ' + lastErr.join(' | ') : '');
+                                try { self.guardScreen(false); } catch (e) {}
                             }
                             var dismissMarkerPresent = false;
                             try { dismissMarkerPresent = fs.existsSync(dismissFile); } catch (e) {}
@@ -1481,6 +1501,8 @@ Glass.prototype.startDisplayOnce = function () {
                         });
                         child.startedAt = Date.now();
                         self.meterChild = child;
+                        // The plain display where glass-evo owns the screen: its component is gone.
+                        if (!child.face) { try { self.guardScreen(false); } catch (e) {} }
                         self.displayStartedAt = new Date().toISOString();
 };
 
@@ -1943,17 +1965,7 @@ Glass.prototype.noteFrostSuits = function () {
 const REGISTER_FILE = DATA_DIR + '/screen-owner.json';
 
 Glass.prototype.evoComponent = function () {
-    var self = this;
-    try {
-        var m = JSON.parse(fs.readFileSync(EVO_DIR + '/manifest.json', 'utf8'));
-        var arch = self.volumioArch();
-        var rel = m.binaries && m.binaries[arch] && m.binaries[arch].path;
-        var bin = rel ? EVO_DIR + '/' + String(rel).replace(/^\/+/, '') : null;
-        var available = !!(bin && fs.existsSync(bin));
-        return { installed: true, available: available, version: String(m.version || ''), binary: available ? bin : null, arch: arch };
-    } catch (e) {
-        return { installed: false, available: false, version: null, binary: null };
-    }
+    return component.installedAt(EVO_DIR, this.volumioArch());
 };
 
 // The register: who owns the screen, since when, what was found, and what
@@ -1995,6 +2007,54 @@ Glass.prototype.screenOwnerState = function () {
     var register = self.readRegister();
     var evo = self.evoComponent();
     return { owner: screenowner.ownedByEvo(register) ? 'glass-evo' : 'kiosk', evo: evo, register: register, here: screenowner.here(register, evo) };
+};
+
+// The component was installed, updated or put back: the board's word on
+// frost is kept for it, the face's count of failures starts again, and a
+// face on the screen leaves to come back as the new one.
+Glass.prototype.componentChanged = function () {
+    var self = this;
+    try { self.noteFrostSuits(); } catch (e) {}
+    self.faceFailures = 0;
+    self.guardNotBefore = 0;
+    try {
+        if (self.screenOwnerState().owner === 'glass-evo' && fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+    } catch (e) {}
+};
+
+// The screen back to the kiosk without being asked, where glass-evo owns it
+// and cannot hold it (screenowner.guard has the cases): the way back as
+// the Manager's own, with the reason written into the register for the
+// Screen tab to say. Answers with the way back while one runs, else null.
+Glass.prototype.guardScreen = function (stopping) {
+    var self = this;
+    if (self.screenGoingBack) { return self.screenGoingBack; }
+    // A way back that did not finish is tried again a minute later, not at every launch.
+    if (self.guardNotBefore && Date.now() < self.guardNotBefore) { return null; }
+    var state = self.screenOwnerState();
+    var reason = screenowner.guard({ owner: state.owner, available: state.evo.available, failures: self.faceFailures || 0, stopping: !!stopping, updating: !!self.screenKeptAcrossStop });
+    if (!reason) { return null; }
+    var failure = reason === 'face-failed' ? String(self.faceError || '').slice(0, 300) : '';
+    self.logger.warn(id + 'screen owner: glass-evo cannot hold the screen (' + reason + (failure ? ': ' + failure : '') + '); the kiosk gets it back');
+    self.faceFailures = 0;
+    self.screenGoingBack = self.setScreenOwner('kiosk').then(function (result) {
+        self.screenGoingBack = null;
+        var reg = self.readRegister();
+        if (result && result.ok && reg && reg.gaveBackAt) {
+            reg.gaveBackBecause = reason;
+            if (failure) { reg.failure = failure; }
+            self.writeRegister(reg);
+        } else {
+            self.guardNotBefore = Date.now() + 60000;
+        }
+        return result;
+    }, function (e) {
+        self.screenGoingBack = null;
+        self.guardNotBefore = Date.now() + 60000;
+        self.logger.warn(id + 'screen owner: the way back did not run: ' + (e && e.message ? e.message : e));
+        return null;
+    });
+    return self.screenGoingBack;
 };
 
 // glass-evo takes the screen, or the kiosk gets it back. A take turns the
@@ -5077,6 +5137,7 @@ Glass.prototype.managerPaths = function () {
     return {
         pluginPath: PluginPath,
         dataDir: DATA_DIR,
+        evoDir: EVO_DIR,
         meterBase: String(base_folder_P || (DATA_DIR + '/templates/')).replace(/\/$/, ''),
         spectrumBase: String(base_folder_S || (DATA_DIR + '/templates_spectrum/')).replace(/\/$/, ''),
         launcher: LaunchScript,
@@ -5377,6 +5438,8 @@ Glass.prototype.updateApply = function (stagedName) {
     var name = String(stagedName || '');
     if (!/^[A-Za-z0-9._-]+\.zip$/.test(name)) { return Promise.reject(new Error('bad zip name')); }
     self.logger.info(id + 'upgrade: handing ' + name + ' to the plugin manager');
+    // The plugin manager stops this plugin and starts the new one: glass-evo keeps its screen across that stop.
+    self.screenKeptAcrossStop = true;
     return new Promise(function (resolve, reject) {
         self.commandRouter.updatePlugin({
             url: 'http://127.0.0.1:3000/plugin-serve/' + name,
@@ -5387,7 +5450,7 @@ Glass.prototype.updateApply = function (stagedName) {
             // configuration, which it saves a moment later; the restart must
             // not land before that, or the plugin comes back installed and off.
             self.ensureEnabledInRegistry().then(resolve, resolve);
-        }, function (e) { reject(e instanceof Error ? e : new Error(String(e))); });
+        }, function (e) { self.screenKeptAcrossStop = false; reject(e instanceof Error ? e : new Error(String(e))); });
     });
 };
 

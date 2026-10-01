@@ -89,4 +89,27 @@ function here(register, evo) {
   return !!(evo && evo.installed) || ownedByEvo(register);
 }
 
-module.exports = { KIOSK_PLUGINS, KIOSK_UNITS, planTakePlugins, planTakeUnits, planGiveBack, ownedByEvo, here };
+// How many times in a row the face may fail to start before the screen
+// goes back to the kiosk.
+const FACE_TRIES = 3;
+
+// The face's failures in a row after one more exit: a clean exit, or a run
+// longer than a crash at launch takes, clears them.
+function faceFailures(count, exit) {
+  return exit.clean || exit.ranMs >= exit.windowMs ? 0 : count + 1;
+}
+
+// Why the screen goes back to the kiosk without being asked, or null. While
+// glass-evo owns the screen the kiosk is off, so the face is the player's
+// only interface on it: where the face cannot be, the kiosk must. The
+// plugin stopped (turned off or removed, an update's own stop aside), the
+// component gone, or the face failing to start time after time.
+function guard(state) {
+  if (state.owner !== 'glass-evo') return null;
+  if (state.stopping) return state.updating ? null : 'plugin-stopped';
+  if (!state.available) return 'component-missing';
+  if (state.failures >= FACE_TRIES) return 'face-failed';
+  return null;
+}
+
+module.exports = { KIOSK_PLUGINS, KIOSK_UNITS, FACE_TRIES, planTakePlugins, planTakeUnits, planGiveBack, ownedByEvo, here, faceFailures, guard };

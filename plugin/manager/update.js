@@ -48,18 +48,19 @@ function compareVersions(a, b) {
   return pa[3] < pb[3] ? -1 : 1;
 }
 
-// The release's plugin zip and what the page shows about the release.
-function parseRelease(body) {
+// The release's zip, the plugin's unless another name is asked for, and
+// what the page shows about the release.
+function parseRelease(body, pattern) {
   if (!body || typeof body !== 'object' || !Array.isArray(body.assets)) {
     throw new UpdateError('no-release', 'the release has no assets');
   }
   let asset = null;
   let version = null;
   for (const a of body.assets) {
-    const m = ASSET.exec(String(a.name || ''));
+    const m = (pattern || ASSET).exec(String(a.name || ''));
     if (m) { asset = a; version = m[1]; break; }
   }
-  if (!asset) throw new UpdateError('no-release', 'the release holds no plugin zip');
+  if (!asset) throw new UpdateError('no-release', 'the release holds no zip of the name looked for');
   const digest = /^sha256:([0-9a-f]{64})$/.exec(String(asset.digest || ''));
   return {
     version: version,
@@ -72,6 +73,40 @@ function parseRelease(body) {
     bytes: Number(asset.size) || 0,
     sha256: digest ? digest[1] : null
   };
+}
+
+// A release's zip fetched to a file and checked: its size and its digest
+// as the release states them. The file is there only when both hold.
+async function fetchChecked(release, file, job, fetch) {
+  const tmp = file + '.part';
+  const crypto = require('crypto');
+  const hash = crypto.createHash('sha256');
+  const out = fs.createWriteStream(tmp);
+  let received = 0;
+  job.state = 'downloading';
+  try {
+    await new Promise(function (resolve, reject) {
+      out.on('error', reject);
+      (fetch || get)(release.url, {
+        timeout: DOWNLOAD_TIMEOUT_MS,
+        limit: release.bytes,
+        sink: function (chunk, total) {
+          hash.update(chunk);
+          received = total;
+          out.write(chunk);
+          job.progress = { done: received, total: release.bytes };
+        }
+      }).then(function () { out.end(resolve); }, function (e) { out.destroy(); reject(e); });
+    });
+    job.state = 'verifying';
+    if (received !== release.bytes) throw new UpdateError('size', 'downloaded ' + received + ' bytes, expected ' + release.bytes);
+    if (hash.digest('hex') !== release.sha256) throw new UpdateError('checksum', 'the download does not match the release digest');
+    await fsp.rename(tmp, file);
+  } catch (e) {
+    await fsp.rm(tmp, { force: true });
+    await fsp.rm(file, { force: true });
+    throw e instanceof UpdateError || e instanceof CatalogError ? e : new UpdateError('network', e.message);
+  }
 }
 
 class Updater {
@@ -174,36 +209,8 @@ class Updater {
     await fsp.mkdir(this.stagingDir, { recursive: true });
     const name = 'glass-' + latest.version + '.zip';
     const file = path.join(this.stagingDir, name);
-    const tmp = file + '.part';
-    const crypto = require('crypto');
-    const hash = crypto.createHash('sha256');
-    const out = fs.createWriteStream(tmp);
-    let received = 0;
-    job.state = 'downloading';
-    try {
-      await new Promise(function (resolve, reject) {
-        out.on('error', reject);
-        get(latest.url, {
-          timeout: DOWNLOAD_TIMEOUT_MS,
-          limit: latest.bytes,
-          sink: function (chunk, total) {
-            hash.update(chunk);
-            received = total;
-            out.write(chunk);
-            job.progress = { done: received, total: latest.bytes };
-          }
-        }).then(function () { out.end(resolve); }, function (e) { out.destroy(); reject(e); });
-      });
-      job.state = 'verifying';
-      if (received !== latest.bytes) throw new UpdateError('size', 'downloaded ' + received + ' bytes, expected ' + latest.bytes);
-      if (hash.digest('hex') !== latest.sha256) throw new UpdateError('checksum', 'the download does not match the release digest');
-      await fsp.rename(tmp, file);
-      return { name: name, file: file, version: latest.version };
-    } catch (e) {
-      await fsp.rm(tmp, { force: true });
-      await fsp.rm(file, { force: true });
-      throw e instanceof UpdateError || e instanceof CatalogError ? e : new UpdateError('network', e.message);
-    }
+    await fetchChecked(latest, file, job);
+    return { name: name, file: file, version: latest.version };
   }
 
   // The kept zip of the version before the last upgrade, staged for the
@@ -276,4 +283,4 @@ class Updater {
   }
 }
 
-module.exports = { Updater: Updater, UpdateError: UpdateError, compareVersions: compareVersions, parseRelease: parseRelease, RELEASES_URL: RELEASES_URL, KEEP_AUTOMATIC_BACKUPS: KEEP_AUTOMATIC_BACKUPS };
+module.exports = { Updater: Updater, UpdateError: UpdateError, compareVersions: compareVersions, parseRelease: parseRelease, fetchChecked: fetchChecked, RELEASES_URL: RELEASES_URL, KEEP_AUTOMATIC_BACKUPS: KEEP_AUTOMATIC_BACKUPS };
