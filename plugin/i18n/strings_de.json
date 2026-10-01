@@ -440,7 +440,7 @@
     "MANAGER_DIAG_S_REMOTES": "Eine Fernanzeige, das Face oder Anymote zeigt nichts oder bewegt sich nicht",
     "MANAGER_DIAG_S_SLOW": "Es ist langsam, oder der Player ist ausgelastet",
     "MANAGER_DIAG_S_OTHER": "Etwas anderes",
-    "MANAGER_DIAG_FOUND": "Die Prüfungen haben eine wahrscheinliche Ursache gefunden.",
+    "MANAGER_DIAG_FOUND": "Die Prüfungen haben eine wahrscheinliche Ursache gefunden. Wenn es das nicht ist, poste das Statusblatt mit dem, was du getan und gesehen hast: „Als Text kopieren“ nimmt diese Befunde mit.",
     "MANAGER_DIAG_NOTHING": "Die Prüfungen haben keine Ursache gefunden. Poste das Statusblatt mit dem, was du getan und gesehen hast: „Als Text kopieren“ nimmt diese Befunde mit.",
     "MANAGER_DIAG_KIND_CAUSE": "Wahrscheinliche Ursache",
     "MANAGER_DIAG_KIND_NOTE": "Gut zu wissen",
