@@ -241,6 +241,10 @@ function meterExitAction(cleanExit, timeoutArmed, dismissMarkerPresent) {
     return 'restart';
 }
 
+// How long after the plugin's stop the registry is asked whether the stop
+// was a turning off: the plugin manager disables it right after the stop.
+var STOP_GUARD_MS = 5000;
+
 // A display that dies this soon after launch is a crash, not a reload; the
 // armed interval retries at the screensaver cadence.
 var METER_CRASH_BACKOFF_MS = 10000;
@@ -1259,10 +1263,12 @@ Glass.prototype.checkAlsaChain = function () {
 
 Glass.prototype.onStop = function () {
     var self = this;
-    // glass-evo's screen goes back to the kiosk with the plugin; the stop
-    // waits for it, so the player's interface is back before Glass is gone.
-    var back = null;
-    try { back = self.guardScreen(true); } catch (e) {}
+    // glass-evo's screen goes back to the kiosk when the plugin is turned
+    // off or removed. An update stops the plugin too, and leaves it enabled:
+    // a moment after the stop the player's registry says which it was.
+    setTimeout(function () {
+        try { self.guardScreen(true); } catch (e) { self.logger.warn(id + 'screen owner: not guarded after the stop: ' + (e && e.message ? e.message : e)); }
+    }, STOP_GUARD_MS);
     if (self.carDashTimer) { clearTimeout(self.carDashTimer); self.carDashTimer = null; }
     if (self.screenWatcher) { clearTimeout(self.screenWatcher); self.screenWatcher = null; }
 
@@ -1302,12 +1308,7 @@ Glass.prototype.onStop = function () {
         self.stopManager();
     });
 
-    if (!back) { return libQ.resolve(); }
-    var defer = libQ.defer();
-    var limit = setTimeout(function () { defer.resolve(); }, 30000);
-    var done = function () { clearTimeout(limit); defer.resolve(); };
-    back.then(done, done);
-    return defer.promise;
+    return libQ.resolve();
 };
 
 Glass.prototype.onRestart = function () {
@@ -2023,16 +2024,19 @@ Glass.prototype.componentChanged = function () {
 };
 
 // The screen back to the kiosk without being asked, where glass-evo owns it
-// and cannot hold it (screenowner.guard has the cases): the way back as
-// the Manager's own, with the reason written into the register for the
-// Screen tab to say. Answers with the way back while one runs, else null.
-Glass.prototype.guardScreen = function (stopping) {
+// and cannot hold it (screenowner.guard has the cases; `stopped` is the
+// look a moment after the plugin's stop): the way back as the Manager's
+// own, with the reason written into the register for the Screen tab to
+// say. Answers with the way back while one runs, else null.
+Glass.prototype.guardScreen = function (stopped) {
     var self = this;
     if (self.screenGoingBack) { return self.screenGoingBack; }
     // A way back that did not finish is tried again a minute later, not at every launch.
     if (self.guardNotBefore && Date.now() < self.guardNotBefore) { return null; }
     var state = self.screenOwnerState();
-    var reason = screenowner.guard({ owner: state.owner, available: state.evo.available, failures: self.faceFailures || 0, stopping: !!stopping, updating: !!self.screenKeptAcrossStop });
+    var enabled = true;
+    if (stopped) { try { enabled = self.commandRouter.pluginManager.isEnabled('user_interface', 'glass') === true; } catch (e) {} }
+    var reason = screenowner.guard({ owner: state.owner, available: state.evo.available, failures: self.faceFailures || 0, stopped: !!stopped, enabled: enabled });
     if (!reason) { return null; }
     var failure = reason === 'face-failed' ? String(self.faceError || '').slice(0, 300) : '';
     self.logger.warn(id + 'screen owner: glass-evo cannot hold the screen (' + reason + (failure ? ': ' + failure : '') + '); the kiosk gets it back');
@@ -5438,8 +5442,6 @@ Glass.prototype.updateApply = function (stagedName) {
     var name = String(stagedName || '');
     if (!/^[A-Za-z0-9._-]+\.zip$/.test(name)) { return Promise.reject(new Error('bad zip name')); }
     self.logger.info(id + 'upgrade: handing ' + name + ' to the plugin manager');
-    // The plugin manager stops this plugin and starts the new one: glass-evo keeps its screen across that stop.
-    self.screenKeptAcrossStop = true;
     return new Promise(function (resolve, reject) {
         self.commandRouter.updatePlugin({
             url: 'http://127.0.0.1:3000/plugin-serve/' + name,
@@ -5450,7 +5452,7 @@ Glass.prototype.updateApply = function (stagedName) {
             // configuration, which it saves a moment later; the restart must
             // not land before that, or the plugin comes back installed and off.
             self.ensureEnabledInRegistry().then(resolve, resolve);
-        }, function (e) { self.screenKeptAcrossStop = false; reject(e instanceof Error ? e : new Error(String(e))); });
+        }, function (e) { reject(e instanceof Error ? e : new Error(String(e))); });
     });
 };
 

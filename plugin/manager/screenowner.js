@@ -102,11 +102,12 @@ function faceFailures(count, exit) {
 // Why the screen goes back to the kiosk without being asked, or null. While
 // glass-evo owns the screen the kiosk is off, so the face is the player's
 // only interface on it: where the face cannot be, the kiosk must. The
-// plugin stopped (turned off or removed, an update's own stop aside), the
+// plugin turned off or removed (stopped, and no longer enabled in the
+// player's registry; an update stops it too and leaves it enabled), the
 // component gone, or the face failing to start time after time.
 function guard(state) {
   if (state.owner !== 'glass-evo') return null;
-  if (state.stopping) return state.updating ? null : 'plugin-stopped';
+  if (state.stopped) return state.enabled ? null : 'plugin-stopped';
   if (!state.available) return 'component-missing';
   if (state.failures >= FACE_TRIES) return 'face-failed';
   return null;
