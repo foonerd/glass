@@ -843,6 +843,7 @@
     "MANAGER_LOOK_CLOCK": "Clock",
     "MANAGER_LOOK_OPACITY": "opacity",
     "MANAGER_LOOK_SIZE": "size",
+    "MANAGER_LOOK_TINT_OWN": "glass of its own colour",
     "MANAGER_LOOK_RESET": "Reset to defaults",
     "MANAGER_LOOK_RESET_DONE": "The look is back to its defaults.",
     "MANAGER_LOOK_DATE": "Date",

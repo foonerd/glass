@@ -843,6 +843,7 @@
     "MANAGER_LOOK_CLOCK": "Uhr",
     "MANAGER_LOOK_OPACITY": "Deckkraft",
     "MANAGER_LOOK_SIZE": "Größe",
+    "MANAGER_LOOK_TINT_OWN": "Glas in eigener Farbe",
     "MANAGER_LOOK_RESET": "Auf Standard zurücksetzen",
     "MANAGER_LOOK_RESET_DONE": "Das Aussehen ist wieder Standard.",
     "MANAGER_LOOK_DATE": "Datum",
