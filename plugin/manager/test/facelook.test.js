@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { settingsOf, plan, resetPlan, frostSuits } = require('../facelook');
+const { settingsOf, plan, resetPlan, frostSuits, themeKeys } = require('../facelook');
 
 const current = { 'screen.rotation': '270', 'face.size': 'car', 'face.frost.suits': 'true', 'face.theme': 'Midnight', 'face.colours.accent': '#ff8800', 'face.glass.bar': '0.6', 'face.': 'x' };
 
@@ -33,6 +33,22 @@ test('a name or a value that is not one is refused, and so are the keys set else
 test('a reset removes the look and keeps the size and the board\'s word', function () {
   assert.deepStrictEqual(resetPlan(current).changes, { 'face.theme': null, 'face.colours.accent': null, 'face.glass.bar': null });
   assert.deepStrictEqual(resetPlan({ 'face.size': 'car' }).changes, {});
+});
+
+test('a pattern for a time or a date is a value; what would break a line is not', function () {
+  assert.deepStrictEqual(plan({}, { 'clock.format': '%-I:%M %p', 'date.format': '%A, %B %-d (%Y)', 'date.place': 'top' }).changes,
+    { 'face.clock.format': '%-I:%M %p', 'face.date.format': '%A, %B %-d (%Y)', 'face.date.place': 'top' });
+  assert.strictEqual(plan({}, { 'date.format': '%d/%m/%Y' }).changes['face.date.format'], '%d/%m/%Y');
+  ['%H=%M', '"%H:%M"', '%H;%M', "%H'%M", '[%H]'].forEach(function (bad) {
+    assert.strictEqual(plan({}, { 'clock.format': bad }).error, 'bad-value', bad);
+  });
+});
+
+test('a face theme\'s text is its keys under their sections', function () {
+  assert.deepStrictEqual(themeKeys('# a theme\n[Theme]\nname = Midnight\n\n[clock]\nformat = %-I:%M %p\n ; note\nshow=off\n[date]\nplace = top\nnot a pair\n = lost\n'),
+    { 'theme.name': 'Midnight', 'clock.format': '%-I:%M %p', 'clock.show': 'off', 'date.place': 'top' });
+  assert.deepStrictEqual(themeKeys('glass.bar = 0.5'), { 'glass.bar': '0.5' });
+  assert.deepStrictEqual(themeKeys(null), {});
 });
 
 test('frost suits the boards with room for it', function () {
