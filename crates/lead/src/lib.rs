@@ -2942,6 +2942,11 @@ pub struct RunSettings {
     /// How large a face draws its controls and its clock: 1 as designed,
     /// more for a hand at arm's length; `face.size` normal, large or car.
     pub face_scale: f32,
+    /// A face's own settings: every `face.<name>` key, by its name without
+    /// the prefix, as written. The display hands them to a face unread; the
+    /// face owns their meaning.
+    #[serde(default)]
+    pub face: std::collections::BTreeMap<String, String>,
 }
 
 /// The matrix that changes nothing.
@@ -2977,6 +2982,33 @@ pub fn parse_matrix(value: Option<&str>) -> [f32; 6] {
 /// How large a face draws, from `face.size`: normal as designed, large
 /// for a hand at arm's length, car for a glance while driving; anything
 /// else, or nothing, is normal.
+/// A face's settings in a configuration: the `face.<name>` keys of its
+/// current section, under their names without the prefix, the last of a
+/// name winning as elsewhere.
+pub fn face_settings(text: &str) -> std::collections::BTreeMap<String, String> {
+    let mut found = std::collections::BTreeMap::new();
+    let mut in_current = false;
+    for line in text.lines() {
+        let line = line.trim();
+        if line.starts_with('[') {
+            in_current = line.eq_ignore_ascii_case("[current]");
+            continue;
+        }
+        if !in_current || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        if let Some(name) = key.trim().strip_prefix("face.") {
+            if !name.is_empty() {
+                found.insert(name.to_string(), value.trim().to_string());
+            }
+        }
+    }
+    found
+}
+
 pub fn face_scale(size: Option<&str>) -> f32 {
     match size.map(|s| s.trim().to_ascii_lowercase()).as_deref() {
         Some("large") => 1.4,
@@ -3107,6 +3139,7 @@ impl Default for RunSettings {
             pointer: false,
             touch_matrix: IDENTITY_MATRIX,
             face_scale: 1.0,
+            face: Default::default(),
         }
     }
 }
@@ -3126,6 +3159,7 @@ pub fn run_settings(text: &str) -> RunSettings {
         pointer: truthy(current_value(text, "screen.pointer.shown").as_deref()),
         touch_matrix: parse_matrix(current_value(text, "touch.matrix").as_deref()),
         face_scale: face_scale(current_value(text, "face.size").as_deref()),
+        face: face_settings(text),
         x: current_value(text, "position.x")
             .and_then(|v| v.parse().ok())
             .unwrap_or(0),
@@ -5468,6 +5502,16 @@ mod tests {
         assert_eq!(face_scale(Some("Large")), 1.4);
         assert_eq!(face_scale(Some(" car ")), 2.0);
         assert_eq!(face_scale(Some("huge")), 1.0, "anything else is normal");
+        let run = run_settings(
+            "[current]\nface.size = car\nface.theme = Midnight\nface.colours.accent = #ff8800\nface. = x\nscreen.rotation = 90\n[other]\nface.lost = 1\n",
+        );
+        assert_eq!(run.face_scale, 2.0);
+        let pairs: Vec<String> = run.face.iter().map(|(k, v)| format!("{k}={v}")).collect();
+        assert_eq!(
+            pairs.join(" "),
+            "colours.accent=#ff8800 size=car theme=Midnight",
+            "the face's keys of the current section, by name, as written"
+        );
     }
 
     #[test]
@@ -5487,6 +5531,7 @@ mod tests {
                 pointer: false,
                 touch_matrix: IDENTITY_MATRIX,
                 face_scale: 1.0,
+                face: Default::default(),
             }
         );
         assert_eq!(run_settings(""), RunSettings::default());
