@@ -89,8 +89,9 @@ pub fn run(args: Vec<String>) -> ExitCode {
 }
 
 /// What a face sees of the display each frame: the player's state as the
-/// source has it, the theme's fonts, the picture's size, the clock, and
-/// whether the screen is the display's own.
+/// source has it (the cover's file among it, once fetched), the theme's
+/// fonts, the picture's size, the clock, whether the screen is the
+/// display's own, and the face's own settings as the configuration has them.
 pub struct View<'a> {
     pub input: &'a Input,
     pub fonts: &'a expose::Fonts,
@@ -100,6 +101,9 @@ pub struct View<'a> {
     pub ours: bool,
     /// How large the face draws: 1 as designed, more for a hand at arm's length.
     pub scale: f32,
+    /// The configuration's `face.<name>` keys by name, as written: the
+    /// display reads none of them but the size; their meaning is the face's.
+    pub settings: &'a std::collections::BTreeMap<String, String>,
 }
 
 /// A face drawn over the display: what glass-evo adds on top of the
@@ -119,7 +123,7 @@ pub trait Overlay {
 
 /// The types a face is written against, in one place.
 pub mod face {
-    pub use expose::{ui, Fonts, Frame};
+    pub use expose::{blur, fit_art, read_art, render_text, ui, Fonts, Frame};
     pub use intake::Command;
     pub use lead::{Input, Metadata, TextStyle};
     pub use pane::PointerKind;
@@ -1055,6 +1059,7 @@ fn session(
                     now_ms: started.elapsed().as_millis() as u64,
                     ours: screen_ours,
                     scale: skin.run.face_scale,
+                    settings: &skin.run.face,
                 };
                 let mut own = frame.clone();
                 if face.draw(&mut own, &view) {
@@ -1104,6 +1109,7 @@ fn session(
                         now_ms: started.elapsed().as_millis() as u64,
                         ours: screen_ours,
                         scale: skin.run.face_scale,
+                        settings: &skin.run.face,
                     };
                     events.retain(|event| {
                         let taken = face.pointer(event.kind, event.x, event.y, &view);
