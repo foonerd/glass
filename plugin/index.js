@@ -1881,8 +1881,16 @@ Glass.prototype.faceSettings = function () {
             return name[0] !== '.' && fs.existsSync(FACES_DIR + '/' + name + '/face.txt');
         }).sort();
     } catch (e) { /* no face themes installed */ }
+    var settings = facelook.settingsOf(meterConfig && meterConfig.current);
+    // What the chosen theme says, for the page to show what stands where
+    // the user has not said otherwise.
+    var theme = {};
+    if (settings.theme && themes.indexOf(settings.theme) !== -1) {
+        try { theme = facelook.themeKeys(fs.readFileSync(FACES_DIR + '/' + settings.theme + '/face.txt', 'utf8')); } catch (e) { /* not readable: the built-in look */ }
+    }
     return {
-        settings: facelook.settingsOf(meterConfig && meterConfig.current),
+        settings: settings,
+        theme: theme,
         themes: themes,
         frostSuits: facelook.frostSuits(self.boardInfo().class)
     };

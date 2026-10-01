@@ -8,10 +8,11 @@
 
 const PREFIX = 'face.';
 // A name is up to four words of letters and digits, dot between; a value
-// is a short word, a number or a colour. Nothing that could break out of
-// a line of the configuration.
+// is a short word, a number, a colour, or a pattern for a time or a date
+// (%H:%M, %d/%m/%Y, %A, %B %-d). Nothing that could break out of a line of
+// the configuration or make its writer quote the value.
 const NAME = /^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*){0,3}$/;
-const VALUE = /^[#A-Za-z0-9_. -]{1,64}$/;
+const VALUE = /^[#%A-Za-z0-9_.:\/,() -]{1,64}$/;
 // Set elsewhere: the size on the screen's own route, the board's word by
 // the plugin at its start.
 const OWN = ['size', 'frost.suits'];
@@ -48,6 +49,25 @@ function plan(current, set) {
   return { changes };
 }
 
+// A face theme's text as its keys, each under its section, the way the
+// face reads it: `[glass]` and `bar = 0.6` is `glass.bar`. For the page to
+// show what stands when the user has not said otherwise.
+function themeKeys(text) {
+  const found = {};
+  let section = '';
+  String(text || '').split('\n').forEach(function (raw) {
+    const line = raw.trim();
+    if (!line || line[0] === '#' || line[0] === ';') return;
+    if (line[0] === '[' && line[line.length - 1] === ']') { section = line.slice(1, -1).trim().toLowerCase(); return; }
+    const at = line.indexOf('=');
+    if (at < 1) return;
+    const key = line.slice(0, at).trim().toLowerCase();
+    if (!key) return;
+    found[section ? section + '.' + key : key] = line.slice(at + 1).trim();
+  });
+  return found;
+}
+
 // Back to the defaults: every key of the look removed.
 function resetPlan(current) {
   const changes = {};
@@ -63,4 +83,4 @@ function frostSuits(boardClass) {
   return ['pi4', 'pi5', 'x64'].indexOf(String(boardClass)) !== -1;
 }
 
-module.exports = { PREFIX, settingsOf, plan, resetPlan, frostSuits };
+module.exports = { PREFIX, settingsOf, plan, resetPlan, frostSuits, themeKeys };
