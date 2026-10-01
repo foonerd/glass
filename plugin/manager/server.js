@@ -23,6 +23,7 @@ const { Previews } = require('./previews');
 const { Updater, UpdateError } = require('./update');
 const { zipDirectory } = require('./zipwrite');
 const tailor = require('./tailor');
+const { SYMPTOMS, diagnose } = require('./diagnose');
 
 const MAX_BACKUP_UPLOAD_BYTES = 32 * 1024 * 1024;
 const MAX_BACKUP_FILE_BYTES = 4 * 1024 * 1024;
@@ -167,6 +168,24 @@ class Manager {
 
     app.get('/api/status', wrap(async function (req, res) {
       res.json(await self.status());
+    }));
+
+    // The guided diagnosis: the symptoms it knows, and for one of them
+    // what the checks find in the facts the Manager has at hand.
+    app.get('/api/diagnose', function (req, res) {
+      res.json({ symptoms: SYMPTOMS });
+    });
+    app.post('/api/diagnose', wrap(async function (req, res) {
+      const symptom = String((req.body && req.body.symptom) || '');
+      if (SYMPTOMS.indexOf(symptom) === -1) return res.status(400).json({ error: 'bad-symptom' });
+      const safe = function (fn, fallback) { try { return fn(); } catch (e) { return fallback; } };
+      res.json(diagnose(symptom, {
+        now: Date.now(),
+        status: await self.status(),
+        screen: safe(() => self.plugin.screenSettings(), null),
+        update: safe(() => self.updater.view(), null),
+        log: safe(() => self.plugin.recentLog(300).lines, [])
+      }));
     }));
 
     // Installed themes.

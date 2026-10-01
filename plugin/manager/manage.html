@@ -77,6 +77,12 @@
   table.kv td:first-child { color: var(--muted); width: 38%; }
   table.kv tr.section td { background: var(--panel2); color: #fff; font-weight: 600; padding-top: 9px; padding-bottom: 9px; }
   table.kv td { white-space: pre-wrap; }
+  .diag-list { display: flex; flex-direction: column; gap: 6px; }
+  .diag-list button { text-align: left; }
+  .finding { display: grid; grid-template-columns: 150px 1fr auto; gap: 10px; padding: 9px 0; border-bottom: 1px solid #333; align-items: start; white-space: pre-wrap; }
+  .finding .kind { color: var(--muted); font-size: 13px; padding-top: 2px; }
+  .finding.cause .kind { color: var(--warn); font-weight: 600; }
+  .finding.ok { color: var(--muted); }
   .list { display: flex; flex-direction: column; gap: 8px; }
   .item { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .item .grow { flex: 1; min-width: 160px; }
@@ -442,10 +448,19 @@
 
   <!-- Status -->
   <section class="view" id="view-status">
+    <div class="panel" id="diag-panel" hidden>
+      <div class="row" style="justify-content:space-between">
+        <h2 id="diag-title" style="margin:0"></h2>
+        <div class="row"><button class="small" id="btn-diag-back" hidden></button><button class="small" id="btn-diag-again" hidden></button><button class="small" id="btn-diag-close"></button></div>
+      </div>
+      <div class="help" id="diag-lead" style="margin:8px 0 10px"></div>
+      <div class="diag-list" id="diag-symptoms"></div>
+      <div id="diag-result" hidden></div>
+    </div>
     <div class="panel">
       <div class="row" style="justify-content:space-between">
         <h2 id="st-title" style="margin:0"></h2>
-        <div class="row"><button class="small" id="btn-status-reveal"></button><button class="small" id="btn-status-copy"></button><button class="small" id="btn-status-refresh"></button></div>
+        <div class="row"><button class="small" id="btn-diag-open"></button><button class="small" id="btn-status-reveal"></button><button class="small" id="btn-status-copy"></button><button class="small" id="btn-status-refresh"></button></div>
       </div>
       <table class="kv" id="st-table" style="margin-top:10px"></table>
     </div>
@@ -700,6 +715,7 @@
     $('perf-title').textContent = t('MANAGER_PERF_TITLE'); $('perf-help').textContent = t('MANAGER_PERF_HELP'); $('perf-profile-label').textContent = t('MANAGER_PERF_PROFILE'); $('btn-perf-apply').textContent = t('MANAGER_APPLY'); $('perf-governor-label').textContent = t('MANAGER_PERF_GOVERNOR'); $('perf-governor-help').textContent = t('MANAGER_PERF_GOVERNOR_DOC');
     $('log-title').textContent = t('MANAGER_LOG_TITLE'); $('log-help').textContent = t('MANAGER_LOG_HELP'); $('log-level-label').textContent = t('MANAGER_LOG_LEVEL'); $('log-targets-label').textContent = t('MANAGER_LOG_TARGETS'); $('btn-log-apply').textContent = t('MANAGER_APPLY'); $('btn-log-show').textContent = t('MANAGER_LOG_SHOW'); $('btn-log-download').querySelector('button').textContent = t('MANAGER_LOG_DOWNLOAD');
     $('btn-status-refresh').textContent = t('MANAGER_REFRESH');
+    $('btn-diag-open').textContent = t('MANAGER_DIAG_OPEN'); $('diag-title').textContent = t('MANAGER_DIAG_OPEN'); $('btn-diag-close').textContent = t('MANAGER_DIAG_CLOSE'); $('btn-diag-back').textContent = t('MANAGER_DIAG_BACK'); $('btn-diag-again').textContent = t('MANAGER_DIAG_AGAIN');
     $('btn-status-reveal').textContent = t('MANAGER_ST_REVEAL');
     $('btn-status-copy').textContent = t('MANAGER_ST_COPY');
     $('upd-title').textContent = t('MANAGER_UPD_TITLE');
@@ -1581,7 +1597,7 @@
   $('btn-status-copy').onclick = function () {
     var button = $('btn-status-copy');
     var done = function () { button.textContent = t('MANAGER_ST_COPIED'); setTimeout(function () { button.textContent = t('MANAGER_ST_COPY'); }, 1500); };
-    var text = state.statusText || '';
+    var text = (state.statusText || '') + (state.diagnosisText ? '\n' + state.diagnosisText : '');
     var fallback = function () {
       var area = document.createElement('textarea');
       area.value = text; area.style.position = 'fixed'; area.style.opacity = '0';
@@ -1591,6 +1607,49 @@
     };
     if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done, fallback); } else { fallback(); }
   };
+
+  // ---- the guided diagnosis ---------------------------------------------
+  // Pick what is wrong; the Manager runs the checks it can run itself and
+  // says what it found: likely causes first, then what is worth knowing,
+  // then what it checked and found right. The findings join the sheet's
+  // copied text.
+  function symptomTitle(id) { return t('MANAGER_DIAG_S_' + String(id).toUpperCase().replace(/-/g, '_')); }
+  function findingText(x) {
+    return t('MANAGER_' + x.key).replace(/\{([a-z]+)\}/g, function (slot, name) { return x.with && x.with[name] !== undefined ? String(x.with[name]) : slot; });
+  }
+  function showSymptoms() {
+    state.diagnosis = null; state.diagnosisText = '';
+    $('diag-panel').hidden = false;
+    $('diag-result').hidden = true; $('btn-diag-back').hidden = true; $('btn-diag-again').hidden = true;
+    $('diag-lead').textContent = t('MANAGER_DIAG_PICK');
+    $('diag-symptoms').hidden = false;
+    api('GET', '/api/diagnose').then(function (d) {
+      $('diag-symptoms').innerHTML = (d.symptoms || []).map(function (id) { return '<button data-symptom="' + esc(id) + '">' + esc(symptomTitle(id)) + '</button>'; }).join('');
+      Array.prototype.forEach.call($('diag-symptoms').querySelectorAll('button'), function (b) { b.onclick = function () { runDiagnosis(b.getAttribute('data-symptom')); }; });
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  function runDiagnosis(symptom) {
+    api('POST', '/api/diagnose', { symptom: symptom }).then(function (d) {
+      state.diagnosis = d;
+      var kinds = { cause: t('MANAGER_DIAG_KIND_CAUSE'), note: t('MANAGER_DIAG_KIND_NOTE'), ok: t('MANAGER_DIAG_KIND_OK') };
+      var verdict = t(d.found ? 'MANAGER_DIAG_FOUND' : 'MANAGER_DIAG_NOTHING');
+      $('diag-lead').textContent = symptomTitle(d.symptom) + '. ' + verdict;
+      $('diag-symptoms').hidden = true;
+      $('diag-result').innerHTML = (d.findings || []).map(function (x) {
+        return '<div class="finding ' + esc(x.kind) + '"><div class="kind">' + esc(kinds[x.kind] || x.kind) + '</div><div>' + esc(findingText(x)) + '</div><div>' +
+          (x.go ? '<button class="small" data-go="' + esc(x.go) + '">' + esc(t('MANAGER_DIAG_GO')) + '</button>' : '') + '</div></div>';
+      }).join('');
+      Array.prototype.forEach.call($('diag-result').querySelectorAll('button[data-go]'), function (b) { b.onclick = function () { showView(b.getAttribute('data-go')); }; });
+      $('diag-result').hidden = false; $('btn-diag-back').hidden = false; $('btn-diag-again').hidden = false;
+      state.diagnosisText = [t('MANAGER_DIAG_SECTION'), '  ' + symptomTitle(d.symptom) + '. ' + verdict].concat((d.findings || []).map(function (x) {
+        return '  ' + (kinds[x.kind] || x.kind) + ': ' + findingText(x).replace(/\n/g, '\n    ');
+      })).join('\n') + '\n';
+    }).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  $('btn-diag-open').onclick = showSymptoms;
+  $('btn-diag-back').onclick = showSymptoms;
+  $('btn-diag-again').onclick = function () { if (state.diagnosis) runDiagnosis(state.diagnosis.symptom); };
+  $('btn-diag-close').onclick = function () { $('diag-panel').hidden = true; state.diagnosis = null; state.diagnosisText = ''; };
 
   // ---- the performance profile ------------------------------------------
   function loadSharing() {
