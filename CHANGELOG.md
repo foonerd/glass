@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.95] - 2026-10-01
+
+A face is handed its own settings. Every `face.<name>` key of the display's configuration reaches a face drawn over the display through its view, by name and as written, the writer's backslash before a `#` taken off so a colour arrives as `#rrggbb`; the display reads none of them but the size, and their meaning is the face's, so a new setting of glass-evo needs no change in Glass. The library surface a face is built on also carries the renderer's picture reading, scaling and blur, for a face that takes its colours from the cover and frosts what lies under its glass. Nothing changes for the display itself.
+
 ## [0.7.94] - 2026-10-01
 
 Make a report. Whatever Find a problem's checks say, a report can follow, so a finding that does not settle the matter is where a report begins rather than where the page ends. Glass logs in full while the problem is reproduced, the display starting again so that its own lines are full too; when it has happened you say in a line what you did and what you saw, and the player's system log goes out through Volumio's own submitter, the call the player's dev page makes: the kernel's and the player's journal with Glass's lines of those minutes among them, the configuration and the network details, passwords left out, filed under the Glass version, the symptom and your line. The report holds your words, the minutes it was reproduced in by the player's clock, the log's link, what the checks found and the status sheet. Two ways to hand it over: Open a GitHub issue, for a defect, with the report in the issue where a link can carry it and on the clipboard either way; Copy for the forum, for a question or anything else. Nothing is sent before Start is pressed and the page says what goes where.
