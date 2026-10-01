@@ -24,12 +24,15 @@ const { Updater, UpdateError } = require('./update');
 const { zipDirectory } = require('./zipwrite');
 const tailor = require('./tailor');
 const { SYMPTOMS, diagnose } = require('./diagnose');
+const { Capture, CaptureError } = require('./capture');
 
 const MAX_BACKUP_UPLOAD_BYTES = 32 * 1024 * 1024;
 const MAX_BACKUP_FILE_BYTES = 4 * 1024 * 1024;
 const BACKUP_FILES = ['manifest.json', 'config.json', 'peppymeter_config.txt', 'spectrum_config.txt'];
 
 const DEFAULT_PORT = 5582;
+// Where Volumio's submitter keeps the system log it could not send.
+const KEPT_SYSTEM_LOG = '/var/tmp/logondemand';
 const MAX_TRACK_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
 const CATALOG_INDEX_MAX_AGE_MS = 10 * 60 * 1000;
@@ -66,6 +69,17 @@ class Manager {
       plugin: plugin,
       logger: this.logger
     });
+    this.capture = new Capture({
+      file: path.join(paths.dataDir, 'capture.json'),
+      now: Date.now,
+      read: (file) => fs.readFileSync(file, 'utf8'),
+      write: (file, text) => { fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, text); },
+      remove: (file) => fs.unlinkSync(file),
+      logSettings: () => plugin.logSettings(),
+      setLogSettings: (settings) => plugin.setLogSettings(settings),
+      relaunch: () => plugin.relaunchDisplay(),
+      sendLog: (description) => plugin.sendSystemLog(description)
+    });
   }
 
   // The port the manager listens on, and where it is reached from a browser.
@@ -80,6 +94,10 @@ class Manager {
     await self.catalog.init();
     await self.previews.init();
     await self.updater.init();
+    // A capture the backend went down under goes on, or ends if its time passed.
+    try {
+      if (self.capture.resume().state !== 'idle') self.logger.info('glass: manager: a report\'s capture goes on after the restart');
+    } catch (e) { self.logger.warn('glass: manager: capture not resumed: ' + (e && e.message ? e.message : e)); }
     const app = express();
     app.disable('x-powered-by');
     app.use(express.json({ limit: '1mb' }));
@@ -175,18 +193,71 @@ class Manager {
     app.get('/api/diagnose', function (req, res) {
       res.json({ symptoms: SYMPTOMS });
     });
-    app.post('/api/diagnose', wrap(async function (req, res) {
-      const symptom = String((req.body && req.body.symptom) || '');
-      if (SYMPTOMS.indexOf(symptom) === -1) return res.status(400).json({ error: 'bad-symptom' });
+    const facts = async function () {
       const safe = function (fn, fallback) { try { return fn(); } catch (e) { return fallback; } };
-      res.json(diagnose(symptom, {
+      return {
         now: Date.now(),
         status: await self.status(),
         screen: safe(() => self.plugin.screenSettings(), null),
         update: safe(() => self.updater.view(), null),
         log: safe(() => self.plugin.recentLog(300).lines, [])
-      }));
+      };
+    };
+    app.post('/api/diagnose', wrap(async function (req, res) {
+      const symptom = String((req.body && req.body.symptom) || '');
+      if (SYMPTOMS.indexOf(symptom) === -1) return res.status(400).json({ error: 'bad-symptom' });
+      res.json(diagnose(symptom, await facts()));
     }));
+
+    // The capture behind a report: Glass logs in full while the problem is
+    // reproduced, then the player's system log goes out through Volumio's
+    // own submitter and the report comes back with its link. The level is
+    // put back here, whatever the page does.
+    const captured = function (res, fn) {
+      return Promise.resolve().then(fn).then(function (out) { res.json(out); }, function (e) {
+        if (e instanceof CaptureError) return res.status(409).json({ error: e.code });
+        throw e;
+      });
+    };
+    // A time as the journal writes it, by the player's clock, to find the
+    // capture's window in the system log.
+    const journalStamp = function (ms) {
+      const d = new Date(ms);
+      const two = (n) => String(n).padStart(2, '0');
+      return ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'][d.getMonth()] + ' ' + two(d.getDate()) + ' ' + two(d.getHours()) + ':' + two(d.getMinutes()) + ':' + two(d.getSeconds());
+    };
+    const stamped = function (view) {
+      return view.startedAt ? Object.assign({}, view, { from: journalStamp(view.startedAt), to: journalStamp(view.endedAt || view.until) }) : view;
+    };
+    app.get('/api/diagnose/capture', function (req, res) {
+      res.json(stamped(self.capture.view()));
+    });
+    app.post('/api/diagnose/capture', wrap(async function (req, res) {
+      const symptom = String((req.body && req.body.symptom) || '');
+      if (SYMPTOMS.indexOf(symptom) === -1) return res.status(400).json({ error: 'bad-symptom' });
+      const diagnosis = diagnose(symptom, await facts());
+      return captured(res, () => stamped(self.capture.start(symptom, diagnosis)));
+    }));
+    app.post('/api/diagnose/capture/finish', wrap(function (req, res) {
+      return captured(res, async function () {
+        const report = stamped(await self.capture.finish(self.paths.version, req.body && req.body.text));
+        if (report.log.error) {
+          // The submitter keeps a log it could not send; offered only when it is this capture's.
+          let kept = false;
+          try { kept = fs.statSync(KEPT_SYSTEM_LOG).mtimeMs >= report.endedAt - 5000; } catch (e) { kept = false; }
+          report.log.kept = kept;
+        }
+        return report;
+      });
+    }));
+    app.post('/api/diagnose/capture/cancel', wrap(function (req, res) {
+      return captured(res, () => self.capture.cancel());
+    }));
+    app.get('/api/diagnose/log', function (req, res) {
+      if (!fs.existsSync(KEPT_SYSTEM_LOG)) return res.status(404).json({ error: 'no-log' });
+      const stamp = new Date().toISOString().replace(/[:T]/g, '-').slice(0, 16);
+      res.download(KEPT_SYSTEM_LOG, 'volumio-log-' + os.hostname() + '-' + stamp + '.txt');
+    });
 
     // Installed themes.
     app.get('/api/themes', wrap(async function (req, res) {

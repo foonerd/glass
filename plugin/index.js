@@ -395,6 +395,48 @@ Glass.prototype.setLogSettings = function (data) {
     return Object.assign({ changed: changed }, self.logSettings());
 };
 
+// Start the display again when it is up, so it reads its settings and its
+// log level afresh; says whether there was one to start again.
+Glass.prototype.relaunchDisplay = function () {
+    var self = this;
+    var running = !!(self.meterChild && self.meterChild.exitCode === null);
+    if (running && fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+    return running;
+};
+
+// The player's system log through Volumio's own submitter, the call the
+// player's dev page makes: the backend runs the submitter and broadcasts
+// what it said, the log server's answer with the link, to its interfaces,
+// of which this plugin is one. Resolves with those words; a call made
+// while another waits ends the earlier one with nothing.
+Glass.prototype.sendSystemLog = function (description) {
+    var self = this;
+    return new Promise(function (resolve, reject) {
+        if (self.logReply) { self.logReply(''); }
+        self.logReply = resolve;
+        try {
+            self.commandRouter.executeOnPlugin('system_controller', 'system', 'sendBugReport', { text: String(description || '') });
+        } catch (e) {
+            self.logReply = null;
+            reject(e);
+        }
+    });
+};
+
+// What Volumio's backend broadcasts to its interfaces, as a name and a
+// value or as one { msg, value }, by its version. Only the submitter's
+// answer is of interest here.
+Glass.prototype.broadcastMessage = function (emit, payload) {
+    var named = emit && typeof emit === 'object';
+    var name = named ? emit.msg : emit;
+    var value = named ? emit.value : payload;
+    if (name === 'pushSendBugReport' && this.logReply) {
+        var answer = this.logReply;
+        this.logReply = null;
+        answer(typeof value === 'string' ? value : JSON.stringify(value || ''));
+    }
+};
+
 // The last lines Glass wrote to the player's journal, newest last.
 Glass.prototype.recentLog = function (count) {
     var wanted = Math.min(Math.max(parseInt(count, 10) || 300, 20), 3000);
