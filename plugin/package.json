@@ -17,7 +17,7 @@
     "express": "^4.19.2"
   },
   "glassEvo": {
-    "least": "0.1.9"
+    "least": "0.1.10"
   },
   "volumio_info": {
     "prettyName": "Glass",
