@@ -14,9 +14,10 @@ After=systemd-user-sessions.service
 Type=simple
 User=root
 Group=root
-# The session's one client lets the player's user draw, keeps the screen
-# from blanking, and waits: the face is started by the plugin.
-ExecStart=/usr/bin/xinit /bin/sh -c 'xhost +SI:localuser:volumio; xset -dpms; xset s off; xset s noblank; exec sleep infinity' -- :0 -keeptty
+# The session's one client lets the player's user draw, makes the pointer
+# an arrow in place of the server's own cross, keeps the screen from
+# blanking, and waits: the face is started by the plugin.
+ExecStart=/usr/bin/xinit /bin/sh -c 'xhost +SI:localuser:volumio; xsetroot -cursor_name left_ptr; xset -dpms; xset s off; xset s noblank; exec sleep infinity' -- :0 -keeptty
 Restart=always
 RestartSec=3
 
