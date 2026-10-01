@@ -91,14 +91,15 @@ test('the face\'s failures in a row are counted, and cleared by a run that holds
 });
 
 test('the screen goes back by itself only where glass-evo owns it and cannot hold it', () => {
-  const holds = { owner: 'glass-evo', available: true, failures: 0, stopping: false, updating: false };
+  const holds = { owner: 'glass-evo', available: true, failures: 0, stopped: false, enabled: true };
   assert.equal(owner.guard(holds), null);
   assert.equal(owner.guard(Object.assign({}, holds, { failures: owner.FACE_TRIES - 1 })), null);
   assert.equal(owner.guard(Object.assign({}, holds, { failures: owner.FACE_TRIES })), 'face-failed');
   assert.equal(owner.guard(Object.assign({}, holds, { available: false })), 'component-missing');
-  assert.equal(owner.guard(Object.assign({}, holds, { stopping: true })), 'plugin-stopped');
-  assert.equal(owner.guard(Object.assign({}, holds, { stopping: true, updating: true })), null, 'an update stops the plugin and starts it again');
-  assert.equal(owner.guard({ owner: 'kiosk', available: false, failures: 9, stopping: true, updating: false }), null, 'the kiosk\'s screen is not Glass\'s to hand anywhere');
+  assert.equal(owner.guard(Object.assign({}, holds, { stopped: true, enabled: false })), 'plugin-stopped');
+  assert.equal(owner.guard(Object.assign({}, holds, { stopped: true, enabled: true })), null, 'an update stops the plugin, leaves it enabled and starts it again');
+  assert.equal(owner.guard(Object.assign({}, holds, { stopped: true, enabled: true, available: false, failures: 9 })), null, 'a stopped plugin judges nothing else');
+  assert.equal(owner.guard({ owner: 'kiosk', available: false, failures: 9, stopped: true, enabled: false }), null, 'the kiosk\'s screen is not Glass\'s to hand anywhere');
 });
 
 test('glass-evo is here where its component is installed or the screen is its own', () => {
