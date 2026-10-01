@@ -390,6 +390,9 @@ Glass.prototype.setLogSettings = function (data) {
     var before = self.logSettings();
     self.config.set('logLevel', wanted.level);
     self.config.set('logTargets', wanted.targets.join(','));
+    // On disk at once: the settings are saved a second after a change by
+    // themselves, and a level set just before a restart must outlive it.
+    try { self.config.save(); } catch (e) { /* saved by itself a second on */ }
     var changed = before.level !== wanted.level || before.targets.join(',') !== wanted.targets.join(',');
     if (changed) { self.context.logger.info(id + 'logging: level ' + wanted.level + (wanted.targets.length ? ', targets ' + wanted.targets.join(', ') : '')); }
     return Object.assign({ changed: changed }, self.logSettings());
