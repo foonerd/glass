@@ -2984,7 +2984,9 @@ pub fn parse_matrix(value: Option<&str>) -> [f32; 6] {
 /// else, or nothing, is normal.
 /// A face's settings in a configuration: the `face.<name>` keys of its
 /// current section, under their names without the prefix, the last of a
-/// name winning as elsewhere.
+/// name winning as elsewhere. The plugin's writer puts a backslash before
+/// a `#` or a `;` in a value, which would otherwise begin a comment; the
+/// value is handed on as it was meant, a colour as `#rrggbb`.
 pub fn face_settings(text: &str) -> std::collections::BTreeMap<String, String> {
     let mut found = std::collections::BTreeMap::new();
     let mut in_current = false;
@@ -3002,7 +3004,8 @@ pub fn face_settings(text: &str) -> std::collections::BTreeMap<String, String> {
         };
         if let Some(name) = key.trim().strip_prefix("face.") {
             if !name.is_empty() {
-                found.insert(name.to_string(), value.trim().to_string());
+                let value = value.trim().replace("\\#", "#").replace("\\;", ";");
+                found.insert(name.to_string(), value);
             }
         }
     }
@@ -5503,14 +5506,14 @@ mod tests {
         assert_eq!(face_scale(Some(" car ")), 2.0);
         assert_eq!(face_scale(Some("huge")), 1.0, "anything else is normal");
         let run = run_settings(
-            "[current]\nface.size = car\nface.theme = Midnight\nface.colours.accent = #ff8800\nface. = x\nscreen.rotation = 90\n[other]\nface.lost = 1\n",
+            "[current]\nface.size = car\nface.theme = Midnight\nface.colours.accent = \\#ff8800\nface. = x\nscreen.rotation = 90\n[other]\nface.lost = 1\n",
         );
         assert_eq!(run.face_scale, 2.0);
         let pairs: Vec<String> = run.face.iter().map(|(k, v)| format!("{k}={v}")).collect();
         assert_eq!(
             pairs.join(" "),
             "colours.accent=#ff8800 size=car theme=Midnight",
-            "the face's keys of the current section, by name, as written"
+            "the face's keys of the current section, by name, the writer's backslash before a # taken off"
         );
     }
 
