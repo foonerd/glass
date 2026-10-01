@@ -843,6 +843,7 @@
     "MANAGER_LOOK_CLOCK": "Horloge",
     "MANAGER_LOOK_OPACITY": "opacité",
     "MANAGER_LOOK_SIZE": "taille",
+    "MANAGER_LOOK_TINT_OWN": "verre de sa propre couleur",
     "MANAGER_LOOK_RESET": "Rétablir les valeurs par défaut",
     "MANAGER_LOOK_RESET_DONE": "L'apparence est revenue à ses valeurs par défaut.",
     "MANAGER_LOOK_DATE": "Date",
