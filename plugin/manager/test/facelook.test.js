@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { settingsOf, plan, resetPlan, frostSuits, themeKeys } = require('../facelook');
+const { settingsOf, plan, planAll, resetPlan, frostSuits, themeKeys } = require('../facelook');
 
 const current = { 'screen.rotation': '270', 'face.size': 'car', 'face.frost.suits': 'true', 'face.theme': 'Midnight', 'face.colours.accent': '#ff8800', 'face.glass.bar': '0.6', 'face.': 'x' };
 
@@ -49,6 +49,15 @@ test('a face theme\'s text is its keys under their sections', function () {
     { 'theme.name': 'Midnight', 'clock.format': '%-I:%M %p', 'clock.show': 'off', 'date.place': 'top' });
   assert.deepStrictEqual(themeKeys('glass.bar = 0.5'), { 'glass.bar': '0.5' });
   assert.deepStrictEqual(themeKeys(null), {});
+});
+
+test('a reset with a request: the look removed, the request set, a key named again kept', function () {
+  const now = { 'face.size': 'car', 'face.date.show': 'on', 'face.glass.bar': '0.6', 'face.theme': 'Midnight' };
+  assert.deepStrictEqual(planAll(now, { 'date.show': 'on', 'date.place': 'below', theme: 'Warm' }, true).changes,
+    { 'face.glass.bar': null, 'face.theme': 'Warm', 'face.date.place': 'below' }, 'date.show stays on, untouched');
+  assert.deepStrictEqual(planAll(now, {}, true).changes, { 'face.date.show': null, 'face.glass.bar': null, 'face.theme': null });
+  assert.deepStrictEqual(planAll(now, { 'glass.bar': '0.6' }, false).changes, {});
+  assert.strictEqual(planAll(now, { 'Bad': '1' }, true).error, 'bad-name');
 });
 
 test('frost suits the boards with room for it', function () {

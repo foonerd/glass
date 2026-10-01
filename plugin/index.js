@@ -1915,11 +1915,9 @@ Glass.prototype.setFaceSettings = function (set, reset) {
     var self = this;
     self.loadConfigs();
     if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return { error: 'GLASS.NO_PEPPYCONFIG' }; }
-    var changes = reset ? facelook.resetPlan(meterConfig.current).changes : {};
-    var planned = facelook.plan(meterConfig.current, set || {});
+    var planned = facelook.planAll(meterConfig.current, set, reset);
     if (planned.error) { return planned; }
-    Object.keys(planned.changes).forEach(function (key) { changes[key] = planned.changes[key]; });
-    // A key a reset removes and the request sets again is set, not removed.
+    var changes = planned.changes;
     var changed = self.applyFaceChanges(changes);
     if (changed) { self.logger.info(id + 'face: ' + Object.keys(changes).map(function (k) { return k + (changes[k] === null ? ' removed' : ' = ' + changes[k]); }).join(', ')); }
     return Object.assign({ ok: true, changed: changed }, self.faceSettings());
