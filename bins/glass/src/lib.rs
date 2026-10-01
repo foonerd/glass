@@ -714,9 +714,10 @@ fn session(
                 // `screen.driver` and `screen.rotation`: what draws, and the
                 // picture turned on a screen no X server turns.
                 driver: skin.run.driver.sdl_name().map(str::to_string),
-                // The turn is the display's own only on the screen itself;
-                // under X the server turns the screen, and this stays 0.
-                rotation: if draws_on_kms(&skin.run.driver) {
+                // The turn is the display's own only on a screen that is its
+                // own; under a kiosk's X the server turns the screen, and
+                // this stays 0.
+                rotation: if screen_is_ours(&skin.run.driver) {
                     skin.run.rotation.degrees()
                 } else {
                     0
@@ -851,9 +852,10 @@ fn session(
     // The screen is ours when no X server holds it: the display never
     // leaves it, and after the countdown it shows black rather than the
     // console.
-    // The screen is ours when the display draws on it itself: by the driver
-    // key, or by the launcher's word when the key is Auto.
-    let screen_ours = draws_on_kms(&skin.run.driver);
+    // The screen is ours when the display draws on it itself, by the driver
+    // key or by the launcher's word when the key is Auto, or when the
+    // launcher says the X server is there for the display alone.
+    let screen_ours = screen_is_ours(&skin.run.driver);
     let mut black_frame: Option<Frame> = None;
     loop {
         let frame_started = Instant::now();
@@ -1487,6 +1489,24 @@ fn draws_on_kms(driver: &lead::ScreenDriver) -> bool {
         || (*driver == lead::ScreenDriver::Auto && screen_given().is_none() && !screen_available())
 }
 
+/// Whether the launcher's word, `GLASS_SCREEN_OURS`, says the screen is the
+/// display's own: an X server with nothing else on it, brought up for the
+/// display where the kernel does not drive the screen.
+fn ours_said(value: Option<&str>) -> bool {
+    matches!(
+        value.map(|v| v.trim().to_ascii_lowercase()).as_deref(),
+        Some("1" | "true" | "yes" | "on")
+    )
+}
+
+/// Whether the screen is the display's own: it draws on the screen itself,
+/// or the launcher says the X server it draws on is there for it alone.
+/// The display then never leaves the screen, shows black after the
+/// countdown rather than what lies under it, and turns the picture itself.
+fn screen_is_ours(driver: &lead::ScreenDriver) -> bool {
+    draws_on_kms(driver) || ours_said(env::var("GLASS_SCREEN_OURS").ok().as_deref())
+}
+
 /// A calibration of the touch panel in progress: the targets, in picture
 /// pixels, and the samples read so far, each a raw share of the panel
 /// paired with the share that would have landed on the target.
@@ -1594,6 +1614,17 @@ fn memory_line(stores: &[(&'static str, usize)]) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn the_launcher_says_when_an_x_server_is_the_displays_own() {
+        for said in ["1", "true", " Yes ", "ON"] {
+            assert!(super::ours_said(Some(said)), "{said:?} says ours");
+        }
+        for said in ["", "0", "false", "no", "x11"] {
+            assert!(!super::ours_said(Some(said)), "{said:?} does not");
+        }
+        assert!(!super::ours_said(None), "said nothing: a kiosk's X server");
+    }
+
     #[test]
     fn a_frame_is_shown_whole_while_the_theme_is_covered_and_once_after() {
         // The theme alone: by what changed.
