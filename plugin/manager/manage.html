@@ -2195,7 +2195,9 @@
     renderScreenNow(sc.now || {}, free);
     renderScreenOwner(sc.owner);
     // The face's size: shown once glass-evo is here to draw at it; saved as it is chosen.
-    var evoHere = !!(sc.owner && sc.owner.evo && sc.owner.evo.available);
+    // The face's size and look are for a face that can be on this screen: glass-evo here,
+    // and the screen its own or one it could hold.
+    var evoHere = !!(sc.owner && sc.owner.evo && sc.owner.evo.available && (sc.owner.owner === 'glass-evo' || sc.owner.holdable));
     $('screen-face-row').hidden = !evoHere;
     $('look-panel').hidden = !evoHere || !LOOK;
     if (evoHere && LOOK) { if (lookDirty()) paintLook(true); else loadLook(); }
