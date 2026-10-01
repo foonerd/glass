@@ -105,6 +105,41 @@ function pairPlan(installed, target) {
   return { action: 'none' };
 }
 
+// Before a Glass goes in, the component that is here is brought to what
+// that Glass works with: the staged zip's package names the least
+// glass-evo, and an older one is updated first, held to that Glass. A
+// Glass older than the component needs is not installed at all. Answers
+// whether the component was changed; a pair that cannot be made is an
+// error, and nothing was changed.
+async function pair(component, staged, job) {
+  const here = component.installed();
+  if (!here.installed) return false;
+  let least = null;
+  const zip = await Zip.open(staged.file);
+  try {
+    const entry = zip.entries.find(function (e) { return e.isRegular && e.name === 'package.json'; });
+    if (entry && entry.size <= MAX_RELEASE_BYTES) least = leastOf((await zip.read(entry)).toString('utf8'));
+  } finally {
+    await zip.close();
+  }
+  const plan = pairPlan(here, { version: staged.version, least: least });
+  if (plan.action === 'none') return false;
+  if (plan.action === 'refuse') {
+    throw new ComponentError('pair', 'glass-evo ' + here.version + ' needs Glass ' + plan.needs + ' or later; put glass-evo back to its previous version first');
+  }
+  try {
+    const view = await component.check(true);
+    if (!view.latest || compareVersions(view.latest.version, plan.least) < 0) {
+      throw new ComponentError('too-old', 'the latest glass-evo released is ' + (view.latest ? view.latest.version : 'not known'));
+    }
+    await component.install(job, { glass: staged.version, least: plan.least });
+  } catch (e) {
+    throw new ComponentError('pair', 'Glass ' + staged.version + ' needs glass-evo ' + plan.least + ' or later, which could not be installed (' + (e && e.message ? e.message : e) + '); nothing was changed');
+  }
+  component.logger.info('glass: manager upgrade: glass-evo brought to ' + component.installed().version + ' for Glass ' + staged.version);
+  return true;
+}
+
 class Component {
   // dir: where the component lives; beside it <dir>.new while one is
   // unpacked and <dir>.prev, the one before. stateDir: where the last
@@ -327,4 +362,4 @@ class Component {
   }
 }
 
-module.exports = { Component, ComponentError, RELEASES_URL, ASSET, leastOf, manifestOf, misfit, installedAt, pairPlan };
+module.exports = { Component, ComponentError, RELEASES_URL, ASSET, leastOf, manifestOf, misfit, installedAt, pairPlan, pair };

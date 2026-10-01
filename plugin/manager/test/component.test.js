@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const { buildZip } = require('./zipwriter');
-const { Component, leastOf, manifestOf, misfit, installedAt, pairPlan } = require('../component');
+const { Component, leastOf, manifestOf, misfit, installedAt, pairPlan, pair } = require('../component');
 
 const sha = (data) => crypto.createHash('sha256').update(data).digest('hex');
 
@@ -193,5 +193,37 @@ test('what this Glass does not work with is neither offered nor put back', async
   assert.deepEqual([component.view().outdated, component.view().installed.available], [true, true]);
   await assert.rejects(component.rollback(), { code: 'too-old' });
   assert.equal(installedAt(path.join(root, 'evo'), 'x64').available, false, 'installed, with no binary for another architecture');
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('a Glass about to go in brings the component with it, or does not go in', async () => {
+  const { root, component, offer, job } = rig();
+  await component.init();
+  offer('0.1.9', { requires: '0.8.0' });
+  await component.check(true);
+  // A Glass's zip as staged for the plugin manager, naming the least glass-evo it works with.
+  const staged = function (version, least) {
+    const file = path.join(root, 'glass-' + version + '.zip');
+    fs.writeFileSync(file, buildZip([{ name: 'index.js', data: '// glass' }, { name: 'package.json', data: JSON.stringify(least ? { name: 'glass', glassEvo: { least: least } } : { name: 'glass' }) }]));
+    return { file: file, version: version };
+  };
+  assert.equal(await pair(component, staged('0.9.0', '0.2.0'), job()), false, 'no component here, nothing to bring');
+  await component.install(job());
+
+  assert.equal(await pair(component, staged('0.8.1', '0.1.9'), job()), false, 'the one here already goes with it');
+  assert.equal(await pair(component, staged('0.8.1', null), job()), false, 'a Glass that names none');
+  await assert.rejects(pair(component, staged('0.7.97', null), job()), { code: 'pair', message: /needs Glass 0\.8\.0 or later/ });
+
+  // The Glass needs 0.2.0; the latest released is still 0.1.9.
+  await assert.rejects(pair(component, staged('0.9.0', '0.2.0'), job()), { code: 'pair', message: /needs glass-evo 0\.2\.0 or later.*latest glass-evo released is 0\.1\.9.*nothing was changed/ });
+  assert.equal(component.view().installed.version, '0.1.9');
+
+  // 0.2.0 is out and needs that very Glass, later than the one running: it goes in for it.
+  offer('0.2.0', { requires: '0.9.0' });
+  assert.equal(await pair(component, staged('0.9.0', '0.2.0'), job()), true);
+  assert.deepEqual([component.view().installed.version, component.view().previous.version], ['0.2.0', '0.1.9']);
+  // The Glass then failed to go in: the component goes back to the one that runs with this Glass.
+  component.least = '0.1.9';
+  assert.deepEqual(await component.rollback(), { from: '0.2.0', to: '0.1.9' });
   fs.rmSync(root, { recursive: true, force: true });
 });

@@ -20,8 +20,8 @@ const { trackFileFor } = require('./trackfile');
 const logging = require('./logging');
 const { Catalog, CatalogError } = require('./catalog');
 const { Previews } = require('./previews');
-const { Updater, UpdateError, compareVersions } = require('./update');
-const { Component, ComponentError, leastOf, pairPlan } = require('./component');
+const { Updater, UpdateError } = require('./update');
+const { Component, leastOf, pair } = require('./component');
 const { zipDirectory } = require('./zipwrite');
 const tailor = require('./tailor');
 const { SYMPTOMS, diagnose } = require('./diagnose');
@@ -1224,7 +1224,8 @@ class Manager {
     self.exclusive(async function () {
       try {
         const staged = rollback ? await self.updater.stagePrevious(job) : await self.updater.download(job);
-        const paired = await self.pairComponent(job, staged);
+        // The component here is brought to what that Glass works with first.
+        const paired = await pair(self.component, staged, job);
         let result;
         try {
           result = await self.updater.apply(job, staged);
@@ -1241,40 +1242,6 @@ class Manager {
         self.finish(job, e);
       }
     });
-  }
-
-  // Before a Glass goes in, the component that is here is brought to what
-  // that Glass works with: the staged zip's package names the least
-  // glass-evo, and an older one is updated first, held to that Glass. A
-  // Glass older than the component needs is not installed at all. Answers
-  // whether the component was changed.
-  async pairComponent(job, staged) {
-    const here = this.component.installed();
-    if (!here.installed) return false;
-    let least = null;
-    const zip = await Zip.open(staged.file);
-    try {
-      const entry = zip.entries.find(function (e) { return e.isRegular && e.name === 'package.json'; });
-      if (entry && entry.size <= 1024 * 1024) least = leastOf((await zip.read(entry)).toString('utf8'));
-    } finally {
-      await zip.close();
-    }
-    const plan = pairPlan(here, { version: staged.version, least: least });
-    if (plan.action === 'none') return false;
-    if (plan.action === 'refuse') {
-      throw new UpdateError('pair', 'glass-evo ' + here.version + ' needs Glass ' + plan.needs + ' or later; put glass-evo back to its previous version first');
-    }
-    try {
-      const view = await this.component.check(true);
-      if (!view.latest || compareVersions(view.latest.version, plan.least) < 0) {
-        throw new ComponentError('too-old', 'the latest glass-evo released is ' + (view.latest ? view.latest.version : 'not known'));
-      }
-      await this.component.install(job, { glass: staged.version, least: plan.least });
-    } catch (e) {
-      throw new UpdateError('pair', 'Glass ' + staged.version + ' needs glass-evo ' + plan.least + ' or later, which could not be installed (' + (e && e.message ? e.message : e) + '); nothing was changed');
-    }
-    this.logger.info('glass: manager upgrade: glass-evo brought to ' + this.component.installed().version + ' for Glass ' + staged.version);
-    return true;
   }
 
   // Get or update the component, or put the one before back; a face on
