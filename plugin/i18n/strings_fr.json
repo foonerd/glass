@@ -821,6 +821,7 @@
     "MANAGER_OWNER_DONE": "Fait.",
     "MANAGER_OWNER_EVO_ABSENT": "glass-evo n'est pas installé pour ce lecteur.",
     "MANAGER_OWNER_FAILED": "Le changement n'est pas allé au bout :",
+    "MANAGER_ST_OWNER": "Propriétaire de l'écran",
     "MANAGER_FACE_SIZE": "Taille de l'interface",
     "MANAGER_FACE_SIZE_NORMAL": "Normale",
     "MANAGER_FACE_SIZE_LARGE": "Grande, pour une main à bout de bras",
