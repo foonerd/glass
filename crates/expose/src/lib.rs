@@ -2547,6 +2547,14 @@ pub fn render_text(
     )
 }
 
+/// How far every glyph is set to the right of its pen, in pixels. The
+/// outline rasteriser miscounts a glyph whose points fall exactly on pixel
+/// edges, which a pen at a quarter or a half of a pixel can bring about:
+/// PeppyFont's bold `w` at 25 pixels, three quarters of a pixel across,
+/// came out as a grey smear (the w of "The Show Must Go On"). A thousandth
+/// of a pixel is nothing to the eye and takes the points off the edges.
+const GLYPH_NUDGE: f32 = 1.0 / 1024.0;
+
 /// The face and glyph for a character: the text's own face when it has the
 /// character, else the fallback face when that has it, else the own face's
 /// missing-glyph mark.
@@ -2635,7 +2643,10 @@ fn render_line(
                 pen += face_scaled.kern(prev, id);
             }
         }
-        let glyph = id.with_scale_and_position(face_scaled.scale(), ab_glyph::point(pen, ascent));
+        let glyph = id.with_scale_and_position(
+            face_scaled.scale(),
+            ab_glyph::point(pen + GLYPH_NUDGE, ascent),
+        );
         if let Some(outline) = face.outline_glyph(glyph) {
             let bounds = outline.px_bounds();
             outline.draw(|gx, gy, coverage| {
@@ -8852,6 +8863,61 @@ mod tests {
             None
         }
         dirs.iter().find_map(|d| walk(Path::new(d), 3))
+    }
+
+    /// The plugin's own bold face, where the checkout has it.
+    fn peppy_bold() -> Option<String> {
+        let path =
+            Path::new(env!("CARGO_MANIFEST_DIR")).join("../../plugin/fonts/PeppyFont-Bold.ttf");
+        path.is_file().then(|| path.to_string_lossy().into_owned())
+    }
+
+    #[test]
+    fn a_glyph_whose_pen_falls_on_a_quarter_pixel_is_set_whole() {
+        let Some(file) = peppy_bold() else {
+            println!("the plugin's bold face is not in this checkout");
+            return;
+        };
+        let fonts = Fonts::load(&FontFiles {
+            bold: file,
+            ..FontFiles::default()
+        });
+        // In this title at this size the pen stands at 97.75 before the w of
+        // "Show", where the rasteriser, left to itself, smears the letter:
+        // no pixel of it reaches two thirds cover.
+        let title = render_text(
+            Some(&fonts),
+            TextStyle::Bold,
+            25,
+            [201, 201, 201],
+            "The Show Must Go On (with Elton John)",
+            0,
+        )
+        .unwrap();
+        let alone =
+            render_text(Some(&fonts), TextStyle::Bold, 25, [201, 201, 201], "w", 0).unwrap();
+        let ink = |frame: &Frame, from: u32, to: u32| -> (u32, u32) {
+            let (mut sum, mut full) = (0u32, 0u32);
+            for y in 0..frame.height {
+                for x in from..to.min(frame.width) {
+                    let a = frame.rgba[((y * frame.width + x) * 4 + 3) as usize] as u32;
+                    sum += a;
+                    full += u32::from(a >= 250);
+                }
+            }
+            (sum, full)
+        };
+        let (in_title, full) = ink(&title, 98, 98 + alone.width);
+        let (by_itself, _) = ink(&alone, 0, alone.width);
+        assert!(
+            full > 20,
+            "the w has its solid strokes: {full} pixels at full cover"
+        );
+        let apart = in_title.abs_diff(by_itself) as f32 / by_itself as f32;
+        assert!(
+            apart < 0.08,
+            "the w in the title weighs what a w alone does: {in_title} against {by_itself}"
+        );
     }
 
     #[test]
