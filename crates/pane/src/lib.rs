@@ -147,6 +147,20 @@ pub struct Surface {
     recording_lifts: bool,
 }
 
+/// Whether an SDL video driver shows nothing on any screen: the ones made
+/// for drawing with no screen at all.
+fn shows_nothing(driver: &str) -> bool {
+    matches!(driver, "offscreen" | "dummy")
+}
+
+/// Whether a driver was asked for by name, as `SDL_VIDEODRIVER` holds it:
+/// one name, or several parted by commas, tried in order.
+fn asked_for(asked: &str, driver: &str) -> bool {
+    asked
+        .split(',')
+        .any(|name| name.trim().eq_ignore_ascii_case(driver))
+}
+
 impl Surface {
     /// Open the player's window: the whole screen, no frame, no pointer.
     pub fn open(width: u32, height: u32) -> Result<Self, String> {
@@ -232,6 +246,16 @@ impl Surface {
         };
         let sdl = sdl2::init()?;
         let video = sdl.video()?;
+        // With no X server, no Wayland and no screen of its own to open,
+        // SDL falls back to a driver that draws to nowhere: the display
+        // would run and show nothing. That is a screen it could not open.
+        let chosen = video.current_video_driver();
+        let asked = std::env::var("SDL_VIDEODRIVER").unwrap_or_default();
+        if shows_nothing(chosen) && !asked_for(&asked, chosen) {
+            return Err(format!(
+                "no screen to draw on: no X server, no Wayland and no KMS/DRM device (SDL fell back to {chosen})"
+            ));
+        }
         let (width, height) = (width.max(1), height.max(1));
         let mut builder = video.window(&options.title, width, height);
         // Centred on the chosen screen; a full screen window takes that screen.
@@ -676,9 +700,23 @@ pub fn write_ppm(path: impl AsRef<Path>, frame: &Frame) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        finger_pixel, fitted_rect, keep_mouse, rotated_center, through, unrotate_point, IDENTITY,
-        TOUCH_MOUSEID,
+        asked_for, finger_pixel, fitted_rect, keep_mouse, rotated_center, shows_nothing, through,
+        unrotate_point, IDENTITY, TOUCH_MOUSEID,
     };
+
+    #[test]
+    fn a_driver_that_shows_nothing_is_taken_only_when_asked_for_by_name() {
+        assert!(shows_nothing("offscreen") && shows_nothing("dummy"));
+        assert!(!shows_nothing("x11") && !shows_nothing("KMSDRM") && !shows_nothing("wayland"));
+        assert!(!asked_for("", "offscreen"), "SDL's own fallback");
+        assert!(!asked_for("x11", "offscreen"));
+        assert!(asked_for("offscreen", "offscreen"));
+        assert!(asked_for("dummy", "dummy"));
+        assert!(
+            asked_for("x11, Offscreen", "offscreen"),
+            "a list tried in order"
+        );
+    }
 
     /// A finger at 92% across and 96% down a 720x1280 panel is window pixel
     /// (662, 1229); a real mouse always counts, a mouse made from a touch
