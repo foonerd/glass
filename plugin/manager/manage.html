@@ -1767,8 +1767,9 @@
   // The screen's owner: the kiosk, or glass-evo; the register in plain
   // words; and the one action that fits. A take or a way back changes the
   // player's interface, so each asks once before it goes.
-  function renderScreenOwner(o) {
-    o = o || {};
+  // Who owns the screen, the face's component, and what the last take
+  // changed: the lines the Screen tab shows and the status sheet joins.
+  function ownerLines(o) {
     var evo = o.evo || {};
     var r = o.register;
     var when = function (iso) { try { return new Date(iso).toLocaleString(); } catch (e) { return String(iso); } };
@@ -1779,7 +1780,12 @@
       lines.push(t('MANAGER_OWNER_TOOK') + ' ' + when(r.takenAt) + (names.length ? '; ' + t('MANAGER_OWNER_TURNED_OFF') + ' ' + names.join(', ') : '') + '.' + (r.gaveBackAt ? ' ' + t('MANAGER_OWNER_GAVE_BACK') + ' ' + when(r.gaveBackAt) + '.' : ''));
       if (r.error) lines.push(t('MANAGER_OWNER_ERROR') + ' ' + r.error);
     }
-    $('screen-owner').innerHTML = lines.map(function (l, i) { return '<div' + (i ? ' class="help"' : '') + '>' + esc(l) + '</div>'; }).join('');
+    return lines;
+  }
+  function renderScreenOwner(o) {
+    o = o || {};
+    var evo = o.evo || {};
+    $('screen-owner').innerHTML = ownerLines(o).map(function (l, i) { return '<div' + (i ? ' class="help"' : '') + '>' + esc(l) + '</div>'; }).join('');
     var acts = [];
     if (o.owner === 'glass-evo') acts.push(['kiosk', 'MANAGER_OWNER_BACK', 'MANAGER_OWNER_CONFIRM_BACK']);
     else if (evo.available) acts.push(['glass-evo', 'MANAGER_OWNER_USE_EVO', 'MANAGER_OWNER_CONFIRM_TAKE']);
@@ -1872,6 +1878,7 @@
       ['MANAGER_ST_INPUTS', found.join(' · ')],
       ['MANAGER_SCREEN_BACKLIGHT', lights.length ? lights.join(' · ') : none]
     ];
+    if (sc.owner) rows.splice(1, 0, ['MANAGER_ST_OWNER', ownerLines(sc.owner).concat([t('MANAGER_FACE_SIZE') + ': ' + (sc.faceSize || 'normal')]).join(' · ')]);
     return rows;
   }
   function renderTouch(tc) {

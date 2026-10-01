@@ -821,6 +821,7 @@
     "MANAGER_OWNER_DONE": "Done.",
     "MANAGER_OWNER_EVO_ABSENT": "glass-evo is not installed for this player.",
     "MANAGER_OWNER_FAILED": "The change did not finish:",
+    "MANAGER_ST_OWNER": "Screen owner",
     "MANAGER_FACE_SIZE": "Face size",
     "MANAGER_FACE_SIZE_NORMAL": "Normal",
     "MANAGER_FACE_SIZE_LARGE": "Large, for a hand at arm's length",
