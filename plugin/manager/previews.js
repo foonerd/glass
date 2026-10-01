@@ -152,16 +152,16 @@ class Previews {
         resolve(out);
       });
     });
-    const meters = [];
-    output.split('\n').forEach(function (line) {
-      const m = /^glass: snapshot (.+\.png)$/.exec(line);
-      if (m && !m[1].endsWith('.thumb.png')) {
-        const stem = path.basename(m[1], '.png');
-        meters.push(stem);
-      }
-    });
+    // The pictures on disk are the truth; the display's log lines, which
+    // its log level may hold back, and the theme's own order only say in
+    // what order to show them.
     const produced = path.join(work, theme);
-    if (meters.length === 0 || !fs.existsSync(produced)) {
+    let files = [];
+    try { files = await fsp.readdir(produced); } catch (e) { /* nothing was written */ }
+    let order = [];
+    try { order = sectionNames(await fsp.readFile(metersFile, 'utf8')); } catch (e) { /* no order from the theme */ }
+    const meters = metersProduced(files, output, order);
+    if (meters.length === 0) {
       await fsp.rm(work, { recursive: true, force: true });
       throw new Error('the render produced no pictures');
     }
@@ -187,4 +187,35 @@ class Previews {
   }
 }
 
-module.exports = { Previews: Previews, THUMB_WIDTH: THUMB_WIDTH };
+// The section names of a meters file, in its order.
+function sectionNames(text) {
+  const names = [];
+  String(text || '').split('\n').forEach(function (line) {
+    const m = /^\s*\[(.+)\]\s*$/.exec(line);
+    if (m) names.push(m[1].trim());
+  });
+  return names;
+}
+
+// The meters a render produced, from the pictures it wrote: every
+// <meter>.png in the folder that is not a thumbnail. Their order is the
+// display's own where it said one (its log lines, when its log level lets
+// them through), then the theme's, then by name. A line naming a picture
+// that is not there counts for nothing.
+function metersProduced(files, output, order) {
+  const stems = (files || [])
+    .filter(function (f) { return /\.png$/i.test(f) && !/\.thumb\.png$/i.test(f); })
+    .map(function (f) { return path.basename(f, path.extname(f)); });
+  const have = new Set(stems);
+  const out = [];
+  const take = function (stem) { if (have.has(stem) && out.indexOf(stem) === -1) out.push(stem); };
+  String(output || '').split('\n').forEach(function (line) {
+    const m = /^glass: snapshot (.+\.png)$/.exec(line.trim());
+    if (m && !m[1].endsWith('.thumb.png')) take(path.basename(m[1], '.png'));
+  });
+  (order || []).forEach(take);
+  stems.slice().sort().forEach(take);
+  return out;
+}
+
+module.exports = { Previews: Previews, THUMB_WIDTH: THUMB_WIDTH, metersProduced: metersProduced, sectionNames: sectionNames };
