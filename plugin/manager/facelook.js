@@ -1,0 +1,66 @@
+'use strict';
+
+// The face's own settings in the display's configuration: the face.<name>
+// keys the display hands to glass-evo unread. The Manager sets them, a
+// theme's choice and the user's overrides over it, and says for the board
+// whether frost over a moving theme suits it. Pure: the plans are made
+// here, the plugin writes them.
+
+const PREFIX = 'face.';
+// A name is up to four words of letters and digits, dot between; a value
+// is a short word, a number or a colour. Nothing that could break out of
+// a line of the configuration.
+const NAME = /^[a-z][a-z0-9]*(\.[a-z][a-z0-9]*){0,3}$/;
+const VALUE = /^[#A-Za-z0-9_. -]{1,64}$/;
+// Set elsewhere: the size on the screen's own route, the board's word by
+// the plugin at its start.
+const OWN = ['size', 'frost.suits'];
+// What a reset leaves: those, and nothing of the look.
+const KEPT = OWN;
+
+// The face's settings as the configuration's current section has them,
+// by name.
+function settingsOf(current) {
+  const out = {};
+  Object.keys(current || {}).forEach(function (key) {
+    if (key.indexOf(PREFIX) === 0 && key.length > PREFIX.length) out[key.slice(PREFIX.length)] = String(current[key]);
+  });
+  return out;
+}
+
+// The changes a request asks for, as full keys with their values, null to
+// remove; or the error of a name or a value that is not one.
+function plan(current, set) {
+  if (!set || typeof set !== 'object' || Array.isArray(set)) return { error: 'bad-request' };
+  const changes = {};
+  for (const name of Object.keys(set)) {
+    if (!NAME.test(name) || OWN.indexOf(name) !== -1) return { error: 'bad-name', name };
+    const value = set[name];
+    const key = PREFIX + name;
+    if (value === null || value === '') {
+      if (current && current[key] !== undefined) changes[key] = null;
+      continue;
+    }
+    const text = String(value).trim();
+    if (!VALUE.test(text)) return { error: 'bad-value', name };
+    if (!current || String(current[key]) !== text) changes[key] = text;
+  }
+  return { changes };
+}
+
+// Back to the defaults: every key of the look removed.
+function resetPlan(current) {
+  const changes = {};
+  Object.keys(settingsOf(current)).forEach(function (name) {
+    if (KEPT.indexOf(name) === -1) changes[PREFIX + name] = null;
+  });
+  return { changes };
+}
+
+// Whether frost over a moving theme suits a board: where a frame has room
+// for it. The user's switch decides either way.
+function frostSuits(boardClass) {
+  return ['pi4', 'pi5', 'x64'].indexOf(String(boardClass)) !== -1;
+}
+
+module.exports = { PREFIX, settingsOf, plan, resetPlan, frostSuits };
