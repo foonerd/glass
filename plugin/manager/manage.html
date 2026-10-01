@@ -83,6 +83,7 @@
   .finding .kind { color: var(--muted); font-size: 13px; padding-top: 2px; }
   .finding.cause .kind { color: var(--warn); font-weight: 600; }
   .finding.ok { color: var(--muted); }
+  pre.report { white-space: pre-wrap; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background: #1a1a1a; border: 1px solid var(--line); border-radius: 8px; padding: 10px; max-height: 380px; overflow: auto; }
   .list { display: flex; flex-direction: column; gap: 8px; }
   .item { background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
   .item .grow { flex: 1; min-width: 160px; }
@@ -1506,7 +1507,7 @@
     // for the sheet on show; the sheet stands without them if they fail.
     var onShow = $('view-status').classList.contains('active');
     var screenRead = onShow ? api('GET', '/api/screen').catch(function () { return null; }) : Promise.resolve(null);
-    Promise.all([api('GET', '/api/status'), screenRead]).then(function (both) {
+    return Promise.all([api('GET', '/api/status'), screenRead]).then(function (both) {
       var s = both[0];
       var sc = both[1];
       state.status = s;
@@ -1594,10 +1595,7 @@
   $('btn-status-reveal').onclick = function () { state.revealAddresses = !state.revealAddresses; loadStatus(); };
   // The sheet as text, for a forum post: the clipboard where the page may
   // use it, else a selection copied the old way.
-  $('btn-status-copy').onclick = function () {
-    var button = $('btn-status-copy');
-    var done = function () { button.textContent = t('MANAGER_ST_COPIED'); setTimeout(function () { button.textContent = t('MANAGER_ST_COPY'); }, 1500); };
-    var text = (state.statusText || '') + (state.diagnosisText ? '\n' + state.diagnosisText : '');
+  function copyText(text, done) {
     var fallback = function () {
       var area = document.createElement('textarea');
       area.value = text; area.style.position = 'fixed'; area.style.opacity = '0';
@@ -1606,16 +1604,49 @@
       document.body.removeChild(area);
     };
     if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).then(done, fallback); } else { fallback(); }
+  }
+  // A button that says "copied" for a moment after it did.
+  function copyFrom(button, label, text) {
+    copyText(text, function () { button.textContent = t('MANAGER_ST_COPIED'); setTimeout(function () { button.textContent = t(label); }, 1500); });
+  }
+  $('btn-status-copy').onclick = function () {
+    copyFrom($('btn-status-copy'), 'MANAGER_ST_COPY', (state.statusText || '') + (state.diagnosisText ? '\n' + state.diagnosisText : ''));
   };
 
   // ---- the guided diagnosis ---------------------------------------------
   // Pick what is wrong; the Manager runs the checks it can run itself and
   // says what it found: likely causes first, then what is worth knowing,
-  // then what it checked and found right. The findings join the sheet's
-  // copied text.
+  // then what it checked and found right. Whatever the checks say, a
+  // report can follow: Glass logs in full while the problem is reproduced,
+  // the player's system log goes out through Volumio's own submitter, and
+  // the report, the user's words, the findings, the sheet and the log's
+  // link, is copied for the forum or opened as a GitHub issue.
+  var ISSUES = 'https://github.com/foonerd/glass/issues/new';
   function symptomTitle(id) { return t('MANAGER_DIAG_S_' + String(id).toUpperCase().replace(/-/g, '_')); }
   function findingText(x) {
     return t('MANAGER_' + x.key).replace(/\{([a-z]+)\}/g, function (slot, name) { return x.with && x.with[name] !== undefined ? String(x.with[name]) : slot; });
+  }
+  function diagKinds() { return { cause: t('MANAGER_DIAG_KIND_CAUSE'), note: t('MANAGER_DIAG_KIND_NOTE'), ok: t('MANAGER_DIAG_KIND_OK') }; }
+  // A diagnosis as lines of text, for the sheet's copy and for a report.
+  function diagnosisText(d) {
+    var kinds = diagKinds();
+    return [t('MANAGER_DIAG_SECTION'), '  ' + symptomTitle(d.symptom) + ': ' + t(d.found ? 'MANAGER_DIAG_V_FOUND' : 'MANAGER_DIAG_V_NOTHING')].concat((d.findings || []).map(function (x) {
+      return '  ' + (kinds[x.kind] || x.kind) + ': ' + findingText(x).replace(/\n/g, '\n    ');
+    })).join('\n') + '\n';
+  }
+  // One step of the panel: its lead, its body, and whether the way back to
+  // the symptoms and the findings shows.
+  function diagShow(lead, html, nav) {
+    $('diag-panel').hidden = false;
+    $('diag-lead').textContent = lead;
+    $('diag-symptoms').hidden = true;
+    $('diag-result').innerHTML = html; $('diag-result').hidden = false;
+    $('btn-diag-back').hidden = !nav; $('btn-diag-again').hidden = !nav;
+  }
+  // The panel opens where things stand: on a capture under way, else on
+  // the symptoms.
+  function openDiagnosis() {
+    api('GET', '/api/diagnose/capture').then(function (c) { if (c.state === 'idle') showSymptoms(); else showCapturing(c); }).catch(showSymptoms);
   }
   function showSymptoms() {
     state.diagnosis = null; state.diagnosisText = '';
@@ -1631,22 +1662,70 @@
   function runDiagnosis(symptom) {
     api('POST', '/api/diagnose', { symptom: symptom }).then(function (d) {
       state.diagnosis = d;
-      var kinds = { cause: t('MANAGER_DIAG_KIND_CAUSE'), note: t('MANAGER_DIAG_KIND_NOTE'), ok: t('MANAGER_DIAG_KIND_OK') };
-      var verdict = t(d.found ? 'MANAGER_DIAG_FOUND' : 'MANAGER_DIAG_NOTHING');
-      $('diag-lead').textContent = symptomTitle(d.symptom) + '. ' + verdict;
-      $('diag-symptoms').hidden = true;
-      $('diag-result').innerHTML = (d.findings || []).map(function (x) {
+      var kinds = diagKinds();
+      diagShow(symptomTitle(d.symptom) + '. ' + t(d.found ? 'MANAGER_DIAG_FOUND' : 'MANAGER_DIAG_NOTHING'), (d.findings || []).map(function (x) {
         return '<div class="finding ' + esc(x.kind) + '"><div class="kind">' + esc(kinds[x.kind] || x.kind) + '</div><div>' + esc(findingText(x)) + '</div><div>' +
           (x.go ? '<button class="small" data-go="' + esc(x.go) + '">' + esc(t('MANAGER_DIAG_GO')) + '</button>' : '') + '</div></div>';
-      }).join('');
+      }).join('') + '<div class="row" style="margin-top:12px"><button class="primary" id="btn-diag-report">' + esc(t('MANAGER_DIAG_REPORT')) + '</button></div>', true);
       Array.prototype.forEach.call($('diag-result').querySelectorAll('button[data-go]'), function (b) { b.onclick = function () { showView(b.getAttribute('data-go')); }; });
-      $('diag-result').hidden = false; $('btn-diag-back').hidden = false; $('btn-diag-again').hidden = false;
-      state.diagnosisText = [t('MANAGER_DIAG_SECTION'), '  ' + symptomTitle(d.symptom) + '. ' + verdict].concat((d.findings || []).map(function (x) {
-        return '  ' + (kinds[x.kind] || x.kind) + ': ' + findingText(x).replace(/\n/g, '\n    ');
-      })).join('\n') + '\n';
+      $('btn-diag-report').onclick = showReportIntro;
+      state.diagnosisText = diagnosisText(d);
     }).catch(function (e) { toast(errorText(e), 'error'); });
   }
-  $('btn-diag-open').onclick = showSymptoms;
+  // Before a capture: what a report holds and what is sent where.
+  function showReportIntro() {
+    var symptom = state.diagnosis.symptom;
+    diagShow(t('MANAGER_DIAG_REPORT_INTRO'), '<div class="row" style="margin-top:12px"><button class="primary" id="btn-diag-start">' + esc(t('MANAGER_DIAG_START')) + '</button></div>', true);
+    $('btn-diag-start').onclick = function () {
+      $('btn-diag-start').disabled = true;
+      api('POST', '/api/diagnose/capture', { symptom: symptom }).then(showCapturing).catch(function (e) { toast(errorText(e), 'error'); openDiagnosis(); });
+    };
+  }
+  // While Glass logs in full: reproduce, say what happened, and go on.
+  function showCapturing(c) {
+    state.diagnosisText = '';
+    if (c.state === 'sending') { diagShow(t('MANAGER_DIAG_SENDING'), '', false); return; }
+    diagShow(symptomTitle(c.symptom) + '. ' + t('MANAGER_DIAG_CAPTURING').replace('{from}', c.from).replace('{until}', c.to),
+      '<textarea id="diag-said" rows="3" style="width:100%" placeholder="' + esc(t('MANAGER_DIAG_SAID')) + '"></textarea>' +
+      '<div class="row" style="margin-top:10px"><button class="primary" id="btn-diag-happened">' + esc(t('MANAGER_DIAG_HAPPENED')) + '</button><button id="btn-diag-cancel">' + esc(t('MANAGER_DIAG_CANCEL')) + '</button></div>', false);
+    $('btn-diag-cancel').onclick = function () {
+      api('POST', '/api/diagnose/capture/cancel', {}).then(showSymptoms).catch(function (e) { toast(errorText(e), 'error'); openDiagnosis(); });
+    };
+    $('btn-diag-happened').onclick = function () {
+      var said = $('diag-said').value.trim();
+      if (!said) { toast(t('MANAGER_DIAG_SAID_NEEDED'), 'error'); $('diag-said').focus(); return; }
+      diagShow(t('MANAGER_DIAG_SENDING'), '', false);
+      api('POST', '/api/diagnose/capture/finish', { text: said }).then(showReport).catch(function (e) { toast(errorText(e), 'error'); openDiagnosis(); });
+    };
+  }
+  // The report: the user's words, when it was reproduced, the system log's
+  // link, what the checks found, and the sheet as it stands now.
+  function showReport(r) {
+    loadStatus().catch(function () {}).then(function () {
+      var head = [t('MANAGER_DIAG_R_TITLE') + ': ' + symptomTitle(r.symptom),
+        t('MANAGER_DIAG_R_SAID') + ': ' + r.text,
+        t('MANAGER_DIAG_R_WINDOW').replace('{from}', r.from).replace('{to}', r.to),
+        t('MANAGER_DIAG_R_LOG') + ': ' + (r.log.link || t('MANAGER_DIAG_R_NOT_SENT').replace('{said}', r.log.said || r.log.error))].join('\n');
+      var rest = (r.diagnosis ? diagnosisText(r.diagnosis) + '\n' : '') + (state.statusText || '');
+      var text = head + '\n\n' + rest;
+      diagShow(r.log.link ? t('MANAGER_DIAG_REPORT_READY') : t('MANAGER_DIAG_REPORT_NO_LINK').replace('{said}', r.log.said || r.log.error),
+        '<pre class="report">' + esc(text) + '</pre><div class="row" style="margin-top:10px"><button class="primary" id="btn-diag-forum">' + esc(t('MANAGER_DIAG_COPY_FORUM')) + '</button>' +
+        '<button id="btn-diag-issue">' + esc(t('MANAGER_DIAG_OPEN_ISSUE')) + '</button>' +
+        (r.log.kept ? '<a href="/api/diagnose/log" download><button type="button">' + esc(t('MANAGER_DIAG_DOWNLOAD_LOG')) + '</button></a>' : '') + '</div>', false);
+      $('btn-diag-back').hidden = false;
+      $('btn-diag-forum').onclick = function () { copyFrom($('btn-diag-forum'), 'MANAGER_DIAG_COPY_FORUM', text); };
+      // An issue opens with the report in it where a link can carry it; the
+      // whole report is on the clipboard either way.
+      $('btn-diag-issue').onclick = function () {
+        var title = symptomTitle(r.symptom) + ': ' + r.text.replace(/\s+/g, ' ').slice(0, 70);
+        var body = head + '\n\n```\n' + rest + '```\n';
+        if (encodeURIComponent(body).length > 6000) body = head + '\n\n' + t('MANAGER_DIAG_ISSUE_PASTE');
+        copyText(text, function () {});
+        window.open(ISSUES + '?title=' + encodeURIComponent(title) + '&body=' + encodeURIComponent(body), '_blank', 'noopener');
+      };
+    });
+  }
+  $('btn-diag-open').onclick = openDiagnosis;
   $('btn-diag-back').onclick = showSymptoms;
   $('btn-diag-again').onclick = function () { if (state.diagnosis) runDiagnosis(state.diagnosis.symptom); };
   $('btn-diag-close').onclick = function () { $('diag-panel').hidden = true; state.diagnosis = null; state.diagnosisText = ''; };
