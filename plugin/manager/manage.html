@@ -357,9 +357,9 @@
           <div class="help" id="look-pattern-hint" style="margin-top:4px" hidden></div>
           <div class="row" style="margin-top:8px"><label><input type="checkbox" id="look-granular"> <span id="look-granular-label"></span></label></div>
           <div id="look-granular-rows" hidden>
-            <div class="row" style="margin-top:6px"><label style="min-width:110px" id="look-buttons-label"></label><input type="color" id="look-buttons-ink"><input type="range" id="look-buttons-opacity" min="10" max="100" step="1" style="max-width:200px"><span class="help" id="look-buttons-value"></span></div>
-            <div class="row" style="margin-top:6px"><label style="min-width:110px" id="look-clock-label"></label><input type="color" id="look-clock-ink"><input type="range" id="look-clock-opacity" min="10" max="100" step="1" style="max-width:200px"><span class="help" id="look-clock-value"></span><input type="range" id="look-clock-glass" min="0" max="95" step="1" style="max-width:160px"><span class="help" id="look-clock-glass-value"></span></div>
-            <div class="row" style="margin-top:6px"><label style="min-width:110px" id="look-date-label"></label><input type="color" id="look-date-ink"><input type="range" id="look-date-opacity" min="10" max="100" step="1" style="max-width:200px"><span class="help" id="look-date-value"></span></div>
+            <div class="row" style="margin-top:6px"><label style="min-width:110px" id="look-buttons-label"></label><input type="color" id="look-buttons-ink"><input type="range" id="look-buttons-opacity" min="10" max="100" step="1" style="max-width:160px"><span class="help" id="look-buttons-value"></span><input type="range" id="look-buttons-size" min="50" max="250" step="5" style="max-width:160px"><span class="help" id="look-buttons-size-value"></span></div>
+            <div class="row" style="margin-top:6px"><label style="min-width:110px" id="look-clock-label"></label><input type="color" id="look-clock-ink"><input type="range" id="look-clock-opacity" min="10" max="100" step="1" style="max-width:160px"><span class="help" id="look-clock-value"></span><input type="range" id="look-clock-glass" min="0" max="95" step="1" style="max-width:160px"><span class="help" id="look-clock-glass-value"></span><input type="range" id="look-clock-size" min="50" max="250" step="5" style="max-width:160px"><span class="help" id="look-clock-size-value"></span></div>
+            <div class="row" style="margin-top:6px"><label style="min-width:110px" id="look-date-label"></label><input type="color" id="look-date-ink"><input type="range" id="look-date-opacity" min="10" max="100" step="1" style="max-width:160px"><span class="help" id="look-date-value"></span><input type="range" id="look-date-size" min="50" max="250" step="5" style="max-width:160px"><span class="help" id="look-date-size-value"></span></div>
           </div>
           <div class="row" style="margin-top:10px"><button class="primary" id="btn-look-save"></button><button id="btn-look-reset"></button></div>
         </div>
@@ -1819,7 +1819,15 @@
     fillPatterns('look-date-format', 'look-date-custom', DATE_PATTERNS, eff('date.format', '%A %-d %B'));
     $('look-date-place').innerHTML = [['top', 'MANAGER_LOOK_DATE_TOP'], ['above', 'MANAGER_LOOK_DATE_ABOVE'], ['below', 'MANAGER_LOOK_DATE_BELOW']].map(function (p) { return '<option value="' + p[0] + '">' + esc(t(p[1])) + '</option>'; }).join('');
     $('look-date-place').value = ['top', 'above', 'below'].indexOf(String(eff('date.place', 'top')).toLowerCase()) === -1 ? 'top' : String(eff('date.place', 'top')).toLowerCase();
-    var own_rows = ['buttons.ink', 'buttons.opacity', 'clock.ink', 'clock.opacity', 'date.ink', 'date.opacity'];
+    var own_rows = ['buttons.ink', 'buttons.opacity', 'clock.ink', 'clock.opacity', 'date.ink', 'date.opacity', 'measure.bar', 'measure.clock', 'measure.date'];
+    // A piece's own size, as a share of its designed measure; the face
+    // size above scales every piece together, on top of these.
+    var MEASURES = { buttons: ['measure.bar', 72], clock: ['measure.clock', 144], date: ['measure.date', 40] };
+    Object.keys(MEASURES).forEach(function (piece) {
+      var units = parseFloat(eff(MEASURES[piece][0], MEASURES[piece][1]));
+      var share = Math.round((isNaN(units) ? MEASURES[piece][1] : units) / MEASURES[piece][1] * 20) * 5;
+      $('look-' + piece + '-size').value = Math.min(250, Math.max(50, share));
+    });
     $('look-granular').checked = own_rows.some(function (k) { return s[k] !== undefined; });
     $('look-buttons-ink').value = hex(eff('buttons.ink'), '#f2f2f5'); $('look-buttons-opacity').value = percent(eff('buttons.opacity'), 100);
     $('look-clock-ink').value = hex(eff('clock.ink'), '#f2f2f5'); $('look-clock-opacity').value = percent(eff('clock.opacity'), 86);
@@ -1834,6 +1842,7 @@
       $('look-clock-value').textContent = t('MANAGER_LOOK_OPACITY') + ' ' + $('look-clock-opacity').value + '%';
       $('look-clock-glass-value').textContent = t('MANAGER_LOOK_TINT').toLowerCase() + ' ' + $('look-clock-glass').value + '%';
       $('look-date-value').textContent = t('MANAGER_LOOK_OPACITY') + ' ' + $('look-date-opacity').value + '%';
+      ['buttons', 'clock', 'date'].forEach(function (piece) { $('look-' + piece + '-size-value').textContent = t('MANAGER_LOOK_SIZE') + ' ' + $('look-' + piece + '-size').value + '%'; });
       $('look-clock-format').disabled = !$('look-clock-show').checked;
       $('look-date-format').disabled = !$('look-date-show').checked; $('look-date-place').disabled = !$('look-date-show').checked;
       $('look-clock-custom').hidden = !!$('look-clock-format').value || !$('look-clock-show').checked;
@@ -1841,7 +1850,7 @@
       $('look-pattern-hint').hidden = $('look-clock-custom').hidden && $('look-date-custom').hidden;
     };
     var watch = function (elements, mark) { elements.forEach(function (el) { $(el).oninput = function () { touched[mark || el] = true; show(); }; }); };
-    watch(['look-artwork', 'look-own', 'look-granular', 'look-glass', 'look-frost', 'look-buttons-opacity', 'look-clock-opacity', 'look-clock-glass', 'look-date-opacity']);
+    watch(['look-artwork', 'look-own', 'look-granular', 'look-glass', 'look-frost', 'look-buttons-opacity', 'look-clock-opacity', 'look-clock-glass', 'look-date-opacity', 'look-buttons-size', 'look-clock-size', 'look-date-size']);
     watch(['look-clock-show', 'look-clock-format', 'look-clock-custom'], 'clock');
     watch(['look-date-show', 'look-date-format', 'look-date-custom', 'look-date-place'], 'date');
     show();
@@ -1876,6 +1885,9 @@
         set['clock.ink'] = $('look-clock-ink').value; set['clock.opacity'] = (parseInt($('look-clock-opacity').value, 10) / 100).toFixed(2);
         set['clock.glass'] = (parseInt($('look-clock-glass').value, 10) / 100).toFixed(2);
         set['date.ink'] = $('look-date-ink').value; set['date.opacity'] = (parseInt($('look-date-opacity').value, 10) / 100).toFixed(2);
+        Object.keys(MEASURES).forEach(function (piece) {
+          set[MEASURES[piece][0]] = String(Math.round(MEASURES[piece][1] * parseInt($('look-' + piece + '-size').value, 10) / 100));
+        });
       } else if (!fresh) { own_rows.forEach(function (k) { set[k] = null; }); }
       api('POST', '/api/face', { set: set, reset: fresh }).then(function (r) { renderLook(r); toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); });
     };
