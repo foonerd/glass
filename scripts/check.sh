@@ -62,8 +62,15 @@ fi
 
 echo "check: page scripts"
 # The remote's settings page and the manager's page carry their script
-# inline; a browser runs all of it or none, so each must parse.
-python3 - bins/glass/src/remote/page.html plugin/manager/manage.html plugin/manager/anymote.html <<'PY'
+# inline; a browser runs all of it or none, so each must parse. The
+# scripts stay beside their pages until the lint has read them too.
+PAGES="bins/glass/src/remote/page.html plugin/manager/manage.html plugin/manager/anymote.html"
+PAGE_SCRIPTS=""
+for page in $PAGES; do PAGE_SCRIPTS="$PAGE_SCRIPTS $page.check.js"; done
+# shellcheck disable=SC2086
+trap 'rm -f $PAGE_SCRIPTS' EXIT
+# shellcheck disable=SC2086
+python3 - $PAGES <<'PY'
 import re, sys
 for path in sys.argv[1:]:
     text = open(path, encoding='utf-8').read()
@@ -72,13 +79,12 @@ for path in sys.argv[1:]:
         print(f"check: {path} has no script", file=sys.stderr); sys.exit(1)
     open(path + '.check.js', 'w', encoding='utf-8').write('\n'.join(blocks))
 PY
-for page in bins/glass/src/remote/page.html plugin/manager/manage.html plugin/manager/anymote.html; do
+for page in $PAGES; do
   if command -v node >/dev/null 2>&1; then
-    node --check "$page.check.js" || { rm -f "$page.check.js"; echo "check: the script of $page does not parse" >&2; exit 1; }
+    node --check "$page.check.js" || { echo "check: the script of $page does not parse" >&2; exit 1; }
   else
-    docker run --rm -v "$ROOT:/glass:ro" node:20-slim node --check "/glass/$page.check.js" || { rm -f "$page.check.js"; echo "check: the script of $page does not parse" >&2; exit 1; }
+    docker run --rm -v "$ROOT:/glass:ro" node:20-slim node --check "/glass/$page.check.js" || { echo "check: the script of $page does not parse" >&2; exit 1; }
   fi
-  rm -f "$page.check.js"
 done
 
 echo "check: plugin files"
@@ -103,6 +109,22 @@ elif command -v docker >/dev/null 2>&1; then
   docker run --rm -v "$ROOT/plugin:/plugin:ro" -w /plugin node:20-slim sh -c 'node --check index.js manager/face-page.js manager/facefeed.js && node --test manager/test/*.test.js'
 else
   echo "check: plugin: neither node nor docker found, skipped" >&2
+fi
+
+echo "check: undefined names"
+# A name nothing defines parses and passes the tests, and throws when its
+# line runs: the plugin's scripts, the browser module and the pages' own
+# scripts are linted for it, with one pinned ESLint fetched for the run.
+ESLINT="eslint@10.11.0"
+# shellcheck disable=SC2086
+LINT="npx --yes $ESLINT --config scripts/lint/eslint.config.js --no-warn-ignored plugin/index.js plugin/manager/*.js $PAGE_SCRIPTS"
+if command -v npx >/dev/null 2>&1; then
+  $LINT || { echo "check: a script uses a name nothing defines (or $ESLINT could not be fetched)" >&2; exit 1; }
+elif command -v docker >/dev/null 2>&1; then
+  docker run --rm -v "$ROOT:/glass:ro" -v glass-check-npm:/root/.npm -w /glass node:20-slim sh -c "$LINT" \
+    || { echo "check: a script uses a name nothing defines (or $ESLINT could not be fetched)" >&2; exit 1; }
+else
+  echo "check: undefined names: neither node nor docker found, skipped" >&2
 fi
 
 echo "check: clean"
