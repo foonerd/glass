@@ -551,6 +551,10 @@ class Manager {
     app.get('/face/face-page.js', function (req, res) {
       res.sendFile(path.join(__dirname, 'face-page.js'), { maxAge: 0 });
     });
+    // The look panel's model, which the page shares with its tests.
+    app.get('/look/lookmodel.js', function (req, res) {
+      res.sendFile(path.join(__dirname, 'lookmodel.js'), { maxAge: 0 });
+    });
     // A tap or a drag on the Face tab's controls: the command a display
     // would send down the channel, run the same way.
     app.post('/api/face/command', wrap(async function (req, res) {

@@ -93,6 +93,52 @@
   .meters .m img { width: 100%; display: block; aspect-ratio: 16 / 9; object-fit: contain; background: #0a0a0a; }
   .meters .m div { padding: 6px 8px; font-size: 13px; color: #ddd; word-break: break-word; }
   .checks { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 6px 14px; }
+  /* How the screen looks: the looks to choose from, a likeness of the screen (its measures in 720ths of its own height), the adjustments a section each. */
+  .looks { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin: 12px 0 18px; }
+  .look-card { padding: 0; text-align: left; border-radius: 8px; overflow: hidden; display: flex; flex-direction: column; }
+  .look-card.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+  .look-card .cap { padding: 7px 9px 9px; font-size: 13.5px; color: #fff; }
+  .look-card .cap small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+  .look-card .lp { border: 0; border-radius: 0; }
+  .look-cols { display: flex; gap: 22px; align-items: flex-start; flex-wrap: wrap; }
+  .look-side { flex: 1 1 340px; max-width: 520px; min-width: 0; }
+  /* Beside the adjustments the likeness stays in view while they scroll. */
+  @media (min-width: 820px) { .look-side { position: sticky; top: 84px; } }
+  .look-adjust { flex: 1 1 340px; min-width: 0; }
+  .lp { position: relative; container-type: size; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 8px; border: 1px solid var(--line); background: #111 center / cover no-repeat; --u: calc(var(--s, 1) * 100cqh / 720); font-weight: 700; line-height: 1; white-space: nowrap; }
+  .lp-bar { position: absolute; left: 0; right: 0; bottom: 0; height: var(--barh); display: flex; align-items: center; justify-content: space-around; }
+  .lp-bar svg { height: 50%; }
+  .lp-top { position: absolute; top: calc(var(--u) * 20); left: 50%; transform: translateX(-50%); }
+  .lp-mid { position: absolute; left: 0; right: 0; top: var(--from); bottom: var(--barh); display: flex; align-items: center; justify-content: center; }
+  .lp-plate { display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 8); max-width: 100%; overflow: hidden; }
+  .lp-top, .lp-plate { padding: calc(var(--u) * 12) calc(var(--u) * 28); }
+  .lp [data-open] { cursor: pointer; }
+  .lp [data-open]:hover, .lp [data-open]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  .seg button { border: 0; border-radius: 0; background: transparent; padding: 7px 14px; font-size: 14px; white-space: nowrap; }
+  .seg button + button { border-left: 1px solid var(--line); }
+  .seg button.on { background: var(--accent); color: #fff; }
+  button.acc { display: flex; justify-content: space-between; gap: 12px; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid #333; border-radius: 0; padding: 11px 2px; font-size: 14.5px; }
+  button.acc b { font-weight: 600; color: #fff; white-space: nowrap; }
+  button.acc .sum { color: var(--muted); font-size: 13.5px; text-align: right; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  button.acc[aria-expanded=true] { border-bottom-color: transparent; }
+  .acc-body { padding: 0 2px 8px 18px; border-bottom: 1px solid #333; }
+  .lf { display: grid; grid-template-columns: minmax(110px, 170px) 1fr; align-items: center; gap: 4px 14px; padding: 9px 0; }
+  .lf > .name { color: var(--text); font-size: 14px; }
+  .lf > div { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; min-width: 0; }
+  .lf > .hint { grid-column: 2; }
+  .lf select, .lf input[type=text] { width: auto; max-width: 100%; }
+  .lf .switch { font-size: 14px; }
+  .lf input[type=color] { width: 44px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 5px; background: none; cursor: pointer; }
+  .range { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 12.5px; flex: 1; white-space: nowrap; }
+  .range input { flex: 1; min-width: 80px; max-width: 240px; accent-color: var(--accent); }
+  input.look-toggle { appearance: none; -webkit-appearance: none; width: 40px; height: 22px; border-radius: 11px; background: #555; position: relative; cursor: pointer; margin: 0; flex: none; transition: background .15s; }
+  input.look-toggle::after { content: ''; position: absolute; left: 2px; top: 2px; width: 18px; height: 18px; border-radius: 50%; background: #fff; transition: left .15s; }
+  input.look-toggle:checked { background: var(--accent); }
+  input.look-toggle:checked::after { left: 20px; }
+  input.look-toggle:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  button.textlink, button.textlink:hover:not(:disabled) { background: none; border: 0; padding: 0; color: var(--accent); font-size: 13.5px; }
+  button.textlink:hover:not(:disabled) { text-decoration: underline; }
   /* A row or a flex box hidden by script stays hidden: the flag outranks every display rule. */
   [hidden] { display: none !important; }
   .modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.65); display: none; align-items: center; justify-content: center; z-index: 50; padding: 20px; }
@@ -342,32 +388,28 @@
         <div class="full" id="screen-owner" style="margin-top:10px"></div>
         <div class="full row" id="screen-owner-actions"></div>
         <div class="full row" id="screen-face-row" hidden><label id="screen-face-label" style="margin-right:8px"></label><select id="screen-face"><option value="normal"></option><option value="large"></option><option value="car"></option></select></div>
-        <div class="full" id="look-panel" hidden>
-          <div id="look-title" style="font-weight:600;margin:6px 0 8px"></div>
-          <div class="row" id="look-theme-row" hidden><label id="look-theme-label" style="min-width:110px"></label><select id="look-theme" style="max-width:320px"></select></div>
-          <div class="row" style="margin-top:8px"><label style="min-width:110px" id="look-colours-label"></label>
-            <label><input type="radio" name="look-colours" id="look-artwork"> <span id="look-artwork-label"></span></label>
-            <label><input type="radio" name="look-colours" id="look-own"> <span id="look-own-label"></span></label>
-            <span class="row" id="look-own-pickers"><span class="help" id="look-tint-label"></span><input type="color" id="look-tint"><span class="help" id="look-accent-label"></span><input type="color" id="look-accent"></span>
-          </div>
-          <div class="row" style="margin-top:8px"><label style="min-width:110px" id="look-glass-label"></label><input type="range" id="look-glass" min="40" max="95" step="1" style="max-width:260px"><span class="help" id="look-glass-value"></span></div>
-          <div class="row" style="margin-top:8px"><label><input type="checkbox" id="look-frost"> <span id="look-frost-label"></span></label><span class="help" id="look-frost-word"></span></div>
-          <div class="row" style="margin-top:8px"><label style="min-width:110px"><input type="checkbox" id="look-clock-show"> <span id="look-clock-show-label"></span></label><select id="look-clock-format" style="max-width:220px"></select><input type="text" id="look-clock-custom" maxlength="48" style="max-width:220px" hidden></div>
-          <div class="row" style="margin-top:8px"><label style="min-width:110px"><input type="checkbox" id="look-date-show"> <span id="look-date-show-label"></span></label><select id="look-date-format" style="max-width:240px"></select><input type="text" id="look-date-custom" maxlength="48" style="max-width:220px" hidden><select id="look-date-place" style="max-width:220px"></select></div>
-          <div class="help" id="look-pattern-hint" style="margin-top:4px" hidden></div>
-          <div class="row" style="margin-top:8px"><label><input type="checkbox" id="look-granular"> <span id="look-granular-label"></span></label></div>
-          <div id="look-granular-rows" hidden>
-            <div class="row" style="margin-top:6px"><label style="min-width:110px" id="look-buttons-label"></label><input type="color" id="look-buttons-ink"><input type="range" id="look-buttons-opacity" min="10" max="100" step="1" style="max-width:160px"><span class="help" id="look-buttons-value"></span><input type="range" id="look-buttons-size" min="50" max="250" step="5" style="max-width:160px"><span class="help" id="look-buttons-size-value"></span></div>
-            <div class="row" style="margin-top:6px"><label style="min-width:110px" id="look-clock-label"></label><input type="color" id="look-clock-ink"><input type="range" id="look-clock-opacity" min="10" max="100" step="1" style="max-width:160px"><span class="help" id="look-clock-value"></span><input type="range" id="look-clock-glass" min="0" max="95" step="1" style="max-width:160px"><span class="help" id="look-clock-glass-value"></span><label><input type="checkbox" id="look-clock-tint-own"> <span class="help" id="look-clock-tint-label"></span></label><input type="color" id="look-clock-tint"><input type="range" id="look-clock-size" min="50" max="250" step="5" style="max-width:160px"><span class="help" id="look-clock-size-value"></span></div>
-            <div class="row" style="margin-top:6px"><label style="min-width:110px" id="look-date-label"></label><input type="color" id="look-date-ink"><input type="range" id="look-date-opacity" min="10" max="100" step="1" style="max-width:160px"><span class="help" id="look-date-value"></span><label><input type="checkbox" id="look-date-tint-own"> <span class="help" id="look-date-tint-label"></span></label><input type="color" id="look-date-tint"><input type="range" id="look-date-size" min="50" max="250" step="5" style="max-width:160px"><span class="help" id="look-date-size-value"></span></div>
-          </div>
-          <div class="row" style="margin-top:10px"><button class="primary" id="btn-look-save"></button><button id="btn-look-reset"></button></div>
-        </div>
         <div class="screen-controls"><label id="screen-rotation-label"></label><select id="screen-rotation"><option value="0">0</option><option value="90">90</option><option value="180">180</option><option value="270">270</option></select></div>
         <div class="screen-controls"><label id="screen-pointer-label"></label><select id="screen-pointer"><option value="auto"></option><option value="show"></option><option value="hide"></option></select></div>
         <div class="full help screen-controls" id="screen-suggested"></div>
         <div class="full row screen-controls"><button class="primary" id="btn-screen-apply"></button></div>
       </div>
+    </div>
+    <div class="panel" id="look-panel" hidden>
+      <h2 id="look-title" style="margin:0 0 6px"></h2>
+      <div class="help" id="look-lead"></div>
+      <div class="looks" id="look-cards"></div>
+      <div class="look-cols">
+        <div class="look-side">
+          <div id="look-preview"></div>
+          <div class="seg" id="look-mode" style="margin-top:10px"><button data-mode="idle"></button><button data-mode="playing"></button></div>
+          <div class="help" id="look-preview-help" style="margin-top:8px"></div>
+        </div>
+        <div class="look-adjust">
+          <div class="help"><span id="look-adjust-title"></span> <span id="look-adjusted" hidden>· <span id="look-adjusted-word"></span> <button class="textlink" id="btn-look-plain"></button></span></div>
+          <div id="look-sections"></div>
+        </div>
+      </div>
+      <div class="row" style="margin-top:16px"><button class="primary" id="btn-look-save"></button><button id="btn-look-reset"></button><span class="help" id="look-save-note"></span></div>
     </div>
     <div class="panel" id="touch-map-panel">
       <h2 id="touch-map-title" style="margin:0 0 10px"></h2>
@@ -576,6 +618,7 @@
 <div class="toasts" id="toasts"></div>
 
 <script src="/face/face-page.js"></script>
+<script src="/look/lookmodel.js"></script>
 <script>
 (function () {
   'use strict';
@@ -1768,147 +1811,306 @@
   $('btn-touch-apply').onclick = function () {
     api('POST', '/api/touch', { interactive: $('touch-mode').value }).then(function (tc) { $('touch-mode').value = tc.interactive; toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); });
   };
-  // ---- the face's look ----------------------------------------------------
-  // A theme's choice and the user's own word over it: the colours from the
-  // artwork or their own, the glass's opacity, frost over a moving theme
-  // with the board's word beside it, the buttons and the clock on their
-  // own where wanted, and the way back to the defaults.
+  // ---- how the screen looks -----------------------------------------------
+  // A look is chosen from a row of them, the one that follows the artwork
+  // first; under it a likeness of the player's screen and the adjustments
+  // in plain words, a section for each part of the screen, and a click on
+  // a part of the likeness opens its section. Nothing reaches the player
+  // until the save. The model is lookmodel.js, which its tests share.
+  var LOOK = window.GlassLook;
+  var lookUi = { f: null, chosen: '', base: null, v: null, saved: null, own: {}, picked: {}, open: '', more: {}, mode: 'idle', picture: '' };
+  var LOOK_ICONS = {
+    previous: '<rect x="5" y="5" width="2.6" height="14"/><path d="M19 5v14L9 12z"/>',
+    play: '<path d="M7 4l13 8-13 8z"/>',
+    pause: '<rect x="6" y="4.5" width="4" height="15"/><rect x="14" y="4.5" width="4" height="15"/>',
+    next: '<path d="M5 5v14l10-7z"/><rect x="16.4" y="5" width="2.6" height="14"/>',
+    minus: '<rect x="5" y="10.8" width="14" height="2.4" rx="1.2"/>',
+    plus: '<rect x="5" y="10.8" width="14" height="2.4" rx="1.2"/><rect x="10.8" y="5" width="2.4" height="14" rx="1.2"/>',
+    more: '<circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>'
+  };
+  // The picture behind the likeness: the theme on the screen now.
+  function lookPicture() {
+    return api('GET', '/api/status').then(function (s) {
+      if (!s.activeTheme) return '';
+      return api('GET', '/api/themes/' + encodeURIComponent(s.activeTheme) + '/previews').then(function (data) {
+        var meters = data.meters || [];
+        var shown = meters.filter(function (m) { return s.showing && m.meter === s.showing.meter; })[0] || meters[0];
+        return shown ? shown.url : '';
+      });
+    }).catch(function () { return ''; });
+  }
   function loadLook() {
-    return api('GET', '/api/face').then(renderLook).catch(function (e) { toast(errorText(e), 'error'); });
+    return Promise.all([api('GET', '/api/face'), lookPicture()]).then(function (r) { lookUi.picture = r[1]; renderLook(r[0]); }).catch(function (e) { toast(errorText(e), 'error'); });
   }
-  // The patterns offered for the clock and the date, each with what it
-  // gives on a Thursday afternoon; any other pattern is typed in.
-  var CLOCK_PATTERNS = [['%H:%M', '13:05'], ['%H:%M:%S', '13:05:09'], ['%-I:%M %p', '1:05 PM'], ['%-I:%M:%S %p', '1:05:09 PM']];
-  var DATE_PATTERNS = [['%A %-d %B', 'Thursday 1 October'], ['%A, %B %-d', 'Thursday, October 1'], ['%a %-d %b %Y', 'Thu 1 Oct 2026'], ['%d/%m/%Y', '01/10/2026'], ['%m/%d/%Y', '10/01/2026'], ['%d.%m.%Y', '01.10.2026'], ['%Y-%m-%d', '2026-10-01']];
-  function fillPatterns(select, custom, patterns, value) {
-    $(select).innerHTML = patterns.map(function (p) { return '<option value="' + esc(p[0]) + '">' + esc(p[1]) + '</option>'; }).join('') + '<option value="">' + esc(t('MANAGER_LOOK_PATTERN_OWN')) + '</option>';
-    var offered = patterns.some(function (p) { return p[0] === value; });
-    $(select).value = offered ? value : '';
-    $(custom).value = offered ? '' : value;
+  function lookFind(name) { return ((lookUi.f && lookUi.f.looks) || []).filter(function (l) { return l.name === name; })[0]; }
+  function lookDirty() { return !!lookUi.saved && (lookUi.chosen !== lookUi.saved.chosen || LOOK.differs(lookUi.saved.v, lookUi.v)); }
+  function lookPlace(v) { var place = String(v['date.place']).toLowerCase(); return place === 'above' || place === 'below' ? place : 'top'; }
+  // A pattern that is none of those offered is one of the user's own, and
+  // stays so while it is typed, whatever it passes through.
+  function lookOwnPatterns() {
+    lookUi.own = { 'clock.format': LOOK.CLOCK_PATTERNS.indexOf(lookUi.v['clock.format']) === -1, 'date.format': LOOK.DATE_PATTERNS.indexOf(lookUi.v['date.format']) === -1 };
   }
-  function patternOf(select, custom) { return $(select).value || $(custom).value.trim(); }
+  // The colour a picker starts at when a part takes one of its own: what
+  // the part shows now.
+  function lookPick(key) {
+    if (/\.ink$/.test(key)) return LOOK.colourOf(lookUi.v['colours.ink']) || LOOK.BUILTIN['colours.ink'];
+    if (key === 'colours.accent') return '#ebebf0';
+    return LOOK.colourOf(lookUi.v['colours.tint']) || '#0e0e10';
+  }
+  // The screen as a look would draw it, by the page's own means: the
+  // face's measures, its backgrounds as a colour over the theme's picture.
+  // A likeness, not the player's renderer.
+  function lookLikeness(v, opts) {
+    var ink = LOOK.colourOf(v['colours.ink']) || LOOK.BUILTIN['colours.ink'];
+    var tint = LOOK.colourOf(v['colours.tint']) || '#0e0e10';
+    var units = function (key) { return parseFloat(v[key]) || parseFloat(LOOK.BUILTIN[key]); };
+    var blur = LOOK.frostOn(v, opts.suits) ? 'backdrop-filter:blur(calc(var(--u) * 14));-webkit-backdrop-filter:blur(calc(var(--u) * 14));' : '';
+    var edge = LOOK.share(v['glass.hairline'], 0);
+    var glass = function (key, colour, line) {
+      var solid = LOOK.share(v[key], 0);
+      return solid ? 'background:rgba(' + LOOK.rgb(LOOK.colourOf(colour) || tint) + ',' + solid + ');box-shadow:inset ' + line + ' rgba(255,255,255,' + edge + ');' + blur : '';
+    };
+    var words = function (piece) { return 'rgba(' + LOOK.rgb(LOOK.colourOf(v[piece + '.ink']) || ink) + ',' + LOOK.share(v[piece + '.opacity'], 1) + ')'; };
+    var open = function (section) { return opts.pick ? ' data-open="' + section + '" role="button" tabindex="0" title="' + esc(t('MANAGER_LOOK_PICK')) + '"' : ''; };
+    var now = new Date();
+    var html = '';
+    var from = '0px';
+    if (opts.mode === 'idle') {
+      var clock = LOOK.isOn(v['clock.show']) ? '<div style="font-size:calc(var(--u) * ' + units('measure.clock') + ');color:' + words('clock') + '">' + esc(LOOK.strftime(v['clock.format'], now)) + '</div>' : '';
+      var place = lookPlace(v);
+      var dateWords = 'font-size:calc(var(--u) * ' + units('measure.date') + ');color:' + words('date') + ';';
+      var dateText = esc(LOOK.strftime(v['date.format'], now));
+      var beside = '';
+      if (LOOK.isOn(v['date.show'])) {
+        if (place === 'top') {
+          html += '<div class="lp-top"' + open('date') + ' style="' + dateWords + glass('date.glass', v['date.tint'], '0 0 0 1px') + '">' + dateText + '</div>';
+          from = 'calc(var(--u) * ' + (64 + units('measure.date')) + ')';
+        } else {
+          beside = '<div' + open('date') + ' style="' + dateWords + '">' + dateText + '</div>';
+        }
+      }
+      if (clock || beside) html += '<div class="lp-mid"><div class="lp-plate"' + open(clock ? 'clock' : 'date') + ' style="' + glass('clock.glass', v['clock.tint'], '0 0 0 1px') + '">' + (place === 'above' ? beside + clock : clock + beside) + '</div></div>';
+    }
+    var fill = words('buttons');
+    html += '<div class="lp-bar"' + open('buttons') + ' style="' + glass('glass.bar', v['colours.tint'], '0 1px') + '">' + ['previous', opts.mode === 'idle' ? 'play' : 'pause', 'next', 'minus', 'plus', 'more'].map(function (name) {
+      return '<svg viewBox="0 0 24 24" style="fill:' + fill + '">' + LOOK_ICONS[name] + '</svg>';
+    }).join('') + '</div>';
+    var picture = opts.picture ? ';background-image:url(&quot;' + esc(opts.picture.replace(/["\\()\s]/g, function (c) { return '%' + c.charCodeAt(0).toString(16); })) + '&quot;)' : '';
+    return '<div class="lp" style="--s:' + opts.scale + ';--from:' + from + ';--barh:clamp(5.56cqh, calc(var(--u) * ' + units('measure.bar') + '), 33.3cqh)' + picture + '">' + html + '</div>';
+  }
+  // The adjustments: a section for each part, the finer ones behind More.
+  function lookSections() {
+    var field = function (label, control, hint, when) {
+      return '<div class="lf"' + (when ? ' data-when="' + when + '"' : '') + '><span class="name">' + esc(t(label)) + '</span><div>' + control + '</div>' + (hint ? '<div class="help hint">' + hint + '</div>' : '') + '</div>';
+    };
+    var slider = function (key, kind, min, max, step, from, to) {
+      return '<span class="range"><span>' + esc(t('MANAGER_LOOK_END_' + from)) + '</span><input type="range" data-key="' + key + '" data-kind="' + kind + '" min="' + min + '" max="' + max + '" step="' + step + '" aria-label="' + esc(t('MANAGER_LOOK_END_' + from) + ' – ' + t('MANAGER_LOOK_END_' + to)) + '"><span>' + esc(t('MANAGER_LOOK_END_' + to)) + '</span></span>';
+    };
+    var onoff = function (key, kind) { return '<input type="checkbox" class="look-toggle" data-key="' + key + '" data-kind="' + kind + '">'; };
+    var colour = function (key) { return '<input type="color" data-key="' + key + '" data-kind="colour">'; };
+    // A colour that is a word (from the artwork, the same as the rest) until it is one of its own.
+    var word = function (key, label) { return '<label class="switch"><input type="checkbox" data-key="' + key + '" data-kind="word"> <span>' + esc(t(label)) + '</span></label>' + colour(key); };
+    var pattern = function (key, list) {
+      return '<select data-key="' + key + '" data-kind="pattern">' + list.map(function (p) { return '<option value="' + esc(p) + '">' + esc(LOOK.strftime(p, LOOK.sample())) + '</option>'; }).join('') + '<option value="">' + esc(t('MANAGER_LOOK_PATTERN_OWN')) + '</option></select>' +
+        '<input type="text" data-key="' + key + '" data-kind="own" maxlength="48" size="16" spellcheck="false">';
+    };
+    var places = '<select data-key="date.place" data-kind="place">' + ['top', 'above', 'below'].map(function (p) { return '<option value="' + p + '">' + esc(t('MANAGER_LOOK_DATE_' + p.toUpperCase())) + '</option>'; }).join('') + '</select>';
+    var hint = function (when) { return '<div class="help" data-when="' + when + '" style="padding:0 0 8px">' + esc(t('MANAGER_LOOK_PATTERN_HINT')) + '</div>'; };
+    // A piece's own colour, strength and background, behind its More.
+    var finer = function (piece, when) {
+      return [field('MANAGER_LOOK_COLOUR', word(piece + '.ink', 'MANAGER_LOOK_SAME')),
+        field('MANAGER_LOOK_STRENGTH', slider(piece + '.opacity', 'share', 10, 100, 1, 'FAINT', 'FULL'))].concat(piece === 'buttons' ? [] : [
+        field('MANAGER_LOOK_BACKGROUND', slider(piece + '.glass', 'share', 0, 100, 1, 'NONE', 'SOLID'), '', when),
+        field('MANAGER_LOOK_BACKGROUND_COLOUR', word(piece + '.tint', 'MANAGER_LOOK_SAME'), '', when)]);
+    };
+    var sections = [
+      ['colours', 'MANAGER_LOOK_COLOURS', [
+        field('MANAGER_LOOK_BACKGROUND_COLOUR', word('colours.tint', 'MANAGER_LOOK_FROM_ARTWORK')),
+        field('MANAGER_LOOK_HIGHLIGHT', word('colours.accent', 'MANAGER_LOOK_FROM_ARTWORK'), esc(t('MANAGER_LOOK_HIGHLIGHT_HINT'))),
+        field('MANAGER_LOOK_INK', colour('colours.ink'))]],
+      ['backgrounds', 'MANAGER_LOOK_BACKGROUNDS', [
+        field('MANAGER_LOOK_HOW_SOLID', slider('glass.bar', 'solid', 10, 100, 1, 'CLEAR', 'SOLID')),
+        field('MANAGER_LOOK_BLUR', onoff('glass.frost', 'frost'), esc(t(lookUi.f.frostSuits ? 'MANAGER_LOOK_BLUR_SUITS' : 'MANAGER_LOOK_BLUR_HEAVY')))]],
+      ['clock', 'MANAGER_LOOK_CLOCK', [
+        field('MANAGER_LOOK_SHOW_CLOCK', onoff('clock.show', 'switch')),
+        field('MANAGER_LOOK_SHOWS', pattern('clock.format', LOOK.CLOCK_PATTERNS), '', 'clock'),
+        hint('own:clock.format'),
+        field('MANAGER_LOOK_SIZE', slider('measure.clock', 'size', 50, 250, 5, 'SMALL', 'LARGE'), '', 'clock')],
+        'MANAGER_LOOK_MORE_PIECE', finer('clock', '')],
+      ['date', 'MANAGER_LOOK_DATE', [
+        field('MANAGER_LOOK_SHOW_DATE', onoff('date.show', 'switch')),
+        field('MANAGER_LOOK_SHOWS', pattern('date.format', LOOK.DATE_PATTERNS), '', 'date'),
+        hint('own:date.format'),
+        field('MANAGER_LOOK_WHERE', places, '', 'date'),
+        field('MANAGER_LOOK_SIZE', slider('measure.date', 'size', 50, 250, 5, 'SMALL', 'LARGE'), '', 'date')],
+        'MANAGER_LOOK_MORE_PIECE', finer('date', 'date-top')],
+      ['buttons', 'MANAGER_LOOK_BUTTONS', [
+        field('MANAGER_LOOK_SIZE', slider('measure.bar', 'size', 50, 250, 5, 'SMALL', 'LARGE'))],
+        'MANAGER_LOOK_MORE_BUTTONS', finer('buttons', '')]
+    ];
+    return sections.map(function (s) {
+      return '<button class="acc" data-section="' + s[0] + '" aria-expanded="false"><b><span class="mark"></span> ' + esc(t(s[1])) + '</b><span class="sum"></span></button>' +
+        '<div class="acc-body" data-body="' + s[0] + '" hidden>' + s[2].join('') +
+        (s[3] ? '<div data-when="' + s[0] + '" style="padding:6px 0"><button class="textlink" data-more="' + s[0] + '" data-label="' + s[3] + '"></button></div><div data-finer="' + s[0] + '" hidden>' + s[4].join('') + '</div>' : '') + '</div>';
+    }).join('');
+  }
+  // The looks to choose from, each as it comes.
+  function lookCards(scale) {
+    var f = lookUi.f;
+    var cards = [{ name: '', title: t('MANAGER_LOOK_BUILTIN'), says: t('MANAGER_LOOK_BUILTIN_SAYS'), keys: {} }].concat((f.looks || []).map(function (l) {
+      return { name: l.name, title: l.name, says: l.keys['theme.description'] || '', keys: l.keys };
+    }));
+    return cards.map(function (c) {
+      return '<button class="look-card" data-look="' + esc(c.name) + '">' + lookLikeness(LOOK.lay(f.builtIn, c.keys), { mode: 'idle', scale: scale, suits: !!f.frostSuits, picture: lookUi.picture, pick: false }) +
+        '<div class="cap">' + esc(c.title) + '<small>' + esc(c.says) + '</small></div></button>';
+    }).join('');
+  }
+  // The panel as the model stands: the cards too where the looks, the
+  // picture or the face size may have changed.
+  function paintLook(cards) {
+    var f = lookUi.f;
+    var v = lookUi.v;
+    if (!f) return;
+    var suits = !!f.frostSuits;
+    var scale = { large: 1.4, car: 2 }[$('screen-face').value] || 1;
+    var place = lookPlace(v);
+    if (cards) $('look-cards').innerHTML = lookCards(scale);
+    Array.prototype.forEach.call($('look-cards').children, function (card) {
+      var on = card.getAttribute('data-look') === lookUi.chosen;
+      card.classList.toggle('on', on);
+      card.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    $('look-preview').innerHTML = lookLikeness(v, { mode: lookUi.mode, scale: scale, suits: suits, picture: lookUi.picture, pick: true });
+    Array.prototype.forEach.call($('look-mode').children, function (b) { b.classList.toggle('on', b.getAttribute('data-mode') === lookUi.mode); });
+    Array.prototype.forEach.call($('look-sections').querySelectorAll('[data-key]'), function (el) {
+      var key = el.getAttribute('data-key');
+      var kind = el.getAttribute('data-kind');
+      var colour = LOOK.colourOf(v[key]);
+      if (kind === 'switch') el.checked = LOOK.isOn(v[key]);
+      else if (kind === 'frost') el.checked = LOOK.frostOn(v, suits);
+      else if (kind === 'word') el.checked = !colour;
+      else if (kind === 'colour') {
+        // Beside a word the picker shows only for a colour of the part's own.
+        el.hidden = !colour && !!el.parentNode.querySelector('[data-kind="word"]');
+        el.value = colour || lookUi.picked[key] || lookPick(key);
+      } else if (kind === 'share' || kind === 'solid') el.value = Math.round(LOOK.share(v[key], 0) * 100);
+      else if (kind === 'size') { el.value = LOOK.sizeOf(key, v[key]); el.title = el.value + '%'; }
+      else if (kind === 'pattern') el.value = lookUi.own[key] ? '' : v[key];
+      else if (kind === 'own') { el.hidden = !lookUi.own[key]; if (document.activeElement !== el) el.value = v[key]; }
+      else if (kind === 'place') el.value = place;
+    });
+    // A row shows while it has something to say: a clock's rows while the
+    // clock shows, a date's own background while the date stands at the top.
+    var when = { clock: LOOK.isOn(v['clock.show']), date: LOOK.isOn(v['date.show']), buttons: true };
+    when['date-top'] = when.date && place === 'top';
+    when['own:clock.format'] = when.clock && lookUi.own['clock.format'];
+    when['own:date.format'] = when.date && lookUi.own['date.format'];
+    Array.prototype.forEach.call($('look-sections').querySelectorAll('[data-when]'), function (el) { el.hidden = !when[el.getAttribute('data-when')]; });
+    var fixed = [LOOK.colourOf(v['colours.tint']), LOOK.colourOf(v['colours.accent'])].filter(Boolean).length;
+    var sums = {
+      colours: t(['MANAGER_LOOK_SUM_ARTWORK', 'MANAGER_LOOK_SUM_MIXED', 'MANAGER_LOOK_SUM_OWN'][fixed]),
+      backgrounds: t('MANAGER_LOOK_SOLID_' + LOOK.solidWord(v['glass.bar'])) + (LOOK.frostOn(v, suits) ? ', ' + t('MANAGER_LOOK_SUM_BLURRED') : ''),
+      clock: when.clock ? LOOK.strftime(v['clock.format'], LOOK.sample()) + ' · ' + t('MANAGER_LOOK_SIZE_' + LOOK.sizeWord('measure.clock', v['measure.clock'])) : t('MANAGER_LOOK_SUM_OFF'),
+      date: when.date ? LOOK.strftime(v['date.format'], LOOK.sample()) + ' · ' + t('MANAGER_LOOK_DATE_' + place.toUpperCase()) : t('MANAGER_LOOK_SUM_OFF'),
+      buttons: t('MANAGER_LOOK_SIZE_' + LOOK.sizeWord('measure.bar', v['measure.bar']))
+    };
+    Array.prototype.forEach.call($('look-sections').querySelectorAll('[data-section]'), function (head) {
+      var name = head.getAttribute('data-section');
+      var open = lookUi.open === name;
+      head.setAttribute('aria-expanded', open ? 'true' : 'false');
+      head.querySelector('.mark').textContent = open ? '▾' : '▸';
+      head.querySelector('.sum').textContent = sums[name];
+      $('look-sections').querySelector('[data-body="' + name + '"]').hidden = !open;
+    });
+    Array.prototype.forEach.call($('look-sections').querySelectorAll('[data-more]'), function (b) {
+      var name = b.getAttribute('data-more');
+      b.textContent = t(lookUi.more[name] ? 'MANAGER_LOOK_LESS' : b.getAttribute('data-label'));
+      $('look-sections').querySelector('[data-finer="' + name + '"]').hidden = !lookUi.more[name] || !when[name];
+    });
+    $('look-adjusted').hidden = !LOOK.differs(lookUi.base, v);
+    $('btn-look-save').disabled = !lookDirty();
+  }
   function renderLook(f) {
     var s = f.settings || {};
-    var theme = f.theme || {};
-    state.look = f;
-    // What stands: the user's own word, else the theme's, else the built-in look's.
-    var eff = function (key, fallback) { return s[key] !== undefined ? s[key] : (theme[key] !== undefined ? theme[key] : fallback); };
-    var on = function (key, fallback) { var v = String(eff(key, fallback ? 'on' : 'off')).toLowerCase(); return ['on', 'true', 'yes', '1'].indexOf(v) !== -1; };
-    var hex = function (v, fallback) { return /^#[0-9a-fA-F]{6}$/.test(String(v || '')) ? String(v).toLowerCase() : fallback; };
-    var percent = function (v, fallback) { var n = Math.round(parseFloat(v) * 100); return isNaN(n) ? fallback : n; };
-    var labels = { 'look-title': 'MANAGER_LOOK_TITLE', 'look-theme-label': 'MANAGER_LOOK_THEME', 'look-colours-label': 'MANAGER_LOOK_COLOURS', 'look-artwork-label': 'MANAGER_LOOK_ARTWORK', 'look-own-label': 'MANAGER_LOOK_OWN',
-      'look-tint-label': 'MANAGER_LOOK_TINT', 'look-accent-label': 'MANAGER_LOOK_ACCENT', 'look-glass-label': 'MANAGER_LOOK_GLASS', 'look-frost-label': 'MANAGER_LOOK_FROST', 'look-granular-label': 'MANAGER_LOOK_GRANULAR',
-      'look-buttons-label': 'MANAGER_LOOK_BUTTONS', 'look-clock-label': 'MANAGER_LOOK_CLOCK', 'look-date-label': 'MANAGER_LOOK_DATE', 'look-clock-show-label': 'MANAGER_LOOK_CLOCK', 'look-date-show-label': 'MANAGER_LOOK_DATE',
-      'look-pattern-hint': 'MANAGER_LOOK_PATTERN_HINT', 'btn-look-save': 'MANAGER_SAVE', 'btn-look-reset': 'MANAGER_LOOK_RESET' };
+    lookUi.f = f;
+    lookUi.chosen = lookFind(s.theme) ? s.theme : '';
+    lookUi.base = LOOK.lay(f.builtIn, (lookFind(lookUi.chosen) || {}).keys);
+    lookUi.v = LOOK.lay(lookUi.base, s);
+    lookUi.saved = { chosen: lookUi.chosen, v: LOOK.lay(lookUi.v) };
+    lookOwnPatterns();
+    var labels = { 'look-title': 'MANAGER_LOOK_TITLE', 'look-lead': 'MANAGER_LOOK_LEAD', 'look-preview-help': 'MANAGER_LOOK_PREVIEW_HELP', 'look-adjust-title': 'MANAGER_LOOK_ADJUST', 'look-adjusted-word': 'MANAGER_LOOK_ADJUSTED',
+      'btn-look-plain': 'MANAGER_LOOK_PLAIN', 'btn-look-save': 'MANAGER_SAVE', 'btn-look-reset': 'MANAGER_LOOK_RESET', 'look-save-note': 'MANAGER_LOOK_SAVE_NOTE' };
     Object.keys(labels).forEach(function (el) { $(el).textContent = t(labels[el]); });
-    var themes = f.themes || [];
-    var chosen = themes.indexOf(s.theme) === -1 ? '' : s.theme;
-    $('look-theme-row').hidden = !themes.length && !s.theme;
-    $('look-theme').innerHTML = [''].concat(themes).map(function (name) { return '<option value="' + esc(name) + '">' + esc(name || t('MANAGER_LOOK_THEME_BUILTIN')) + '</option>'; }).join('');
-    $('look-theme').value = chosen;
-    var own = !!(hex(eff('colours.tint'), '') || hex(eff('colours.accent'), ''));
-    $('look-own').checked = own; $('look-artwork').checked = !own;
-    $('look-tint').value = hex(eff('colours.tint'), '#0e0e10'); $('look-accent').value = hex(eff('colours.accent'), '#ebebf0');
-    $('look-glass').value = Math.min(95, Math.max(40, percent(eff('glass.bar'), 75)));
-    var frost = String(eff('glass.frost', 'auto')).toLowerCase();
-    $('look-frost').checked = frost === 'on' || (frost !== 'off' && !!f.frostSuits);
-    $('look-frost-word').textContent = t(f.frostSuits ? 'MANAGER_LOOK_FROST_SUITS' : 'MANAGER_LOOK_FROST_HEAVY');
-    $('look-clock-show').checked = on('clock.show', true);
-    fillPatterns('look-clock-format', 'look-clock-custom', CLOCK_PATTERNS, eff('clock.format', '%H:%M'));
-    $('look-date-show').checked = on('date.show', false);
-    fillPatterns('look-date-format', 'look-date-custom', DATE_PATTERNS, eff('date.format', '%A %-d %B'));
-    $('look-date-place').innerHTML = [['top', 'MANAGER_LOOK_DATE_TOP'], ['above', 'MANAGER_LOOK_DATE_ABOVE'], ['below', 'MANAGER_LOOK_DATE_BELOW']].map(function (p) { return '<option value="' + p[0] + '">' + esc(t(p[1])) + '</option>'; }).join('');
-    $('look-date-place').value = ['top', 'above', 'below'].indexOf(String(eff('date.place', 'top')).toLowerCase()) === -1 ? 'top' : String(eff('date.place', 'top')).toLowerCase();
-    var own_rows = ['buttons.ink', 'buttons.opacity', 'clock.ink', 'clock.opacity', 'date.ink', 'date.opacity', 'measure.bar', 'measure.clock', 'measure.date', 'clock.tint', 'date.tint'];
-    // The clock's glass and the date's: the theme's tint, or a colour of their own.
-    ['clock', 'date'].forEach(function (piece) {
-      var colour = hex(eff(piece + '.tint'), '');
-      $('look-' + piece + '-tint-own').checked = !!colour;
-      $('look-' + piece + '-tint').value = colour || hex(eff('colours.tint'), '#0e0e10');
-      $('look-' + piece + '-tint-label').textContent = t('MANAGER_LOOK_TINT_OWN');
-    });
-    // A piece's own size, as a share of its designed measure; the face
-    // size above scales every piece together, on top of these.
-    var MEASURES = { buttons: ['measure.bar', 72], clock: ['measure.clock', 144], date: ['measure.date', 40] };
-    Object.keys(MEASURES).forEach(function (piece) {
-      var units = parseFloat(eff(MEASURES[piece][0], MEASURES[piece][1]));
-      var share = Math.round((isNaN(units) ? MEASURES[piece][1] : units) / MEASURES[piece][1] * 20) * 5;
-      $('look-' + piece + '-size').value = Math.min(250, Math.max(50, share));
-    });
-    $('look-granular').checked = own_rows.some(function (k) { return s[k] !== undefined; });
-    $('look-buttons-ink').value = hex(eff('buttons.ink'), '#f2f2f5'); $('look-buttons-opacity').value = percent(eff('buttons.opacity'), 100);
-    $('look-clock-ink').value = hex(eff('clock.ink'), '#f2f2f5'); $('look-clock-opacity').value = percent(eff('clock.opacity'), 86);
-    $('look-clock-glass').value = Math.min(95, Math.max(0, percent(eff('clock.glass'), 55)));
-    $('look-date-ink').value = hex(eff('date.ink'), '#f2f2f5'); $('look-date-opacity').value = percent(eff('date.opacity'), 86);
-    var touched = {};
-    var show = function () {
-      $('look-own-pickers').hidden = !$('look-own').checked;
-      $('look-granular-rows').hidden = !$('look-granular').checked;
-      $('look-glass-value').textContent = $('look-glass').value + '%';
-      $('look-buttons-value').textContent = t('MANAGER_LOOK_OPACITY') + ' ' + $('look-buttons-opacity').value + '%';
-      $('look-clock-value').textContent = t('MANAGER_LOOK_OPACITY') + ' ' + $('look-clock-opacity').value + '%';
-      $('look-clock-glass-value').textContent = t('MANAGER_LOOK_TINT').toLowerCase() + ' ' + $('look-clock-glass').value + '%';
-      $('look-date-value').textContent = t('MANAGER_LOOK_OPACITY') + ' ' + $('look-date-opacity').value + '%';
-      ['clock', 'date'].forEach(function (piece) { $('look-' + piece + '-tint').hidden = !$('look-' + piece + '-tint-own').checked; });
-      ['buttons', 'clock', 'date'].forEach(function (piece) { $('look-' + piece + '-size-value').textContent = t('MANAGER_LOOK_SIZE') + ' ' + $('look-' + piece + '-size').value + '%'; });
-      $('look-clock-format').disabled = !$('look-clock-show').checked;
-      $('look-date-format').disabled = !$('look-date-show').checked; $('look-date-place').disabled = !$('look-date-show').checked;
-      $('look-clock-custom').hidden = !!$('look-clock-format').value || !$('look-clock-show').checked;
-      $('look-date-custom').hidden = !!$('look-date-format').value || !$('look-date-show').checked;
-      $('look-pattern-hint').hidden = $('look-clock-custom').hidden && $('look-date-custom').hidden;
-    };
-    var watch = function (elements, mark) { elements.forEach(function (el) { $(el).oninput = function () { touched[mark || el] = true; show(); }; }); };
-    watch(['look-artwork', 'look-own', 'look-granular', 'look-glass', 'look-frost', 'look-buttons-opacity', 'look-clock-opacity', 'look-clock-glass', 'look-date-opacity', 'look-buttons-size', 'look-clock-size', 'look-date-size', 'look-clock-tint-own', 'look-date-tint-own']);
-    watch(['look-clock-show', 'look-clock-format', 'look-clock-custom'], 'clock');
-    watch(['look-date-show', 'look-date-format', 'look-date-custom', 'look-date-place'], 'date');
-    show();
-    $('btn-look-save').onclick = function () {
-      var set = {};
-      var picked = $('look-theme').value;
-      // A theme is taken as its author made it: choosing another puts the
-      // user's own word aside, to be said again over the new one.
-      var fresh = picked !== chosen;
-      set.theme = picked || null;
-      if ($('look-own').checked) { set['colours.tint'] = $('look-tint').value; set['colours.accent'] = $('look-accent').value; }
-      else if (touched['look-artwork'] && own) { set['colours.tint'] = 'artwork'; set['colours.accent'] = 'artwork'; }
-      // One slider for every glass, each keeping its step from the bar's:
-      // the sheet a little denser, the clock's and the date's lighter.
-      if (touched['look-glass']) {
-        var g = parseInt($('look-glass').value, 10) / 100;
-        set['glass.bar'] = g.toFixed(2); set['glass.sheet'] = Math.min(1, g + 0.03).toFixed(2);
-        set['clock.glass'] = Math.max(0.1, g - 0.2).toFixed(2); set['date.glass'] = Math.max(0.1, g - 0.2).toFixed(2);
-      }
-      if (touched['look-frost']) { set['glass.frost'] = $('look-frost').checked ? 'on' : 'off'; }
-      if (touched.clock) {
-        set['clock.show'] = $('look-clock-show').checked ? 'on' : 'off';
-        if (patternOf('look-clock-format', 'look-clock-custom')) set['clock.format'] = patternOf('look-clock-format', 'look-clock-custom');
-      }
-      if (touched.date) {
-        set['date.show'] = $('look-date-show').checked ? 'on' : 'off';
-        if (patternOf('look-date-format', 'look-date-custom')) set['date.format'] = patternOf('look-date-format', 'look-date-custom');
-        set['date.place'] = $('look-date-place').value;
-      }
-      if ($('look-granular').checked) {
-        set['buttons.ink'] = $('look-buttons-ink').value; set['buttons.opacity'] = (parseInt($('look-buttons-opacity').value, 10) / 100).toFixed(2);
-        set['clock.ink'] = $('look-clock-ink').value; set['clock.opacity'] = (parseInt($('look-clock-opacity').value, 10) / 100).toFixed(2);
-        set['clock.glass'] = (parseInt($('look-clock-glass').value, 10) / 100).toFixed(2);
-        set['date.ink'] = $('look-date-ink').value; set['date.opacity'] = (parseInt($('look-date-opacity').value, 10) / 100).toFixed(2);
-        Object.keys(MEASURES).forEach(function (piece) {
-          set[MEASURES[piece][0]] = String(Math.round(MEASURES[piece][1] * parseInt($('look-' + piece + '-size').value, 10) / 100));
-        });
-        // A glass of its own takes its colour; one that follows the theme's
-        // says so where the theme gave it a colour, else has no word at all.
-        ['clock', 'date'].forEach(function (piece) {
-          var themed = hex(theme[piece + '.tint'], '');
-          set[piece + '.tint'] = $('look-' + piece + '-tint-own').checked ? $('look-' + piece + '-tint').value : (themed ? 'tint' : null);
-        });
-      } else if (!fresh) { own_rows.forEach(function (k) { set[k] = null; }); }
-      api('POST', '/api/face', { set: set, reset: fresh }).then(function (r) { renderLook(r); toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); });
-    };
-    $('btn-look-reset').onclick = function () {
-      api('POST', '/api/face', { set: {}, reset: true }).then(function (r) { renderLook(r); toast(t('MANAGER_LOOK_RESET_DONE')); }).catch(function (e) { toast(errorText(e), 'error'); });
-    };
+    Array.prototype.forEach.call($('look-mode').children, function (b) { b.textContent = t(b.getAttribute('data-mode') === 'idle' ? 'MANAGER_LOOK_IDLE' : 'MANAGER_LOOK_PLAYING'); });
+    $('look-sections').innerHTML = lookSections();
+    paintLook(true);
   }
+  // A look is taken as it comes; going back to the saved one brings the
+  // saved adjustments with it.
+  function lookChoose(name) {
+    if (name === lookUi.chosen) return;
+    lookUi.chosen = name;
+    lookUi.base = LOOK.lay(lookUi.f.builtIn, (lookFind(name) || {}).keys);
+    lookUi.v = LOOK.lay(name === lookUi.saved.chosen ? lookUi.saved.v : lookUi.base);
+    lookOwnPatterns();
+    paintLook();
+  }
+  // A section opens from its header, which also closes it, or from its
+  // part of the likeness, which brings it into view.
+  function lookOpen(name, fromLikeness) {
+    lookUi.open = !fromLikeness && lookUi.open === name ? '' : name;
+    paintLook();
+    if (fromLikeness) {
+      var head = $('look-sections').querySelector('[data-section="' + name + '"]');
+      head.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      head.focus({ preventScroll: true });
+    }
+  }
+  function lookInput(el) {
+    var v = lookUi.v;
+    var key = el.getAttribute('data-key');
+    var kind = el.getAttribute('data-kind');
+    if (kind === 'switch') v[key] = el.checked ? 'on' : 'off';
+    // The look's own word stands where the switch agrees with it.
+    else if (kind === 'frost') v[key] = el.checked === LOOK.frostOn(lookUi.base, !!lookUi.f.frostSuits) ? lookUi.base[key] : el.checked ? 'on' : 'off';
+    else if (kind === 'word') v[key] = el.checked ? LOOK.BUILTIN[key] : lookUi.picked[key] || lookPick(key);
+    else if (kind === 'colour') { v[key] = el.value; lookUi.picked[key] = el.value; }
+    else if (kind === 'share') v[key] = (el.value / 100).toFixed(2);
+    else if (kind === 'solid') { var moved = LOOK.backgrounds(lookUi.base, v, el.value / 100); Object.keys(moved).forEach(function (k) { v[k] = moved[k]; }); }
+    else if (kind === 'size') v[key] = LOOK.unitsOf(key, el.value);
+    else if (kind === 'pattern') { lookUi.own[key] = el.value === ''; if (el.value) v[key] = el.value; }
+    else if (kind === 'own') { if (el.value.trim()) v[key] = el.value.trim(); }
+    else if (kind === 'place') v[key] = el.value;
+    paintLook();
+  }
+  $('look-cards').onclick = function (e) { var card = e.target.closest('[data-look]'); if (card) lookChoose(card.getAttribute('data-look')); };
+  $('look-mode').onclick = function (e) { var b = e.target.closest('[data-mode]'); if (b) { lookUi.mode = b.getAttribute('data-mode'); paintLook(); } };
+  $('look-preview').onclick = function (e) { var part = e.target.closest('[data-open]'); if (part) lookOpen(part.getAttribute('data-open'), true); };
+  $('look-preview').onkeydown = function (e) {
+    var part = (e.key === 'Enter' || e.key === ' ') && e.target.closest('[data-open]');
+    if (part) { e.preventDefault(); lookOpen(part.getAttribute('data-open'), true); }
+  };
+  $('look-sections').onclick = function (e) {
+    var head = e.target.closest('[data-section]');
+    var more = e.target.closest('[data-more]');
+    if (head) lookOpen(head.getAttribute('data-section'));
+    else if (more) { lookUi.more[more.getAttribute('data-more')] = !lookUi.more[more.getAttribute('data-more')]; paintLook(); }
+  };
+  $('look-sections').oninput = function (e) { if (e.target.getAttribute('data-key')) lookInput(e.target); };
+  $('btn-look-plain').onclick = function () { lookUi.v = LOOK.lay(lookUi.base); lookOwnPatterns(); paintLook(); };
+  // Every key the panel sets goes with the save, removed where the look
+  // already says it, so the settings hold the user's adjustments alone.
+  $('btn-look-save').onclick = function () {
+    var set = LOOK.changes(lookUi.base, lookUi.v);
+    set.theme = lookUi.chosen || null;
+    api('POST', '/api/face', { set: set }).then(function (r) { renderLook(r); toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
+  $('btn-look-reset').onclick = function () {
+    confirmDialog(t('MANAGER_LOOK_RESET'), t('MANAGER_LOOK_RESET_ASK'), t('MANAGER_LOOK_RESET')).then(function (yes) {
+      if (!yes) return;
+      api('POST', '/api/face', { set: {}, reset: true }).then(function (r) { renderLook(r); toast(t('MANAGER_LOOK_RESET_DONE')); }).catch(function (e) { toast(errorText(e), 'error'); });
+    });
+  };
   function loadScreen() {
     return api('GET', '/api/screen').then(renderScreen).catch(function (e) { toast(errorText(e), 'error'); });
   }
@@ -1970,8 +2172,8 @@
     // The face's size: shown once glass-evo is here to draw at it; saved as it is chosen.
     var evoHere = !!(sc.owner && sc.owner.evo && sc.owner.evo.available);
     $('screen-face-row').hidden = !evoHere;
-    $('look-panel').hidden = !evoHere;
-    if (evoHere) loadLook();
+    $('look-panel').hidden = !evoHere || !LOOK;
+    if (evoHere && LOOK) { if (lookDirty()) paintLook(true); else loadLook(); }
     $('screen-face').value = sc.faceSize || 'normal';
     $('screen-face').onchange = function () {
       api('POST', '/api/screen', { faceSize: $('screen-face').value }).then(function (r) { renderScreen(r); toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); loadScreen(); });

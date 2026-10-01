@@ -926,8 +926,9 @@ Glass.prototype.launchEnv = function () {
         var owner = self.screenOwnerState();
         if (owner.owner === 'glass-evo' && owner.evo.available) { env.GLASS_BIN = owner.evo.binary; }
     } catch (e) {}
-    // Where face themes are kept, for the face to read the one chosen.
-    env.GLASS_FACES = FACES_DIR;
+    // Where face themes are kept, the user's before the ones glass-evo
+    // ships, for the face to read the one chosen.
+    env.GLASS_FACES = FACES_DIR + ':' + EVO_LOOKS_DIR;
     return env;
 };
 
@@ -1866,8 +1867,10 @@ Glass.prototype.setScreenSettings = function (data) {
 // manifest and the binaries by architecture. Available means the manifest
 // and the binary for this player's architecture are there.
 const EVO_DIR = DATA_DIR + '/evo';
-// Face themes: a folder each, with the theme's text in face.txt.
+// Face themes: a folder each, with the theme's text in face.txt. The
+// user's own, and the looks the glass-evo component ships.
 const FACES_DIR = DATA_DIR + '/faces';
+const EVO_LOOKS_DIR = EVO_DIR + '/themes';
 
 // The face's own settings, as the display's configuration has them: the
 // look's keys by name, the face themes installed, and the plugin's word on
@@ -1875,23 +1878,27 @@ const FACES_DIR = DATA_DIR + '/faces';
 Glass.prototype.faceSettings = function () {
     var self = this;
     self.loadConfigs();
-    var themes = [];
-    try {
-        themes = fs.readdirSync(FACES_DIR).filter(function (name) {
-            return name[0] !== '.' && fs.existsSync(FACES_DIR + '/' + name + '/face.txt');
-        }).sort();
-    } catch (e) { /* no face themes installed */ }
-    var settings = facelook.settingsOf(meterConfig && meterConfig.current);
-    // What the chosen theme says, for the page to show what stands where
-    // the user has not said otherwise.
-    var theme = {};
-    if (settings.theme && themes.indexOf(settings.theme) !== -1) {
-        try { theme = facelook.themeKeys(fs.readFileSync(FACES_DIR + '/' + settings.theme + '/face.txt', 'utf8')); } catch (e) { /* not readable: the built-in look */ }
-    }
+    // The looks to choose from: a face theme of the user's stands before a
+    // shipped one of its name, as it does for the face itself.
+    var looks = [];
+    [[FACES_DIR, false], [EVO_LOOKS_DIR, true]].forEach(function (place) {
+        var names = [];
+        try { names = fs.readdirSync(place[0]).sort(); } catch (e) { /* none there */ }
+        names.forEach(function (name) {
+            if (name[0] === '.' || looks.some(function (l) { return l.name === name; })) { return; }
+            try {
+                looks.push({ name: name, shipped: place[1], keys: facelook.themeKeys(fs.readFileSync(place[0] + '/' + name + '/face.txt', 'utf8')) });
+            } catch (e) { /* a folder with no theme in it */ }
+        });
+    });
+    // The built-in look, as the component writes it out; none from one
+    // that does not.
+    var builtIn = {};
+    try { builtIn = facelook.themeKeys(fs.readFileSync(EVO_DIR + '/face.txt', 'utf8')); } catch (e) { /* not written out */ }
     return {
-        settings: settings,
-        theme: theme,
-        themes: themes,
+        settings: facelook.settingsOf(meterConfig && meterConfig.current),
+        builtIn: builtIn,
+        looks: looks,
         frostSuits: facelook.frostSuits(self.boardInfo().class)
     };
 };
