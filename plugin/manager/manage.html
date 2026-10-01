@@ -326,22 +326,15 @@
 
   <!-- Remotes -->
   <section class="view" id="view-screen">
-    <div class="panel" id="screen-found-panel">
-      <div class="row" style="justify-content:space-between">
-        <h2 id="screen-found-title" style="margin:0"></h2>
-        <button class="small" id="btn-screen-probe"></button>
-      </div>
-      <div class="help" id="screen-found-help" style="margin:6px 0 10px"></div>
-      <div id="screen-found"></div>
-      <div class="help" id="screen-suggested" style="margin-top:10px"></div>
-    </div>
     <div class="panel" id="screen-panel">
       <h2 id="screen-title" style="margin:0 0 10px"></h2>
       <div class="help" id="screen-help" style="margin-bottom:10px"></div>
       <div class="form">
         <div class="full" id="screen-now"></div>
+        <div class="full"><button class="small" id="btn-screen-details"></button></div>
         <div class="screen-controls"><label id="screen-rotation-label"></label><select id="screen-rotation"><option value="0">0</option><option value="90">90</option><option value="180">180</option><option value="270">270</option></select></div>
         <div class="screen-controls"><label id="screen-pointer-label"></label><select id="screen-pointer"><option value="auto"></option><option value="show"></option><option value="hide"></option></select></div>
+        <div class="full help screen-controls" id="screen-suggested"></div>
         <div class="full row screen-controls"><button class="primary" id="btn-screen-apply"></button></div>
       </div>
     </div>
@@ -651,7 +644,7 @@
     $('touch-title').textContent = t('MANAGER_TOUCH_TITLE'); $('touch-help').textContent = t('MANAGER_TOUCH_HELP'); $('touch-mode-label').textContent = t('MANAGER_TOUCH_MODE'); $('btn-touch-apply').textContent = t('MANAGER_SAVE');
     $('touch-mode').options[0].textContent = t('INTERACTIVE_THEME'); $('touch-mode').options[1].textContent = t('INTERACTIVE_ON'); $('touch-mode').options[2].textContent = t('INTERACTIVE_OFF');
     $('screen-title').textContent = t('MANAGER_SCREEN_TITLE'); $('screen-help').textContent = t('MANAGER_SCREEN_HELP'); $('screen-rotation-label').textContent = t('MANAGER_SCREEN_ROTATION'); $('btn-screen-apply').textContent = t('MANAGER_SAVE');
-    $('screen-found-title').textContent = t('MANAGER_SCREEN_FOUND_TITLE'); $('screen-found-help').textContent = t('MANAGER_SCREEN_FOUND_HELP'); $('btn-screen-probe').textContent = t('MANAGER_SCREEN_PROBE'); $('screen-pointer-label').textContent = t('MANAGER_SCREEN_POINTER');
+    $('btn-screen-details').textContent = t('MANAGER_SCREEN_DETAILS'); $('screen-pointer-label').textContent = t('MANAGER_SCREEN_POINTER');
     ['auto', 'show', 'hide'].forEach(function (p, i) { $('screen-pointer').options[i].textContent = t('MANAGER_SCREEN_POINTER_' + p.toUpperCase()); });
     $('touch-map-title').textContent = t('MANAGER_TOUCHMAP_TITLE'); $('touch-map-help').textContent = t('MANAGER_TOUCHMAP_HELP'); $('touch-map-label').textContent = t('MANAGER_TOUCHMAP_MAPPING'); $('touch-swap-label').textContent = t('MANAGER_TOUCHMAP_SWAP'); $('touch-flip-x-label').textContent = t('MANAGER_TOUCHMAP_FLIP_X'); $('touch-flip-y-label').textContent = t('MANAGER_TOUCHMAP_FLIP_Y'); $('btn-touch-map-apply').textContent = t('MANAGER_SAVE'); $('btn-touch-calibrate').textContent = t('MANAGER_TOUCHMAP_CALIBRATE'); $('touch-calibrate-help').textContent = t('MANAGER_TOUCHMAP_CALIBRATE_HELP');
     ['auto', 'overrides', 'calibrated'].forEach(function (m, i) { $('touch-map').options[i].textContent = t('MANAGER_TOUCHMAP_' + m.toUpperCase()); });
@@ -1493,7 +1486,13 @@
     });
   };
   function loadStatus() {
-    api('GET', '/api/status').then(function (s) {
+    // The screen's facts cost a probe of the player, so they are read only
+    // for the sheet on show; the sheet stands without them if they fail.
+    var onShow = $('view-status').classList.contains('active');
+    var screenRead = onShow ? api('GET', '/api/screen').catch(function () { return null; }) : Promise.resolve(null);
+    Promise.all([api('GET', '/api/status'), screenRead]).then(function (both) {
+      var s = both[0];
+      var sc = both[1];
       state.status = s;
       $('subtitle').textContent = (s.hostname || '') + ' · Glass ' + s.version;
       var reveal = !!state.revealAddresses;
@@ -1520,9 +1519,10 @@
         ['MANAGER_ST_SECTION_SCREEN', [
           ['MANAGER_ST_DISPLAY', s.headless ? t('DISPLAY_OUTPUT_NONE') : (s.running ? t('MANAGER_ST_RUNNING') : t('MANAGER_ST_IDLE')) + ' · DISPLAY=:' + s.display + ' · ' + t('MANAGER_ST_TIMEOUT') + ' ' + s.timeout + ' s' + (s.running && s.showing && s.showing.rate && s.performance && s.showing.rate < s.performance.values.frameRate ? ' · ' + t('MANAGER_ST_GOVERNED') + ' ' + s.showing.rate + ' fps' : '')],
           ['MANAGER_ST_SCREEN', !screen ? '-' : (screen.size ? t('MANAGER_ST_SCREEN_SIZE') + ' ' + screen.size : t('MANAGER_ST_NO_SCREEN')) + (s.themeSize ? ' · ' + t('MANAGER_ST_THEME_SIZE') + ' ' + s.themeSize : '') + ' · ' + (screen.mouse ? t('MANAGER_ST_MOUSE_ON') : t('MANAGER_ST_MOUSE_OFF')) + (s.running && screen.since ? ' · ' + t('MANAGER_ST_SINCE') + ' ' + fmtDate(screen.since) : '')],
+        ].concat(sc ? screenRows(sc) : [], [
           ['MANAGER_TOUCH_TITLE', !s.interactive ? '-' : t('INTERACTIVE_' + String(s.interactive).toUpperCase())],
           ['MANAGER_PERF_TITLE', !s.performance ? '-' : t('MANAGER_PERF_' + String(s.performance.profile || 'custom').toUpperCase()) + (s.performance.profile === 'auto' && s.performance.auto ? ' (' + t('MANAGER_PERF_' + String(s.performance.auto).toUpperCase()) + ')' : '') + ' · ' + s.performance.values.frameRate + ' fps · ' + t('MANAGER_ST_GOVERNOR') + ' ' + (s.performance.governor ? t('MANAGER_ST_ON') : t('MANAGER_ST_OFF')) + (s.performance.board && s.performance.board.model ? ' · ' + s.performance.board.model : '')]
-        ]],
+        ])],
         ['MANAGER_ST_SECTION_AUDIO', [
           ['MANAGER_ST_TAP', !audio ? '-' : (audio.tapInChain ? t('MANAGER_ST_TAP_IN') : t('MANAGER_ST_TAP_OUT')) + (audio.output ? ' · ' + t('MANAGER_ST_OUTPUT') + ' ' + audio.output : '')],
           ['MANAGER_ST_PLAYER', (s.channel.status || '-') + (s.channel.service ? ' · ' + s.channel.service : '') + (s.channel.title ? ' · ' + (s.channel.artist ? s.channel.artist + ' - ' : '') + s.channel.title : '') +
@@ -1608,64 +1608,90 @@
   function loadScreen() {
     return api('GET', '/api/screen').then(renderScreen).catch(function (e) { toast(errorText(e), 'error'); });
   }
+  function screenOn(driver) { return t('MANAGER_SCREEN_ON_' + String(driver).toUpperCase()); }
   // The screen now: what the display draws on (as it reported when it
-  // opened the screen, else what it will draw on when it starts), whether
-  // the screen is Glass's or the kiosk's, and the facts behind that.
-  function renderScreenNow(now, fact, free) {
-    var on = function (d) { return t('MANAGER_SCREEN_ON_' + String(d).toUpperCase()); };
+  // opened the screen, else what it will draw on when it starts) and
+  // whether the screen is Glass's or the kiosk's. The facts behind that
+  // are on the status sheet.
+  function renderScreenNow(now, free) {
     var d = now.display || {};
     var lines = [];
-    if (d.running && d.driver) lines.push(t('MANAGER_SCREEN_DRAWS') + ' ' + on(d.driver) + '.');
-    else if (now.wouldDraw) lines.push(t('MANAGER_SCREEN_WOULD_DRAW') + ' ' + on(now.wouldDraw) + '.');
+    if (d.running && d.driver) lines.push(t('MANAGER_SCREEN_DRAWS') + ' ' + screenOn(d.driver) + '.');
+    else if (now.wouldDraw) lines.push(t('MANAGER_SCREEN_WOULD_DRAW') + ' ' + screenOn(now.wouldDraw) + '.');
     else lines.push(t('MANAGER_SCREEN_WOULD_DRAW_NOTHING'));
     lines.push(free ? t('MANAGER_SCREEN_FREE') : t('MANAGER_SCREEN_NOT_FREE'));
-    var plug = function (isOn) { return t(isOn ? 'MANAGER_SCREEN_PLUGIN_ON' : 'MANAGER_SCREEN_PLUGIN_OFF'); };
-    lines.push([t('MANAGER_SCREEN_KIOSK_SERVICE') + ': ' + (fact.kiosk || '?') + (fact.kioskEnabled ? ', ' + t('MANAGER_SCREEN_ENABLED_AT_BOOT') : ''),
-      t('MANAGER_SCREEN_X_SERVER') + ': ' + t(fact.xserver ? 'MANAGER_SCREEN_UP' : 'MANAGER_SCREEN_DOWN'),
-      t('MANAGER_SCREEN_TOUCH_DISPLAY') + ': ' + plug(fact.touchDisplay),
-      t('MANAGER_SCREEN_DISPLAY_CONF') + ': ' + plug(fact.displayConfiguration)].join(' · '));
     $('screen-now').innerHTML = lines.map(function (l, i) { return '<div' + (i === 1 ? ' class="help"' : '') + '>' + esc(l) + '</div>'; }).join('');
   }
   function renderScreen(sc) {
     var free = !!sc.free;
-    renderScreenNow(sc.now || {}, sc.fact || {}, free);
+    renderScreenNow(sc.now || {}, free);
     Array.prototype.forEach.call(document.querySelectorAll('.screen-controls'), function (el) { el.hidden = !free; });
     $('touch-map-panel').hidden = !free;
     $('screen-rotation').value = String(sc.rotation || 0);
     $('screen-pointer').value = sc.pointer || 'auto';
     $('screen-pointer').options[0].textContent = t('MANAGER_SCREEN_POINTER_AUTO') + ' (' + t(sc.pointerShown ? 'MANAGER_SCREEN_POINTER_SHOW' : 'MANAGER_SCREEN_POINTER_HIDE').toLowerCase() + ' ' + t('MANAGER_SCREEN_POINTER_NOW') + ')';
-    if (sc.probe) renderProbe(sc.probe);
+    if (sc.probe) renderSuggestion(sc.probe);
     if (sc.touch) renderTouch(sc.touch);
   }
-  // What the player has, in plain words: one row per thing found.
-  function renderProbe(p) {
-    var rows = [];
+  // What the probe suggests for the controls beside it.
+  function renderSuggestion(p) {
+    var s = p.suggestion || {};
+    $('screen-suggested').textContent = t('MANAGER_SCREEN_SUGGESTED') + ': ' + t('MANAGER_SCREEN_ROTATION').toLowerCase() + ' ' + (s.rotation || 0) + ', ' + t('MANAGER_SCREEN_POINTER').toLowerCase() + ' ' + t(s.pointer === 'show' ? 'MANAGER_SCREEN_POINTER_SHOW' : 'MANAGER_SCREEN_POINTER_HIDE').toLowerCase() + (s.panel ? ' (' + s.panel + ')' : '');
+  }
+  // The calibration as it stands, and the matrix when one is in use.
+  function calibrationText(tc) {
+    var c = tc.calibration || { state: 'none' };
+    var text = '';
+    if (c.state === 'waiting') text = t('MANAGER_TOUCHMAP_WAITING');
+    else if (c.state === 'done') text = t('MANAGER_TOUCHMAP_DONE') + (typeof c.worst === 'number' ? ' ' + t('MANAGER_TOUCHMAP_WORST') + ' ' + Math.round(c.worst) + ' px' : '');
+    else if (c.state === 'failed') text = t('MANAGER_TOUCHMAP_FAILED') + ' ' + t('MANAGER_TOUCHMAP_FAIL_' + String(c.error || 'unfit').toUpperCase().replace(/[^A-Z]/g, '')) + (typeof c.worst === 'number' ? ' (' + t('MANAGER_TOUCHMAP_WORST') + ' ' + Math.round(c.worst) + ' px)' : '');
+    return text + (tc.mapping === 'calibrated' && tc.matrix ? ' · ' + t('MANAGER_TOUCHMAP_MATRIX') + ' ' + tc.matrix.map(function (v) { return Math.round(v * 1000) / 1000; }).join(', ') : '');
+  }
+  // The screen's facts as rows of the status sheet: what the display draws
+  // on and whose the screen is, the kiosk as it stands, the screen's
+  // settings, the touch mapping, and what the player has: panels, inputs,
+  // backlights.
+  function screenRows(sc) {
     var none = t('MANAGER_SCREEN_NONE');
-    if (p.board) rows.push([t('MANAGER_SCREEN_BOARD'), p.board]);
+    var now = sc.now || {};
+    var d = now.display || {};
+    var fact = sc.fact || {};
+    var p = sc.probe || {};
+    var tc = sc.touch || {};
+    var plug = function (isOn) { return t(isOn ? 'MANAGER_SCREEN_PLUGIN_ON' : 'MANAGER_SCREEN_PLUGIN_OFF'); };
+    var drawn = d.running && d.driver ? screenOn(d.driver) + (d.renderer ? ' (' + d.renderer + ')' : '')
+      : t('MANAGER_ST_NOT_DRAWN') + ', ' + (now.wouldDraw ? t('MANAGER_ST_NEXT_ON') + ' ' + screenOn(now.wouldDraw) : t('MANAGER_ST_NEXT_NOTHING'));
+    var kiosk = [t('MANAGER_SCREEN_KIOSK_SERVICE') + ': ' + (fact.kiosk || '?') + (fact.kioskEnabled ? ', ' + t('MANAGER_SCREEN_ENABLED_AT_BOOT') : ''),
+      t('MANAGER_SCREEN_X_SERVER') + ': ' + t(fact.xserver ? 'MANAGER_SCREEN_UP' : 'MANAGER_SCREEN_DOWN'),
+      t('MANAGER_SCREEN_TOUCH_DISPLAY') + ': ' + plug(fact.touchDisplay) + (typeof p.touchDisplayAngle === 'number' ? ' (' + t('MANAGER_ST_ANGLE') + ' ' + p.touchDisplayAngle + ')' : ''),
+      t('MANAGER_SCREEN_DISPLAY_CONF') + ': ' + plug(fact.displayConfiguration)].join(' · ');
+    var pointer = t('MANAGER_SCREEN_POINTER_' + String(sc.pointer || 'auto').toUpperCase()).toLowerCase() +
+      (sc.pointer === 'auto' || !sc.pointer ? ' (' + t(sc.pointerShown ? 'MANAGER_SCREEN_POINTER_SHOW' : 'MANAGER_SCREEN_POINTER_HIDE').toLowerCase() + ' ' + t('MANAGER_SCREEN_POINTER_NOW') + ')' : '');
+    var settings = t('MANAGER_SCREEN_ROTATION').toLowerCase() + ' ' + (sc.rotation || 0) + ' · ' + t('MANAGER_SCREEN_POINTER').toLowerCase() + ' ' + pointer;
+    var turns = [tc.swap && t('MANAGER_TOUCHMAP_SWAP'), tc.flipX && t('MANAGER_TOUCHMAP_FLIP_X'), tc.flipY && t('MANAGER_TOUCHMAP_FLIP_Y')].filter(Boolean);
+    var calibration = calibrationText(tc);
+    var mapping = t('MANAGER_TOUCHMAP_' + String(tc.mapping || 'auto').toUpperCase()) +
+      (tc.mapping === 'overrides' && turns.length ? ': ' + turns.join(', ').toLowerCase() : '') + (calibration ? ' · ' + calibration : '');
     var panels = (p.connectors || []).map(function (c) {
       if (c.status !== 'connected') return c.name + ': ' + t('MANAGER_SCREEN_DISCONNECTED');
       var size = c.native ? c.native.width + '×' + c.native.height : '';
       return c.name + ': ' + t('MANAGER_SCREEN_CONNECTED') + (size ? ', ' + size : '') + (c.portrait ? ', ' + t('MANAGER_SCREEN_PORTRAIT') : '');
     });
-    rows.push([t('MANAGER_SCREEN_PANELS'), panels.length ? panels.join(' · ') : none]);
     var inputs = p.inputs || { touch: [], mice: [], keyboards: [], remotes: [] };
-    var names = function (list) { return list.length ? list.map(function (d) { return d.name; }).join(', ') : none; };
-    rows.push([t('MANAGER_SCREEN_TOUCH'), names(inputs.touch)]);
-    rows.push([t('MANAGER_SCREEN_MICE'), names(inputs.mice)]);
-    rows.push([t('MANAGER_SCREEN_KEYBOARDS'), names(inputs.keyboards)]);
-    if (inputs.remotes.length) rows.push([t('MANAGER_SCREEN_REMOTES'), names(inputs.remotes)]);
+    var names = function (list) { return list && list.length ? list.map(function (dev) { return dev.name + (dev.event ? ' (' + String(dev.event).replace('/dev/input/', '') + ')' : ''); }).join(', ') : none; };
+    var found = [t('MANAGER_SCREEN_TOUCH') + ': ' + names(inputs.touch), t('MANAGER_SCREEN_MICE') + ': ' + names(inputs.mice), t('MANAGER_SCREEN_KEYBOARDS') + ': ' + names(inputs.keyboards)];
+    if (inputs.remotes && inputs.remotes.length) found.push(t('MANAGER_SCREEN_REMOTES') + ': ' + names(inputs.remotes));
     var lights = (p.backlights || []).map(function (b) { return b.name + ': ' + b.brightness + ' / ' + b.max; });
-    rows.push([t('MANAGER_SCREEN_BACKLIGHT'), lights.length ? lights.join(' · ') : none]);
-    var h = p.holders || {};
-    var holder = h.kiosk ? t('MANAGER_SCREEN_HOLDER_KIOSK') : t('MANAGER_SCREEN_HOLDER_NONE');
-    var more = [];
-    if (h.touchDisplay) more.push(t('MANAGER_SCREEN_HOLDER_TOUCH_DISPLAY'));
-    if (h.displayConfiguration) more.push(t('MANAGER_SCREEN_HOLDER_DISPLAY_CONF'));
-    if (h.xserver) more.push(t('MANAGER_SCREEN_HOLDER_X'));
-    rows.push([t('MANAGER_SCREEN_HOLDER'), holder + (more.length ? ' (' + more.join(', ') + ')' : '')]);
-    $('screen-found').innerHTML = '<table class="kv">' + rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('') + '</table>';
-    var s = p.suggestion || {};
-    $('screen-suggested').textContent = t('MANAGER_SCREEN_SUGGESTED') + ': ' + t('MANAGER_SCREEN_ROTATION').toLowerCase() + ' ' + (s.rotation || 0) + ', ' + t('MANAGER_SCREEN_POINTER').toLowerCase() + ' ' + t(s.pointer === 'show' ? 'MANAGER_SCREEN_POINTER_SHOW' : 'MANAGER_SCREEN_POINTER_HIDE').toLowerCase() + (s.panel ? ' (' + s.panel + ')' : '');
+    var rows = [
+      ['MANAGER_ST_DRAWN_ON', drawn + ' · ' + t(sc.free ? 'MANAGER_ST_SCREEN_GLASS' : 'MANAGER_ST_SCREEN_KIOSK')],
+      ['MANAGER_ST_KIOSK', kiosk],
+      ['MANAGER_ST_SCREEN_SETTINGS', settings],
+      ['MANAGER_ST_TOUCH_MAP', mapping],
+      ['MANAGER_SCREEN_PANELS', panels.length ? panels.join(' · ') : none],
+      ['MANAGER_ST_INPUTS', found.join(' · ')],
+      ['MANAGER_SCREEN_BACKLIGHT', lights.length ? lights.join(' · ') : none]
+    ];
+    return rows;
   }
   function renderTouch(tc) {
     if (!tc) return;
@@ -1674,11 +1700,7 @@
     var overrides = $('touch-map').value === 'overrides';
     ['touch-swap', 'touch-flip-x', 'touch-flip-y'].forEach(function (id) { $(id).disabled = !overrides; });
     var c = tc.calibration || { state: 'none' };
-    var text = '';
-    if (c.state === 'waiting') text = t('MANAGER_TOUCHMAP_WAITING');
-    else if (c.state === 'done') text = t('MANAGER_TOUCHMAP_DONE') + (typeof c.worst === 'number' ? ' ' + t('MANAGER_TOUCHMAP_WORST') + ' ' + Math.round(c.worst) + ' px' : '');
-    else if (c.state === 'failed') text = t('MANAGER_TOUCHMAP_FAILED') + ' ' + t('MANAGER_TOUCHMAP_FAIL_' + String(c.error || 'unfit').toUpperCase().replace(/[^A-Z]/g, '')) + (typeof c.worst === 'number' ? ' (' + t('MANAGER_TOUCHMAP_WORST') + ' ' + Math.round(c.worst) + ' px)' : '');
-    $('touch-map-state').textContent = text + (tc.mapping === 'calibrated' && tc.matrix ? ' · ' + t('MANAGER_TOUCHMAP_MATRIX') + ' ' + tc.matrix.map(function (v) { return Math.round(v * 1000) / 1000; }).join(', ') : '');
+    $('touch-map-state').textContent = calibrationText(tc);
     if (c.state === 'waiting') { if (!state.touchPoll) state.touchPoll = setTimeout(function () { state.touchPoll = null; api('GET', '/api/screen').then(function (sc) { renderTouch(sc.touch); }).catch(function () {}); }, 2000); }
   }
   $('touch-map').onchange = function () { var overrides = $('touch-map').value === 'overrides'; ['touch-swap', 'touch-flip-x', 'touch-flip-y'].forEach(function (id) { $(id).disabled = !overrides; }); };
@@ -1688,9 +1710,7 @@
   $('btn-touch-calibrate').onclick = function () {
     api('POST', '/api/screen/calibrate', {}).then(function (r) { renderTouch({ mapping: $('touch-map').value, calibration: r.calibration }); toast(t('MANAGER_TOUCHMAP_STARTED')); }).catch(function (e) { toast(errorText(e), 'error'); });
   };
-  $('btn-screen-probe').onclick = function () {
-    api('GET', '/api/screen/probe').then(function (p) { renderProbe(p); toast(t('MANAGER_SCREEN_PROBED')); }).catch(function (e) { toast(errorText(e), 'error'); });
-  };
+  $('btn-screen-details').onclick = function () { showView('status'); };
   $('btn-screen-apply').onclick = function () {
     api('POST', '/api/screen', { rotation: parseInt($('screen-rotation').value, 10), pointer: $('screen-pointer').value }).then(function (sc) { renderScreen(sc); toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); });
   };
