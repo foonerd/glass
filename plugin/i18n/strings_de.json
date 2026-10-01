@@ -848,6 +848,7 @@
     "MANAGER_EVO_ERR_NO_BINARY": "Dieses glass-evo hat kein Programm für diesen Player.",
     "MANAGER_EVO_ERR_PAIR": "Glass und glass-evo ließen sich nicht auf Versionen bringen, die zusammenarbeiten.",
     "MANAGER_EVO_ERR_MANIFEST": "Der Download ist keine glass-evo-Komponente.",
+    "MANAGER_OWNER_NO_SCREEN": "Dieser Player hat keinen Bildschirm, auf den glass-evo selbst zeichnen kann: Sein Bild kommt nur über den Kiosk. Der Kiosk bleibt hier die Oberfläche.",
     "MANAGER_OWNER_BACK_FACE_FAILED": "glass-evo konnte nicht starten, deshalb ging der Bildschirm an den Kiosk zurück.",
     "MANAGER_OWNER_BACK_COMPONENT_MISSING": "Die glass-evo-Komponente war nicht mehr da, deshalb ging der Bildschirm an den Kiosk zurück.",
     "MANAGER_OWNER_BACK_PLUGIN_STOPPED": "Glass wurde ausgeschaltet, deshalb ging der Bildschirm an den Kiosk zurück.",

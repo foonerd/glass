@@ -2175,7 +2175,9 @@
     $('screen-owner').innerHTML = ownerLines(o).map(function (l, i) { return '<div' + (i ? ' class="help"' : '') + '>' + esc(l) + '</div>'; }).join('');
     var acts = [];
     if (o.owner === 'glass-evo') acts.push(['kiosk', 'MANAGER_OWNER_BACK', 'MANAGER_OWNER_CONFIRM_BACK']);
-    else if (evo.available) acts.push(['glass-evo', 'MANAGER_OWNER_USE_EVO', 'MANAGER_OWNER_CONFIRM_TAKE']);
+    else if (evo.available && o.holdable) acts.push(['glass-evo', 'MANAGER_OWNER_USE_EVO', 'MANAGER_OWNER_CONFIRM_TAKE']);
+    // The kiosk's screen, with glass-evo here and nothing for it to draw on by itself: said, not offered.
+    if (o.owner !== 'glass-evo' && evo.available && !o.holdable) $('screen-owner').innerHTML += '<div class="help">' + esc(t('MANAGER_OWNER_NO_SCREEN')) + '</div>';
     $('screen-owner-actions').innerHTML = acts.map(function (a) { return '<button class="small" data-owner="' + a[0] + '" data-label="' + a[1] + '" data-ask="' + a[2] + '">' + esc(t(a[1])) + '</button>'; }).join(' ');
     Array.prototype.forEach.call($('screen-owner-actions').querySelectorAll('button'), function (b) {
       b.onclick = function () {

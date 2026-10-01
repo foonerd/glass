@@ -2007,7 +2007,9 @@ Glass.prototype.screenOwnerState = function () {
     var self = this;
     var register = self.readRegister();
     var evo = self.evoComponent();
-    return { owner: screenowner.ownedByEvo(register) ? 'glass-evo' : 'kiosk', evo: evo, register: register, here: screenowner.here(register, evo) };
+    var holdable = false;
+    try { holdable = screenowner.holdable(self.screenProbe()); } catch (e) {}
+    return { owner: screenowner.ownedByEvo(register) ? 'glass-evo' : 'kiosk', evo: evo, register: register, here: screenowner.here(register, evo), holdable: holdable };
 };
 
 // The component was installed, updated or put back: the board's word on
@@ -2099,6 +2101,8 @@ Glass.prototype.setScreenOwner = function (owner) {
     if (owner === 'glass-evo') {
         if (state.owner === 'glass-evo') { return Promise.resolve({ ok: true, changed: false }); }
         if (!state.evo.available) { return Promise.resolve({ error: 'GLASS.MANAGER_OWNER_EVO_ABSENT' }); }
+        // Nothing is turned off for a face that would have no screen to draw on.
+        if (!screenowner.holdable(self.screenProbe(true))) { return Promise.resolve({ error: 'GLASS.MANAGER_OWNER_NO_SCREEN' }); }
         var register = { owner: 'glass-evo', takenAt: new Date().toISOString(), evo: state.evo.version, found: self.screenFact(), changes: [] };
         var pluginSteps = screenowner.planTakePlugins(self.kioskPluginStates());
         self.logger.info(id + 'screen owner: glass-evo takes the screen (' + pluginSteps.length + ' plugin' + (pluginSteps.length === 1 ? '' : 's') + ' to turn off)');
