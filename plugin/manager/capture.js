@@ -60,8 +60,14 @@ class Capture {
     try { marker = JSON.parse(this.deps.read(this.deps.file)); } catch (e) { marker = null; }
     if (!marker || !marker.previous) return this.view();
     this.marker = marker;
-    if (this.deps.now() >= marker.until) this.restore();
-    else this.arm(marker.until - this.deps.now());
+    if (this.deps.now() >= marker.until) {
+      this.restore();
+    } else {
+      // The marker says a capture is on: the level is raised again, whatever
+      // of the settings reached the disk before the backend went down.
+      try { this.deps.setLogSettings(RAISED); } catch (e) { /* the settings are not writable */ }
+      this.arm(marker.until - this.deps.now());
+    }
     return this.view();
   }
 

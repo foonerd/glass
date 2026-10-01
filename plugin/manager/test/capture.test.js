@@ -97,10 +97,11 @@ test('a backend that restarted in the middle picks the capture up, or ends one w
   first.capture.start('restarts', null);
   const marker = first.world.files['/data/capture.json'];
 
-  // The backend comes back two minutes on: the level stays raised, the timer runs for the rest.
+  // The backend comes back two minutes on, the raised level lost with it
+  // (the settings had not reached the disk): the capture goes on, the
+  // level is raised again from the marker, the timer runs for the rest.
   let again = rig();
   again.world.files['/data/capture.json'] = marker;
-  again.world.settings = RAISED;
   again.world.now = first.world.now + 2 * 60 * 1000;
   assert.strictEqual(again.capture.resume().state, 'capturing');
   assert.deepStrictEqual(again.world.settings, RAISED);
