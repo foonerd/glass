@@ -342,6 +342,23 @@
         <div class="full" id="screen-owner" style="margin-top:10px"></div>
         <div class="full row" id="screen-owner-actions"></div>
         <div class="full row" id="screen-face-row" hidden><label id="screen-face-label" style="margin-right:8px"></label><select id="screen-face"><option value="normal"></option><option value="large"></option><option value="car"></option></select></div>
+        <div class="full" id="look-panel" hidden>
+          <div id="look-title" style="font-weight:600;margin:6px 0 8px"></div>
+          <div class="row" id="look-theme-row" hidden><label id="look-theme-label" style="min-width:110px"></label><select id="look-theme" style="max-width:320px"></select></div>
+          <div class="row" style="margin-top:8px"><label style="min-width:110px" id="look-colours-label"></label>
+            <label><input type="radio" name="look-colours" id="look-artwork"> <span id="look-artwork-label"></span></label>
+            <label><input type="radio" name="look-colours" id="look-own"> <span id="look-own-label"></span></label>
+            <span class="row" id="look-own-pickers"><span class="help" id="look-tint-label"></span><input type="color" id="look-tint"><span class="help" id="look-accent-label"></span><input type="color" id="look-accent"></span>
+          </div>
+          <div class="row" style="margin-top:8px"><label style="min-width:110px" id="look-glass-label"></label><input type="range" id="look-glass" min="40" max="95" step="1" style="max-width:260px"><span class="help" id="look-glass-value"></span></div>
+          <div class="row" style="margin-top:8px"><label><input type="checkbox" id="look-frost"> <span id="look-frost-label"></span></label><span class="help" id="look-frost-word"></span></div>
+          <div class="row" style="margin-top:8px"><label><input type="checkbox" id="look-granular"> <span id="look-granular-label"></span></label></div>
+          <div id="look-granular-rows" hidden>
+            <div class="row" style="margin-top:6px"><label style="min-width:110px" id="look-buttons-label"></label><input type="color" id="look-buttons-ink"><input type="range" id="look-buttons-opacity" min="10" max="100" step="1" style="max-width:200px"><span class="help" id="look-buttons-value"></span></div>
+            <div class="row" style="margin-top:6px"><label style="min-width:110px" id="look-clock-label"></label><input type="color" id="look-clock-ink"><input type="range" id="look-clock-opacity" min="10" max="100" step="1" style="max-width:200px"><span class="help" id="look-clock-value"></span></div>
+          </div>
+          <div class="row" style="margin-top:10px"><button class="primary" id="btn-look-save"></button><button id="btn-look-reset"></button></div>
+        </div>
         <div class="screen-controls"><label id="screen-rotation-label"></label><select id="screen-rotation"><option value="0">0</option><option value="90">90</option><option value="180">180</option><option value="270">270</option></select></div>
         <div class="screen-controls"><label id="screen-pointer-label"></label><select id="screen-pointer"><option value="auto"></option><option value="show"></option><option value="hide"></option></select></div>
         <div class="full help screen-controls" id="screen-suggested"></div>
@@ -1747,6 +1764,70 @@
   $('btn-touch-apply').onclick = function () {
     api('POST', '/api/touch', { interactive: $('touch-mode').value }).then(function (tc) { $('touch-mode').value = tc.interactive; toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); });
   };
+  // ---- the face's look ----------------------------------------------------
+  // A theme's choice and the user's own word over it: the colours from the
+  // artwork or their own, the glass's opacity, frost over a moving theme
+  // with the board's word beside it, the buttons and the clock on their
+  // own where wanted, and the way back to the defaults.
+  function loadLook() {
+    return api('GET', '/api/face').then(renderLook).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  function renderLook(f) {
+    var s = f.settings || {};
+    state.look = f;
+    var hex = function (v, fallback) { return /^#[0-9a-fA-F]{6}$/.test(String(v || '')) ? String(v).toLowerCase() : fallback; };
+    var percent = function (v, fallback) { var n = Math.round(parseFloat(v) * 100); return isNaN(n) ? fallback : n; };
+    var labels = { 'look-title': 'MANAGER_LOOK_TITLE', 'look-theme-label': 'MANAGER_LOOK_THEME', 'look-colours-label': 'MANAGER_LOOK_COLOURS', 'look-artwork-label': 'MANAGER_LOOK_ARTWORK', 'look-own-label': 'MANAGER_LOOK_OWN',
+      'look-tint-label': 'MANAGER_LOOK_TINT', 'look-accent-label': 'MANAGER_LOOK_ACCENT', 'look-glass-label': 'MANAGER_LOOK_GLASS', 'look-frost-label': 'MANAGER_LOOK_FROST', 'look-granular-label': 'MANAGER_LOOK_GRANULAR',
+      'look-buttons-label': 'MANAGER_LOOK_BUTTONS', 'look-clock-label': 'MANAGER_LOOK_CLOCK', 'btn-look-save': 'MANAGER_SAVE', 'btn-look-reset': 'MANAGER_LOOK_RESET' };
+    Object.keys(labels).forEach(function (el) { $(el).textContent = t(labels[el]); });
+    var themes = f.themes || [];
+    $('look-theme-row').hidden = !themes.length && !s.theme;
+    $('look-theme').innerHTML = [''].concat(themes).map(function (name) { return '<option value="' + esc(name) + '">' + esc(name || t('MANAGER_LOOK_THEME_BUILTIN')) + '</option>'; }).join('');
+    $('look-theme').value = themes.indexOf(s.theme) === -1 ? '' : s.theme;
+    var own = !!(hex(s['colours.tint'], '') || hex(s['colours.accent'], ''));
+    $('look-own').checked = own; $('look-artwork').checked = !own;
+    $('look-tint').value = hex(s['colours.tint'], '#0e0e10'); $('look-accent').value = hex(s['colours.accent'], '#ebebf0');
+    $('look-glass').value = Math.min(95, Math.max(40, percent(s['glass.bar'], 75)));
+    $('look-frost').checked = s['glass.frost'] === 'on' || (s['glass.frost'] !== 'off' && !!f.frostSuits);
+    $('look-frost-word').textContent = t(f.frostSuits ? 'MANAGER_LOOK_FROST_SUITS' : 'MANAGER_LOOK_FROST_HEAVY');
+    var granular = ['buttons.ink', 'buttons.opacity', 'clock.ink', 'clock.opacity'].some(function (k) { return s[k] !== undefined; });
+    $('look-granular').checked = granular;
+    $('look-buttons-ink').value = hex(s['buttons.ink'], '#f2f2f5'); $('look-buttons-opacity').value = percent(s['buttons.opacity'], 100);
+    $('look-clock-ink').value = hex(s['clock.ink'], '#f2f2f5'); $('look-clock-opacity').value = percent(s['clock.opacity'], 86);
+    var touched = {};
+    var show = function () {
+      $('look-own-pickers').hidden = !$('look-own').checked;
+      $('look-granular-rows').hidden = !$('look-granular').checked;
+      $('look-glass-value').textContent = $('look-glass').value + '%';
+      $('look-buttons-value').textContent = t('MANAGER_LOOK_OPACITY') + ' ' + $('look-buttons-opacity').value + '%';
+      $('look-clock-value').textContent = t('MANAGER_LOOK_OPACITY') + ' ' + $('look-clock-opacity').value + '%';
+    };
+    ['look-artwork', 'look-own', 'look-granular', 'look-glass', 'look-buttons-opacity', 'look-clock-opacity', 'look-frost'].forEach(function (el) {
+      $(el).oninput = function () { touched[el] = true; show(); };
+    });
+    show();
+    $('btn-look-save').onclick = function () {
+      var set = {};
+      var theme = $('look-theme').value;
+      // A theme is taken as its author made it: choosing another puts the
+      // user's own word aside, to be said again over the new one.
+      var fresh = theme !== (themes.indexOf(s.theme) === -1 ? '' : s.theme);
+      set.theme = theme || null;
+      if ($('look-own').checked) { set['colours.tint'] = $('look-tint').value; set['colours.accent'] = $('look-accent').value; }
+      else if (!fresh) { set['colours.tint'] = null; set['colours.accent'] = null; }
+      if (touched['look-glass']) { var g = parseInt($('look-glass').value, 10) / 100; set['glass.bar'] = g.toFixed(2); set['glass.sheet'] = Math.min(1, g + 0.03).toFixed(2); }
+      if (touched['look-frost']) { set['glass.frost'] = $('look-frost').checked ? 'on' : 'off'; }
+      if ($('look-granular').checked) {
+        set['buttons.ink'] = $('look-buttons-ink').value; set['buttons.opacity'] = (parseInt($('look-buttons-opacity').value, 10) / 100).toFixed(2);
+        set['clock.ink'] = $('look-clock-ink').value; set['clock.opacity'] = (parseInt($('look-clock-opacity').value, 10) / 100).toFixed(2);
+      } else if (!fresh) { ['buttons.ink', 'buttons.opacity', 'clock.ink', 'clock.opacity'].forEach(function (k) { set[k] = null; }); }
+      api('POST', '/api/face', { set: set, reset: fresh }).then(function (r) { renderLook(r); toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); });
+    };
+    $('btn-look-reset').onclick = function () {
+      api('POST', '/api/face', { set: {}, reset: true }).then(function (r) { renderLook(r); toast(t('MANAGER_LOOK_RESET_DONE')); }).catch(function (e) { toast(errorText(e), 'error'); });
+    };
+  }
   function loadScreen() {
     return api('GET', '/api/screen').then(renderScreen).catch(function (e) { toast(errorText(e), 'error'); });
   }
@@ -1808,6 +1889,8 @@
     // The face's size: shown once glass-evo is here to draw at it; saved as it is chosen.
     var evoHere = !!(sc.owner && sc.owner.evo && sc.owner.evo.available);
     $('screen-face-row').hidden = !evoHere;
+    $('look-panel').hidden = !evoHere;
+    if (evoHere) loadLook();
     $('screen-face').value = sc.faceSize || 'normal';
     $('screen-face').onchange = function () {
       api('POST', '/api/screen', { faceSize: $('screen-face').value }).then(function (r) { renderScreen(r); toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); loadScreen(); });

@@ -25,6 +25,7 @@ const { FaceFeed } = require('./manager/facefeed');
 const { advanced } = require('./manager/statenow');
 const screenprobe = require('./manager/screenprobe');
 const screenowner = require('./manager/screenowner');
+const facelook = require('./manager/facelook');
 const { compact: compactQueue } = require('./manager/queue');
 const legacyThemes = require('./manager/legacy');
 const { safeFolderName, sections: configSections } = require('./manager/zip');
@@ -925,6 +926,8 @@ Glass.prototype.launchEnv = function () {
         var owner = self.screenOwnerState();
         if (owner.owner === 'glass-evo' && owner.evo.available) { env.GLASS_BIN = owner.evo.binary; }
     } catch (e) {}
+    // Where face themes are kept, for the face to read the one chosen.
+    env.GLASS_FACES = FACES_DIR;
     return env;
 };
 
@@ -1008,6 +1011,7 @@ Glass.prototype.onStart = function () {
     self.pluginStartedAt = Date.now();
     try { self.migrateScreenDriver(); } catch (e) { self.logger.warn(id + 'screen: driver key not migrated: ' + (e && e.message ? e.message : e)); }
     try { self.watchScreen(); } catch (e) { self.logger.warn(id + 'screen: not watched: ' + (e && e.message ? e.message : e)); }
+    try { self.noteFrostSuits(); } catch (e) { self.logger.warn(id + 'face: the board not noted: ' + (e && e.message ? e.message : e)); }
 
     self.loadConfigs();
     if (!meterConfig) {
@@ -1862,6 +1866,66 @@ Glass.prototype.setScreenSettings = function (data) {
 // manifest and the binaries by architecture. Available means the manifest
 // and the binary for this player's architecture are there.
 const EVO_DIR = DATA_DIR + '/evo';
+// Face themes: a folder each, with the theme's text in face.txt.
+const FACES_DIR = DATA_DIR + '/faces';
+
+// The face's own settings, as the display's configuration has them: the
+// look's keys by name, the face themes installed, and the plugin's word on
+// whether frost over a moving theme suits this board.
+Glass.prototype.faceSettings = function () {
+    var self = this;
+    self.loadConfigs();
+    var themes = [];
+    try {
+        themes = fs.readdirSync(FACES_DIR).filter(function (name) {
+            return name[0] !== '.' && fs.existsSync(FACES_DIR + '/' + name + '/face.txt');
+        }).sort();
+    } catch (e) { /* no face themes installed */ }
+    return {
+        settings: facelook.settingsOf(meterConfig && meterConfig.current),
+        themes: themes,
+        frostSuits: facelook.frostSuits(self.boardInfo().class)
+    };
+};
+
+// Changes to the configuration's face keys, written and the display
+// started again so the face reads them; says whether anything changed.
+Glass.prototype.applyFaceChanges = function (changes, quietly) {
+    var self = this;
+    var keys = Object.keys(changes);
+    if (!keys.length) { return false; }
+    keys.forEach(function (key) {
+        if (changes[key] === null) { delete meterConfig.current[key]; } else { meterConfig.current[key] = changes[key]; }
+    });
+    fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+    try { self.updateConfigVersion(); } catch (e) {}
+    if (!quietly && fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+    return true;
+};
+
+Glass.prototype.setFaceSettings = function (set, reset) {
+    var self = this;
+    self.loadConfigs();
+    if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return { error: 'GLASS.NO_PEPPYCONFIG' }; }
+    var changes = reset ? facelook.resetPlan(meterConfig.current).changes : {};
+    var planned = facelook.plan(meterConfig.current, set || {});
+    if (planned.error) { return planned; }
+    Object.keys(planned.changes).forEach(function (key) { changes[key] = planned.changes[key]; });
+    // A key a reset removes and the request sets again is set, not removed.
+    var changed = self.applyFaceChanges(changes);
+    if (changed) { self.logger.info(id + 'face: ' + Object.keys(changes).map(function (k) { return k + (changes[k] === null ? ' removed' : ' = ' + changes[k]); }).join(', ')); }
+    return Object.assign({ ok: true, changed: changed }, self.faceSettings());
+};
+
+// The plugin's word on frost for this board, kept beside the face's
+// settings so the face can follow it where the user has not decided.
+Glass.prototype.noteFrostSuits = function () {
+    var self = this;
+    self.loadConfigs();
+    if (!meterConfig || !meterConfig.current || !fs.existsSync(MeterConfigFile)) { return; }
+    var suits = facelook.frostSuits(self.boardInfo().class) ? 'true' : 'false';
+    if (String(meterConfig.current['face.frost.suits']) !== suits) { self.applyFaceChanges({ 'face.frost.suits': suits }, true); }
+};
 const REGISTER_FILE = DATA_DIR + '/screen-owner.json';
 
 Glass.prototype.evoComponent = function () {

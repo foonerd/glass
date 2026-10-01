@@ -514,6 +514,18 @@ class Manager {
       res.json(Object.assign({ ok: true }, result, { screen: self.plugin.screenSettings() }));
     }));
 
+    // The face's look: its settings in the display's configuration, the
+    // face themes installed, and whether frost suits this board.
+    app.get('/api/face', function (req, res) {
+      res.json(self.plugin.faceSettings());
+    });
+    app.post('/api/face', function (req, res) {
+      const body = req.body || {};
+      const result = self.plugin.setFaceSettings(body.set, body.reset === true);
+      if (result && result.error) return res.status(400).json(result);
+      res.json(result);
+    });
+
     // Interactive controls: as the theme says, on, or off.
     app.get('/api/touch', function (req, res) {
       res.json({ interactive: self.plugin.interactiveMode() });
