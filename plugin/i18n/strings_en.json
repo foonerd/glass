@@ -849,6 +849,7 @@
     "MANAGER_EVO_ERR_NO_BINARY": "This glass-evo has no binary for this player.",
     "MANAGER_EVO_ERR_PAIR": "Glass and glass-evo could not be brought to versions that work together.",
     "MANAGER_EVO_ERR_MANIFEST": "The download is not a glass-evo component.",
+    "MANAGER_OWNER_OWN_X": "it brought up an X server of its own",
     "MANAGER_OWNER_NO_SCREEN": "This player has no screen glass-evo can draw on by itself: its picture comes only through the kiosk. The kiosk stays the interface here.",
     "MANAGER_OWNER_BACK_FACE_FAILED": "glass-evo could not start, so the screen went back to the kiosk.",
     "MANAGER_OWNER_BACK_COMPONENT_MISSING": "The glass-evo component was gone, so the screen went back to the kiosk.",

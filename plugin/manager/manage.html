@@ -2157,8 +2157,10 @@
     var lines = [t(o.owner === 'glass-evo' ? 'MANAGER_OWNER_EVO' : 'MANAGER_OWNER_KIOSK')];
     lines.push(t('MANAGER_OWNER_EVO_STATE') + ': ' + (evo.available ? t('MANAGER_OWNER_AVAILABLE') + (evo.version ? ' ' + evo.version : '') : evo.installed ? t('MANAGER_OWNER_NO_BINARY') : t('MANAGER_OWNER_NOT_INSTALLED')));
     if (r && r.takenAt) {
-      var names = (r.changes || []).map(function (c) { return c.kind === 'plugin' ? t('MANAGER_OWNER_PLUGIN_' + String(c.name).toUpperCase()) : c.name; });
-      lines.push(t('MANAGER_OWNER_TOOK') + ' ' + when(r.takenAt) + (names.length ? '; ' + t('MANAGER_OWNER_TURNED_OFF') + ' ' + names.join(', ') : '') + '.' + (r.gaveBackAt ? ' ' + t('MANAGER_OWNER_GAVE_BACK') + ' ' + when(r.gaveBackAt) + '.' : ''));
+      // What the take turned off; the X server it brought up for the face is said apart.
+      var ownX = (r.changes || []).some(function (c) { return c.kind === 'own-x'; });
+      var names = (r.changes || []).filter(function (c) { return c.kind !== 'own-x'; }).map(function (c) { return c.kind === 'plugin' ? t('MANAGER_OWNER_PLUGIN_' + String(c.name).toUpperCase()) : c.name; });
+      lines.push(t('MANAGER_OWNER_TOOK') + ' ' + when(r.takenAt) + (names.length ? '; ' + t('MANAGER_OWNER_TURNED_OFF') + ' ' + names.join(', ') : '') + (ownX ? '; ' + t('MANAGER_OWNER_OWN_X') : '') + '.' + (r.gaveBackAt ? ' ' + t('MANAGER_OWNER_GAVE_BACK') + ' ' + when(r.gaveBackAt) + '.' : ''));
       if (r.error) lines.push(t('MANAGER_OWNER_ERROR') + ' ' + r.error);
       // Given back without being asked: why.
       var because = { 'face-failed': 'MANAGER_OWNER_BACK_FACE_FAILED', 'component-missing': 'MANAGER_OWNER_BACK_COMPONENT_MISSING', 'plugin-stopped': 'MANAGER_OWNER_BACK_PLUGIN_STOPPED' }[r.gaveBackAt && r.gaveBackBecause];
