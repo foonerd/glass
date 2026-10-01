@@ -1608,7 +1608,7 @@ Glass.prototype.screenSettings = function () {
         free: self.screenOurs(fact),
         fact: fact,
         now: {
-            display: { running: running, driver: running && self.displayRenderer ? self.displayRenderer.driver : null },
+            display: { running: running, driver: running && self.displayRenderer ? self.displayRenderer.driver : null, renderer: running && self.displayRenderer ? self.displayRenderer.renderer : null },
             wouldDraw: screenprobe.wouldDraw(fact)
         },
         probe: found,
