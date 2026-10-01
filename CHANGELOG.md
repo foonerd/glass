@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.92] - 2026-10-01
+
+The status sheet carries the screen whole. The Status tab's Screen section now says what the display draws on and through which renderer, whose the screen is, the kiosk service, the X server and the kiosk's plugins with the Touch Display plugin's angle, the screen's rotation and pointer, the touch mapping and its calibration, the panels with their native sizes, the touch panels, mice and keyboards with their event nodes, and the backlights; Copy as text carries all of it into a report. These facts are read for the sheet on show only, so the page's start costs what it did. The Screen tab keeps what it acts on: what the display draws on, whose the screen is, and its controls with the suggestion beside them, with a button to the sheet for the rest; the list of what the player has and its Look again button are gone from there. `GET /api/screen` names the renderer in `now.display.renderer`.
+
+For those who build Glass: `scripts/check.sh` lints the plugin's scripts, the browser module and the pages' inline scripts for a name nothing defines, with one pinned ESLint fetched for the run.
+
 ## [0.7.91] - 2026-10-01
 
 Theme previews render again on a player whose log level is below Info. The Manager learned which pictures a preview render had made from the display's own lines on its output, and those lines are held back below Info, so such a player rendered every theme and was told there were no pictures, at every upgrade that made the previews stale; reported from the community after 0.7.90. The pictures the render wrote are read from their folder now, shown in the display's order where it says one, else the theme's.
