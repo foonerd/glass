@@ -54,4 +54,5 @@ if ($Startup) {
     Shortcut (Join-Path $menu 'Startup/Glass Remote.lnk') '--remote' 'A Volumio player''s meters on this screen'
 }
 Write-Output "The first start shows the settings page address on the screen; Glass Remote Settings opens it."
+Write-Output "This is the standalone remote: the player's theme and nothing over it. The bundle, with the Glass interface (a clock, a bar of controls), is not built for Windows yet; Anymote shows it in a browser, at /anymote on the player's manager."
 Write-Output "When Windows Defender Firewall asks whether glass may accept connections on private networks, allow it: that is how players announce themselves."
