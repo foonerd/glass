@@ -44,7 +44,7 @@ fi
 
 if ! "$BIN" --help >/dev/null 2>&1; then
   echo "glass-launcher: the shipped binary for this machine is missing or is the wrong CPU." >&2
-  echo "glass-launcher: expected $ROOT/bin/$ARCH_DIR/glass" >&2
+  echo "glass-launcher: tried $BIN" >&2
   exit 126
 fi
 
