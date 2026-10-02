@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.4] - 2026-10-02
+
+One fix, to the look panel of the Manager's Screen tab.
+
+- **The likeness shows the clock as large as the screen will, and no larger.** glass-evo sets a line of the idle screen no wider than the picture leaves beside its glass and its margins, the date no taller than a quarter of the picture, and the clock in what the date and the bar leave, never taller than half. The likeness set them at the size asked for, however large: a clock pushed up to the widest ran from edge to edge in the Manager and stood inside its margins on the player. The likeness now makes the same fit (`fitted` and `idleMost` in the look model), again whenever the panel changes size, and its glass keeps the margins the screen's has.
+
 ## [0.8.3] - 2026-10-02
 
 One fix, to the analyser while the player stands still.
