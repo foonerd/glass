@@ -2,6 +2,13 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.23] - 2026-10-02
+
+For a remote display on Windows built with a face; nothing changes on the player or on the standalone remote.
+
+- **A face on Windows is given the local time.** The time of day a face is handed (`Wall::now`) was universal time on Windows: the system's zone was read on a player only. Windows itself is asked now (`SystemTimeToTzSpecificLocalTime`, by the zone's own rules for the date), not the C runtime, which reads a `TZ` variable of another system's making in its own way. The zone's name is not read there; its distance from universal time is.
+- **The Windows installer installs either flavour and says which**, as the Linux one does since 0.8.21: `glass-evo.exe` in the archive is the bundle and is installed in the standalone's place, under the same name, with the same Start menu entries; `-Check` names the flavour.
+
 ## [0.8.22] - 2026-10-02
 
 The remote's settings page, for a remote built with a face; nothing changes on the player or on the standalone remote.
