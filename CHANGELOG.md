@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.15] - 2026-10-02
+
+One fix, to a spectrum look laid out for two channels.
+
+- **What plays no longer changes a look's layout.** A look with a dual layout drew as `single` whenever its two channels read alike: through a mono recording its two sides became one area across the box, in the single palette where the theme names only `palette.left` and `palette.right`, and came apart again at the next stereo track. 0.8.3 took silence out of that rule; the rule itself is gone. How many channels a look draws is the theme's to say: a section that asks for a one-channel bank (`channels = 1`) draws one, the two channels' mean; any other draws what its `layout` asks, and a recording alike on both channels shows the same on both sides.
+
 ## [0.8.14] - 2026-10-02
 
 One fix, to the strings of the Status sheet.
