@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.20] - 2026-10-02
+
+A remote display can carry a face. Nothing changes for the remote Glass ships, which carries none.
+
+- **A remote's sessions take the face the display was built with.** A display built with a face over it (`glass::run_with`, as glass-evo is) lost it when started as a remote: a remote's session was given none. It is handed on now, and a face on a remote has the window as it has a screen of the display's own: it shows its clock while the player stands still, the picture behind it goes black past the countdown as on the player, and a touch beside it does nothing, where a remote without a face plays or pauses on a touch.
+- **The remote knows whose the player's screen is, and brings the look.** `GET /api/remote/config` gains `face`: `owner` (`glass-evo` where its face holds the player's screen) and `theme`, the face theme the player's settings name as `name` and `text` (the user's before a shipped one of its name; null where none is named). The remote keeps the text at `faces/<name>/face.txt` in its home, where a face reads its themes, and nothing else there. The configuration's version covers both, so a remote starts its session again when the screen changes hands or the look changes. The face's own settings travelled already, in the meter configuration.
+- **When a remote shows its face** is the remote's to say: `face` in its configuration, `follow` (the default: where the player's own screen shows it), `always` or `off`. A remote's log says which it is and why.
+
 ## [0.8.19] - 2026-10-02
 
 No change in what is shown; one change in how it is made.
