@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.18] - 2026-10-02
+
+One fix, for a player whose screen glass-evo took from a running kiosk.
+
+- **The kiosk is left stopped, not failed, and Find a problem does not blame it.** On a player whose image runs its own kiosk (x86), handing the screen to glass-evo stopped the kiosk's unit, whose `startx` leaves with an error when its X server goes: the unit stood as failed for as long as glass-evo held the screen. Find a problem then named it as the cause for "the screen", "the meters never appear" and "the display keeps restarting", and advised turning the Touch Display plugin off and on, with nothing wrong. The take now clears the unit's state once it has stopped it, and the diagnosis takes a failed kiosk for a cause only where the kiosk is meant to run. A player already in that state needs nothing done: the diagnosis is right at once, and the unit's state goes at the next take or restart.
+
 ## [0.8.17] - 2026-10-02
 
 One fix, to how a display that cannot start is started again.
