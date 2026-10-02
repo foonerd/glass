@@ -91,6 +91,7 @@ impl RemoteSession {
             release,
             screen: [skin.width, skin.height],
             page: self.page.clone(),
+            face: self.app.face().unwrap_or_default(),
         });
         logline::say!(
             Info,
@@ -574,6 +575,12 @@ pub fn remote_main(
     }
     let wanted_port = config.page_port;
     let app = RemoteApp::new(config_path.clone(), cache_dir.clone(), config);
+    // The flavour: a display built with a face says which, on its page and
+    // to the player.
+    app.set_face(
+        face.as_ref()
+            .map(|f| f.name().unwrap_or_else(|| "a face".to_string())),
+    );
     super::apply_log_level(&app.config());
     let page_port = match super::serve(app.clone()) {
         Ok(port) => {
@@ -846,6 +853,7 @@ pub fn remote_main(
                 }
             );
         }
+        app.set_status(|s| s.face_shown = shown);
         let mut no_face = None;
         let face_here = if shown { &mut *face } else { &mut no_face };
         match session(&run, Some(&mut remote), &mut window, face_here) {

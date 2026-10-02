@@ -141,6 +141,10 @@ pub struct RemoteHello {
     /// The remote's own settings page, when it serves one.
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub page: String,
+    /// The face the display was built with, by its name and version; left
+    /// out by a display without one (the standalone remote).
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub face: String,
 }
 
 impl RemoteHello {
@@ -640,6 +644,7 @@ mod tests {
             release: "0.7.0".into(),
             screen: [1280, 720],
             page: "http://10.0.0.7:5583/".into(),
+            face: String::new(),
         });
         assert!(channel.connected());
         assert_eq!(channel.name(), address.to_string());

@@ -71,6 +71,11 @@ pub trait Overlay {
     fn pointer(&mut self, kind: PointerKind, x: i32, y: i32, view: &View) -> bool;
     /// The commands for the player the face wants sent, taken every frame.
     fn commands(&mut self) -> Vec<intake::Command>;
+    /// What the face is called and its version, as a remote display says
+    /// which flavour it is: on its settings page and to the player.
+    fn name(&self) -> Option<String> {
+        None
+    }
 }
 
 /// The types a face is written against, in one place.

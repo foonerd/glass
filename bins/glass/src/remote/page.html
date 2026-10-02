@@ -124,6 +124,14 @@
     </div>
   </div>
 
+  <div class="panel hidden" id="face-panel">
+    <h2>The Glass interface</h2>
+    <div class="form">
+      <div class="full"><label>This remote shows</label><select id="face-shown"><option value="follow">what the player's screen shows</option><option value="always">the Glass interface always</option><option value="off">the theme alone</option></select></div>
+      <div class="full help" id="face-help"></div>
+    </div>
+  </div>
+
   <div class="panel">
     <h2>Levels</h2>
     <div class="form">
@@ -171,7 +179,11 @@
     return api('GET', '/api/state').then(function (s) {
       $('unreached').classList.add('hidden');
       state.config = s.config; state.status = s.status;
-      $('subtitle').textContent = 'Glass ' + s.release + ' · protocol ' + s.protocol;
+      state.face = s.face || null;
+      $('subtitle').textContent = 'Glass ' + s.release + ' · protocol ' + s.protocol + (s.face ? ' · with ' + s.face : '');
+      // The choice is there only on a display built with the Glass interface (the bundle).
+      $('face-panel').classList.toggle('hidden', !s.face);
+      $('face-help').textContent = s.face ? 'This remote is the bundle: the display with ' + s.face + ' in it, a clock and the date when the player stands still and a bar of controls. The first choice shows them when the player\'s own screen does, which is when glass-evo holds it. The controls need a touch screen or a mouse here; the clock needs neither.' : '';
       $('paths').textContent = 'Configuration: ' + s.configPath + ' · cache: ' + s.cache;
       renderStatus(s.status);
       if (!state.dirty) fill(s.config);
@@ -186,9 +198,9 @@
       ['Frames', (st.rate ? 'drawn at ' + st.rate + ' a second · ' : '') + (st.frames_per_s ? 'received ' + st.frames_per_s.toFixed(0) + ' a second' : 'none') + (st.refused ? ' (' + st.refused + ' refused)' : '')],
       ['Theme', st.theme ? st.theme + (st.meter ? ' · ' + st.meter : '') : ''],
       ['Screen', st.screen && st.screen[0] ? st.screen[0] + 'x' + st.screen[1] : ''],
-      ['Synced', st.synced || ''],
+      ['Synced', st.synced || '']].concat(state.face ? [['Glass interface', st.face_shown ? 'shown' : 'not shown']] : []).concat([
       ['This page', st.page || '']
-    ];
+    ]);
     var c = state.config; var p = c && c.active ? c.players[c.active] : null;
     var manager = p ? 'http://' + p.host + ':' + p.manager_port + '/' : '';
     $('status').innerHTML = rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('') +
@@ -316,6 +328,7 @@
     $('d-mode').value = c.display.mode; $('d-x').value = c.display.position ? c.display.position[0] : ''; $('d-y').value = c.display.position ? c.display.position[1] : '';
     $('d-fps').value = c.display.fps || ''; $('d-fit').checked = !!c.display.fit;
     $('gain').value = c.gain_db; $('decay').value = c.spectrum_decay ? c.spectrum_decay : ''; $('r-name').value = c.name; $('r-port').value = c.page_port; $('r-log').value = c.log_level || '';
+    $('face-shown').value = c.face || 'follow';
     renderNames();
   }
   function gather() {
@@ -336,9 +349,10 @@
     var x = $('d-x').value.trim(), y = $('d-y').value.trim();
     c.display = { mode: $('d-mode').value, position: (x !== '' && y !== '') ? [parseInt(x, 10) || 0, parseInt(y, 10) || 0] : null, fit: $('d-fit').checked, fps: $('d-fps').value ? parseInt($('d-fps').value, 10) : null, monitor: parseInt($('d-monitor').value, 10) || 0 };
     c.gain_db = parseFloat($('gain').value) || 0; c.spectrum_decay = parseFloat($('decay').value) || 0; c.name = $('r-name').value.trim(); c.page_port = parseInt($('r-port').value, 10) || 5583; c.log_level = $('r-log').value || null;
+    c.face = $('face-shown').value || 'follow';
     return c;
   }
-  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'gain', 'decay', 'r-name', 'r-port', 'r-log'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
+  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'gain', 'decay', 'r-name', 'r-port', 'r-log', 'face-shown'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
   $('btn-win-leave').onclick = function () { api('POST', '/api/window', { mode: 'windowed' }).then(function () { toast('The display is a window now.'); }).catch(function (e) { toast(e.message, 'error'); }); };
   $('btn-win-full').onclick = function () { api('POST', '/api/window', { mode: 'fullscreen' }).then(function () { toast('The display takes the screen.'); }).catch(function (e) { toast(e.message, 'error'); }); };
   $('btn-cfg-import').onclick = function () { $('cfg-file').click(); };
