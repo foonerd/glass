@@ -787,6 +787,28 @@ impl Slideshow {
     }
 }
 
+/// The fanart show across a change of meter, as what shows and what rests.
+/// The show's place among an artist's pictures and the time of its last
+/// advance are kept: a meter with a place for fanart takes the show up
+/// where the meter before left it, and a meter without one rests it until
+/// the next that has. A new show starts only where there was none.
+fn fanart_carried(
+    showing: Option<Slideshow>,
+    rested: Option<Slideshow>,
+    has_place: bool,
+) -> (Option<Slideshow>, Option<Slideshow>) {
+    let kept = showing.or(rested);
+    if has_place {
+        let show = kept.unwrap_or_else(|| Slideshow {
+            seed: lead::epoch_nanos().max(1),
+            ..Slideshow::default()
+        });
+        (Some(show), None)
+    } else {
+        (None, kept)
+    }
+}
+
 /// The seconds left of a persist period of `seconds` that began at
 /// `started_ms`, at `now_ms` on the same clock: whole seconds passed come
 /// off, and the count never goes below zero or runs backwards from a
@@ -1516,6 +1538,9 @@ pub struct TapSource {
     folder_files: Vec<String>,
     /// The fanart slideshow, run only when the skin has a slot.
     fanart: Option<Slideshow>,
+    /// The show while the meter on show has no place for it, kept so the
+    /// next meter that has one takes it up where it was.
+    fanart_rested: Option<Slideshow>,
     /// When the slideshow was last given the player's artist and track
     /// between states, so its interval runs while nothing else changes.
     fanart_checked_at: Option<Moment>,
@@ -1672,6 +1697,7 @@ impl TapSource {
             folder_key: String::new(),
             folder_files: Vec::new(),
             fanart: None,
+            fanart_rested: None,
             fanart_checked_at: None,
             vinyl_album_file: String::new(),
             vinyl_key: String::new(),
@@ -1924,11 +1950,15 @@ impl TapSource {
         self.queue_lengths.clear();
         self.queue_read_at = None;
         // The slideshow asks the player on a thread of its own, or the
-        // host where the host brings the pictures.
-        self.fanart = skin.fanart.as_ref().map(|_| Slideshow {
-            seed: lead::epoch_nanos().max(1),
-            ..Slideshow::default()
-        });
+        // host where the host brings the pictures. It is the artist's, not
+        // the meter's: a change of meter carries it on.
+        let (fanart, rested) = fanart_carried(
+            self.fanart.take(),
+            self.fanart_rested.take(),
+            skin.fanart.is_some(),
+        );
+        self.fanart = fanart;
+        self.fanart_rested = rested;
         let spectrum_max = skin.spectrum_max.max(1.0) as u32;
         if let Some(bins) = skin
             .spectra
@@ -2732,6 +2762,41 @@ mod tests {
         let mut fixed = Selector::seeded(rotation(true, Vec::new()), 1);
         assert!(!fixed.rotates());
         assert_eq!(fixed.next(), None);
+    }
+
+    #[test]
+    fn the_fanart_show_carries_on_across_a_change_of_meter() {
+        let at = Slideshow {
+            artist_key: "tina turner".into(),
+            refs: vec!["a".into(), "b".into(), "c".into()],
+            index: 2,
+            last_advance: Some(Moment::now()),
+            ..Slideshow::default()
+        };
+        let stamp = at.last_advance;
+        // Another meter with a place for fanart: the same show, where it was.
+        let (showing, rested) = fanart_carried(Some(at), None, true);
+        let show = showing.expect("the show goes on");
+        assert!(rested.is_none());
+        assert_eq!(
+            (show.artist_key.as_str(), show.index, show.refs.len()),
+            ("tina turner", 2, 3)
+        );
+        assert_eq!(show.last_advance, stamp, "the interval is not begun again");
+        // A meter without a place rests it, and the next with one takes it up.
+        let (showing, rested) = fanart_carried(Some(show), None, false);
+        assert!(showing.is_none());
+        let (showing, rested) = fanart_carried(None, rested, true);
+        assert!(rested.is_none());
+        assert_eq!(showing.expect("taken up again").index, 2);
+        // With no show before, a new one, seeded.
+        let (showing, rested) = fanart_carried(None, None, true);
+        assert!(rested.is_none());
+        let fresh = showing.expect("a new show");
+        assert!(fresh.seed != 0 && fresh.refs.is_empty());
+        // And nothing where there is neither a show nor a place.
+        let (showing, rested) = fanart_carried(None, None, false);
+        assert!(showing.is_none() && rested.is_none());
     }
 
     #[test]
