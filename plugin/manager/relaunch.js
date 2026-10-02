@@ -45,4 +45,50 @@ function base(ownScreen, screensaverMs) {
   return ownScreen ? OWN_SCREEN_MS : Math.max(1000, Number(screensaverMs) || 0);
 }
 
-module.exports = { LAUNCH_MS: LAUNCH_MS, LONGEST_MS: LONGEST_MS, OWN_SCREEN_MS: OWN_SCREEN_MS, deaths: deaths, wait: wait, holdUntil: holdUntil, base: base };
+// What a display that died at launch is started with the next time: the
+// graphics libraries' own words switched on. Of a screen it cannot open SDL
+// keeps only its last word ("Can't load EGL/GL library on window creation"),
+// whichever step failed; Mesa, asked, names the library or the driver that
+// would not load, and the journal then has it.
+function diagnosing(deathsInARow) {
+  return deathsInARow > 0 ? { EGL_LOG_LEVEL: 'debug', LIBGL_DEBUG: 'verbose' } : {};
+}
+
+// The libraries a display needs to draw on a screen of its own that the
+// system's loader does not know, from `ldconfig -p`: EGL, the buffer manager,
+// and OpenGL or OpenGL ES (SDL takes either). An unreadable list names none.
+function missingLibraries(ldconfigText) {
+  const text = String(ldconfigText || '');
+  if (!/\.so/.test(text)) return [];
+  const has = function (name) { return text.indexOf(name) !== -1; };
+  const missing = [];
+  if (!has('libEGL.so.1')) missing.push('libEGL.so.1');
+  if (!has('libGL.so.1') && !has('libGLESv2.so.2')) missing.push('libGL.so.1');
+  if (!has('libgbm.so.1')) missing.push('libgbm.so.1');
+  return missing;
+}
+
+// Whether a display's last words speak of the graphics libraries.
+function aboutGraphics(text) {
+  return /\bEGL\b|GL library|\bGLES|\bgbm\b|MESA/i.test(String(text || ''));
+}
+
+// Why a display died, in one line: how it left and its own last word first,
+// then what was said before that reads as a fault, each once, as far as
+// `limit` characters go. The last word is never cut out by what came before.
+const FAULT = /warning|error|fail|cannot|could not|unable|no such|not found|denied|missing/i;
+function reason(exitWord, lines, limit) {
+  const all = (lines || []).map(function (l) { return String(l).trim(); }).filter(Boolean);
+  const last = all.length ? all[all.length - 1] : '';
+  const max = Math.max(40, Number(limit) || 300);
+  let out = [String(exitWord || '').trim(), last].filter(Boolean).join(' ').slice(0, max);
+  const said = [last];
+  all.slice(0, -1).forEach(function (line) {
+    if (!FAULT.test(line) || said.indexOf(line) !== -1) return;
+    said.push(line);
+    if ((out + ' | ' + line).length <= max) out += ' | ' + line;
+  });
+  return out;
+}
+
+module.exports = { LAUNCH_MS: LAUNCH_MS, LONGEST_MS: LONGEST_MS, OWN_SCREEN_MS: OWN_SCREEN_MS, deaths: deaths, wait: wait, holdUntil: holdUntil, base: base, diagnosing: diagnosing, missingLibraries: missingLibraries, aboutGraphics: aboutGraphics, reason: reason };
