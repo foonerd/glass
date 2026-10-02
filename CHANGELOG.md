@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.5] - 2026-10-02
+
+One addition, to how releases reach a player.
+
+- **Test releases.** From the next release on, a release of Glass or of glass-evo is published as a pre-release, tried on the project's own players, and then made the latest; until that last step no player is offered it. The System tab has a switch, "Offer test releases", for a player that wants them at once: with it on, the Manager looks at the repository's last ten releases and offers the newest, a pre-release among them (marked "test release" on the tab), for Glass and for glass-evo alike; with it off, as on every player until someone turns it on, it asks for the latest as before. The choice is looked up the moment it is made. `POST /api/update/test` with `{"test": true}` sets it, `/api/update` and `/api/evo` say `test`, and the status sheet's housekeeping says which releases the player is offered.
+
 ## [0.8.4] - 2026-10-02
 
 One fix, to the look panel of the Manager's Screen tab.
