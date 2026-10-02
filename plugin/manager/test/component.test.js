@@ -24,6 +24,11 @@ function componentZip(version, options) {
   });
   const manifest = { name: 'glass-evo', version: options.says || version, binaries: binaries };
   if (options.requires) manifest.requires = { glass: options.requires };
+  if (options.module) {
+    const module = Buffer.from('the face for a browser, ' + version);
+    manifest.face = { path: options.module.path || 'face/glass-evo-face.wasm', sha256: options.module.wrong ? 'e'.repeat(64) : sha(module) };
+    if (!options.module.absent) files.push({ name: 'face/glass-evo-face.wasm', data: module });
+  }
   files.unshift({ name: 'manifest.json', data: JSON.stringify(manifest) });
   files.push({ name: 'face.txt', data: '[theme]\nname = Example\n' });
   files.push({ name: 'themes/Warm/face.txt', data: '[theme]\nname = Warm\n' });
@@ -101,7 +106,7 @@ test('a Glass about to be installed asks for a newer component, or cannot be', (
 test('getting the component: checked, unpacked for this player, and kept through an update and a way back', async () => {
   const { root, component, offer, job } = rig();
   await component.init();
-  assert.deepEqual(installedAt(path.join(root, 'evo'), 'arm'), { installed: false, available: false, version: null, binary: null, arch: 'arm', requires: null });
+  assert.deepEqual(installedAt(path.join(root, 'evo'), 'arm'), { installed: false, available: false, version: null, binary: null, arch: 'arm', requires: null, face: null });
   offer('0.1.9', { requires: '0.8.0' });
   let view = await component.check(true);
   assert.deepEqual([view.installed, view.available, view.outdated, view.behind, view.latest.version], [null, true, false, false, '0.1.9']);
@@ -227,3 +232,35 @@ test('a Glass about to go in brings the component with it, or does not go in', a
   assert.deepEqual(await component.rollback(), { from: '0.2.0', to: '0.1.9' });
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test('the face for a browser is carried out of the component, checked, where the manifest names one', async function () {
+  const r = rig();
+  await r.component.init();
+  // A component that names none has none, and installs as ever.
+  r.offer('0.1.13');
+  await r.component.check(true);
+  await r.component.install(r.job());
+  assert.equal(r.component.installed().face, null);
+  // One that carries it: the file under face/, as the manifest says it is.
+  r.offer('0.1.14', { module: {} });
+  await r.component.check(true);
+  await r.component.install(r.job());
+  const here = r.component.installed();
+  assert.equal(here.version, '0.1.14');
+  assert.equal(here.face, path.join(r.root, 'evo', 'face', 'glass-evo-face.wasm'));
+  assert.equal(fs.readFileSync(here.face, 'utf8'), 'the face for a browser, 0.1.14');
+  // Named and not what it is said to be, named and not there, or named
+  // outside face/: the component is not installed, and the one before stays.
+  for (const [module, code] of [[{ wrong: true }, 'checksum'], [{ absent: true }, 'no-module']]) {
+    r.offer('0.1.15', { module: module });
+    await r.component.check(true);
+    await assert.rejects(r.component.install(r.job()), function (e) { return e.code === code; });
+    assert.equal(r.component.installed().version, '0.1.14');
+  }
+  r.offer('0.1.15', { module: { path: '../face.wasm' } });
+  await r.component.check(true);
+  await r.component.install(r.job());
+  assert.equal(r.component.installed().version, '0.1.15');
+  assert.equal(r.component.installed().face, null, 'a module named outside face/ is no module');
+});
+
