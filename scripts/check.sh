@@ -51,6 +51,12 @@ if command -v pwsh >/dev/null 2>&1 || command -v docker >/dev/null 2>&1; then
     said=$(run_installer "$layout" -Check) || { echo "check: install.ps1 fails with the display under $bin" >&2; rm -rf "$layout"; exit 1; }
     echo "$said" | grep -q "would install from" || { echo "check: install.ps1 -Check said: $said" >&2; rm -rf "$layout"; exit 1; }
   done
+  # The bundle's layout: glass-evo's display in the archive is installed as the bundle.
+  rm -rf "$layout"/* && mkdir -p "$layout/bin" "$layout/remote/windows"
+  cp remote/windows/*.ps1 "$layout/remote/windows/"
+  : > "$layout/bin/glass-evo.exe"; : > "$layout/bin/SDL2.dll"
+  said=$(run_installer "$layout" -Check) || { echo "check: install.ps1 fails with glass-evo's display under bin" >&2; rm -rf "$layout"; exit 1; }
+  echo "$said" | grep -q "would install from .*(the bundle)" || { echo "check: install.ps1 -Check said of the bundle: $said" >&2; rm -rf "$layout"; exit 1; }
   rm -rf "$layout"/* && mkdir -p "$layout/remote/windows" && cp remote/windows/*.ps1 "$layout/remote/windows/"
   if run_installer "$layout" -Check >/dev/null 2>&1; then
     echo "check: install.ps1 must refuse a layout without the display" >&2; rm -rf "$layout"; exit 1
