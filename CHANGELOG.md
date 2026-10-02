@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.26] - 2026-10-02
+
+Reported from a player whose meters rotate at random.
+
+- **The fanart slideshow carries on across a change of meter.** The show was made anew whenever the meter on show changed, so with meters rotating, by a timer or with the title, the artist's pictures started again at every change: from the first picture, or from a new random one, with the interval begun again and what was remembered per artist lost. The show is the artist's now, not the meter's: its place among the pictures and the time of its last advance are kept when the meter changes, a meter with no place for fanart rests the show, and the next meter that has one takes it up where it was. The same on a remote display, in the Face tab and in Anymote. On a player whose screen glass-evo holds, the screen follows with the glass-evo built on this release.
+
 ## [0.8.25] - 2026-10-02
 
 Found on an x86 player with glass-evo on its screen.
