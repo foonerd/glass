@@ -7,6 +7,8 @@ ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 unset CARGO_TARGET_DIR
 
+# The libraries the cross builds link against, from Debian bookworm's own
+# packages, each held against the digest Debian's index gives for it.
 # Each library is looked for at its own path with -e, which follows links: a
 # restored CI cache keeps the links of the sysroot and drops the files behind
 # them, and such a library counts as missing and is unpacked again.
@@ -14,36 +16,38 @@ fetch_sdl() {
   local deb_arch=$1
   local multiarch=$2
   local dest=$3
+  local sha=$4
   local deb="target/sysroot/${deb_arch}.deb"
   local so="target/sysroot/$deb_arch/usr/lib/$multiarch/libSDL2-2.0.so.0"
   if [ ! -e "$so" ]; then
     mkdir -p "target/sysroot/$deb_arch"
-    "$ROOT/scripts/fetch.sh" "http://deb.debian.org/debian/pool/main/libs/libsdl2/libsdl2-2.0-0_2.26.5+dfsg-1_${deb_arch}.deb" "$deb"
+    "$ROOT/scripts/fetch.sh" "http://deb.debian.org/debian/pool/main/libs/libsdl2/libsdl2-2.0-0_2.26.5+dfsg-1_${deb_arch}.deb" "$deb" "$sha"
     dpkg-deb -x "$deb" "target/sysroot/$deb_arch"
   fi
   mkdir -p "$dest"
   ln -sfn "$(realpath "$so")" "$dest/libSDL2.so"
 }
 
-fetch_sdl armhf arm-linux-gnueabihf target/sysroot/link-armhf
-fetch_sdl arm64 aarch64-linux-gnu target/sysroot/link-arm64
+fetch_sdl armhf arm-linux-gnueabihf target/sysroot/link-armhf b76abdb214e7213a1ea6542dd618c940d3b5601c14dcf88577db1d13d6a80ec7
+fetch_sdl arm64 aarch64-linux-gnu target/sysroot/link-arm64 7d875b119108a240015e7739c7a0de402616975281bcd8169cb434326fa93a66
 
 # The ALSA library of each target, for the tap's link step (its build
 # script finds it under target/sysroot/<arch>).
 fetch_asound() {
   local deb_arch=$1
   local multiarch=$2
+  local sha=$3
   local deb="target/sysroot/asound-${deb_arch}.deb"
   local so="target/sysroot/$deb_arch/usr/lib/$multiarch/libasound.so.2"
   if [ ! -e "$so" ]; then
     mkdir -p "target/sysroot/$deb_arch"
-    "$ROOT/scripts/fetch.sh" "http://deb.debian.org/debian/pool/main/a/alsa-lib/libasound2_1.2.8-1+b1_${deb_arch}.deb" "$deb"
+    "$ROOT/scripts/fetch.sh" "http://deb.debian.org/debian/pool/main/a/alsa-lib/libasound2_1.2.8-1+b1_${deb_arch}.deb" "$deb" "$sha"
     dpkg-deb -x "$deb" "target/sysroot/$deb_arch"
   fi
 }
-fetch_asound armhf arm-linux-gnueabihf
-fetch_asound arm64 aarch64-linux-gnu
-fetch_asound amd64 x86_64-linux-gnu
+fetch_asound armhf arm-linux-gnueabihf 97718ff5e552c9a7b9e77e8debbe219b0068a9ab5dcabedd0800c69dd8f0eb96
+fetch_asound arm64 aarch64-linux-gnu 9fa889400fcee4b92c8f4a2fafbb7f2cd33444d9ec1665a71002ab67c06114bb
+fetch_asound amd64 x86_64-linux-gnu 44c77b076a7b11ae99712439022d822245b1994c435da564ebd320bb676faf4c
 export CARGO_TARGET_ARMV7_UNKNOWN_LINUX_GNUEABIHF_RUSTFLAGS="-L native=$ROOT/target/sysroot/link-armhf -C link-arg=-Wl,--allow-shlib-undefined"
 export CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_RUSTFLAGS="-L native=$ROOT/target/sysroot/link-arm64 -C link-arg=-Wl,--allow-shlib-undefined"
 
