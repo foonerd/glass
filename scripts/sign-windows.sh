@@ -24,8 +24,10 @@ apt_install() {
     || { sudo apt-get update && sudo apt-get install -y --no-install-recommends "$@"; }
 }
 JSIGN_VERSION=7.5
+JSIGN_SHA256=7b4a01ba81e9ee866f09a5e45d40c928707eb5286f4e20d4042c67a141ae5e62
 if ! command -v jsign >/dev/null 2>&1; then
-  "$ROOT/scripts/fetch.sh" "https://github.com/ebourg/jsign/releases/download/$JSIGN_VERSION/jsign_${JSIGN_VERSION}_all.deb" /tmp/jsign.deb
+  "$ROOT/scripts/fetch.sh" "https://github.com/ebourg/jsign/releases/download/$JSIGN_VERSION/jsign_${JSIGN_VERSION}_all.deb" \
+    /tmp/jsign.deb "$JSIGN_SHA256"
   apt_install /tmp/jsign.deb osslsigncode
 fi
 command -v osslsigncode >/dev/null 2>&1 || apt_install osslsigncode
