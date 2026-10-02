@@ -1,41 +1,119 @@
 name: release
 
+# A tag builds the release: the check, the Linux builds, the Windows build
+# and the Android app side by side, then one job that signs and publishes.
+# Run by hand it builds everything and publishes nothing.
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
-  contents: write
-  id-token: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
 
+# The check, the Linux builds and the Windows build run in the builder image
+# (scripts/builder/Dockerfile, named by its digest as in ci.yml) and read
+# the build caches ci.yml wrote on main.
 jobs:
-  release:
-    name: build, package, publish
+  check:
+    name: format, lints, tests, docs
     runs-on: ubuntu-24.04
-    # The environment names this job to Azure: the federated credential
-    # for Trusted Signing matches repo:foonerd/glass:environment:release,
-    # the same for every tag.
-    environment: release
+    container: ghcr.io/foonerd/glass-builder@sha256:cdc7706f7cb2e06022a418ed257659d192e9b1d68d478e7885b110575620697a
     steps:
       - uses: actions/checkout@v7
-      - run: rustup toolchain install && rustup show active-toolchain && rustup target add x86_64-pc-windows-gnu aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
-      - name: The Android NDK, build tools and cargo-ndk
+      - name: The tag names the version the workspace carries
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "the tag is $GITHUB_REF_NAME, the workspace is $version" >&2; exit 1; }
+      - run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: check
+          cache-bin: false
+          save-if: false
+      - run: scripts/check.sh
+
+  linux:
+    name: cross builds, the plugin zip, the remotes' archives
+    runs-on: ubuntu-24.04
+    container: ghcr.io/foonerd/glass-builder@sha256:cdc7706f7cb2e06022a418ed257659d192e9b1d68d478e7885b110575620697a
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install && rustup show active-toolchain
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: ship
+          cache-bin: false
+          save-if: false
+      - run: scripts/ship.sh
+      - name: The tap passes every format through byte for byte
+        run: scripts/tap_exact.sh lib/x64/libglasstap.so bin/x64/tapdump
+      - run: scripts/package.sh
+      - name: Per-architecture archives of the display, the tap and the remote installer
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          for arch in arm armv7 armv8 x64; do
+            tar -C . --transform "s,^,glass-$version-$arch/," -czf "dist/glass-$version-$arch.tar.gz" "bin/$arch" "lib/$arch" remote/README.md remote/linux
+          done
+          # What a remote needs is a few megabytes; anything more is the
+          # build's leavings, never to be published again.
+          for f in dist/glass-*-*.tar.gz; do
+            size=$(stat -c %s "$f")
+            if [ "$size" -gt 16000000 ]; then
+              echo "$f is $size bytes, more than a remote needs:" >&2
+              tar -tzf "$f" | head -40 >&2
+              exit 1
+            fi
+          done
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-linux
+          path: |
+            dist/glass-*.zip
+            dist/glass-*-*.tar.gz
+          if-no-files-found: error
+
+  windows:
+    name: windows cross build
+    runs-on: ubuntu-24.04
+    container: ghcr.io/foonerd/glass-builder@sha256:cdc7706f7cb2e06022a418ed257659d192e9b1d68d478e7885b110575620697a
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install && rustup show active-toolchain && rustup target add x86_64-pc-windows-gnu
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: windows
+          cache-bin: false
+          save-if: false
+      - run: scripts/ship-windows.sh
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-windows
+          path: bin/windows-x64
+          if-no-files-found: error
+
+  # The Android app is signed with the project's key when the repository
+  # holds it (secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASS);
+  # without it the apk carries a throwaway key and is not published.
+  android:
+    name: android build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install && rustup show active-toolchain && rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
+      - name: The NDK, the build tools and cargo-ndk
         run: |
           yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "ndk;27.2.12479018" "build-tools;35.0.0" "platforms;android-35" >/dev/null
           cargo install cargo-ndk --locked
-      - name: Cross compilers and the libraries the host build links against
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends gcc-arm-linux-gnueabihf gcc-aarch64-linux-gnu libc6-dev-armhf-cross libc6-dev-arm64-cross mingw-w64 libsdl2-dev libasound2-dev alsa-utils
       - uses: Swatinem/rust-cache@v2
-      - run: scripts/check.sh
-      - run: scripts/ship.sh
-      - run: scripts/ship-windows.sh
-      # The Android app is signed with the project's key when the repository
-      # holds it (secrets ANDROID_KEYSTORE_BASE64, ANDROID_KEYSTORE_PASS);
-      # without it the apk carries a throwaway key and is not published.
+        with:
+          shared-key: android
+          save-if: false
       - name: The Android app
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -50,11 +128,46 @@ jobs:
             echo "no signing key in the repository: the apk is not published"
             rm -f dist/glass-*-android.apk
           fi
+      - uses: actions/upload-artifact@v7
+        with:
+          name: release-android
+          path: dist/glass-*-android.apk
+          if-no-files-found: ignore
+
+  publish:
+    name: sign, publish
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [check, linux, windows, android]
+    runs-on: ubuntu-24.04
+    # The environment names this job to Azure: the federated credential
+    # for Trusted Signing matches repo:foonerd/glass:environment:release,
+    # the same for every tag.
+    environment: release
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          pattern: release-*
+          path: artifacts
+      - name: What the build jobs made, where the steps below look for it
+        run: |
+          mkdir -p dist bin/windows-x64
+          cp artifacts/release-linux/* dist/
+          cp artifacts/release-windows/* bin/windows-x64/
+          if ls artifacts/release-android/*.apk >/dev/null 2>&1; then
+            cp artifacts/release-android/*.apk dist/
+          else
+            echo "no signed apk from the Android build: none is published"
+          fi
+          ls -la dist bin/windows-x64
       # The Windows binary and the installer are signed with Azure Trusted
       # Signing when the repository holds the account (variables
       # TRUSTED_SIGNING_ENDPOINT, _ACCOUNT, _PROFILE; secrets AZURE_TENANT_ID,
       # AZURE_CLIENT_ID, AZURE_SUBSCRIPTION_ID for a federated login);
-      # without them the archive is published unsigned, as before.
+      # without them the archive is published unsigned.
       - name: Azure login for Trusted Signing
         if: ${{ vars.TRUSTED_SIGNING_ACCOUNT != '' }}
         uses: azure/login@v3
@@ -69,26 +182,6 @@ jobs:
           TRUSTED_SIGNING_ENDPOINT: ${{ vars.TRUSTED_SIGNING_ENDPOINT }}
           TRUSTED_SIGNING_ACCOUNT: ${{ vars.TRUSTED_SIGNING_ACCOUNT }}
           TRUSTED_SIGNING_PROFILE: ${{ vars.TRUSTED_SIGNING_PROFILE }}
-      - name: The tap passes every format through byte for byte
-        run: scripts/tap_exact.sh lib/x64/libglasstap.so bin/x64/tapdump
-      - run: scripts/package.sh
-      - name: Notes from the changelog
-        run: scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > dist/notes.md
-      - name: Per-architecture archives of the display, the tap and the remote installer
-        run: |
-          for arch in arm armv7 armv8 x64; do
-            tar -C . --transform "s,^,glass-${GITHUB_REF_NAME#v}-$arch/," -czf "dist/glass-${GITHUB_REF_NAME#v}-$arch.tar.gz" "bin/$arch" "lib/$arch" remote/README.md remote/linux
-          # What a remote needs is a few megabytes; anything more is the
-          # build's leavings, never to be published again.
-          for f in dist/glass-*-*.tar.gz; do
-            size=$(stat -c %s "$f")
-            if [ "$size" -gt 16000000 ]; then
-              echo "$f is $size bytes, more than a remote needs:" >&2
-              tar -tzf "$f" | head -40 >&2
-              exit 1
-            fi
-          done
-          done
       - name: The Windows archive of the display and the remote installer
         run: |
           top="glass-${GITHUB_REF_NAME#v}-windows-x64"
@@ -96,6 +189,8 @@ jobs:
           cp -r bin/windows-x64 "dist/$top/bin"
           cp -r remote/windows remote/README.md "dist/$top/remote/"
           (cd dist && zip -qr "$top.zip" "$top") && rm -rf "dist/$top"
+      - name: Notes from the changelog
+        run: scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > dist/notes.md
       - uses: softprops/action-gh-release@v3
         with:
           body_path: dist/notes.md

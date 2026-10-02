@@ -17,12 +17,18 @@ ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 : "${TRUSTED_SIGNING_ENDPOINT:?}" "${TRUSTED_SIGNING_ACCOUNT:?}" "${TRUSTED_SIGNING_PROFILE:?}"
 
+# The two tools are small; the package lists are fetched only when the
+# machine's own no longer name them.
+apt_install() {
+  sudo apt-get install -y --no-install-recommends "$@" \
+    || { sudo apt-get update && sudo apt-get install -y --no-install-recommends "$@"; }
+}
 JSIGN_VERSION=7.5
 if ! command -v jsign >/dev/null 2>&1; then
   curl -fsSL -o /tmp/jsign.deb "https://github.com/ebourg/jsign/releases/download/$JSIGN_VERSION/jsign_${JSIGN_VERSION}_all.deb"
-  sudo apt-get install -y --no-install-recommends /tmp/jsign.deb osslsigncode
+  apt_install /tmp/jsign.deb osslsigncode
 fi
-command -v osslsigncode >/dev/null 2>&1 || sudo apt-get install -y --no-install-recommends osslsigncode
+command -v osslsigncode >/dev/null 2>&1 || apt_install osslsigncode
 
 token=$(az account get-access-token --resource https://codesigning.azure.net --query accessToken -o tsv)
 for file in bin/windows-x64/glass.exe remote/windows/install.ps1 remote/windows/uninstall.ps1; do
