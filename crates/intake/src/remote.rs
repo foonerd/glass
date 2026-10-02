@@ -413,6 +413,9 @@ pub struct Synced {
     pub meter: String,
     pub fetched: usize,
     pub kept: usize,
+    /// Whose the player's screen is, as the player said: `glass-evo` where
+    /// its face holds it. Empty from a player that does not say.
+    pub face_owner: String,
 }
 
 /// What was fetched before, by path under the home, with its checksum.
@@ -424,6 +427,9 @@ struct Ledger {
     theme: String,
     #[serde(default)]
     files: HashMap<String, String>,
+    /// Whose the player's screen was at the last sync.
+    #[serde(default)]
+    face_owner: String,
 }
 
 /// Brings the player's configuration and assets into `home`.
@@ -460,6 +466,33 @@ impl Sync {
     /// What the last sync said, line by line.
     pub fn log(&self) -> &[String] {
         &self.log
+    }
+
+    /// Whose the player's screen was when it was last asked, kept with the
+    /// rest for a start while the player cannot be reached.
+    pub fn face_owner(&self) -> &str {
+        &self.ledger.face_owner
+    }
+
+    /// The look a face on this display draws in, where a face reads its
+    /// themes: `faces/<name>/face.txt` under the home, and nothing else
+    /// there. A player that names none leaves the folder empty, and the
+    /// face draws its built-in look.
+    fn bring_face(&mut self, face: &crate::bring::RemoteFace) -> Result<(), String> {
+        let faces = self.home.join("faces");
+        if faces.exists() {
+            std::fs::remove_dir_all(&faces).map_err(|e| format!("{}: {e}", faces.display()))?;
+        }
+        if let Some(theme) = face.theme.as_ref() {
+            if crate::bring::face_theme_name_ok(&theme.name) {
+                let dir = faces.join(theme.name.trim());
+                std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+                std::fs::write(dir.join("face.txt"), &theme.text)
+                    .map_err(|e| format!("{}: {e}", dir.display()))?;
+            }
+        }
+        self.ledger.face_owner = face.owner.trim().to_string();
+        Ok(())
     }
 
     fn get_text(&self, url: &str) -> Result<String, String> {
@@ -545,6 +578,7 @@ impl Sync {
             .map_err(|e| format!("meter.txt: {e}"))?;
         std::fs::write(self.home.join("config/spectrum.txt"), &texts.spectrum)
             .map_err(|e| format!("spectrum.txt: {e}"))?;
+        self.bring_face(&config.face)?;
         let mut fetched = 0usize;
         let mut kept = 0usize;
         let mut count = |brought: bool| if brought { fetched += 1 } else { kept += 1 };
@@ -598,6 +632,7 @@ impl Sync {
                 .unwrap_or(config.meter),
             fetched,
             kept,
+            face_owner: self.ledger.face_owner.clone(),
         })
     }
 }
@@ -654,6 +689,46 @@ mod tests {
             none.is_empty(),
             "a font the player does not list is left as named"
         );
+    }
+
+    #[test]
+    fn a_remote_keeps_the_players_look_where_a_face_reads_it() {
+        let home = std::env::temp_dir().join(format!("glass-sync-face-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&home);
+        std::fs::create_dir_all(home.join("faces/Old")).unwrap();
+        std::fs::write(home.join("faces/Old/face.txt"), "stale").unwrap();
+        let mut sync = Sync::new(&home, "http://127.0.0.1:1", "http://127.0.0.1:1");
+        let said: RemoteConfig = serde_json::from_str(
+            r#"{"version":"v","theme":"t","files":{"meter":""},"assets":{"fonts":[],"icons":[]},
+                "face":{"owner":"glass-evo","theme":{"name":"Dark Glass","text":"[theme]\nname = Dark Glass\n"}}}"#,
+        )
+        .unwrap();
+        sync.bring_face(&said.face).unwrap();
+        assert_eq!(sync.face_owner(), "glass-evo");
+        assert_eq!(
+            std::fs::read_to_string(home.join("faces/Dark Glass/face.txt")).unwrap(),
+            "[theme]\nname = Dark Glass\n"
+        );
+        assert!(
+            !home.join("faces/Old").exists(),
+            "the look of before is gone"
+        );
+        // A name that is more than a folder's name is not written anywhere.
+        let odd: RemoteConfig = serde_json::from_str(
+            r#"{"face":{"owner":"kiosk","theme":{"name":"../out","text":"x"}}}"#,
+        )
+        .unwrap();
+        sync.bring_face(&odd.face).unwrap();
+        assert_eq!(sync.face_owner(), "kiosk");
+        assert!(!home.join("faces/Dark Glass").exists());
+        assert!(!home.parent().unwrap().join("out").exists());
+        // A player older than 0.8.20 says nothing: no look, no owner.
+        let older: RemoteConfig =
+            serde_json::from_str(r#"{"version":"v","theme":"t","files":{"meter":""}}"#).unwrap();
+        assert_eq!(older.face, crate::bring::RemoteFace::default());
+        sync.bring_face(&older.face).unwrap();
+        assert_eq!(sync.face_owner(), "");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]

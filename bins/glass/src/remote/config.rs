@@ -285,6 +285,32 @@ pub struct RemoteConfig {
     /// 0.5 to 0.99, on this remote; 0 shows the bars as the player sends them.
     #[serde(default)]
     pub spectrum_decay: f32,
+    /// When a display that carries a face draws it over the theme. A
+    /// display without one has nothing to draw, whatever this says.
+    #[serde(default)]
+    pub face: FaceShown,
+}
+
+/// When a remote that carries a face shows it: where the player's own
+/// screen shows it, always, or never.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum FaceShown {
+    #[default]
+    Follow,
+    Always,
+    Off,
+}
+
+impl FaceShown {
+    /// Whether the face is drawn, the player's screen being `owner`'s.
+    pub fn shows(self, owner: &str) -> bool {
+        match self {
+            FaceShown::Follow => owner == "glass-evo",
+            FaceShown::Always => true,
+            FaceShown::Off => false,
+        }
+    }
 }
 
 fn default_version() -> u32 {
@@ -307,6 +333,7 @@ impl Default for RemoteConfig {
             themes_dir: None,
             log_level: None,
             spectrum_decay: 0.0,
+            face: FaceShown::default(),
         }
     }
 }
@@ -566,6 +593,23 @@ mod tests {
         assert!(note.is_some());
         assert_eq!(fallback, RemoteConfig::default());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_face_is_shown_where_the_players_screen_shows_it_unless_said_otherwise() {
+        assert!(FaceShown::Follow.shows("glass-evo"));
+        assert!(!FaceShown::Follow.shows("kiosk"));
+        assert!(!FaceShown::Follow.shows(""), "a player that does not say");
+        assert!(FaceShown::Always.shows("kiosk") && FaceShown::Always.shows(""));
+        assert!(!FaceShown::Off.shows("glass-evo"));
+        // A configuration from before the setting follows the player.
+        let old: RemoteConfig = serde_json::from_str(r#"{"version":1,"name":"k"}"#).unwrap();
+        assert_eq!(old.face, FaceShown::Follow);
+        let set: RemoteConfig = serde_json::from_str(r#"{"face":"always"}"#).unwrap();
+        assert_eq!(set.face, FaceShown::Always);
+        assert!(serde_json::to_string(&set)
+            .unwrap()
+            .contains(r#""face":"always""#));
     }
 
     #[test]

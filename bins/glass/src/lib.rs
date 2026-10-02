@@ -410,6 +410,7 @@ pub fn run_with(args: Vec<String>, mut face: Option<Box<dyn Overlay>>) -> ExitCo
             remote_name,
             config_file.as_deref(),
             open_settings,
+            &mut face,
         );
     }
     intake::set_overrides(run.overrides.clone());
@@ -898,6 +899,11 @@ fn session(
     // key or by the launcher's word when the key is Auto, or when the
     // launcher says the X server is there for the display alone.
     let screen_ours = screen_is_ours(&skin.run.driver);
+    // A face on a remote has the window as it has a screen of the display's
+    // own: it shows its clock while the player stands still, the picture
+    // behind it goes black past the countdown as on the player, and a touch
+    // beside it does nothing.
+    let remote_face = remote.is_some() && face.is_some();
     let mut black_frame = Black::default();
     loop {
         let frame_started = Instant::now();
@@ -1055,7 +1061,7 @@ fn session(
             // The screen is ours and the player has stopped past the
             // countdown: black, never the console. The theme is not drawn
             // behind a black screen, unless a file is to be written of it.
-            let idle_black = screen_ours && stands_black(&input.metadata);
+            let idle_black = (screen_ours || remote_face) && stands_black(&input.metadata);
             let rastered = !idle_black || write_file;
             if profiling && rastered {
                 motion.profile = Some(Vec::new());
@@ -1130,7 +1136,7 @@ fn session(
                     height: frame.height,
                     now_ms: started.elapsed().as_millis() as u64,
                     wall: &wall,
-                    ours: screen_ours,
+                    ours: screen_ours || remote_face,
                     scale: skin.run.face_scale,
                     settings: &skin.run.face,
                 };
@@ -1195,7 +1201,7 @@ fn session(
                         height: skin.height,
                         now_ms: started.elapsed().as_millis() as u64,
                         wall: &wall,
-                        ours: screen_ours,
+                        ours: screen_ours || remote_face,
                         scale: skin.run.face_scale,
                         settings: &skin.run.face,
                     };
@@ -1339,12 +1345,12 @@ fn session(
                     Shown::Touched => {
                         if acted {
                             // A control took the touch.
-                        } else if remote.is_some() && !dismiss {
+                        } else if remote.is_some() && !dismiss && !remote_face {
                             // A touch on a remote plays or pauses the player.
                             if let Some(remote) = remote.as_deref() {
                                 remote.touched(&mut source);
                             }
-                        } else if screen_ours {
+                        } else if screen_ours || remote_face {
                             // The screen is ours: a touch outside a control does nothing.
                         } else if skin.run.exit_on_touch || dismiss {
                             let marker = env::var(DISMISS_FILE_VAR).ok();
@@ -1443,11 +1449,8 @@ fn session(
             let shown_at = Instant::now();
             // Only what was painted on this frame counts: behind a black
             // screen the theme is not painted at all.
-            let behind_black = screen_ours
-                && input.metadata.status != "play"
-                && input.metadata.persist_mode == "countdown"
-                && input.metadata.persist_left == 0
-                && !write_file;
+            let behind_black =
+                (screen_ours || remote_face) && stands_black(&input.metadata) && !write_file;
             if !behind_black {
                 profile_painted += motion
                     .damage()
