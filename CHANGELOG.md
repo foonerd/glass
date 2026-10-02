@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.19] - 2026-10-02
+
+No change in what is shown; one change in how it is made.
+
+- **The screen and the browser views lay a face over the picture with the same code.** The display's loop and the browser's pipeline each had their own copy of it: when a player standing still goes black, the black picture kept between frames, the copy a face draws on, and when a standing face over a standing picture is not drawn again. It is one piece now, in the `overlay` crate (`stands_black`, `Black`, `Laid`), with its own tests, and both call it, so what a face shows on the player's screen and in the Face tab or Anymote cannot come to differ there. For a face built against Glass: `overlay::Laid` and its companions are new; nothing a face is written against has changed.
+
 ## [0.8.18] - 2026-10-02
 
 One fix, for a player whose screen glass-evo took from a running kiosk.
