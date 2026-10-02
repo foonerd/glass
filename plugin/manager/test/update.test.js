@@ -5,7 +5,7 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
-const { compareVersions, parseRelease } = require('../update');
+const { compareVersions, parseRelease, newestRelease, offered, Updater } = require('../update');
 const { zipDirectory } = require('../zipwrite');
 const zip = require('../zip');
 
@@ -63,3 +63,59 @@ test('zipDirectory writes a zip the reader opens, files at the root, links left 
   }
   await fsp.rm(dir, { recursive: true, force: true });
 });
+
+// A release as GitHub lists it, with the plugin's zip.
+function listed(version, marks) {
+  return Object.assign({
+    tag_name: 'v' + version,
+    assets: [{ name: 'glass-' + version + '.zip', size: 5, digest: 'sha256:' + 'a'.repeat(64), browser_download_url: 'zip/' + version }]
+  }, marks || {});
+}
+
+test('the newest of a list is taken by version, a pre-release among them, a draft never', function () {
+  const list = [listed('0.8.4'), listed('0.8.6', { draft: true }), listed('0.8.5', { prerelease: true }), listed('0.8.3'), { tag_name: 'v0.9.0', assets: [] }];
+  const newest = newestRelease(list);
+  assert.equal(newest.version, '0.8.5');
+  assert.equal(newest.prerelease, true);
+  assert.equal(parseRelease(listed('0.8.4')).prerelease, false);
+  assert.throws(function () { newestRelease([listed('1.0.0', { draft: true })]); }, function (e) { return e.code === 'no-release'; });
+  assert.throws(function () { newestRelease({}); }, function (e) { return e.code === 'bad-release'; });
+});
+
+test('a player is offered the latest release, or the newest of all where it takes test releases', async function () {
+  const asked = [];
+  const fetch = async function (url) {
+    asked.push(url);
+    const body = /\/latest$/.test(url) ? listed('0.8.4') : [listed('0.8.5', { prerelease: true }), listed('0.8.4')];
+    return { body: Buffer.from(JSON.stringify(body)) };
+  };
+  assert.equal((await offered(fetch, 'https://api/repos/x/releases/latest', false)).version, '0.8.4');
+  assert.equal((await offered(fetch, 'https://api/repos/x/releases/latest', true)).version, '0.8.5');
+  assert.deepEqual(asked, ['https://api/repos/x/releases/latest', 'https://api/repos/x/releases?per_page=10']);
+  await assert.rejects(offered(async function () { return { body: Buffer.from('<html>') }; }, 'x/latest', false), function (e) { return e.code === 'bad-release'; });
+});
+
+test('the updater asks whether test releases are taken at every check, and says so in its view', async function () {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glass-upd-test-'));
+  let test = false;
+  const updater = new Updater({
+    dir: dir,
+    version: '0.8.4',
+    pluginPath: dir,
+    plugin: {},
+    logger: { info: function () {}, warn: function () {} },
+    releasesUrl: 'r/latest',
+    test: function () { return test; },
+    fetch: async function (url) {
+      return { body: Buffer.from(JSON.stringify(url === 'r/latest' ? listed('0.8.4') : [listed('0.8.5', { prerelease: true }), listed('0.8.4')])) };
+    }
+  });
+  await updater.init();
+  let view = await updater.check(true);
+  assert.deepEqual([view.test, view.available, view.latest.version], [false, false, '0.8.4']);
+  test = true;
+  view = await updater.check(true);
+  assert.deepEqual([view.test, view.available, view.latest.version, view.latest.prerelease], [true, true, '0.8.5', true]);
+  await fsp.rm(dir, { recursive: true, force: true });
+});
+

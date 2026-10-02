@@ -1456,6 +1456,20 @@ Glass.prototype.setInteractiveMode = function (value) {
     return { changed: true, interactive: wanted };
 };
 
+// ---- Test releases: whether this player is offered pre-releases ----------
+
+Glass.prototype.testReleases = function () {
+    return this.config.get('testReleases') === true;
+};
+
+Glass.prototype.setTestReleases = function (on) {
+    var wanted = on === true;
+    if (this.testReleases() === wanted) { return { changed: false, test: wanted }; }
+    this.config.set('testReleases', wanted);
+    this.logger.info(id + 'releases: test releases ' + (wanted ? 'are offered' : 'are not offered'));
+    return { changed: true, test: wanted };
+};
+
 // The display launched once: nothing when the player has no screen of its
 // own or the display already runs; its lines relayed to the journal; on
 // exit, re-armed, restarted or left, as the exit action says.

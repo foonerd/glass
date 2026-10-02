@@ -18,7 +18,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { get } = require('./catalog');
 const { Zip, safeName } = require('./zip');
-const { compareVersions, parseRelease, fetchChecked } = require('./update');
+const { compareVersions, offered, fetchChecked } = require('./update');
 
 const RELEASES_URL = 'https://api.github.com/repos/foonerd/glass-evo/releases/latest';
 const ASSET = /^glass-evo-(\d+\.\d+\.\d+)\.zip$/;
@@ -155,6 +155,7 @@ class Component {
     this.logger = options.logger || console;
     this.releasesUrl = options.releasesUrl || RELEASES_URL;
     this.fetch = options.fetch || get;
+    this.test = options.test || function () { return false; };
     this.latest = null;
     this.checkedAt = null;
   }
@@ -188,6 +189,7 @@ class Component {
     const behind = !!latest && !!this.least && compareVersions(latest.version, this.least) < 0;
     return {
       installed: now.installed ? { version: now.version, available: now.available, requires: now.requires } : null,
+      test: !!this.test(),
       glass: this.glass,
       least: this.least,
       // Here, and older than this Glass works with.
@@ -202,21 +204,12 @@ class Component {
     };
   }
 
-  // The latest release, from GitHub when the last look is older than a day or `force`.
+  // The release offered (the latest, or the newest test release where the
+  // player takes them), from GitHub when the last look is older than a day or `force`.
   async check(force) {
     const fresh = this.latest && this.checkedAt && (Date.now() - new Date(this.checkedAt).getTime()) < CHECK_TTL_MS;
     if (!force && fresh) return this.view();
-    const res = await this.fetch(this.releasesUrl, {
-      headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' },
-      limit: MAX_RELEASE_BYTES
-    });
-    let body;
-    try {
-      body = JSON.parse(res.body.toString('utf8'));
-    } catch (e) {
-      throw new ComponentError('bad-release', 'the release answer is not JSON');
-    }
-    this.latest = parseRelease(body, ASSET);
+    this.latest = await offered(this.fetch, this.releasesUrl, !!this.test(), ASSET);
     this.checkedAt = new Date().toISOString();
     const file = path.join(this.stateDir, 'latest.json');
     await fsp.writeFile(file + '.tmp', JSON.stringify({ latest: this.latest, checkedAt: this.checkedAt }));

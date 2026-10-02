@@ -69,10 +69,43 @@ function parseRelease(body, pattern) {
     notes: String(body.body || '').slice(0, 20000),
     publishedAt: body.published_at || null,
     page: String(body.html_url || ''),
+    prerelease: !!body.prerelease,
     url: String(asset.browser_download_url || ''),
     bytes: Number(asset.size) || 0,
     sha256: digest ? digest[1] : null
   };
+}
+
+// The newest of a list of releases that carries the zip, by version:
+// pre-releases among them, drafts and releases without the zip left out.
+function newestRelease(list, pattern) {
+  if (!Array.isArray(list)) throw new UpdateError('bad-release', 'the releases answer is not a list');
+  let best = null;
+  for (const body of list) {
+    if (!body || body.draft) continue;
+    let release;
+    try { release = parseRelease(body, pattern); } catch (e) { continue; }
+    if (!best || compareVersions(release.version, best.version) > 0) best = release;
+  }
+  if (!best) throw new UpdateError('no-release', 'no release holds a zip of the name looked for');
+  return best;
+}
+
+// The release a player is offered: the repository's latest, which is never
+// a pre-release; or, on a player set to take test releases, the newest of
+// its last ten whatever its mark. `latestUrl` is the address of the latest.
+async function offered(fetch, latestUrl, test, pattern) {
+  const res = await fetch(test ? latestUrl.replace(/\/latest$/, '?per_page=10') : latestUrl, {
+    headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' },
+    limit: MAX_RELEASE_BYTES
+  });
+  let body;
+  try {
+    body = JSON.parse(res.body.toString('utf8'));
+  } catch (e) {
+    throw new UpdateError('bad-release', 'the release answer is not JSON');
+  }
+  return test ? newestRelease(body, pattern) : parseRelease(body, pattern);
 }
 
 // A release's zip fetched to a file and checked: its size and its digest
@@ -112,7 +145,8 @@ async function fetchChecked(release, file, job, fetch) {
 class Updater {
   // dir: where the kept zip, the configuration snapshot and the state
   // live; plugin: the plugin's methods (backupCreate, updateApply,
-  // restartBackend); pluginPath: the installed plugin directory.
+  // restartBackend); pluginPath: the installed plugin directory; test:
+  // whether this player takes test releases, asked at every check.
   constructor(options) {
     this.dir = options.dir;
     this.version = options.version;
@@ -120,6 +154,8 @@ class Updater {
     this.plugin = options.plugin;
     this.logger = options.logger || console;
     this.releasesUrl = options.releasesUrl || RELEASES_URL;
+    this.fetch = options.fetch || get;
+    this.test = options.test || function () { return false; };
     this.stagingDir = options.stagingDir || STAGING_DIR;
     this.latest = null;
     this.checkedAt = null;
@@ -159,21 +195,11 @@ class Updater {
     await fsp.rename(file + '.tmp', file);
   }
 
-  // The latest release, from GitHub when the last look is older than a day or `force`.
+  // The release offered, from GitHub when the last look is older than a day or `force`.
   async check(force) {
     const fresh = this.latest && this.checkedAt && (Date.now() - new Date(this.checkedAt).getTime()) < CHECK_TTL_MS;
     if (!force && fresh) return this.view();
-    const res = await get(this.releasesUrl, {
-      headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' },
-      limit: MAX_RELEASE_BYTES
-    });
-    let body;
-    try {
-      body = JSON.parse(res.body.toString('utf8'));
-    } catch (e) {
-      throw new UpdateError('bad-release', 'the release answer is not JSON');
-    }
-    this.latest = parseRelease(body);
+    this.latest = await offered(this.fetch, this.releasesUrl, !!this.test(), ASSET);
     this.checkedAt = new Date().toISOString();
     const file = path.join(this.dir, 'latest.json');
     await fsp.writeFile(file + '.tmp', JSON.stringify({ latest: this.latest, checkedAt: this.checkedAt }));
@@ -190,6 +216,7 @@ class Updater {
   view() {
     return {
       current: this.version,
+      test: !!this.test(),
       latest: this.latest,
       checkedAt: this.checkedAt,
       available: !!(this.latest && compareVersions(this.latest.version, this.version) > 0),
@@ -283,4 +310,4 @@ class Updater {
   }
 }
 
-module.exports = { Updater: Updater, UpdateError: UpdateError, compareVersions: compareVersions, parseRelease: parseRelease, fetchChecked: fetchChecked, RELEASES_URL: RELEASES_URL, KEEP_AUTOMATIC_BACKUPS: KEEP_AUTOMATIC_BACKUPS };
+module.exports = { Updater: Updater, UpdateError: UpdateError, compareVersions: compareVersions, parseRelease: parseRelease, newestRelease: newestRelease, offered: offered, fetchChecked: fetchChecked, RELEASES_URL: RELEASES_URL, KEEP_AUTOMATIC_BACKUPS: KEEP_AUTOMATIC_BACKUPS };

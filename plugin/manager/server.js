@@ -68,6 +68,7 @@ class Manager {
       version: paths.version,
       pluginPath: paths.pluginPath,
       plugin: plugin,
+      test: function () { return plugin.testReleases(); },
       logger: this.logger
     });
     let packageText = '';
@@ -78,6 +79,7 @@ class Manager {
       glass: paths.version,
       least: leastOf(packageText),
       arch: function () { return plugin.volumioArch(); },
+      test: function () { return plugin.testReleases(); },
       logger: this.logger
     });
     this.capture = new Capture({
@@ -865,6 +867,20 @@ class Manager {
       }
     }));
 
+    // Test releases: whether this player is offered a release still marked
+    // a pre-release, of Glass and of glass-evo alike. The choice is looked
+    // up at once, so the page shows what it brings.
+    app.post('/api/update/test', wrap(async function (req, res) {
+      const body = req.body || {};
+      if (typeof body.test !== 'boolean') return res.status(400).json({ error: 'bad-request', message: 'test must be true or false' });
+      const result = self.plugin.setTestReleases(body.test);
+      let update;
+      let evo;
+      try { update = await self.updater.check(true); } catch (e) { update = Object.assign(self.updater.view(), { error: failure(e) }); }
+      try { evo = await self.component.check(true); } catch (e) { evo = Object.assign(self.component.view(), { error: failure(e) }); }
+      res.json({ ok: true, changed: result.changed, test: result.test, update: update, evo: evo });
+    }));
+
     // One upgrade at a time. A job left in `restarting` for minutes means
     // the restart did not happen; it no longer stands in the way.
     const upgrading = function () {
@@ -1006,7 +1022,7 @@ class Manager {
       rings: rings,
       diskFree: free,
       hostname: os.hostname(),
-      upgrade: { last: (this.updater.state && this.updater.state.last) || null, previous: this.updater.previous() },
+      upgrade: { last: (this.updater.state && this.updater.state.last) || null, previous: this.updater.previous(), test: this.plugin.testReleases() },
       themeSize: (function () { const m = SIZE_PREFIX.exec(String(info.activeTheme || '')); return m ? m[1] + 'x' + m[2] : ''; })(),
       jobs: this.jobs.filter(function (j) { return j.state !== 'done' && j.state !== 'failed'; }).length
     });
