@@ -1613,6 +1613,10 @@
         ['MANAGER_ST_SECTION_PLAYER', [
           ['MANAGER_ST_VERSION', s.version + ' (' + s.arch + (s.binary ? '' : ', ' + t('MANAGER_ST_NO_BINARY')) + ')' + (player && player.build && player.build.commit ? ' · ' + t('MANAGER_ST_BUILD') + ' ' + player.build.commit : '')],
           ['MANAGER_ST_VOLUMIO', !player ? '-' : (player.volumio || '?') + (player.hardware ? ' · ' + player.hardware : '') + (player.board ? ' · ' + player.board : '') + ' · ' + t('MANAGER_ST_BACKEND_UP') + ' ' + up(player.backendUptimeS || 0)],
+          ['MANAGER_ST_MEMORY', !player || !player.memory ? '-' : fmtBytes(player.memory.totalMb * 1048576) + ' · ' + fmtBytes(player.memory.usedMb * 1048576) + ' ' + t('MANAGER_ST_MEM_USED') + ' · ' + fmtBytes(player.memory.availableMb * 1048576) + ' ' + t('MANAGER_ST_MEM_AVAILABLE') + (player.memory.swapUsedMb ? ' · ' + t('MANAGER_ST_MEM_SWAP') + ' ' + fmtBytes(player.memory.swapUsedMb * 1048576) : '')],
+          ['MANAGER_ST_PLUGINS', !player || !player.plugins ? '-' : !player.plugins.length ? t('MANAGER_ST_NONE') : player.plugins.map(function (p) {
+            return p.title + (p.version ? ' ' + p.version : '') + ' (' + p.category + ') · ' + t(p.running ? 'MANAGER_ST_ON' : 'MANAGER_ST_OFF') + (p.audioPath ? ' · ' + t('MANAGER_ST_PLUGIN_AUDIO') : '');
+          }).join('\n')],
           ['MANAGER_ST_ADDRESSES', !reveal ? t('MANAGER_ST_HIDDEN') : (s.hostname || '') + (addresses.length ? ' · ' + addresses.map(function (a) { return a.name + ' ' + a.address; }).join(' · ') : '')],
           ['MANAGER_ST_MANAGER', urlsOf('/') + ' · ' + t('MANAGER_ST_UPTIME') + ' ' + Math.round(s.manager.uptimeS / 60) + ' min'],
           ['MANAGER_ST_ANYMOTE', urlsOf('/anymote')],
