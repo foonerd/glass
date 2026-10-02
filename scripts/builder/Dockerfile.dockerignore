@@ -1,0 +1,3 @@
+# The builder image reads one file of the repository.
+*
+!rust-toolchain.toml
