@@ -45,6 +45,8 @@ pub struct Status {
     pub page: String,
     /// The screens this machine has, once the window opened.
     pub monitors: Vec<MonitorInfo>,
+    /// Whether the face this display carries is drawn in this session.
+    pub face_shown: bool,
 }
 
 /// One screen of this machine.
@@ -65,6 +67,9 @@ pub struct RemoteApp {
     status: Mutex<Status>,
     /// A window mode the page asked for, until the display takes it.
     window_request: Mutex<Option<pane::WindowMode>>,
+    /// The face the display was built with, by its name; none on the
+    /// standalone remote.
+    face: Mutex<Option<String>>,
 }
 
 impl RemoteApp {
@@ -76,7 +81,18 @@ impl RemoteApp {
             generation: AtomicU64::new(1),
             status: Mutex::new(Status::default()),
             window_request: Mutex::new(None),
+            face: Mutex::new(None),
         })
+    }
+
+    /// The face the display was built with, said once at the start.
+    pub fn set_face(&self, name: Option<String>) {
+        *self.face.lock().unwrap_or_else(|e| e.into_inner()) = name;
+    }
+
+    /// The face this display carries, by its name.
+    pub fn face(&self) -> Option<String> {
+        self.face.lock().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     pub fn config(&self) -> RemoteConfig {
@@ -270,6 +286,7 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
                     "status": app.status(),
                     "release": env!("CARGO_PKG_VERSION"),
                     "protocol": tap::wire::PROTOCOL,
+                    "face": app.face(),
                     "configPath": app.path.to_string_lossy(),
                     "cache": app.cache.to_string_lossy(),
                 }),
