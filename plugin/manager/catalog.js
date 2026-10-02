@@ -23,6 +23,8 @@ const MAX_INDEX_BYTES = 16 * 1024 * 1024;
 const MAX_THUMB_BYTES = 2 * 1024 * 1024;
 const MAX_ZIP_BYTES = 512 * 1024 * 1024;
 const NAME = /^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,127}$/;
+// The waits before a download whose connection broke is made again.
+const RETRY_WAITS_MS = [2000, 4000, 8000];
 
 class CatalogError extends Error {
   constructor(code, message) {
@@ -93,7 +95,11 @@ function get(url, options) {
           finished = true;
           resolve({ status: 200, headers: res.headers, body: options.sink ? null : Buffer.concat(chunks), received: received });
         });
-        res.on('error', fail);
+        // A connection that breaks in the body is the network's failure
+        // as much as one that breaks before it.
+        res.on('error', function (e) {
+          fail(e instanceof CatalogError ? e : new CatalogError('network', e.message));
+        });
       });
       req.setTimeout(options.timeout || FETCH_TIMEOUT_MS, function () {
         req.destroy(new CatalogError('timeout', 'no answer from ' + parsed.host));
@@ -104,6 +110,31 @@ function get(url, options) {
     };
     request(url);
   });
+}
+
+// Whether a failed fetch is worth making again: the connection broke or
+// the server failed, as against an answer that would be the same next time.
+function transient(e) {
+  return e instanceof CatalogError && (e.code === 'network' || /^http-5\d\d$/.test(e.code));
+}
+
+// A download made again, from its first byte, when the connection breaks
+// under it. `once` makes one whole attempt; `options.told(e, n, wait)`
+// hears of each new attempt before its wait; `options.waits` and
+// `options.sleep` stand in for the waits in tests.
+async function persisting(once, options) {
+  options = options || {};
+  const waits = options.waits || RETRY_WAITS_MS;
+  const sleep = options.sleep || function (ms) { return new Promise(function (resolve) { setTimeout(resolve, ms); }); };
+  for (let n = 0; ; n++) {
+    try {
+      return await once();
+    } catch (e) {
+      if (!transient(e) || n >= waits.length) throw e;
+      if (options.told) options.told(e, n + 1, waits[n]);
+      await sleep(waits[n]);
+    }
+  }
 }
 
 function validIndex(index) {
@@ -124,6 +155,7 @@ class Catalog {
     this.dir = options.dir;
     this.logger = options.logger || console;
     this.indexUrl = options.indexUrl || INDEX_URL;
+    this.retryWaits = options.retryWaits || RETRY_WAITS_MS;
     this.index = null;
     this.etag = null;
     this.fetchedAt = null;
@@ -230,9 +262,20 @@ class Catalog {
   }
 
   // Download an entry's zip and check its size and SHA-256 against the
-  // index. Resolves with the file; a mismatch removes it and rejects.
+  // index. Resolves with the file; a mismatch removes it and rejects. A
+  // connection that breaks has the download made again.
   async download(entry, onProgress) {
     if (!validEntry(entry)) throw new CatalogError('bad-entry', 'the catalog entry is not usable');
+    const self = this;
+    return persisting(function () { return self.downloadOnce(entry, onProgress); }, {
+      waits: this.retryWaits,
+      told: function (e, n, wait) {
+        self.logger.info('glass: catalog: the download of ' + entry.name + ' broke (' + e.message + '); made again in ' + (wait / 1000) + ' s, attempt ' + (n + 1));
+      }
+    });
+  }
+
+  async downloadOnce(entry, onProgress) {
     const file = path.join(this.downloadsDir, entry.name + '.zip');
     const tmp = file + '.part';
     const hash = crypto.createHash('sha256');
@@ -336,6 +379,8 @@ module.exports = {
   Catalog: Catalog,
   CatalogError: CatalogError,
   get: get,
+  persisting: persisting,
+  transient: transient,
   validIndex: validIndex,
   validEntry: validEntry,
   INDEX_URL: INDEX_URL

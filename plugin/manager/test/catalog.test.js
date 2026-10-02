@@ -10,7 +10,7 @@ const { Catalog } = require('../catalog');
 
 // A catalog server: an index and one zip, both replaceable while it runs.
 function serve() {
-  const state = { index: null, zip: Buffer.alloc(0), hits: { index: 0, zip: 0 } };
+  const state = { index: null, zip: Buffer.alloc(0), breaks: 0, hits: { index: 0, zip: 0 } };
   const server = http.createServer(function (req, res) {
     if (req.url === '/catalog/index.json') {
       state.hits.index += 1;
@@ -23,6 +23,10 @@ function serve() {
     if (req.url === '/t.zip') {
       state.hits.zip += 1;
       res.writeHead(200, { 'content-type': 'application/zip', 'content-length': state.zip.length });
+      if (state.breaks > 0) {
+        state.breaks -= 1;
+        return res.write(state.zip.subarray(0, 1024), function () { res.destroy(); });
+      }
       return res.end(state.zip);
     }
     res.writeHead(404);
@@ -93,4 +97,28 @@ test('when the index has not moved the first error stands, and the index is stal
   assert.equal(catalog.stale(10 * 60000), true, 'older than ten minutes');
   assert.equal(new Catalog({ dir: dir }).stale(1), true, 'no index at all');
   s.close();
+});
+
+test('a theme pack whose connection breaks is downloaded again', async function (t) {
+  const s = await serve();
+  t.after(function () { s.close(); });
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glass-catalog-'));
+  const zip = crypto.randomBytes(100000);
+  s.state.index = indexFor(s.base, zip);
+  s.state.zip = zip;
+  const said = [];
+  const catalog = new Catalog({ dir: dir, indexUrl: s.base + 'catalog/index.json', retryWaits: [5, 5, 5], logger: { info(line) { said.push(line); }, warn() {} } });
+  await catalog.init();
+  await catalog.refresh();
+  s.state.breaks = 2;
+  const got = await catalog.downloadCurrent('t');
+  assert.equal(s.state.hits.zip, 3);
+  assert.ok((await fsp.readFile(got.file)).equals(zip), 'the file is the whole zip');
+  assert.equal(said.filter(function (line) { return /the download of t broke/.test(line); }).length, 2);
+  assert.equal(s.state.hits.index, 1, 'a broken connection is not a moved catalog: the index is not asked again');
+  // Broken more often than there are waits: the error stands.
+  s.state.breaks = 9; s.state.hits.zip = 0;
+  await assert.rejects(catalog.downloadCurrent('t'), function (e) { return e.code === 'network'; });
+  assert.equal(s.state.hits.zip, 4);
+  await fsp.rm(dir, { recursive: true, force: true });
 });

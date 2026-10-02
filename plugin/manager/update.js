@@ -9,7 +9,7 @@
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
-const { get, CatalogError } = require('./catalog');
+const { get, persisting, CatalogError } = require('./catalog');
 const { zipDirectory } = require('./zipwrite');
 
 const RELEASES_URL = 'https://api.github.com/repos/foonerd/glass/releases/latest';
@@ -109,18 +109,23 @@ async function offered(fetch, latestUrl, test, pattern) {
 }
 
 // A release's zip fetched to a file and checked: its size and its digest
-// as the release states them. The file is there only when both hold.
-async function fetchChecked(release, file, job, fetch) {
+// as the release states them. The file is there only when both hold. A
+// connection that breaks has the download made again from its first byte.
+// options: `fetch` in place of the manager's own, `logger`, and for tests
+// `waits` and `sleep`.
+async function fetchChecked(release, file, job, options) {
+  options = options || {};
   const tmp = file + '.part';
   const crypto = require('crypto');
-  const hash = crypto.createHash('sha256');
-  const out = fs.createWriteStream(tmp);
-  let received = 0;
-  job.state = 'downloading';
-  try {
+  const once = async function () {
+    const hash = crypto.createHash('sha256');
+    const out = fs.createWriteStream(tmp);
+    let received = 0;
+    job.state = 'downloading';
+    job.progress = { done: 0, total: release.bytes };
     await new Promise(function (resolve, reject) {
       out.on('error', reject);
-      (fetch || get)(release.url, {
+      (options.fetch || get)(release.url, {
         timeout: DOWNLOAD_TIMEOUT_MS,
         limit: release.bytes,
         sink: function (chunk, total) {
@@ -134,6 +139,15 @@ async function fetchChecked(release, file, job, fetch) {
     job.state = 'verifying';
     if (received !== release.bytes) throw new UpdateError('size', 'downloaded ' + received + ' bytes, expected ' + release.bytes);
     if (hash.digest('hex') !== release.sha256) throw new UpdateError('checksum', 'the download does not match the release digest');
+  };
+  try {
+    await persisting(once, {
+      waits: options.waits,
+      sleep: options.sleep,
+      told: function (e, n, wait) {
+        (options.logger || console).info('glass: manager: the download of ' + path.basename(file) + ' broke (' + e.message + '); made again in ' + (wait / 1000) + ' s, attempt ' + (n + 1));
+      }
+    });
     await fsp.rename(tmp, file);
   } catch (e) {
     await fsp.rm(tmp, { force: true });
@@ -236,7 +250,7 @@ class Updater {
     await fsp.mkdir(this.stagingDir, { recursive: true });
     const name = 'glass-' + latest.version + '.zip';
     const file = path.join(this.stagingDir, name);
-    await fetchChecked(latest, file, job);
+    await fetchChecked(latest, file, job, { logger: this.logger });
     return { name: name, file: file, version: latest.version };
   }
 
