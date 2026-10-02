@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.7] - 2026-10-02
+
+One fix, completing 0.8.6, which was published as a test release and not made the latest.
+
+- **A page opened on a player that already stood still is told that the display stays.** 0.8.6 sent the word with the persist period, which starts at a stop or a pause: on a player that had stood still since before the plugin started, after an update for one, no period had ever been sent, and the Face tab and Anymote still said the display had left the screen. The plugin now says it once after its start, whatever the player does, and again when the screen changes hands.
+
 ## [0.8.6] - 2026-10-02
 
 One fix, to what the Face tab and Anymote say of a player that stands still.
