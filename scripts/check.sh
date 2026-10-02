@@ -16,7 +16,7 @@ cargo test --workspace --locked
 
 echo "check: browser module"
 # The face: the pipeline for a browser, linted and built for its own target.
-cargo clippy -p glass-face --target wasm32-unknown-unknown --locked -- -D warnings
+cargo clippy -p page -p glass-face --target wasm32-unknown-unknown --locked -- -D warnings
 cargo build -p glass-face --profile face --target wasm32-unknown-unknown --locked
 
 echo "check: documentation"

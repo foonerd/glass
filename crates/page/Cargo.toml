@@ -1,0 +1,19 @@
+[package]
+name = "page"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The display's pipeline for a page in a browser, with room for a face over it"
+
+[dependencies]
+lead = { path = "../lead" }
+plot = { path = "../plot" }
+expose = { path = "../expose" }
+intake = { path = "../intake" }
+controls = { path = "../controls" }
+overlay = { path = "../overlay" }
+serde_json = "1"
+
+[lints]
+workspace = true
