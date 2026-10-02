@@ -89,6 +89,16 @@ test('the meters never appear: not playing, no screen of its own, a kiosk that f
   f = healthy(); f.status.running = false; f.screen.fact.kiosk = 'failed'; f.screen.fact.xserver = false; f.screen.now = { display: { running: false }, wouldDraw: null };
   assert.strictEqual(one(diagnose('no-meters', f), 'somewhere').key, 'DIAG_KIOSK_FAILED');
 
+  // Where glass-evo holds the screen the kiosk is not meant to run: its unit
+  // left as failed by the take is not what is wrong, on any symptom.
+  f = healthy(); f.screen.fact.kiosk = 'failed'; f.screen.fact.xserver = false; f.screen.free = true;
+  f.screen.owner = { owner: 'glass-evo' }; f.screen.now = { display: { running: true, driver: 'kmsdrm' }, wouldDraw: 'kmsdrm' };
+  ['no-meters', 'restarts', 'screen'].forEach(function (symptom) {
+    assert.ok(!diagnose(symptom, f).findings.some(function (x) { return x.key === 'DIAG_KIOSK_FAILED'; }), symptom);
+  });
+  f.screen.owner = { owner: 'kiosk' };
+  assert.strictEqual(one(diagnose('screen', f), 'somewhere').key, 'DIAG_KIOSK_FAILED', 'with the kiosk as owner it is');
+
   f = healthy(); f.status.running = false; f.screen.fact = { xserver: false, kiosk: 'inactive', panel: false }; f.screen.now = { display: { running: false }, wouldDraw: null };
   assert.strictEqual(one(diagnose('no-meters', f), 'somewhere').key, 'DIAG_NO_PANEL');
 

@@ -2241,7 +2241,9 @@ Glass.prototype.setScreenOwner = function (owner) {
             return Promise.resolve(self.commandRouter.disableAndStopPlugin(step.category, step.name));
         }
         self.logger.info(id + 'screen owner: ' + step.name + ' stopped' + (step.was.enabled ? ' and disabled' : ''));
-        return systemctl('stop ' + step.name).then(function () { return step.was.enabled ? systemctl('disable ' + step.name) : null; });
+        return systemctl('stop ' + step.name).then(function () { return step.was.enabled ? systemctl('disable ' + step.name) : null; })
+            // startx leaves with an error when its X server is stopped under it: the unit is not left standing as failed.
+            .then(function () { return systemctl('reset-failed ' + step.name).catch(function () { return null; }); });
     };
     var runBack = function (step) {
         if (step.kind === 'own-x') {
