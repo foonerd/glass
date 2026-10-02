@@ -27,6 +27,7 @@ const screenprobe = require('./manager/screenprobe');
 const playerfacts = require('./manager/playerfacts');
 const screenowner = require('./manager/screenowner');
 const views = require('./manager/views');
+const relaunch = require('./manager/relaunch');
 const facelook = require('./manager/facelook');
 const component = require('./manager/component');
 const { compact: compactQueue } = require('./manager/queue');
@@ -1541,6 +1542,10 @@ Glass.prototype.startDisplayOnce = function () {
                         if (self.meterChild && self.meterChild.exitCode === null) {
                             return;
                         }
+                        // A display that died at launch time after time: no start until its wait is over.
+                        if (self.displayHoldUntil && Date.now() < self.displayHoldUntil) {
+                            return;
+                        }
                         // The display's lines reach the journal as it writes them,
                         // through the same gate as the plugin's own.
                         var env = self.launchEnv();
@@ -1584,6 +1589,15 @@ Glass.prototype.startDisplayOnce = function () {
                             if (self.meterChild === child) {
                                 self.meterChild = null;
                                 self.displayRenderer = null;
+                                // Dead at launch: the same start would die the same way, so each death in a row
+                                // waits twice as long, whoever starts the display next (the armed interval, the
+                                // screen's watcher). A display the plugin itself ended is no death.
+                                var ranMs = Date.now() - (child.startedAt || 0);
+                                var ended = signal === 'SIGTERM' || signal === 'SIGKILL' || signal === 'SIGINT';
+                                self.displayDeaths = relaunch.deaths(self.displayDeaths || 0, { clean: error === null || ended, ranMs: ranMs });
+                                self.displayHoldUntil = self.displayDeaths ? relaunch.holdUntil(Date.now(), self.displayDeaths, self.screenTimeoutMs()) : 0;
+                                var waitS = Math.round(relaunch.wait(self.displayDeaths, self.screenTimeoutMs()) / 1000);
+                                var inARow = self.displayDeaths > 1 ? ', ' + self.displayDeaths + ' times in a row' : '';
                                 if (action === 'rearm') {
                                     clearInterval(self.Timeout);
                                     self.Timeout = setInterval(function () {
@@ -1591,12 +1605,13 @@ Glass.prototype.startDisplayOnce = function () {
                                     }, self.screenTimeoutMs());
                                     self.logger.info(id + 'dismissed by touch, re-armed for ' + (self.screenTimeoutMs() / 1000) + ' s');
                                 } else if (action === 'restart') {
-                                    var ranMs = Date.now() - (child.startedAt || 0);
                                     if (meterRestartNow(error === null, ranMs)) {
                                         self.startDisplayOnce();
                                     } else {
-                                        self.logger.warn(id + 'the display died ' + Math.round(ranMs / 1000) + ' s after launch; next attempt in ' + (self.screenTimeoutMs() / 1000) + ' s');
+                                        self.logger.warn(id + 'the display died ' + Math.round(ranMs / 1000) + ' s after launch' + inARow + '; next attempt in ' + waitS + ' s');
                                     }
+                                } else if (self.displayDeaths > 0) {
+                                    self.logger.warn(id + 'the display died ' + Math.round(ranMs / 1000) + ' s after launch' + inARow + '; not started again for ' + waitS + ' s');
                                 }
                             }
                         });
@@ -2149,6 +2164,8 @@ Glass.prototype.componentChanged = function () {
     var self = this;
     try { self.noteFrostSuits(); } catch (e) {}
     self.faceFailures = 0;
+    self.displayDeaths = 0;
+    self.displayHoldUntil = 0;
     self.guardNotBefore = 0;
     try {
         if (self.screenOwnerState().owner === 'glass-evo' && fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
