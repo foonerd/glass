@@ -5,7 +5,9 @@ const fs = require('fs');
 const fsp = require('fs/promises');
 const os = require('os');
 const path = require('path');
-const { compareVersions, parseRelease, newestRelease, offered, Updater } = require('../update');
+const crypto = require('crypto');
+const http = require('http');
+const { compareVersions, parseRelease, newestRelease, offered, fetchChecked, Updater } = require('../update');
 const { zipDirectory } = require('../zipwrite');
 const zip = require('../zip');
 
@@ -119,3 +121,74 @@ test('the updater asks whether test releases are taken at every check, and says 
   await fsp.rm(dir, { recursive: true, force: true });
 });
 
+// A server of one zip that breaks the connection part way through the body
+// for its first `breaks` requests, and answers `status` when one is set.
+function brittle(zip) {
+  const state = { hits: 0, breaks: 0, status: 0 };
+  const server = http.createServer(function (req, res) {
+    state.hits += 1;
+    if (state.status) { res.writeHead(state.status); return res.end(); }
+    res.writeHead(200, { 'content-type': 'application/zip', 'content-length': zip.length });
+    if (state.hits <= state.breaks) {
+      return res.write(zip.subarray(0, 4096), function () { res.destroy(); });
+    }
+    res.end(zip);
+  });
+  return new Promise(function (resolve) {
+    server.listen(0, '127.0.0.1', function () {
+      resolve({ state: state, url: 'http://127.0.0.1:' + server.address().port + '/glass.zip', close: function () { server.close(); } });
+    });
+  });
+}
+
+test('a download whose connection breaks is made again from its first byte, and only such a one', async function (t) {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glass-upd-retry-'));
+  const zipBytes = crypto.randomBytes(200000);
+  const s = await brittle(zipBytes);
+  const release = { url: s.url, bytes: zipBytes.length, sha256: crypto.createHash('sha256').update(zipBytes).digest('hex') };
+  const file = path.join(dir, 'glass.zip');
+  const said = [];
+  const waited = [];
+  const options = {
+    waits: [10, 20, 30],
+    sleep: async function (ms) { waited.push(ms); },
+    logger: { info: function (line) { said.push(line); } }
+  };
+  const job = { state: 'queued', progress: null };
+  t.after(function () { s.close(); });
+
+  // Twice broken, then whole: the file is the zip, nothing of the broken tries in it.
+  s.state.breaks = 2;
+  await fetchChecked(release, file, job, options);
+  assert.equal(s.state.hits, 3);
+  assert.deepEqual(waited, [10, 20]);
+  assert.equal(said.length, 2);
+  assert.match(said[0], /glass\.zip broke .* attempt 2$/);
+  assert.ok((await fsp.readFile(file)).equals(zipBytes), 'the file is the whole zip');
+  assert.deepEqual(job.progress, { done: zipBytes.length, total: zipBytes.length });
+  assert.deepEqual(await fsp.readdir(dir), ['glass.zip'], 'no part file is left');
+
+  // Broken every time: the waits run out, the error stands, no file is left.
+  await fsp.rm(file);
+  s.state.hits = 0; s.state.breaks = 99; waited.length = 0;
+  await assert.rejects(fetchChecked(release, file, job, options), function (e) { return e.code === 'network'; });
+  assert.equal(s.state.hits, 4, 'the first try and one for each wait');
+  assert.deepEqual(waited, [10, 20, 30]);
+  assert.deepEqual(await fsp.readdir(dir), []);
+
+  // A zip that is not the one the release names is not asked for again.
+  s.state.hits = 0; s.state.breaks = 0; waited.length = 0;
+  await assert.rejects(fetchChecked(Object.assign({}, release, { sha256: 'f'.repeat(64) }), file, job, options), function (e) { return e.code === 'checksum'; });
+  assert.equal(s.state.hits, 1);
+
+  // Nor is an answer that says the zip is not there; a failing server is.
+  s.state.hits = 0; s.state.status = 404;
+  await assert.rejects(fetchChecked(release, file, job, options), function (e) { return e.code === 'http-404'; });
+  assert.equal(s.state.hits, 1);
+  s.state.hits = 0; s.state.status = 503;
+  await assert.rejects(fetchChecked(release, file, job, options), function (e) { return e.code === 'http-503'; });
+  assert.equal(s.state.hits, 4);
+  assert.deepEqual(await fsp.readdir(dir), []);
+
+  await fsp.rm(dir, { recursive: true, force: true });
+});

@@ -235,7 +235,7 @@ class Component {
     if (!latest.sha256) throw new ComponentError('no-digest', 'the release carries no checksum for its zip');
     if (!latest.bytes || latest.bytes > MAX_ZIP_BYTES) throw new ComponentError('bad-release', 'the release zip has an unusable size');
     const file = path.join(this.stateDir, 'glass-evo-' + latest.version + '.zip');
-    await fetchChecked(latest, file, job, this.fetch);
+    await fetchChecked(latest, file, job, { fetch: this.fetch, logger: this.logger });
     return file;
   }
 
