@@ -52,7 +52,8 @@ jobs:
       - name: Plugin zip
         run: scripts/package.sh
       - name: The zip names the commit it was built from
-        run: unzip -p dist/glass-*.zip build.json | grep -F "\"commit\": \"$(git rev-parse --short HEAD)\""
+        run: |
+          unzip -p dist/glass-*.zip build.json | grep -F "\"commit\": \"$(git rev-parse --short HEAD)\""
       - uses: actions/upload-artifact@v7
         with:
           name: glass-plugin

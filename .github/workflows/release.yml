@@ -54,7 +54,8 @@ jobs:
         run: scripts/tap_exact.sh lib/x64/libglasstap.so bin/x64/tapdump
       - run: scripts/package.sh
       - name: The zip names the commit it was built from
-        run: unzip -p dist/glass-*.zip build.json | grep -F "\"commit\": \"$(git rev-parse --short HEAD)\""
+        run: |
+          unzip -p dist/glass-*.zip build.json | grep -F "\"commit\": \"$(git rev-parse --short HEAD)\""
       - name: Per-architecture archives of the display, the tap and the remote installer
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
