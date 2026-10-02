@@ -58,8 +58,8 @@ export GLASS_VERSION_CODE=$((major * 100000 + minor * 1000 + patch))
 if [ ! -f "$SDL_SRC/Android.mk" ]; then
   mkdir -p "$SDL_HOME"
   tarball=$SDL_HOME/SDL2-$SDL_VERSION.tar.gz
-  curl -fsSL -o "$tarball" "https://github.com/libsdl-org/SDL/releases/download/release-$SDL_VERSION/SDL2-$SDL_VERSION.tar.gz"
-  echo "$SDL_SHA256  $tarball" | sha256sum -c - >/dev/null
+  "$ROOT/scripts/fetch.sh" "https://github.com/libsdl-org/SDL/releases/download/release-$SDL_VERSION/SDL2-$SDL_VERSION.tar.gz" \
+    "$tarball" "$SDL_SHA256"
   tar -C "$SDL_HOME" -xzf "$tarball"
 fi
 rm -rf "$APP/jni/SDL" && ln -s "$SDL_SRC" "$APP/jni/SDL"
