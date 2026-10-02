@@ -46,7 +46,7 @@ use intake::bring::{
 use intake::hops::WireHops;
 use intake::{decode_event, Event, Hops, Source, Taken, TapSource};
 use lead::{vfs, Input, SkinDesc};
-use overlay::{Cover, View, Wall};
+use overlay::{stands_black, Black, Laid, View, Wall};
 use plot::Indicators;
 
 pub use controls::PointerKind;
@@ -116,13 +116,11 @@ pub struct Page {
     landed: bool,
     /// The face over the theme, in a module that carries one.
     overlay: Option<Box<dyn Overlay>>,
-    /// The copy of the frame the face draws on, kept between frames.
-    over: Option<expose::Frame>,
-    /// `over` holds what the face drew over the picture as it still stands.
-    over_stands: bool,
+    /// The face over the picture, on its copy kept between frames.
+    laid: Laid,
     /// The black behind a face on a player standing still, and whether the
     /// frame before was that.
-    black: Option<expose::Frame>,
+    black: Black,
     was_black: bool,
     /// What the face asked of the player, until the page takes it.
     asked: Vec<Happened>,
@@ -405,8 +403,7 @@ impl Page {
             touch,
             landed,
             overlay,
-            over,
-            over_stands,
+            laid,
             black,
             was_black,
             asked,
@@ -427,24 +424,12 @@ impl Page {
         // Under a face a player that has stood still past the countdown is
         // black, as on a screen that is the display's own; the theme is not
         // painted behind it.
-        let idle_black = overlay.is_some()
-            && input.metadata.status != "play"
-            && input.metadata.persist_mode == "countdown"
-            && input.metadata.persist_left == 0;
+        let idle_black = overlay.is_some() && stands_black(&input.metadata);
         let (base, moved): (&expose::Frame, bool) = if idle_black {
-            let (width, height) = (showing.skin.width, showing.skin.height);
-            let fits = black
-                .as_ref()
-                .is_some_and(|b| b.width == width && b.height == height);
-            if !fits {
-                *black = Some(expose::Frame {
-                    blend: expose::Blend::Normal,
-                    width,
-                    height,
-                    rgba: vec![0; width as usize * height as usize * 4],
-                });
-            }
-            (black.as_ref()?, !*was_black)
+            (
+                black.frame(showing.skin.width, showing.skin.height),
+                !*was_black,
+            )
         } else {
             let stack = Stack {
                 screen: None,
@@ -473,7 +458,8 @@ impl Page {
             return Some(base);
         };
         // The face draws over the picture on its own copy, and only when it
-        // has something to draw that the copy does not hold already.
+        // has something to draw that the copy does not hold already: the
+        // same laying as on the player's screen.
         let view = View {
             input,
             fonts: &assets.fonts,
@@ -485,30 +471,10 @@ impl Page {
             scale: showing.skin.run.face_scale,
             settings: &showing.skin.run.face,
         };
-        let fits = over.as_ref().is_some_and(|own| {
-            own.width == base.width
-                && own.height == base.height
-                && own.rgba.len() == base.rgba.len()
-        });
-        let drew = match face.covers(&view) {
-            Cover::Nothing => false,
-            Cover::Same if fits && *over_stands && !moved => true,
-            _ => {
-                let own = match over.as_mut() {
-                    Some(own) if fits => {
-                        own.rgba.copy_from_slice(&base.rgba);
-                        own.blend = base.blend;
-                        own
-                    }
-                    _ => over.insert(base.clone()),
-                };
-                face.draw(own, &view)
-            }
-        };
-        *over_stands = drew;
+        let drew = laid.lay(face, base, !moved, &view).drew;
         asked.extend(face.commands().into_iter().map(Happened::Command));
         if drew {
-            over.as_ref()
+            laid.frame()
         } else {
             Some(base)
         }
@@ -916,6 +882,7 @@ macro_rules! exports {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use overlay::Cover;
 
     const METER_TXT: &str = "[current]\nbase.folder = /data/INTERNAL/glass/templates\nmeter.folder = 480x320\nmeter = random\nfont.path = /volumio/fonts\nframe.rate = 30\n";
 

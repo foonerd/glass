@@ -12,6 +12,9 @@ use lead::Input;
 
 pub use controls::PointerKind;
 
+mod laid;
+pub use laid::{stands_black, Black, Laid, Lay};
+
 /// What a face sees of the display each frame: the player's state as the
 /// source has it (the cover's file among it, once fetched), the theme's
 /// fonts, the picture's size, the display's clock, the time of day,

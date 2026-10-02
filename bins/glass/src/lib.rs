@@ -16,6 +16,7 @@ use intake::{Overrides, Selector, Source, TapSource};
 use lead::{
     frame_period, should_mark_dismiss, Input, InteractiveMode, SkinDesc, DISMISS_FILE_VAR, RUN_FLAG,
 };
+use overlay::{stands_black, Black, Laid};
 use pane::{publish, write_ppm, PointerKind, Shown, Surface, WindowMode, WindowOptions};
 use plot::{step, Scene};
 use std::time::Duration;
@@ -840,10 +841,9 @@ fn session(
     // When the player last played or the screen was last touched: past it
     // the display on a screen of its own slows to the standing rate.
     let mut active_at = Instant::now();
-    // The copy of the picture a face draws on, kept from frame to frame: a
-    // new one every frame is megabytes asked of the system sixty times a
-    // second.
-    let mut face_copy: Option<Frame> = None;
+    // The face over the picture, on its copy kept from frame to frame: the
+    // same laying as in a browser's page.
+    let mut laid = Laid::default();
     // Move to another meter of the theme: its skin, pictures and motion start afresh.
     macro_rules! switch_meter {
         ($name:expr) => {{
@@ -898,7 +898,7 @@ fn session(
     // key or by the launcher's word when the key is Auto, or when the
     // launcher says the X server is there for the display alone.
     let screen_ours = screen_is_ours(&skin.run.driver);
-    let mut black_frame: Option<Frame> = None;
+    let mut black_frame = Black::default();
     loop {
         let frame_started = Instant::now();
         if let Some(step) = meter_step.take() {
@@ -1055,10 +1055,7 @@ fn session(
             // The screen is ours and the player has stopped past the
             // countdown: black, never the console. The theme is not drawn
             // behind a black screen, unless a file is to be written of it.
-            let idle_black = screen_ours
-                && input.metadata.status != "play"
-                && input.metadata.persist_mode == "countdown"
-                && input.metadata.persist_left == 0;
+            let idle_black = screen_ours && stands_black(&input.metadata);
             let rastered = !idle_black || write_file;
             if profiling && rastered {
                 motion.profile = Some(Vec::new());
@@ -1093,13 +1090,7 @@ fn session(
                 (&assets.base, &[])
             };
             if idle_black {
-                let black = black_frame.get_or_insert_with(|| Frame {
-                    blend: expose::Blend::Normal,
-                    width: frame.width,
-                    height: frame.height,
-                    rgba: vec![0; frame.width as usize * frame.height as usize * 4],
-                });
-                frame = &*black;
+                frame = black_frame.frame(frame.width, frame.height);
             }
             // Whether the picture under whatever lies over the theme is the
             // one of the frame before: black after black, or a theme that
@@ -1143,32 +1134,14 @@ fn session(
                     scale: skin.run.face_scale,
                     settings: &skin.run.face,
                 };
-                let fits = face_copy.as_ref().is_some_and(|own| {
-                    own.width == frame.width
-                        && own.height == frame.height
-                        && own.rgba.len() == frame.rgba.len()
-                });
-                match face.covers(&view) {
-                    Cover::Nothing => {}
-                    Cover::Same if fits && base_same && was_over.face && overlay.is_none() => {
-                        face_drew = true;
-                        face_same = true;
-                    }
-                    _ => {
-                        let own = match face_copy.as_mut() {
-                            Some(own) if fits => {
-                                own.rgba.copy_from_slice(&frame.rgba);
-                                own.blend = frame.blend;
-                                own
-                            }
-                            _ => face_copy.insert(frame.clone()),
-                        };
-                        face_drew = face.draw(own, &view);
-                    }
-                }
+                // A calibration's target over the picture is drawn afresh
+                // every frame, and so is the face over it.
+                let lay = laid.lay(face, frame, base_same && overlay.is_none(), &view);
+                face_drew = lay.drew;
+                face_same = lay.same;
             }
             if face_drew {
-                if let Some(own) = face_copy.as_ref() {
+                if let Some(own) = laid.frame() {
                     frame = own;
                 }
             }
