@@ -171,8 +171,9 @@ impl Wall {
         }
     }
 
-    /// Now, as the system has it: its local time and zone on a player;
-    /// universal time where the system's zone is not read.
+    /// Now, as the system has it: its local time and zone on a player, its
+    /// local time on Windows (the zone's name is not read there); universal
+    /// time where the system's zone is not read.
     pub fn now() -> Self {
         let epoch_ms = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -206,7 +207,70 @@ fn system_zone(epoch_s: i64) -> (i32, String) {
     }
 }
 
-#[cfg(not(unix))]
+/// A moment as Windows keeps one: the calendar's fields, sixteen bits each.
+#[cfg(windows)]
+#[repr(C)]
+#[derive(Default)]
+struct SystemTime {
+    year: u16,
+    month: u16,
+    day_of_week: u16,
+    day: u16,
+    hour: u16,
+    minute: u16,
+    second: u16,
+    milliseconds: u16,
+}
+
+#[cfg(windows)]
+extern "system" {
+    /// A moment of universal time as local time in the system's zone (a
+    /// null zone), by the zone's own rules for that date.
+    fn SystemTimeToTzSpecificLocalTime(
+        zone: *const core::ffi::c_void,
+        universal: *const SystemTime,
+        local: *mut SystemTime,
+    ) -> i32;
+}
+
+/// The system's zone at a moment, on Windows: the system turns the moment
+/// into its local time, and the difference is how far east the zone
+/// stands. The system is asked, not the C runtime, which would read a `TZ`
+/// variable of another system's making in its own way. The zone's name is
+/// not read.
+#[cfg(windows)]
+fn system_zone(epoch_s: i64) -> (i32, String) {
+    let at = Wall::at(epoch_s * 1000, 0, "");
+    let universal = SystemTime {
+        year: at.year as u16,
+        month: at.month as u16,
+        day: at.day as u16,
+        hour: at.hour as u16,
+        minute: at.minute as u16,
+        second: at.second as u16,
+        ..SystemTime::default()
+    };
+    let mut local = SystemTime::default();
+    // SAFETY: the call reads the moment it is handed and writes the one it
+    // is handed, both whole structs of this module's own.
+    let turned =
+        unsafe { SystemTimeToTzSpecificLocalTime(std::ptr::null(), &universal, &mut local) };
+    if turned == 0 {
+        return (0, String::new());
+    }
+    let seconds = |t: &SystemTime| {
+        days_from_civil(i32::from(t.year), u32::from(t.month), u32::from(t.day)) * 86_400
+            + i64::from(t.hour) * 3600
+            + i64::from(t.minute) * 60
+            + i64::from(t.second)
+    };
+    (
+        ((seconds(&local) - seconds(&universal)) / 60) as i32,
+        String::new(),
+    )
+}
+
+#[cfg(not(any(unix, windows)))]
 fn system_zone(_epoch_s: i64) -> (i32, String) {
     (0, String::new())
 }
@@ -295,6 +359,30 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn the_systems_zone_is_a_zone() {
+        // Whatever the system's zone, it stands within fourteen hours of
+        // universal time and at a whole number of quarter hours, and the
+        // local time of day is the universal one moved by it.
+        let now = Wall::now();
+        println!(
+            "zone: {} minutes east, named {:?}",
+            now.offset_minutes, now.zone
+        );
+        assert!(
+            now.offset_minutes.abs() <= 14 * 60,
+            "{}",
+            now.offset_minutes
+        );
+        assert_eq!(now.offset_minutes % 15, 0, "{}", now.offset_minutes);
+        let universal = Wall::at(now.epoch_s * 1000, 0, "");
+        let moved = (i64::from(universal.hour) * 60
+            + i64::from(universal.minute)
+            + i64::from(now.offset_minutes))
+        .rem_euclid(24 * 60);
+        assert_eq!(i64::from(now.hour) * 60 + i64::from(now.minute), moved);
     }
 
     #[test]
