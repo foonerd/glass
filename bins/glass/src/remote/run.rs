@@ -496,6 +496,7 @@ pub fn remote_main(
     name: Option<String>,
     config_file: Option<&str>,
     open_settings: bool,
+    face: &mut Option<Box<dyn overlay::Overlay>>,
 ) -> ExitCode {
     let config_path = super::config::config_path(config_file);
     let cache_dir = crate::cache_dir(run.cache.as_deref());
@@ -788,6 +789,9 @@ pub fn remote_main(
         }
         std::env::set_var(lead::HOME_VAR, &home);
         std::env::remove_var("GLASS_CONFIG");
+        // A face reads its themes where the launcher says: on a remote, the
+        // look the sync brought from the player.
+        std::env::set_var("GLASS_FACES", home.join("faces"));
         intake::set_player(&beacon.address(), beacon.player_port);
         intake::set_manager(&beacon.manager_url());
         intake::set_overrides(Overrides {
@@ -825,7 +829,26 @@ pub fn remote_main(
                 }
             );
         }
-        match session(&run, Some(&mut remote), &mut window, &mut None) {
+        // A display that carries a face draws it as this remote's setting
+        // says: where the player's own screen shows it, always, or never.
+        let shown = face.is_some() && config.face.shows(sync.face_owner());
+        if face.is_some() {
+            logline::say!(
+                Info,
+                "remotes",
+                "face: {} (this remote: {:?}; the player's screen: {})",
+                if shown { "shown" } else { "not shown" },
+                config.face,
+                if sync.face_owner().is_empty() {
+                    "not said"
+                } else {
+                    sync.face_owner()
+                }
+            );
+        }
+        let mut no_face = None;
+        let face_here = if shown { &mut *face } else { &mut no_face };
+        match session(&run, Some(&mut remote), &mut window, face_here) {
             Outcome::Exit(code) => return code,
             Outcome::Reload(why) => {
                 logline::say!(Info, "remotes", "around again ({why})");

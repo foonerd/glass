@@ -1486,17 +1486,47 @@ Glass.prototype.faceModule = function () {
     var mode = self.viewsMode();
     var owner = self.screenOwnerState().owner;
     var carries = views.carriesFace(mode, owner, has);
-    var theme = null;
-    if (carries) {
-        self.loadConfigs();
-        var name = views.themeName(((meterConfig && meterConfig.current) || {})['face.theme']);
-        if (name) {
-            [FACES_DIR, EVO_LOOKS_DIR].some(function (dir) {
-                try { theme = { name: name, text: fs.readFileSync(dir + '/' + name + '/face.txt', 'utf8') }; return true; } catch (e) { return false; }
-            });
-        }
-    }
+    var theme = carries ? self.faceThemeText() : null;
     return { mode: mode, has: has, owner: owner, face: carries, version: carries ? evo.version : null, theme: theme };
+};
+
+// The face theme the settings name, as its name and its text: the user's
+// before a shipped one of its name; null where none is named or found.
+Glass.prototype.faceThemeText = function () {
+    var self = this;
+    self.loadConfigs();
+    var name = views.themeName(((meterConfig && meterConfig.current) || {})['face.theme']);
+    var theme = null;
+    if (name) {
+        [FACES_DIR, EVO_LOOKS_DIR].some(function (dir) {
+            try { theme = { name: name, text: fs.readFileSync(dir + '/' + name + '/face.txt', 'utf8') }; return true; } catch (e) { return false; }
+        });
+    }
+    return theme;
+};
+
+// What a remote display that carries a face needs of the player's: whose
+// the player's screen is, and the look the settings name. The face's own
+// settings travel in the meter configuration.
+Glass.prototype.remoteFace = function () {
+    var self = this;
+    var owner = 'kiosk';
+    try { owner = self.screenOwnerState().owner || 'kiosk'; } catch (e) { /* as the kiosk's */ }
+    var theme = null;
+    try { theme = self.faceThemeText(); } catch (e) { /* the built-in look */ }
+    return { owner: owner, theme: theme };
+};
+
+// The remotes hear when the screen changes hands: the configuration's
+// version covers whose it is, and a remote that follows starts again.
+Glass.prototype.tellRemotesOwner = function () {
+    var self = this;
+    var owner;
+    try { owner = self.screenOwnerState().owner; } catch (e) { return; }
+    if (self.remoteOwnerTold === owner) { return; }
+    var first = self.remoteOwnerTold === undefined;
+    self.remoteOwnerTold = owner;
+    if (!first) { try { self.updateConfigVersion(); } catch (e) { /* at the next change */ } }
 };
 
 // The pages are told when what they should carry changes, so one that is
@@ -1772,6 +1802,7 @@ Glass.prototype.watchScreen = function () {
         // What the browser views carry follows the screen's owner, the
         // component being here, and the user's choice: told when it changes.
         try { self.tellViews(); } catch (e) { /* told at the next look */ }
+        try { self.tellRemotesOwner(); } catch (e) { /* told at the next look */ }
         // The pages are told whether the display stays when the player
         // stands still: once after the start, whether or not the player has
         // stopped since (a page opened on a player that already stood still
@@ -3521,7 +3552,11 @@ Glass.prototype.updateConfigVersion = function () {
   try {
     if (fs.existsSync(MeterConfigFile)) {
       var configContent = fs.readFileSync(MeterConfigFile, 'utf8');
-      var newHash = crypto.createHash('md5').update(configContent).digest('hex').substring(0, 8);
+      // The version covers what a remote brings: the meter configuration,
+      // and for a display with a face whose the screen is and its look.
+      var faceContent = '';
+      try { faceContent = JSON.stringify(self.remoteFace()); } catch (e) { /* the configuration alone */ }
+      var newHash = crypto.createHash('md5').update(configContent).update(faceContent).digest('hex').substring(0, 8);
       
       if (newHash !== remoteConfigVersion) {
         remoteConfigVersion = newHash;
@@ -5117,6 +5152,7 @@ Glass.prototype.remoteConfig = function () {
         theme: self.activeTheme(),
         meter: String((meterConfig && meterConfig.current && meterConfig.current.meter) || ''),
         files: { meter: meterText, spectrum: spectrumText },
+        face: self.remoteFace(),
         assets: {
             fonts: filesOf(PluginPath + '/fonts', isFontFile),
             icons: icons,

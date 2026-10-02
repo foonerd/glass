@@ -33,6 +33,38 @@ pub struct RemoteConfig {
     pub files: RemoteFiles,
     #[serde(default)]
     pub assets: RemoteAssets,
+    /// What a display with a face needs of the player's; empty from a
+    /// player older than 0.8.20.
+    #[serde(default)]
+    pub face: RemoteFace,
+}
+
+/// Whose the player's screen is (`glass-evo` where its face holds it), and
+/// the look the player's settings name, as text.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct RemoteFace {
+    #[serde(default)]
+    pub owner: String,
+    #[serde(default)]
+    pub theme: Option<FaceTheme>,
+}
+
+/// A face theme by its name and its `face.txt`.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct FaceTheme {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub text: String,
+}
+
+/// Whether a face theme's name is one folder's name and nothing else.
+pub fn face_theme_name_ok(name: &str) -> bool {
+    let name = name.trim();
+    !name.is_empty()
+        && name.len() <= 64
+        && !name.starts_with('.')
+        && !name.contains(['/', '\\', '\0'])
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]
@@ -324,6 +356,24 @@ pub fn encode(text: &str) -> String {
 mod tests {
     use super::*;
 
+    #[test]
+    fn a_face_themes_name_is_one_folders_name() {
+        for good in ["Dark Glass", "Night Drive", "my_look-2 (v1.0)"] {
+            assert!(face_theme_name_ok(good), "{good}");
+        }
+        for bad in [
+            "",
+            "  ",
+            ".hidden",
+            "../out",
+            "a/b",
+            "a\\b",
+            &"x".repeat(65),
+        ] {
+            assert!(!face_theme_name_ok(bad), "{bad:?}");
+        }
+    }
+
     fn config() -> RemoteConfig {
         RemoteConfig {
             version: "abc".into(),
@@ -339,6 +389,7 @@ mod tests {
                 webfonts: vec![Asset { name: "Lato Bold.ttf".into(), sha256: "w1".into(), bytes: 1 }],
                 custom: vec![Asset { name: "Mine.ttf".into(), sha256: "c1".into(), bytes: 1 }],
             },
+            face: RemoteFace::default(),
         }
     }
 
