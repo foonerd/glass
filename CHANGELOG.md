@@ -24,7 +24,7 @@ Reported from a player whose meters rotate at random.
 
 Found on an x86 player with glass-evo on its screen.
 
-- **A theme's previews are the theme alone.** Where glass-evo held the player's screen, the previews on the Manager's Themes tab were rendered with glass-evo's clock, date and bar of controls over them: the render ran in the display's own environment, which there names glass-evo's binary and the screen as its own. A preview is rendered by Glass's own display now, with no face (`GLASS_BIN` and `GLASS_SCREEN_OURS` are left out of its environment), and a `--snapshot` session takes no face whatever binary runs it. The previews are rendered again after the upgrade, since each carries the version that drew it. A package's pictures never carried a face.
+- **A theme's previews are the theme alone.** Where glass-evo held the player's screen, the previews on the Manager's Themes tab were rendered with glass-evo's clock, date and bar of controls over them: the render ran in the display's own environment, which there names glass-evo's binary and the screen as its own. A preview is rendered by Glass's own display now, with no face (`GLASS_BIN` and `GLASS_SCREEN_OURS` are left out of its environment), and a `--snapshot` session takes no face whatever binary runs it. Each preview carries the version that drew it, so after the upgrade the old ones are out of date: **Render missing previews** on the Themes tab, or a theme's Details, renders them again. A package's pictures never carried a face.
 
 ## [0.8.24] - 2026-10-02
 
