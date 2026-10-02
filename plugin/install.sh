@@ -51,9 +51,17 @@ chmod +x "$PLUGIN_DIR/run_glass.sh"
 # =============================================================================
 # INSTALL: runtime dependencies
 # =============================================================================
+# SDL2, and the two libraries SDL loads by name to draw on a screen of its
+# own, where no X server runs: EGL and OpenGL. SDL's package does not depend
+# on them; a player with a kiosk has them through its X server, a player
+# without one has not, and the display then dies at once with "EGL not
+# initialized".
+installed() {
+  dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q "install ok installed"
+}
 NEEDED_PKGS=""
-for pkg in libsdl2-2.0-0; do
-  if ! dpkg -s "$pkg" > /dev/null 2>&1; then
+for pkg in libsdl2-2.0-0 libegl1 libgl1; do
+  if ! installed "$pkg"; then
     NEEDED_PKGS="$NEEDED_PKGS $pkg"
   fi
 done
@@ -61,6 +69,12 @@ if [ -n "$NEEDED_PKGS" ]; then
   echo "Installing:$NEEDED_PKGS"
   apt-get update
   apt-get install -y $NEEDED_PKGS
+  for pkg in $NEEDED_PKGS; do
+    if ! installed "$pkg"; then
+      echo "WARNING: $pkg could not be installed. The display cannot draw without it;"
+      echo "         with the player on the internet run: sudo apt-get install -y $pkg"
+    fi
+  done
 fi
 
 # =============================================================================
