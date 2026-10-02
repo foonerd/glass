@@ -1625,8 +1625,12 @@ Glass.prototype.startDisplayOnce = function () {
                                 var ranMs = Date.now() - (child.startedAt || 0);
                                 var ended = signal === 'SIGTERM' || signal === 'SIGKILL' || signal === 'SIGINT';
                                 self.displayDeaths = relaunch.deaths(self.displayDeaths || 0, { clean: error === null || ended, ranMs: ranMs });
-                                self.displayHoldUntil = self.displayDeaths ? relaunch.holdUntil(Date.now(), self.displayDeaths, self.screenTimeoutMs()) : 0;
-                                var waitS = Math.round(relaunch.wait(self.displayDeaths, self.screenTimeoutMs()) / 1000);
+                                // On a screen of its own the watcher starts it, not the screensaver's delay: the waits begin at a second.
+                                var ownScreen = !!child.face;
+                                if (!ownScreen) { try { ownScreen = !!self.screenOurs(); } catch (e) { /* as a screensaver */ } }
+                                var baseMs = relaunch.base(ownScreen, self.screenTimeoutMs());
+                                self.displayHoldUntil = self.displayDeaths ? relaunch.holdUntil(Date.now(), self.displayDeaths, baseMs) : 0;
+                                var waitS = Math.round(relaunch.wait(self.displayDeaths, baseMs) / 1000);
                                 var inARow = self.displayDeaths > 1 ? ', ' + self.displayDeaths + ' times in a row' : '';
                                 if (action === 'rearm') {
                                     clearInterval(self.Timeout);
