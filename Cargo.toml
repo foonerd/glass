@@ -7,6 +7,8 @@ members = [
     "crates/plot",
     "crates/expose",
     "crates/controls",
+    "crates/overlay",
+    "crates/page",
     "crates/pane",
     "crates/tap",
     "crates/bank",
@@ -26,7 +28,7 @@ codegen-units = 1
 panic = "abort"
 
 [workspace.package]
-version = "0.8.8"
+version = "0.8.9"
 edition = "2021"
 license = "MIT"
 publish = false
