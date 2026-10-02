@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.13] - 2026-10-02
+
+One fix, to the Manager's downloads.
+
+- **A download whose connection breaks is made again.** A Glass update, the glass-evo component or a theme pack whose connection was reset part way failed at once with "network", and the button had to be pressed again. Such a download is now made again from its first byte, after 2, 4 and 8 seconds, before the failure is reported; each new attempt is a line in the player's log. Only a broken connection or a failing server (a 5xx answer) is tried again: a file that is not the one its release or the catalog names, or an answer that it is not there, fails as before. Underneath, a connection that broke inside the body was not classed as a network failure by the Manager's own fetch; it is now, like one that breaks before the body.
+
 ## [0.8.12] - 2026-10-02
 
 Clock faces in the look panel, for glass-evo 0.1.15.
