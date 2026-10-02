@@ -88,11 +88,73 @@ pub fn run(args: Vec<String>) -> ExitCode {
     run_with(args, None)
 }
 
-/// Whether a frame is shown whole rather than by what the theme changed:
-/// while anything is drawn over the theme, and once more when it has
-/// gone, so nothing of it is left behind.
-fn shows_whole(covered: bool, was_covered: bool) -> bool {
-    covered || was_covered
+/// The rate the display draws at while the player stands still on a screen
+/// of its own: nothing on it moves to the music then, and a clock, a
+/// countdown, a title passing by or pictures fading into one another need
+/// no more. At ten a slideshow's fades looked choppy; at fifteen they do
+/// not.
+const STANDING_RATE: u32 = 15;
+/// How long after the player last played, or the screen was last touched,
+/// the display keeps its full rate: the gap between two tracks, the bar
+/// fading in, a finger at work.
+const STANDING_AFTER: Duration = Duration::from_millis(3000);
+
+/// How long a frame lasts: the theme's period, or the standing one where
+/// the screen is the display's own and nothing has asked for more since
+/// `STANDING_AFTER`.
+fn paced(period: Duration, ours: bool, quiet_for: Duration) -> Duration {
+    if ours && quiet_for >= STANDING_AFTER {
+        period.max(frame_period(STANDING_RATE))
+    } else {
+        period
+    }
+}
+
+/// What lies over the theme on a frame: black for a player standing still
+/// on a screen that is the display's own, a calibration's target, a face.
+#[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
+struct Over {
+    black: bool,
+    target: bool,
+    face: bool,
+}
+
+impl Over {
+    fn any(self) -> bool {
+        self.black || self.target || self.face
+    }
+}
+
+/// What the window is given of a frame.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Show {
+    /// What the theme changed.
+    Changed,
+    /// The whole picture.
+    Whole,
+    /// Nothing: the window holds this picture already.
+    Kept,
+}
+
+/// What to show of a frame, from what lies over the theme now and what lay
+/// over it on the frame before. The theme alone is shown by what changed.
+/// Anything over it is shown whole, and so is the frame after it has gone,
+/// so nothing of it is left behind; but where the same things lie over the
+/// same picture, drawn the same (`standing`), the window holds the frame
+/// already and is given nothing. A player standing still with a clock on
+/// its screen then costs a frame a minute, not sixty a second.
+fn show_of(over: Over, was: Over, standing: bool) -> Show {
+    if over.any() {
+        if over == was && standing && !over.target {
+            Show::Kept
+        } else {
+            Show::Whole
+        }
+    } else if was.any() {
+        Show::Whole
+    } else {
+        Show::Changed
+    }
 }
 
 /// What a face sees of the display each frame: the player's state as the
@@ -113,11 +175,31 @@ pub struct View<'a> {
     pub settings: &'a std::collections::BTreeMap<String, String>,
 }
 
+/// What a face has to draw over a frame.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Cover {
+    /// Nothing at all.
+    Nothing,
+    /// What it drew on the frame before, were the picture under it the same.
+    Same,
+    /// Something it has not drawn before.
+    New,
+}
+
 /// A face drawn over the display: what glass-evo adds on top of the
 /// theme. The display calls it every frame, offers it every touch before
 /// the theme's controls, and sends the commands it hands back through the
 /// same path the theme's own buttons use. With no face nothing changes.
 pub trait Overlay {
+    /// What the face has to draw over the frame about to be shown. Asked
+    /// before every `draw`. A face that says `Nothing` is not handed the
+    /// frame, and the display spares the copy it would have drawn on; one
+    /// that says `Same` is not asked to draw again while the picture under
+    /// it stands still, and the window is left as it is. A face that does
+    /// not say draws every frame.
+    fn covers(&mut self, _view: &View) -> Cover {
+        Cover::New
+    }
     /// Draw over the frame as shown, after the theme; `true` when anything
     /// was drawn, and the whole picture is then shown again.
     fn draw(&mut self, frame: &mut Frame, view: &View) -> bool;
@@ -800,8 +882,15 @@ fn session(
     }
     let mut run_flag_checked = Instant::now();
     let mut leave: Option<&'static str> = None;
-    // Whether the frame before this one had anything drawn over the theme.
-    let mut was_covered = false;
+    // What lay over the theme on the frame before this one.
+    let mut was_over = Over::default();
+    // When the player last played or the screen was last touched: past it
+    // the display on a screen of its own slows to the standing rate.
+    let mut active_at = Instant::now();
+    // The copy of the picture a face draws on, kept from frame to frame: a
+    // new one every frame is megabytes asked of the system sixty times a
+    // second.
+    let mut face_copy: Option<Frame> = None;
     // Move to another meter of the theme: its skin, pictures and motion start afresh.
     macro_rules! switch_meter {
         ($name:expr) => {{
@@ -1010,40 +1099,46 @@ fn session(
         }
         if surface.is_some() || write_file {
             pictures.follow(&scene, &assets);
-            if profiling {
-                motion.profile = Some(Vec::new());
-            }
-            let painted = raster_over(
-                &scene,
-                Stack {
-                    screen: None,
-                    face: None,
-                    front: assets.front.as_ref(),
-                    needle: assets.indicator.as_ref(),
-                    needle_right: assets.indicator_right.as_ref(),
-                    face_at: skin.face_at,
-                    fonts: Some(&assets.fonts),
-                    art: pictures.art(),
-                    icon: pictures.icon(),
-                    spectra: &assets.spectra,
-                    folder_pictures: pictures.folder_pictures(),
-                    fanart: pictures.fanart(),
-                    vinyl: pictures.vinyl(),
-                    tonearm: assets.tonearm.as_ref(),
-                    reels: pictures.reels(&scene, &assets),
-                    indicators: assets.indicators.as_ref(),
-                    base: Some(&assets.base),
-                },
-                &mut motion,
-                started.elapsed().as_millis() as u64,
-            );
-            let mut frame = painted.frame;
             // The screen is ours and the player has stopped past the
-            // countdown: black, never the console.
+            // countdown: black, never the console. The theme is not drawn
+            // behind a black screen, unless a file is to be written of it.
             let idle_black = screen_ours
                 && input.metadata.status != "play"
                 && input.metadata.persist_mode == "countdown"
                 && input.metadata.persist_left == 0;
+            let rastered = !idle_black || write_file;
+            if profiling && rastered {
+                motion.profile = Some(Vec::new());
+            }
+            let (mut frame, mut damage): (&Frame, &[Rect]) = if rastered {
+                let painted = raster_over(
+                    &scene,
+                    Stack {
+                        screen: None,
+                        face: None,
+                        front: assets.front.as_ref(),
+                        needle: assets.indicator.as_ref(),
+                        needle_right: assets.indicator_right.as_ref(),
+                        face_at: skin.face_at,
+                        fonts: Some(&assets.fonts),
+                        art: pictures.art(),
+                        icon: pictures.icon(),
+                        spectra: &assets.spectra,
+                        folder_pictures: pictures.folder_pictures(),
+                        fanart: pictures.fanart(),
+                        vinyl: pictures.vinyl(),
+                        tonearm: assets.tonearm.as_ref(),
+                        reels: pictures.reels(&scene, &assets),
+                        indicators: assets.indicators.as_ref(),
+                        base: Some(&assets.base),
+                    },
+                    &mut motion,
+                    started.elapsed().as_millis() as u64,
+                );
+                (painted.frame, painted.damage)
+            } else {
+                (&assets.base, &[])
+            };
             if idle_black {
                 let black = black_frame.get_or_insert_with(|| Frame {
                     blend: expose::Blend::Normal,
@@ -1053,8 +1148,15 @@ fn session(
                 });
                 frame = &*black;
             }
+            // Whether the picture under whatever lies over the theme is the
+            // one of the frame before: black after black, or a theme that
+            // did not move.
+            let base_same = if idle_black {
+                was_over.black
+            } else {
+                !was_over.black && damage.is_empty()
+            };
             let mut overlay: Option<Frame> = None;
-            let mut damage: &[Rect] = painted.damage;
             if let Some(cal) = calibration.as_ref() {
                 if let Some(target) = cal.targets.get(cal.samples.len()) {
                     let mut own = frame.clone();
@@ -1065,8 +1167,11 @@ fn session(
             if let Some(own) = overlay.as_ref() {
                 frame = own;
             }
-            // The face draws over the picture as shown, on its own copy.
-            let mut face_frame: Option<Frame> = None;
+            // The face draws over the picture as shown, on its own copy,
+            // and only when it has something to draw that the copy does
+            // not hold already.
+            let mut face_drew = false;
+            let mut face_same = false;
             if let Some(face) = face.as_deref_mut() {
                 let view = View {
                     input: &input,
@@ -1078,13 +1183,34 @@ fn session(
                     scale: skin.run.face_scale,
                     settings: &skin.run.face,
                 };
-                let mut own = frame.clone();
-                if face.draw(&mut own, &view) {
-                    face_frame = Some(own);
+                let fits = face_copy.as_ref().is_some_and(|own| {
+                    own.width == frame.width
+                        && own.height == frame.height
+                        && own.rgba.len() == frame.rgba.len()
+                });
+                match face.covers(&view) {
+                    Cover::Nothing => {}
+                    Cover::Same if fits && base_same && was_over.face && overlay.is_none() => {
+                        face_drew = true;
+                        face_same = true;
+                    }
+                    _ => {
+                        let own = match face_copy.as_mut() {
+                            Some(own) if fits => {
+                                own.rgba.copy_from_slice(&frame.rgba);
+                                own.blend = frame.blend;
+                                own
+                            }
+                            _ => face_copy.insert(frame.clone()),
+                        };
+                        face_drew = face.draw(own, &view);
+                    }
                 }
             }
-            if let Some(own) = face_frame.as_ref() {
-                frame = own;
+            if face_drew {
+                if let Some(own) = face_copy.as_ref() {
+                    frame = own;
+                }
             }
             let whole = [Rect {
                 x: 0,
@@ -1092,14 +1218,17 @@ fn session(
                 w: frame.width,
                 h: frame.height,
             }];
-            // Something drawn over the theme shows the whole picture; so
-            // does the frame after it is gone, or what it left on the
-            // screen would stay wherever the theme does not move.
-            let covered = idle_black || overlay.is_some() || face_frame.is_some();
-            if shows_whole(covered, was_covered) {
-                damage = &whole;
+            let over = Over {
+                black: idle_black,
+                target: overlay.is_some(),
+                face: face_drew,
+            };
+            match show_of(over, was_over, base_same && (!face_drew || face_same)) {
+                Show::Changed => {}
+                Show::Whole => damage = &whole,
+                Show::Kept => damage = &[],
             }
-            was_covered = covered;
+            was_over = over;
             rastered_at = Instant::now();
             if let Some(window) = surface.as_mut() {
                 if let Some(mode) = remote.as_deref().and_then(|r| r.app.take_window_request()) {
@@ -1118,6 +1247,9 @@ fn session(
                 // finger down on a bar drags its value until it lifts; any
                 // other touch does what the touch rules say.
                 let mut events = window.take_pointer();
+                if !events.is_empty() {
+                    active_at = Instant::now();
+                }
                 let mut acted = false;
                 let mut dismiss = false;
                 // The face sees every touch first; what it takes, the
@@ -1379,12 +1511,21 @@ fn session(
                 }
             }
             let shown_at = Instant::now();
-            profile_painted += motion
-                .damage()
-                .iter()
-                .map(|r| u64::from(r.w) * u64::from(r.h))
-                .sum::<u64>();
-            profile_boxes += motion.damage().len() as u64;
+            // Only what was painted on this frame counts: behind a black
+            // screen the theme is not painted at all.
+            let behind_black = screen_ours
+                && input.metadata.status != "play"
+                && input.metadata.persist_mode == "countdown"
+                && input.metadata.persist_left == 0
+                && !write_file;
+            if !behind_black {
+                profile_painted += motion
+                    .damage()
+                    .iter()
+                    .map(|r| u64::from(r.w) * u64::from(r.h))
+                    .sum::<u64>();
+                profile_boxes += motion.damage().len() as u64;
+            }
             profile_loop[0] += polled_at.duration_since(frame_started).as_micros() as u64;
             profile_loop[1] += stepped_at.duration_since(polled_at).as_micros() as u64;
             profile_loop[2] += rastered_at.duration_since(stepped_at).as_micros() as u64;
@@ -1448,9 +1589,16 @@ fn session(
             }
             None => {}
         }
-        // Pace to the frame rate: sleep what is left of the period, not a whole one.
-        if spent < period {
-            thread::sleep(period - spent);
+        // Pace to the frame rate: sleep what is left of the period, not a
+        // whole one. A player standing still on the display's own screen is
+        // drawn at the standing rate; playing, a touch and a calibration
+        // keep the full one.
+        if input.metadata.status == "play" || calibration.is_some() {
+            active_at = Instant::now();
+        }
+        let pace = paced(period, screen_ours && remote.is_none(), active_at.elapsed());
+        if spent < pace {
+            thread::sleep(pace - spent);
         }
     }
     if running_for_plugin {
@@ -1627,12 +1775,77 @@ mod tests {
 
     #[test]
     fn a_frame_is_shown_whole_while_the_theme_is_covered_and_once_after() {
+        use super::{show_of, Over, Show};
+        let none = Over::default();
+        let face = Over { face: true, ..none };
+        let black = Over {
+            black: true,
+            ..none
+        };
         // The theme alone: by what changed.
-        assert!(!super::shows_whole(false, false));
-        // A face over it: whole.
-        assert!(super::shows_whole(true, false));
-        assert!(super::shows_whole(true, true));
+        assert_eq!(show_of(none, none, false), Show::Changed);
+        assert_eq!(show_of(none, none, true), Show::Changed);
+        // A face over a moving theme: whole, every frame.
+        assert_eq!(show_of(face, none, false), Show::Whole);
+        assert_eq!(show_of(face, face, false), Show::Whole);
         // The face gone this frame: whole once more, so its last frame does not stay.
-        assert!(super::shows_whole(false, true));
+        assert_eq!(show_of(none, face, true), Show::Whole);
+        assert_eq!(show_of(none, black, false), Show::Whole);
+    }
+
+    #[test]
+    fn a_player_standing_still_on_its_own_screen_is_drawn_at_the_standing_rate() {
+        use super::{frame_period, paced, STANDING_AFTER, STANDING_RATE};
+        use std::time::Duration;
+        let sixty = frame_period(60);
+        let standing = frame_period(STANDING_RATE);
+        // Playing or just touched: the theme's rate.
+        assert_eq!(paced(sixty, true, Duration::ZERO), sixty);
+        assert_eq!(
+            paced(sixty, true, STANDING_AFTER - Duration::from_millis(1)),
+            sixty
+        );
+        // Quiet long enough on a screen of its own: the standing rate.
+        assert_eq!(paced(sixty, true, STANDING_AFTER), standing);
+        // Under a kiosk the display leaves the screen by itself; its rate is not touched.
+        assert_eq!(paced(sixty, false, Duration::from_secs(60)), sixty);
+        // A theme already slower than the standing rate keeps its own.
+        let five = frame_period(5);
+        assert_eq!(paced(five, true, Duration::from_secs(60)), five);
+    }
+
+    #[test]
+    fn a_frame_that_stands_is_not_shown_again() {
+        use super::{show_of, Over, Show};
+        let none = Over::default();
+        let face = Over { face: true, ..none };
+        let black = Over {
+            black: true,
+            ..none
+        };
+        let black_face = Over {
+            black: true,
+            face: true,
+            ..none
+        };
+        let target = Over {
+            target: true,
+            ..none
+        };
+        // Black comes: whole once, then nothing while it stays black.
+        assert_eq!(show_of(black, none, false), Show::Whole);
+        assert_eq!(show_of(black, black, true), Show::Kept);
+        // The clock on black: whole when it comes and when it changes,
+        // nothing while it says the same.
+        assert_eq!(show_of(black_face, black, true), Show::Whole);
+        assert_eq!(show_of(black_face, black_face, true), Show::Kept);
+        assert_eq!(show_of(black_face, black_face, false), Show::Whole);
+        assert_eq!(show_of(black, black_face, true), Show::Whole);
+        // The bar over a theme that stands still, drawn the same: nothing;
+        // the theme moves, or the bar fades: whole.
+        assert_eq!(show_of(face, face, true), Show::Kept);
+        assert_eq!(show_of(face, face, false), Show::Whole);
+        // A calibration's target is shown every frame.
+        assert_eq!(show_of(target, target, true), Show::Whole);
     }
 }
