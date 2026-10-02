@@ -228,7 +228,31 @@
   // ---- the finger on the controls ---------------------------------------
   // A pointer event goes to the module in the frame's pixels; what comes
   // back is done here: a command to the player through the manager, a
-  // meter stepped, or a dismiss, which leaves full screen.
+  // meter stepped, or a dismiss, which leaves full screen. A module that
+  // carries a face may also ask at a frame (a finger resting on a button),
+  // and that is taken after every frame and done the same way.
+  function carry(acts) {
+    acts.forEach(function (act) {
+      if (act.command) {
+        fetch('/api/face/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(act.command) }).catch(function () {});
+      }
+      if (act.meter) { face.meter = act.meter; sized(); }
+      if (act.dismiss && document.fullscreenElement) document.exitFullscreen();
+    });
+  }
+  // A face tells the time of day: the module is told the page's zone, its
+  // minutes east of universal time and its short name, at the start and
+  // once a minute after, so a change of the clocks is followed.
+  function zone(now) {
+    if (typeof face.ex.zone !== 'function' || (face.zoneAt !== undefined && now - face.zoneAt < 60000)) return;
+    face.zoneAt = now;
+    var name = '';
+    try {
+      var part = new Intl.DateTimeFormat(undefined, { timeZoneName: 'short' }).formatToParts(new Date()).filter(function (p) { return p.type === 'timeZoneName'; })[0];
+      name = part ? part.value : '';
+    } catch (err) { /* no name: the offset alone */ }
+    guarded(function () { withString(name, function (p, l) { face.ex.zone(-new Date().getTimezoneOffset(), p, l); }); });
+  }
   var listening = false;
   function listen(canvas) {
     if (listening) return;
@@ -244,13 +268,7 @@
       try {
         acts = guarded(function () { face.ex.pointer(kind, x, y); return JSON.parse(answer() || '[]'); });
       } catch (err) { say(face.t('MANAGER_FACE_FAILED') + ' ' + err.message, true); return; }
-      acts.forEach(function (act) {
-        if (act.command) {
-          fetch('/api/face/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(act.command) }).catch(function () {});
-        }
-        if (act.meter) { face.meter = act.meter; sized(); }
-        if (act.dismiss && document.fullscreenElement) document.exitFullscreen();
-      });
+      carry(acts);
     };
     canvas.addEventListener('pointerdown', function (e) {
       if (e.pointerType === 'mouse' && e.button !== 0) return;
@@ -369,8 +387,14 @@
     if (now - face.frameAt < period * 0.9) return;
     face.frameAt = now;
     var ptr;
+    var asked = [];
     // The engine's clock is the wall clock, so the theme's clocks and the persist countdown are true.
-  try { ptr = guarded(function () { return face.ex.frame(BigInt(Date.now())); }); } catch (err) { say(face.t('MANAGER_FACE_FAILED') + ' ' + err.message, true); return; }
+    try {
+      zone(now);
+      ptr = guarded(function () { return face.ex.frame(BigInt(Date.now())); });
+      if (typeof face.ex.taken === 'function') asked = guarded(function () { return face.ex.taken() ? JSON.parse(answer() || '[]') : []; });
+    } catch (err) { say(face.t('MANAGER_FACE_FAILED') + ' ' + err.message, true); return; }
+    carry(asked);
     if (!ptr) return;
     var size = face.width * face.height * 4;
     face.image.data.set(memory().subarray(ptr, ptr + size));

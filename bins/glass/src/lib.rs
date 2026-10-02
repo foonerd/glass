@@ -157,66 +157,19 @@ fn show_of(over: Over, was: Over, standing: bool) -> Show {
     }
 }
 
-/// What a face sees of the display each frame: the player's state as the
-/// source has it (the cover's file among it, once fetched), the theme's
-/// fonts, the picture's size, the clock, whether the screen is the
-/// display's own, and the face's own settings as the configuration has them.
-pub struct View<'a> {
-    pub input: &'a Input,
-    pub fonts: &'a expose::Fonts,
-    pub width: u32,
-    pub height: u32,
-    pub now_ms: u64,
-    pub ours: bool,
-    /// How large the face draws: 1 as designed, more for a hand at arm's length.
-    pub scale: f32,
-    /// The configuration's `face.<name>` keys by name, as written: the
-    /// display reads none of them but the size; their meaning is the face's.
-    pub settings: &'a std::collections::BTreeMap<String, String>,
-}
-
-/// What a face has to draw over a frame.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Cover {
-    /// Nothing at all.
-    Nothing,
-    /// What it drew on the frame before, were the picture under it the same.
-    Same,
-    /// Something it has not drawn before.
-    New,
-}
-
-/// A face drawn over the display: what glass-evo adds on top of the
-/// theme. The display calls it every frame, offers it every touch before
-/// the theme's controls, and sends the commands it hands back through the
-/// same path the theme's own buttons use. With no face nothing changes.
-pub trait Overlay {
-    /// What the face has to draw over the frame about to be shown. Asked
-    /// before every `draw`. A face that says `Nothing` is not handed the
-    /// frame, and the display spares the copy it would have drawn on; one
-    /// that says `Same` is not asked to draw again while the picture under
-    /// it stands still, and the window is left as it is. A face that does
-    /// not say draws every frame.
-    fn covers(&mut self, _view: &View) -> Cover {
-        Cover::New
+/// A pointer event of the window's as the controls and a face name it.
+fn kind_of(kind: PointerKind) -> controls::PointerKind {
+    match kind {
+        PointerKind::Down => controls::PointerKind::Down,
+        PointerKind::Move => controls::PointerKind::Move,
+        PointerKind::Up => controls::PointerKind::Up,
     }
-    /// Draw over the frame as shown, after the theme; `true` when anything
-    /// was drawn, and the whole picture is then shown again.
-    fn draw(&mut self, frame: &mut Frame, view: &View) -> bool;
-    /// A pointer event in picture pixels; `true` when taken, and the
-    /// theme's controls and the touch rules then do not see it.
-    fn pointer(&mut self, kind: PointerKind, x: i32, y: i32, view: &View) -> bool;
-    /// The commands for the player the face wants sent, taken every frame.
-    fn commands(&mut self) -> Vec<intake::Command>;
 }
 
-/// The types a face is written against, in one place.
-pub mod face {
-    pub use expose::{blur, fit_art, read_art, render_text, ui, Fonts, Frame};
-    pub use intake::Command;
-    pub use lead::{Input, Metadata, TextStyle};
-    pub use pane::PointerKind;
-}
+// The contract a face is written against, the same on a screen and in a
+// browser, lives in the `overlay` crate; it is offered from here as it
+// always was, so a face written against `glass::` reads as before.
+pub use overlay::{face, Cover, Overlay, View, Wall};
 
 /// The display with a face over it: the same arguments and environment as
 /// `run`, the face drawn and asked as the loop goes.
@@ -1172,6 +1125,12 @@ fn session(
             // not hold already.
             let mut face_drew = false;
             let mut face_same = false;
+            // The time of day, read once a frame, and only for a face.
+            let wall = if face.is_some() {
+                Wall::now()
+            } else {
+                Wall::default()
+            };
             if let Some(face) = face.as_deref_mut() {
                 let view = View {
                     input: &input,
@@ -1179,6 +1138,7 @@ fn session(
                     width: frame.width,
                     height: frame.height,
                     now_ms: started.elapsed().as_millis() as u64,
+                    wall: &wall,
                     ours: screen_ours,
                     scale: skin.run.face_scale,
                     settings: &skin.run.face,
@@ -1261,12 +1221,13 @@ fn session(
                         width: skin.width,
                         height: skin.height,
                         now_ms: started.elapsed().as_millis() as u64,
+                        wall: &wall,
                         ours: screen_ours,
                         scale: skin.run.face_scale,
                         settings: &skin.run.face,
                     };
                     events.retain(|event| {
-                        let taken = face.pointer(event.kind, event.x, event.y, &view);
+                        let taken = face.pointer(kind_of(event.kind), event.x, event.y, &view);
                         if taken && event.kind == PointerKind::Up {
                             acted = true;
                         }
@@ -1348,11 +1309,7 @@ fn session(
                         let margin = indicators.spec.touch_margin;
                         for event in events {
                             let pointer = Pointer {
-                                kind: match event.kind {
-                                    PointerKind::Down => controls::PointerKind::Down,
-                                    PointerKind::Move => controls::PointerKind::Move,
-                                    PointerKind::Up => controls::PointerKind::Up,
-                                },
+                                kind: kind_of(event.kind),
                                 x: event.x,
                                 y: event.y,
                             };

@@ -7,15 +7,10 @@ publish.workspace = true
 description = "The display's pipeline as a WebAssembly module for a browser page"
 
 [lib]
-crate-type = ["cdylib", "rlib"]
+crate-type = ["cdylib"]
 
 [dependencies]
-lead = { path = "../../crates/lead" }
-plot = { path = "../../crates/plot" }
-expose = { path = "../../crates/expose" }
-intake = { path = "../../crates/intake" }
-controls = { path = "../../crates/controls" }
-serde_json = "1"
+page = { path = "../../crates/page" }
 
 [lints]
 workspace = true

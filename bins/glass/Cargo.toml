@@ -19,6 +19,7 @@ logline = { path = "../../crates/logline" }
 expose = { path = "../../crates/expose" }
 controls = { path = "../../crates/controls" }
 intake = { path = "../../crates/intake" }
+overlay = { path = "../../crates/overlay" }
 lead = { path = "../../crates/lead" }
 pane = { path = "../../crates/pane" }
 plot = { path = "../../crates/plot" }

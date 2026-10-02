@@ -1,0 +1,19 @@
+[package]
+name = "overlay"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+description = "The contract between the display and a face drawn over it, the same on a screen and in a browser"
+
+[dependencies]
+expose = { path = "../expose" }
+controls = { path = "../controls" }
+intake = { path = "../intake" }
+lead = { path = "../lead" }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[lints]
+workspace = true
