@@ -2,6 +2,13 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.24] - 2026-10-02
+
+For a remote display on Android built with a face; nothing changes on the player, or in the app as Glass ships it.
+
+- **The Android app's entry is the display's own.** What the app's `SDL_main` did (the app's storage for the configuration and the cache, landscape, the display run as a remote) lived in the shell crate `glass-android`, where an app built with a face could not reach it. It is `glass::android::enter` now, taking the face the app was built with, or none; Glass's own app calls it with none and is the app it was.
+- `remote/README.md`: the bundle exists for Windows (glass-evo 0.1.19) and for Android (glass-evo 0.1.20); on Android both flavours are the one app under the one key, and Android refuses an app built on an older Glass than the one installed.
+
 ## [0.8.23] - 2026-10-02
 
 For a remote display on Windows built with a face; nothing changes on the player or on the standalone remote.
