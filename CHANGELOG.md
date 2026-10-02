@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.30] - 2026-10-02
+
+A line of the log that named the wrong file.
+
+- **The launcher names the binary it tried.** When the display's binary does not answer, the launcher said "expected" and then Glass's own path, with the architecture left empty where glass-evo is the display: `.../glass/bin//glass`, a file nobody had tried. It says "tried" now and the binary it ran, glass-evo's or Glass's.
+
 ## [0.8.29] - 2026-10-02
 
 Found on an x86 player, by making glass-evo fail there as it had on the Raspberry Pi of the report.
