@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.29] - 2026-10-02
+
+Found on an x86 player, by making glass-evo fail there as it had on the Raspberry Pi of the report.
+
+- **A second try is as quick as the first.** The count of starts that died, which sets the wait before the next one, went on across a change of the screen's owner. A first try of "Use glass-evo on the screen" that could not hold gave the screen back in fourteen seconds, as 0.8.27 meant; a second try straight after waited 8, 16 and 32 seconds between its starts, and a third a minute each. The count and the wait begin again now when the screen is handed to glass-evo and when the kiosk gets it back: another display on another screen, of which the deaths before say nothing.
+
 ## [0.8.28] - 2026-10-02
 
 From the same report: "SDL error: Can't load EGL/GL library on window creation" does not say what would not load.
