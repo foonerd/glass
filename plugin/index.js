@@ -1699,11 +1699,17 @@ Glass.prototype.watchScreen = function () {
                 exec('/usr/bin/sudo -n /bin/systemctl restart volumio-kiosk', { uid: 1000, gid: 1000 }, function (error) { if (error) { self.logger.warn(id + 'screen: the kiosk did not start: ' + error.message); } });
             }
         }
-        // Whose the screen is has changed: the pages are told again whether
-        // the display stays when the player stands still.
-        if (self.screenWasFree !== null && self.screenWasFree !== free && self.channel && self.channel.persist) {
-            var told = self.channel.persist;
-            try { self.pushPersist(told.mode, told.seconds, told.startedAt); } catch (e) { /* told at the next stop */ }
+        // The pages are told whether the display stays when the player
+        // stands still: once after the start, whether or not the player has
+        // stopped since (a page opened on a player that already stood still
+        // knew nothing of it), and again when the screen changes hands.
+        if (self.channel) {
+            var stays = false;
+            try { stays = !!self.screenOurs(fact); } catch (e) { /* as a display that leaves */ }
+            if (self.persistToldStays !== stays) {
+                var told = self.channel.persist || { mode: '', seconds: 0, startedAt: 0 };
+                try { self.pushPersist(told.mode, told.seconds, told.startedAt); } catch (e) { /* told at the next stop */ }
+            }
         }
         self.screenWasFree = free;
     };
@@ -1731,6 +1737,7 @@ Glass.prototype.pushPersist = function (mode, seconds, startedAt) {
     var stays = false;
     try { stays = !!self.screenOurs(); } catch (e) { /* not known: as a display that leaves */ }
     var line = { kind: 'persist', mode: String(mode || ''), seconds: parseInt(seconds, 10) || 0, startedAt: parseInt(startedAt, 10) || 0, stays: stays };
+    self.persistToldStays = stays;
     self.channel.persist = line;
     self.channel.push(line);
 };
