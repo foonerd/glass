@@ -12,10 +12,12 @@ A remote comes in two flavours. Both are the same display with the same settings
 | | Standalone | Bundle |
 | --- | --- | --- |
 | Linux (x64, armv8, armv7) | yes | yes, from glass-evo 0.1.18 |
-| Windows | yes | not yet |
-| Android | yes | not yet |
+| Windows (10 or later, 64 bit) | yes | yes, from glass-evo 0.1.19 |
+| Android (7 or later) | yes | yes, from glass-evo 0.1.20 |
 
-Where the bundle is not built yet, Anymote shows the Glass interface in any browser, served by the player's manager at `/anymote`.
+On Android both flavours are the same app, **Glass Remote**, signed with the same key: installing one over the other keeps the settings. Android itself refuses an app built on an older Glass than the one installed, so change flavour to one built on the same Glass or a newer one, or uninstall first.
+
+For a device with nothing installed, Anymote shows the Glass interface in any browser, served by the player's manager at `/anymote`.
 
 ## Linux
 
