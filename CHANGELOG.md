@@ -2,6 +2,15 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.10] - 2026-10-02
+
+The Face tab and Anymote show glass-evo's face, with glass-evo 0.1.14 or later.
+
+- **The views show what the player's screen shows.** Where glass-evo holds the screen, the Face tab and Anymote bring the module the glass-evo component carries, Glass's pipeline with the face over the theme: the clock and the date when the player stands still, the bar and its sheet at a touch, in the look and the sizes chosen for the player, drawn by the same code that draws them on the screen. A touch on the bar acts on the player. The page's own banner about a player standing still is left out there, the clock saying it.
+- **What the views show is the user's to choose**, on the Screen tab where a glass-evo that carries its face for a browser is installed: what the player's screen shows (the face under glass-evo, the theme alone under the kiosk; as it comes), the Glass interface always (the face in the browser even while the player's own screen keeps the kiosk: a tablet on Anymote is then a Glass interface by itself), or the theme alone, as before. A page that is open brings the other module when the choice or the screen's owner changes.
+- The System tab's installer carries the browser module out of the component, checked against the digest the manifest names; a component that names one and does not hold it, or holds another, is not installed.
+- `GET /api/face/module` says which module a page brings and gives the face theme's text; `POST /api/face/views` with `{"mode": "follow" | "face" | "theme"}` sets the choice; `GET /api/screen` says `views`; the feed carries a `views` line when what the pages should carry changes.
+
 ## [0.8.9] - 2026-10-02
 
 Groundwork for showing glass-evo's face in the Face tab and Anymote. Nothing changes on a player or in a page yet.
