@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.27] - 2026-10-02
+
+Reported from a Raspberry Pi 5 with an HDMI panel, where glass-evo could not start.
+
+- **A take that cannot hold gives the screen back in seconds.** A display that dies as it starts is started again after a wait that grows, and that wait was counted from the screensaver's delay everywhere. On a screen that is the display's own the screensaver's delay has no part: the screen's watcher starts the display as soon as it is found gone. So where glass-evo was handed the screen and could not start, its three tries stood the screensaver's delay apart and more, and the screen stayed black for a minute and a half at a delay of thirty seconds before the kiosk had it back. On a screen of the display's own the waits begin at a second now (`relaunch.base`): three failed starts and the screen's return take about ten seconds. A display on a player with no kiosk is tried again after 1, 2, 4 seconds and so on up to a minute; over a kiosk nothing changes.
+
 ## [0.8.26] - 2026-10-02
 
 Reported from a player whose meters rotate at random.
