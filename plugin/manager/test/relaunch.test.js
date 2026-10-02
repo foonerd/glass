@@ -105,3 +105,23 @@ test('why a display died: its last word first, the faults before it after, each 
   assert.ok(reason('exit 1', lines, 130).length <= 130);
   assert.ok(reason('exit 1', lines, 130).indexOf('libEGL warning: egl: failed to create dri2 screen') !== -1, 'a shorter fault that fits is kept');
 });
+
+test('a second take after a failed one is as quick as the first, the count having started again', function () {
+  // Three failed starts on the turns of a watcher that looks every five seconds, from a count of `from`.
+  const lasts = function (from) {
+    let held = 0;
+    let count = from;
+    let failed = 0;
+    for (let tick = 0; tick < 1000; tick++) {
+      const now = tick * 5000;
+      if (now < held) continue;
+      count = deaths(count, { clean: false, ranMs: 300 });
+      failed++;
+      if (failed === 3) return now;
+      held = holdUntil(now + 300, count, base(true, 30000));
+    }
+    return Infinity;
+  };
+  assert.equal(lasts(0), 10000, 'the count started again when the screen changed hands');
+  assert.ok(lasts(3) >= 25000, 'carried over from the first take, the second waited 8 and 16 seconds');
+});

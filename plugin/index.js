@@ -2342,6 +2342,10 @@ Glass.prototype.setScreenOwner = function (owner) {
             .then(function () {
                 self.writeRegister(register);
                 self.probeAt = 0;
+                // Another display on another screen: what died before the screen changed hands says nothing of it.
+                self.displayDeaths = 0;
+                self.displayHoldUntil = 0;
+                self.faceFailures = 0;
                 self.logger.info(id + 'screen owner: glass-evo has the screen; ' + register.changes.length + ' change' + (register.changes.length === 1 ? '' : 's') + ' recorded');
                 // A display already on a free screen would stay as it is:
                 // it leaves now and comes back as the face.
@@ -2359,6 +2363,9 @@ Glass.prototype.setScreenOwner = function (owner) {
         var reg = state.register;
         var steps = screenowner.planGiveBack(reg, { plugins: self.kioskPluginStates(), units: self.kioskUnitStates() });
         self.logger.info(id + 'screen owner: the kiosk gets the screen back (' + steps.length + ' to restore); the display steps aside');
+        // The screensaver over the kiosk is another display: the face's deaths are not counted against it.
+        self.displayDeaths = 0;
+        self.displayHoldUntil = 0;
         self.screenYieldUntil = Date.now() + 30000;
         try { if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); } } catch (e) {}
         return waitFor(function () { return !(self.meterChild && self.meterChild.exitCode === null); }, 10000)
