@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.2] - 2026-10-02
+
+The display does less where there is nothing new to show, and the status sheet says more of the player. The figures are a Raspberry Pi 5 at sixty frames a second with a spectrum across the whole screen, glass-evo on the screen; a face built on this Glass has them, which for glass-evo is 0.1.11.
+
+- **A face costs nothing while it draws nothing.** The display made a new copy of the whole picture for a face on every frame, whether the face drew on it or not: megabytes asked of the system sixty times a second. The face is now asked first (`Overlay::covers`), and the copy it draws on is kept from frame to frame. Steady play: 52 percent of a core before, 46.5 after, the same as the display with no face.
+- **A picture that stands is not sent again.** Black, a clock that says the same minute, a bar nobody touches: where the same things lie over a picture that did not move, the window is left as it is. A face says so with `Cover::Same`.
+- **A player standing still is drawn fifteen times a second.** On a screen that is the display's own, three seconds after the player last played or the screen was last touched, the display slows to fifteen frames a second, and is back at its full rate with the next touch or the next note. Paused with a clock on the screen: 60 percent of a core before, 24 after.
+- **Nothing is drawn behind a black screen.**
+- **The status sheet's Player section** has the player's memory (all of it, in use, available, and swap in use) and the other plugins installed, each with its version, whether it is on, and whether it puts itself in the audio path. Both are in a report made from "Find a problem", where a board's name said nothing of its memory and a DSP plugin went unseen.
+
 ## [0.8.1] - 2026-10-01
 
 On x86 a theme of another size than the screen fills the screen under glass-evo. The plain X server brought up for glass-evo ran no window manager, and it is the window manager that makes a full screen window the size of the screen: the face's window kept the theme's size, so a 1920x1080 theme on a 1280x720 screen was cut off, a smaller one stood small, and "fit the theme to the screen" did nothing. The session now runs the window manager the kiosk's own session runs (openbox). Give the screen back and hand it over again for it to take effect.
