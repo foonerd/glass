@@ -18,8 +18,7 @@ fetch_sdl() {
   local so="target/sysroot/$deb_arch/usr/lib/$multiarch/libSDL2-2.0.so.0"
   if [ ! -e "$so" ]; then
     mkdir -p "target/sysroot/$deb_arch"
-    curl -fsSL -o "$deb" \
-      "http://deb.debian.org/debian/pool/main/libs/libsdl2/libsdl2-2.0-0_2.26.5+dfsg-1_${deb_arch}.deb"
+    "$ROOT/scripts/fetch.sh" "http://deb.debian.org/debian/pool/main/libs/libsdl2/libsdl2-2.0-0_2.26.5+dfsg-1_${deb_arch}.deb" "$deb"
     dpkg-deb -x "$deb" "target/sysroot/$deb_arch"
   fi
   mkdir -p "$dest"
@@ -38,8 +37,7 @@ fetch_asound() {
   local so="target/sysroot/$deb_arch/usr/lib/$multiarch/libasound.so.2"
   if [ ! -e "$so" ]; then
     mkdir -p "target/sysroot/$deb_arch"
-    curl -fsSL -o "$deb" \
-      "http://deb.debian.org/debian/pool/main/a/alsa-lib/libasound2_1.2.8-1+b1_${deb_arch}.deb"
+    "$ROOT/scripts/fetch.sh" "http://deb.debian.org/debian/pool/main/a/alsa-lib/libasound2_1.2.8-1+b1_${deb_arch}.deb" "$deb"
     dpkg-deb -x "$deb" "target/sysroot/$deb_arch"
   fi
 }

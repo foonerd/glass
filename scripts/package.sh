@@ -40,9 +40,7 @@ fetch_font() {
   local file="$STAGE/fonts/$name"
   local cache="$ROOT/target/sysroot/fonts/$name"
   if [ ! -f "$cache" ] || ! echo "$sha  $cache" | sha256sum -c - >/dev/null 2>&1; then
-    mkdir -p "$ROOT/target/sysroot/fonts"
-    curl -fsSL -o "$cache" "https://raw.githubusercontent.com/foonerd/glass_fonts/$FONTS_COMMIT/fonts/$name"
-    echo "$sha  $cache" | sha256sum -c - >/dev/null
+    "$ROOT/scripts/fetch.sh" "https://raw.githubusercontent.com/foonerd/glass_fonts/$FONTS_COMMIT/fonts/$name" "$cache" "$sha"
   fi
   cp "$cache" "$file"
 }

@@ -25,7 +25,7 @@ apt_install() {
 }
 JSIGN_VERSION=7.5
 if ! command -v jsign >/dev/null 2>&1; then
-  curl -fsSL -o /tmp/jsign.deb "https://github.com/ebourg/jsign/releases/download/$JSIGN_VERSION/jsign_${JSIGN_VERSION}_all.deb"
+  "$ROOT/scripts/fetch.sh" "https://github.com/ebourg/jsign/releases/download/$JSIGN_VERSION/jsign_${JSIGN_VERSION}_all.deb" /tmp/jsign.deb
   apt_install /tmp/jsign.deb osslsigncode
 fi
 command -v osslsigncode >/dev/null 2>&1 || apt_install osslsigncode

@@ -28,9 +28,8 @@ command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 || {
 if [ ! -e "$SDL_DIR/bin/SDL2.dll" ]; then
   mkdir -p "$TARGET_DIR/sysroot/windows"
   tarball=$TARGET_DIR/sysroot/windows/SDL2-devel-$SDL_VERSION-mingw.tar.gz
-  curl -fsSL -o "$tarball" \
-    "https://github.com/libsdl-org/SDL/releases/download/release-$SDL_VERSION/SDL2-devel-$SDL_VERSION-mingw.tar.gz"
-  echo "$SDL_SHA256  $tarball" | sha256sum -c - >/dev/null
+  "$ROOT/scripts/fetch.sh" "https://github.com/libsdl-org/SDL/releases/download/release-$SDL_VERSION/SDL2-devel-$SDL_VERSION-mingw.tar.gz" \
+    "$tarball" "$SDL_SHA256"
   tar -C "$TARGET_DIR/sysroot/windows" -xzf "$tarball"
 fi
 
