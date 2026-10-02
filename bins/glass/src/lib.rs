@@ -21,6 +21,8 @@ use pane::{publish, write_ppm, PointerKind, Shown, Surface, WindowMode, WindowOp
 use plot::{step, Scene};
 use std::time::Duration;
 
+#[cfg(target_os = "android")]
+pub mod android;
 mod governor;
 mod package;
 mod remote;
