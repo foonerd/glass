@@ -388,6 +388,10 @@
         <div class="full" id="screen-owner" style="margin-top:10px"></div>
         <div class="full row" id="screen-owner-actions"></div>
         <div class="full row" id="screen-face-row" hidden><label id="screen-face-label" style="margin-right:8px"></label><select id="screen-face"><option value="normal"></option><option value="large"></option><option value="car"></option></select></div>
+        <div class="full" id="screen-views-row" hidden>
+          <div class="row"><label id="screen-views-label" style="margin-right:8px"></label><select id="screen-views"><option value="follow"></option><option value="face"></option><option value="theme"></option></select></div>
+          <div class="help" id="screen-views-help"></div>
+        </div>
         <div class="screen-controls"><label id="screen-rotation-label"></label><select id="screen-rotation"><option value="0">0</option><option value="90">90</option><option value="180">180</option><option value="270">270</option></select></div>
         <div class="screen-controls"><label id="screen-pointer-label"></label><select id="screen-pointer"><option value="auto"></option><option value="show"></option><option value="hide"></option></select></div>
         <div class="full help screen-controls" id="screen-suggested"></div>
@@ -747,6 +751,7 @@
     $('btn-share-apply').textContent = t('MANAGER_APPLY');
     $('touch-title').textContent = t('MANAGER_TOUCH_TITLE'); $('touch-help').textContent = t('MANAGER_TOUCH_HELP'); $('touch-mode-label').textContent = t('MANAGER_TOUCH_MODE'); $('btn-touch-apply').textContent = t('MANAGER_SAVE');
     $('touch-mode').options[0].textContent = t('INTERACTIVE_THEME'); $('touch-mode').options[1].textContent = t('INTERACTIVE_ON'); $('touch-mode').options[2].textContent = t('INTERACTIVE_OFF');
+    $('screen-views-label').textContent = t('MANAGER_VIEWS'); ['follow', 'face', 'theme'].forEach(function (m, i) { $('screen-views').options[i].textContent = t('MANAGER_VIEWS_' + m.toUpperCase()); });
     $('screen-face-label').textContent = t('MANAGER_FACE_SIZE'); ['normal', 'large', 'car'].forEach(function (s, i) { $('screen-face').options[i].textContent = t('MANAGER_FACE_SIZE_' + s.toUpperCase()); });
     $('screen-title').textContent = t('MANAGER_SCREEN_TITLE'); $('screen-help').textContent = t('MANAGER_SCREEN_HELP'); $('screen-rotation-label').textContent = t('MANAGER_SCREEN_ROTATION'); $('btn-screen-apply').textContent = t('MANAGER_SAVE');
     $('btn-screen-details').textContent = t('MANAGER_SCREEN_DETAILS'); $('screen-pointer-label').textContent = t('MANAGER_SCREEN_POINTER');
@@ -2263,6 +2268,15 @@
     $('screen-face-row').hidden = !evoHere;
     $('look-panel').hidden = !evoHere || !LOOK;
     if (evoHere && LOOK) { if (lookDirty()) paintLook(true); else loadLook(); }
+    // What the Face tab and Anymote show, where a glass-evo that carries its
+    // face for a browser is installed: the user's to choose, saved as chosen.
+    var seen = sc.views || {};
+    $('screen-views-row').hidden = !seen.has;
+    $('screen-views').value = seen.mode || 'follow';
+    $('screen-views-help').textContent = t(seen.face ? 'MANAGER_VIEWS_NOW_FACE' : 'MANAGER_VIEWS_NOW_THEME');
+    $('screen-views').onchange = function () {
+      api('POST', '/api/face/views', { mode: $('screen-views').value }).then(function () { toast(t('MANAGER_SAVED')); loadScreen(); }).catch(function (e) { toast(errorText(e), 'error'); loadScreen(); });
+    };
     $('screen-face').value = sc.faceSize || 'normal';
     $('screen-face').onchange = function () {
       api('POST', '/api/screen', { faceSize: $('screen-face').value }).then(function (r) { renderScreen(r); toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); loadScreen(); });

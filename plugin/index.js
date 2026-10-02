@@ -26,6 +26,7 @@ const { advanced } = require('./manager/statenow');
 const screenprobe = require('./manager/screenprobe');
 const playerfacts = require('./manager/playerfacts');
 const screenowner = require('./manager/screenowner');
+const views = require('./manager/views');
 const facelook = require('./manager/facelook');
 const component = require('./manager/component');
 const { compact: compactQueue } = require('./manager/queue');
@@ -1456,6 +1457,60 @@ Glass.prototype.setInteractiveMode = function (value) {
     return { changed: true, interactive: wanted };
 };
 
+// ---- The views: what the Face tab and Anymote show ---------------------
+
+// `follow`, `face` or `theme` (manager/views.js): the user's choice of
+// whether the browser views carry glass-evo's face over the theme.
+Glass.prototype.viewsMode = function () {
+    return views.modeOf(this.config.get('viewsFace'));
+};
+
+Glass.prototype.setViewsMode = function (value) {
+    var wanted = views.modeOf(value);
+    if (this.viewsMode() === wanted) { return { changed: false, mode: wanted }; }
+    this.config.set('viewsFace', wanted);
+    this.logger.info(id + 'views: ' + wanted);
+    this.tellViews();
+    return { changed: true, mode: wanted };
+};
+
+// The module a page gets and what goes with it: Glass's own, or the one
+// the glass-evo component carries, with the text of the face theme the
+// settings name, the user's before a shipped one of its name, for the
+// page to put where the face reads it.
+Glass.prototype.faceModule = function () {
+    var self = this;
+    var evo = self.evoComponent();
+    var has = !!(evo.installed && evo.face);
+    var mode = self.viewsMode();
+    var owner = self.screenOwnerState().owner;
+    var carries = views.carriesFace(mode, owner, has);
+    var theme = null;
+    if (carries) {
+        self.loadConfigs();
+        var name = views.themeName(((meterConfig && meterConfig.current) || {})['face.theme']);
+        if (name) {
+            [FACES_DIR, EVO_LOOKS_DIR].some(function (dir) {
+                try { theme = { name: name, text: fs.readFileSync(dir + '/' + name + '/face.txt', 'utf8') }; return true; } catch (e) { return false; }
+            });
+        }
+    }
+    return { mode: mode, has: has, owner: owner, face: carries, version: carries ? evo.version : null, theme: theme };
+};
+
+// The pages are told when what they should carry changes, so one that is
+// open brings the other module: a line down the channel, kept by the feed
+// for a page that opens later.
+Glass.prototype.tellViews = function () {
+    var self = this;
+    if (!self.channel) { return; }
+    var carries = false;
+    try { carries = !!self.faceModule().face; } catch (e) { /* as the theme alone */ }
+    if (self.viewsToldFace === carries) { return; }
+    self.viewsToldFace = carries;
+    self.channel.push({ kind: 'views', face: carries });
+};
+
 // ---- Test releases: whether this player is offered pre-releases ----------
 
 Glass.prototype.testReleases = function () {
@@ -1699,6 +1754,9 @@ Glass.prototype.watchScreen = function () {
                 exec('/usr/bin/sudo -n /bin/systemctl restart volumio-kiosk', { uid: 1000, gid: 1000 }, function (error) { if (error) { self.logger.warn(id + 'screen: the kiosk did not start: ' + error.message); } });
             }
         }
+        // What the browser views carry follows the screen's owner, the
+        // component being here, and the user's choice: told when it changes.
+        try { self.tellViews(); } catch (e) { /* told at the next look */ }
         // The pages are told whether the display stays when the player
         // stands still: once after the start, whether or not the player has
         // stopped since (a page opened on a player that already stood still
@@ -1775,6 +1833,7 @@ Glass.prototype.screenSettings = function () {
             wouldDraw: screenprobe.wouldDraw(fact)
         },
         owner: self.screenOwnerState(),
+        views: (function () { var m = self.faceModule(); return { mode: m.mode, has: m.has, face: m.face }; })(),
         probe: found,
         touch: self.touchSettings()
     };

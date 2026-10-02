@@ -22,6 +22,7 @@ const { Catalog, CatalogError } = require('./catalog');
 const { Previews } = require('./previews');
 const { Updater, UpdateError } = require('./update');
 const { Component, leastOf, pair } = require('./component');
+const views = require('./views');
 const { zipDirectory } = require('./zipwrite');
 const tailor = require('./tailor');
 const { SYMPTOMS, diagnose } = require('./diagnose');
@@ -562,6 +563,35 @@ class Manager {
       res.type('application/wasm');
       res.sendFile(file, { maxAge: 0 });
     });
+    // glass-evo's module, Glass's pipeline with the face over it, from
+    // the component where it carries one.
+    app.get('/face/glass-evo-face.wasm', function (req, res) {
+      const evo = self.plugin.evoComponent();
+      if (!evo.installed || !evo.face) return res.status(404).json({ error: 'no-module' });
+      res.type('application/wasm');
+      res.sendFile(evo.face, { maxAge: 0 });
+    });
+    // Which module a page brings, and what goes with it: Glass's own, or
+    // glass-evo's with the text of the face theme the settings name. The
+    // user's choice of what the views show decides (`mode`: follow the
+    // screen, the face wherever the component is here, or the theme alone).
+    app.get('/api/face/module', function (req, res) {
+      const m = self.plugin.faceModule();
+      res.json({
+        module: m.face ? 'glass-evo' : 'glass',
+        url: m.face ? '/face/glass-evo-face.wasm?v=' + encodeURIComponent(m.version) : '/face/glass-face.wasm?v=' + encodeURIComponent(self.paths.version),
+        mode: m.mode,
+        has: m.has,
+        theme: m.theme
+      });
+    });
+    app.post('/api/face/views', wrap(async function (req, res) {
+      const mode = String((req.body || {}).mode || '');
+      if (views.MODES.indexOf(mode) === -1) return res.status(400).json({ error: 'bad-request', message: 'mode is one of ' + views.MODES.join(', ') });
+      const result = self.plugin.setViewsMode(mode);
+      const m = self.plugin.faceModule();
+      res.json({ ok: true, changed: result.changed, mode: m.mode, has: m.has, face: m.face });
+    }));
     app.get('/face/face-page.js', function (req, res) {
       res.sendFile(path.join(__dirname, 'face-page.js'), { maxAge: 0 });
     });

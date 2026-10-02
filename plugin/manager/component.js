@@ -29,6 +29,10 @@ const MAX_ZIP_BYTES = 128 * 1024 * 1024;
 const MAX_TEXT_BYTES = 64 * 1024;
 // A look in the component: a folder under themes/ with its text.
 const LOOK = /^themes\/[^/]+\/face\.txt$/;
+// The face for a browser, where the component carries one: Glass's
+// pipeline for a page with the face over it, one module under face/.
+const MODULE = /^face\/[A-Za-z0-9._-]+\.wasm$/;
+const MAX_MODULE_BYTES = 16 * 1024 * 1024;
 
 class ComponentError extends Error {
   constructor(code, message, data) {
@@ -61,7 +65,12 @@ function manifestOf(text) {
     throw new ComponentError('bad-manifest', 'the manifest does not describe glass-evo');
   }
   const needs = m.requires && VERSION.test(String(m.requires.glass || '')) ? String(m.requires.glass) : null;
-  return { version: String(m.version), binaries: m.binaries, requires: needs };
+  // The browser's module, named with its digest; a manifest that names
+  // none, or names it badly, has none.
+  const named = m.face && typeof m.face === 'object' ? m.face : null;
+  const face = named && MODULE.test(String(named.path || '')) && /^[0-9a-f]{64}$/.test(String(named.sha256 || ''))
+    ? { path: String(named.path), sha256: String(named.sha256) } : null;
+  return { version: String(m.version), binaries: m.binaries, requires: needs, face: face };
 }
 
 // Why a component does not go with a Glass on this player, or null: older
@@ -89,9 +98,11 @@ function installedAt(dir, arch) {
     const rel = m.binaries[arch] && m.binaries[arch].path;
     const bin = rel && safeName(String(rel)) ? path.join(dir, String(rel)) : null;
     const available = !!(bin && fs.existsSync(bin));
-    return { installed: true, available: available, version: m.version, binary: available ? bin : null, arch: arch, requires: m.requires };
+    const module = m.face ? path.join(dir, m.face.path) : null;
+    return { installed: true, available: available, version: m.version, binary: available ? bin : null, arch: arch, requires: m.requires,
+      face: module && fs.existsSync(module) ? module : null };
   } catch (e) {
-    return { installed: false, available: false, version: null, binary: null, arch: arch, requires: null };
+    return { installed: false, available: false, version: null, binary: null, arch: arch, requires: null, face: null };
   }
 }
 
@@ -261,6 +272,15 @@ class Component {
       };
       await write('manifest.json', text, 0o644);
       await write(bin.path, data, 0o755);
+      // The face for a browser, where the manifest names one: there, and
+      // what the manifest says it is, or the component is not installed.
+      if (manifest.face) {
+        const module = entry(manifest.face.path);
+        if (!module || module.size > MAX_MODULE_BYTES) throw new ComponentError('no-module', 'the zip holds no ' + manifest.face.path);
+        const bytes = await zip.read(module);
+        if (crypto.createHash('sha256').update(bytes).digest('hex') !== manifest.face.sha256) throw new ComponentError('checksum', 'the browser module does not match the manifest');
+        await write(manifest.face.path, bytes, 0o644);
+      }
       for (const e of zip.entries) {
         if (!e.isRegular || !safeName(e.name) || e.size > MAX_TEXT_BYTES) continue;
         if (e.name === 'face.txt' || LOOK.test(e.name)) await write(e.name, await zip.read(e), 0o644);

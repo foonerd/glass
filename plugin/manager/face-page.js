@@ -149,9 +149,24 @@
   }
 
   // ---- the module and the theme -------------------------------------------
+  // The Manager says which module a page brings: Glass's own, the theme
+  // alone, or the one the glass-evo component carries, the same with the
+  // face over the theme, where the user's choice of what the views show
+  // and the player's screen call for it.
+  function moduleInfo() {
+    return fetch('/api/face/module').then(function (res) {
+      if (!res.ok) throw new Error('module: ' + res.status);
+      return res.json();
+    }).catch(function () {
+      return { module: 'glass', url: '/face/glass-face.wasm?v=' + encodeURIComponent(face.version()), theme: null };
+    });
+  }
   function loadModule() {
     if (face.ex) return Promise.resolve();
-    return fetch('/face/glass-face.wasm?v=' + encodeURIComponent(face.version())).then(function (res) {
+    return moduleInfo().then(function (info) {
+      face.module = info.module;
+      return fetch(info.url);
+    }).then(function (res) {
       if (res.status === 404) throw new Error(face.t('MANAGER_FACE_NO_MODULE'));
       if (!res.ok) throw new Error('module: ' + res.status);
       return res.arrayBuffer();
@@ -159,6 +174,7 @@
       return WebAssembly.instantiate(bytes, {});
     }).then(function (result) {
       face.ex = result.instance.exports;
+      face.zoneAt = undefined;
       var kept = face.earlyLines;
       face.earlyLines = [];
       kept.forEach(function (line) {
@@ -187,7 +203,7 @@
         if (planned.code) throw new Error(planned.answer);
         return bring(assets.concat(JSON.parse(planned.answer)));
       });
-    }).then(function () {
+    }).then(bringFaceTheme).then(function () {
       start(face.wanted || face.playerMeter || config.meter || '');
     });
   }
@@ -214,6 +230,9 @@
     listen(canvas);
     fitted();
     showing();
+    // The banner was settled when the player's lines came, before the
+    // module was here to say whether it draws a face: settled again now.
+    truth();
   }
 
   // On a page of its own the canvas fills the window, the theme's shape kept.
@@ -313,7 +332,9 @@
     var stopped = face.status && face.status !== 'play';
     var persist = face.persist || {};
     var left = stopped && persist.startedAt ? persist.seconds * 1000 - (Date.now() - persist.startedAt) : 0;
-    if (stopped && (!persist.startedAt || left <= 0)) {
+    // A module with a face over the theme shows the player standing still
+    // itself, the clock on black as the player's screen has it: no banner.
+    if (stopped && (!persist.startedAt || left <= 0) && !overlaid()) {
       banner.textContent = face.t((face.status === 'pause' ? 'MANAGER_FACE_PAUSED' : 'MANAGER_FACE_STOPPED') + (persist.stays ? '_STAYS' : ''));
       banner.style.display = 'block';
     } else {
@@ -341,6 +362,11 @@
       if (message && message.kind === 'showing' && message.meter) face.playerMeter = message.meter;
       if (message && message.kind === 'state' && message.state) { face.status = String(message.state.status || ''); truth(); }
       if (message && message.kind === 'persist') { face.persist = { mode: message.mode || '', seconds: message.seconds || 0, startedAt: message.startedAt || 0, stays: !!message.stays }; truth(); }
+      // What the views carry changed: the other module, if this is not it.
+      if (message && message.kind === 'views') {
+        if (face.ex && !!message.face !== (face.module === 'glass-evo')) swapModule();
+        return;
+      }
       // Before the module is up the lines are kept for it: the feed
       // replays the player's state at once, ahead of the module's load.
       if (!face.ex) { face.earlyLines.push(line); return; }
@@ -366,6 +392,40 @@
 
   function disconnect() {
     if (face.stream) { face.stream.close(); face.stream = null; }
+  }
+
+  // Whether the module on show draws a face over the theme.
+  function overlaid() {
+    return !!(face.ex && typeof face.ex.overlaid === 'function' && face.ex.overlaid());
+  }
+  // The face reads its theme where a player keeps the user's face themes:
+  // the text of the one the settings name goes into the module's table
+  // under `faces`, whichever folder the Manager found it in.
+  function bringFaceTheme() {
+    if (!overlaid()) return Promise.resolve();
+    return moduleInfo().then(function (info) {
+      if (!info.theme || !info.theme.name) return;
+      var bytes = new TextEncoder().encode(String(info.theme.text || ''));
+      guarded(function () {
+        withString('faces/' + info.theme.name + '/face.txt', function (pp, pl) {
+          withBytes(bytes, function (dp, dl) { face.ex.put_file(pp, pl, dp, dl); });
+        });
+      });
+    });
+  }
+  // The other module is called for (the screen changed hands, or the user
+  // chose otherwise): this one is let go and the page starts over.
+  function swapModule() {
+    if (face.starting) { face.swap = true; return; }
+    face.ex = null;
+    face.ready = false;
+    truth();
+    face.starting = loadModule().then(bringTheme).catch(function (err) {
+      say(face.t('MANAGER_FACE_FAILED') + ' ' + String(err.message || err), true);
+    }).then(function () {
+      face.starting = null;
+      if (face.swap) { face.swap = false; swapModule(); } else if (face.restart) { face.restart = false; restart(); }
+    });
   }
 
   function restart() {
