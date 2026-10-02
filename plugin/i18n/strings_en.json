@@ -551,6 +551,8 @@
     "MANAGER_FACE_FAILED": "The face could not start:",
     "MANAGER_FACE_STOPPED": "The player is stopped. The display has left the screen; the meters return when it plays.",
     "MANAGER_FACE_PAUSED": "The player is paused. The display has left the screen; the meters return when it plays.",
+    "MANAGER_FACE_STOPPED_STAYS": "The player is stopped; the meters move again when it plays.",
+    "MANAGER_FACE_PAUSED_STAYS": "The player is paused; the meters move again when it plays.",
     "MANAGER_TAB_CATALOG": "Catalog",
     "MANAGER_TAB_ARTWORK": "Appearance",
     "MANAGER_FONTS_TITLE": "Fonts",
