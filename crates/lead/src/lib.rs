@@ -5581,6 +5581,11 @@ mod tests {
             placed.fit && !placed.centered,
             "fitted and placed: {placed:?}"
         );
+        // A position may start left of the screen's corner, or above it.
+        let before = run_settings(
+            "[current]\nposition.type = manual\nposition.x = -40\nposition.y = -1080\n",
+        );
+        assert_eq!((before.x, before.y, before.centered), (-40, -1080, false));
         assert!(should_mark_dismiss(Some("/tmp/glass_dismiss"), false, true));
         assert!(
             !should_mark_dismiss(Some("/tmp/glass_dismiss"), true, true),

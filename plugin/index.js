@@ -5477,7 +5477,9 @@ Glass.prototype.setDisplayPlacement = function (data) {
     if (['center', 'manual'].indexOf(position) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
     var x = data.x === undefined ? now.x : parseInt(data.x, 10);
     var y = data.y === undefined ? now.y : parseInt(data.y, 10);
-    if (isNaN(x) || isNaN(y) || x < 0 || y < 0 || x > 7680 || y > 4320) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    // Either way from the screen's corner: a picture larger than the screen,
+    // or one with a margin drawn into it, is placed with a negative start.
+    if (isNaN(x) || isNaN(y) || Math.abs(x) > 7680 || Math.abs(y) > 4320) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
     var wanted = { 'position.fit': fit ? 'True' : 'False', 'position.type': position, 'position.x': String(x), 'position.y': String(y) };
     var changed = false;
     Object.keys(wanted).forEach(function (k) {

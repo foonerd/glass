@@ -194,10 +194,10 @@
               "placeholder": 0
             },
             {
-              "maxlength": 4
+              "maxlength": 5
             },
             {
-              "min": 0
+              "min": -3840
             },
             {
               "max": 3840
@@ -220,10 +220,10 @@
               "placeholder": 0
             },
             {
-              "maxlength": 4
+              "maxlength": 5
             },
             {
-              "min": 0
+              "min": -2160
             },
             {
               "max": 2160
