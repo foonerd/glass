@@ -34,4 +34,15 @@ function holdUntil(now, count, baseMs) {
   return now + wait(count, baseMs) - base / 2;
 }
 
-module.exports = { LAUNCH_MS: LAUNCH_MS, LONGEST_MS: LONGEST_MS, deaths: deaths, wait: wait, holdUntil: holdUntil };
+// What the waits are counted from. Over a kiosk the display is a screensaver,
+// started at the screensaver's delay, and that delay is the base. On a screen
+// that is the display's own it is started by the screen's watcher as soon as
+// it is found gone, and the screensaver's delay has no part in it: the base
+// is a second, so a display that cannot hold the screen is known in seconds,
+// and where glass-evo was handed the screen, the kiosk has it back in seconds.
+const OWN_SCREEN_MS = 1000;
+function base(ownScreen, screensaverMs) {
+  return ownScreen ? OWN_SCREEN_MS : Math.max(1000, Number(screensaverMs) || 0);
+}
+
+module.exports = { LAUNCH_MS: LAUNCH_MS, LONGEST_MS: LONGEST_MS, OWN_SCREEN_MS: OWN_SCREEN_MS, deaths: deaths, wait: wait, holdUntil: holdUntil, base: base };
