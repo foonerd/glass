@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.6] - 2026-10-02
+
+One fix, to what the Face tab and Anymote say of a player that stands still.
+
+- **The pages no longer say the display has left the screen where it has not.** Under the kiosk the display leaves the screen when the persist period ends after a stop or a pause, and the Face tab and Anymote say so over the standing picture. On a screen that is the display's own, with glass-evo holding it or with no kiosk at all, the display stays, and the pages told the same story all the same. The line that carries the persist period to a page now says whether the display stays (`stays`), told again when the screen changes hands; the pages then say only that the player is stopped or paused and that the meters move again when it plays. The first of two steps: the pages do not yet show glass-evo's clock and bar.
+
 ## [0.8.5] - 2026-10-02
 
 One addition, to how releases reach a player.
