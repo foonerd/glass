@@ -289,7 +289,8 @@ pub struct Analyser {
     pub levels: [Vec<f32>; 2],
     pub hold: [Vec<f32>; 2],
     /// Whether the two channels differ; a one-channel bank gives the same
-    /// twice and draws as one whatever the layout asks.
+    /// twice and draws as one whatever the layout asks. Silence counts as
+    /// two: it does not tell.
     pub stereo: bool,
     pub onsets: u8,
 }
@@ -349,7 +350,13 @@ fn analyser(spec: &SpectrumSpec, input: &Input) -> Option<Analyser> {
             .map(|(&i, &w)| bar_level(&look, bands.get(i).copied().unwrap_or(0.0), w))
             .collect()
     };
-    let stereo = input.bins.bank[0] != input.bins.bank[1];
+    // Two channels that read the same are one channel's bank given twice,
+    // unless they read nothing: silence says nothing of how many channels
+    // there are, and a look laid out for two keeps its two sides through
+    // it (a waterfall would otherwise write its silent rows across both
+    // sides in the one-channel palette).
+    let silent = input.bins.bank.iter().all(|b| b.iter().all(|v| *v == 0.0));
+    let stereo = silent || input.bins.bank[0] != input.bins.bank[1];
     // One channel asked of a stereo bank: the mean of the two, band by
     // band, before the bar scale, as a one-channel bank would read; or,
     // when the box names a channel, that channel alone.
@@ -1221,6 +1228,59 @@ mod analyser_tests {
             "the right box the right"
         );
         assert!(a.levels[1].is_empty() && b.levels[1].is_empty());
+    }
+
+    /// A player that stands still gives two channels of nothing, which are
+    /// equal as a one-channel bank's are: the look's two sides stay, each
+    /// with its own levels, and a one-channel bank with sound still draws
+    /// as one.
+    #[test]
+    fn silence_keeps_the_two_sides_of_a_look() {
+        let skin = SkinDesc {
+            spectra: vec![SpectrumSpec {
+                x: 0,
+                y: 0,
+                w: 100,
+                h: 50,
+                look: Some(Look {
+                    layout: lead::Layout::DualHorizontal,
+                    ..Look::default()
+                }),
+                ..SpectrumSpec::default()
+            }],
+            ..SkinDesc::default()
+        };
+        let bands = 8;
+        let with = |left: Vec<f32>, right: Vec<f32>| {
+            let input = Input {
+                levels: Levels::default(),
+                bins: Bins {
+                    values: Vec::new(),
+                    bank: [left, right],
+                    hold: [vec![0.0; bands], vec![0.0; bands]],
+                    scale: bank::Scale::Log,
+                    onsets: 0,
+                },
+                metadata: Metadata::default(),
+            };
+            step(&skin, &input)
+                .analysers
+                .into_iter()
+                .next()
+                .expect("an analyser")
+        };
+        let still = with(vec![0.0; bands], vec![0.0; bands]);
+        assert!(still.stereo, "silence is not one channel");
+        assert_eq!(
+            (still.levels[0].len(), still.levels[1].len()),
+            (bands, bands)
+        );
+        let mut tone = vec![0.0f32; bands];
+        tone[3] = 1.0;
+        assert!(
+            !with(tone.clone(), tone).stereo,
+            "the same sound twice is one channel"
+        );
     }
 
     /// A `single` layout asked of a stereo bank draws one channel: the
