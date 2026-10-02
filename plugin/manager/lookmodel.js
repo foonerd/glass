@@ -131,6 +131,27 @@
     return String(Math.round(parseFloat(BUILTIN[key]) * percent / 100));
   }
 
+  // The size a line is set at so that it fits, as the face reckons it: the
+  // size wanted, or less by as much as its room at that size exceeds the
+  // room there is.
+  function fitted(wanted, room, most) {
+    if (room[0] <= most[0] && room[1] <= most[1]) return wanted;
+    return wanted * Math.min(most[0] / Math.max(room[0], 1), most[1] / Math.max(room[1], 1));
+  }
+  // The most room the face gives the lines of the idle screen, on a picture
+  // of `width` by `height` whose unit is `unit` long: no line wider than
+  // the picture leaves beside its glass (28 units) and the margins (20);
+  // the date no taller than a quarter of the picture; the clock in what
+  // the bar (`below`) and the date (`dateHeight`, at the `top` with its
+  // glass and margins, or beside the clock with the gap) leave of the
+  // height, and never taller than half the picture.
+  function idleMost(width, height, unit, below, dateHeight, place) {
+    var widest = Math.max(0, width - 2 * (20 + 28) * unit);
+    var taken = !dateHeight ? 0 : place === 'top' ? dateHeight + (20 + 2 * 12 + 20) * unit : dateHeight + 8 * unit;
+    var tallest = Math.max(0, height - below - taken - 2 * (12 + 20) * unit);
+    return { date: [widest, height / 4], clock: [widest, Math.min(tallest, height / 2)] };
+  }
+
   // The patterns offered for the clock and the date; any other is typed.
   var CLOCK_PATTERNS = ['%H:%M', '%H:%M:%S', '%-I:%M %p', '%-I:%M:%S %p'];
   var DATE_PATTERNS = ['%A %-d %B', '%A, %B %-d', '%a %-d %b %Y', '%d/%m/%Y', '%m/%d/%Y', '%d.%m.%Y', '%Y-%m-%d'];
@@ -174,6 +195,7 @@
     BUILTIN: BUILTIN, KEYS: KEYS, CLOCK_PATTERNS: CLOCK_PATTERNS, DATE_PATTERNS: DATE_PATTERNS,
     known: known, lay: lay, same: same, differs: differs, changes: changes,
     isOn: isOn, colourOf: colourOf, rgb: rgb, share: share, frostOn: frostOn, backgrounds: backgrounds,
-    solidWord: solidWord, sizeOf: sizeOf, sizeWord: sizeWord, unitsOf: unitsOf, sample: sample, strftime: strftime
+    solidWord: solidWord, sizeOf: sizeOf, sizeWord: sizeWord, unitsOf: unitsOf, fitted: fitted, idleMost: idleMost,
+    sample: sample, strftime: strftime
   };
 });

@@ -103,3 +103,18 @@ test('a pattern shows as the face\'s clock would show it', () => {
   assert.strictEqual(look.strftime('%-I %p', new Date(2026, 0, 1, 0, 30)), '12 AM');
   assert.strictEqual(look.strftime('%-I %p %j', new Date(2026, 11, 31, 12, 0)), '12 PM 365');
 });
+
+test('a line is set no larger than the face would set it', () => {
+  // A 1280 by 720 picture, the unit one pixel, the bar 72 high.
+  const most = look.idleMost(1280, 720, 1, 72, 0, 'top');
+  assert.deepStrictEqual(most.date, [1184, 180]);
+  assert.deepStrictEqual(most.clock, [1184, 360], 'half the picture at most');
+  assert.strictEqual(look.fitted(144, [600, 170], most.clock), 144, 'what fits stays as wanted');
+  assert.strictEqual(look.fitted(300, [1480, 350], most.clock), 240, 'too wide: smaller by as much');
+  assert.strictEqual(look.fitted(400, [1000, 480], most.clock), 300, 'too tall: smaller by as much');
+  // A date at the top takes its glass and two margins; beside the clock, the gap.
+  assert.strictEqual(look.idleMost(1280, 720, 1, 300, 40, 'top').clock[1], 720 - 300 - (40 + 64) - 64);
+  assert.strictEqual(look.idleMost(1280, 720, 1, 300, 40, 'above').clock[1], 720 - 300 - 48 - 64);
+  // A larger face: every measure grows with the unit.
+  assert.deepStrictEqual(look.idleMost(1280, 720, 2, 144, 0, 'top').clock, [1088, 360]);
+});

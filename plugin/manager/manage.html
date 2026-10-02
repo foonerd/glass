@@ -110,7 +110,7 @@
   .lp-bar svg { height: 50%; }
   .lp-top { position: absolute; top: calc(var(--u) * 20); left: 50%; transform: translateX(-50%); }
   .lp-mid { position: absolute; left: 0; right: 0; top: var(--from); bottom: var(--barh); display: flex; align-items: center; justify-content: center; }
-  .lp-plate { display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 8); max-width: 100%; overflow: hidden; }
+  .lp-plate { display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 8); max-width: calc(100% - var(--u) * 40); overflow: hidden; }
   .lp-top, .lp-plate { padding: calc(var(--u) * 12) calc(var(--u) * 28); }
   .lp [data-open] { cursor: pointer; }
   .lp [data-open]:hover, .lp [data-open]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -1897,17 +1897,17 @@
     var html = '';
     var from = '0px';
     if (opts.mode === 'idle') {
-      var clock = LOOK.isOn(v['clock.show']) ? '<div style="font-size:calc(var(--u) * ' + units('measure.clock') + ');color:' + words('clock') + '">' + esc(LOOK.strftime(v['clock.format'], now)) + '</div>' : '';
+      var clock = LOOK.isOn(v['clock.show']) ? '<div data-fit="clock" style="font-size:calc(var(--u) * ' + units('measure.clock') + ');color:' + words('clock') + '">' + esc(LOOK.strftime(v['clock.format'], now)) + '</div>' : '';
       var place = lookPlace(v);
       var dateWords = 'font-size:calc(var(--u) * ' + units('measure.date') + ');color:' + words('date') + ';';
       var dateText = esc(LOOK.strftime(v['date.format'], now));
       var beside = '';
       if (LOOK.isOn(v['date.show'])) {
         if (place === 'top') {
-          html += '<div class="lp-top"' + open('date') + ' style="' + dateWords + glass('date.glass', v['date.tint'], '0 0 0 1px') + '">' + dateText + '</div>';
+          html += '<div class="lp-top"' + open('date') + ' style="' + glass('date.glass', v['date.tint'], '0 0 0 1px') + '"><div data-fit="date" style="' + dateWords + '">' + dateText + '</div></div>';
           from = 'calc(var(--u) * ' + (64 + units('measure.date')) + ')';
         } else {
-          beside = '<div' + open('date') + ' style="' + dateWords + '">' + dateText + '</div>';
+          beside = '<div data-fit="date"' + open('date') + ' style="' + dateWords + '">' + dateText + '</div>';
         }
       }
       if (clock || beside) html += '<div class="lp-mid"><div class="lp-plate"' + open(clock ? 'clock' : 'date') + ' style="' + glass('clock.glass', v['clock.tint'], '0 0 0 1px') + '">' + (place === 'above' ? beside + clock : clock + beside) + '</div></div>';
@@ -1918,6 +1918,32 @@
     }).join('') + '</div>';
     var picture = opts.picture ? ';background-image:url(&quot;' + esc(opts.picture.replace(/["\\()\s]/g, function (c) { return '%' + c.charCodeAt(0).toString(16); })) + '&quot;)' : '';
     return '<div class="lp" style="--s:' + opts.scale + ';--from:' + from + ';--barh:clamp(5.56cqh, calc(var(--u) * ' + units('measure.bar') + '), 33.3cqh)' + picture + '">' + html + '</div>';
+  }
+  // The likenesses under `root` set their lines as the face does: the date
+  // and the clock no larger than fit beside the glass and the margins, the
+  // clock in what the date and the bar leave. The size wanted is the one
+  // the likeness was written with; it is measured again whenever asked.
+  function lookFit(root) {
+    Array.prototype.forEach.call(root.querySelectorAll('.lp'), function (lp) {
+      var width = lp.clientWidth, height = lp.clientHeight;
+      var clock = lp.querySelector('[data-fit="clock"]'), date = lp.querySelector('[data-fit="date"]');
+      if (!width || !height || (!clock && !date)) return;
+      var unit = height / 720 * (parseFloat(lp.style.getPropertyValue('--s')) || 1);
+      var bar = lp.querySelector('.lp-bar');
+      var top = !!(date && date.parentNode.classList.contains('lp-top'));
+      var set = function (el, most) {
+        if (el.dataset.wanted === undefined) el.dataset.wanted = el.style.fontSize;
+        el.style.fontSize = el.dataset.wanted;
+        var wanted = parseFloat(window.getComputedStyle(el).fontSize);
+        var box = el.getBoundingClientRect();
+        var size = LOOK.fitted(wanted, [box.width, box.height], most);
+        if (size < wanted) el.style.fontSize = size + 'px';
+        return Math.min(box.height, box.height * size / wanted);
+      };
+      var below = bar ? bar.offsetHeight : 0;
+      var dateHeight = date ? set(date, LOOK.idleMost(width, height, unit, below, 0, 'top').date) : 0;
+      if (clock) set(clock, LOOK.idleMost(width, height, unit, below, dateHeight, top ? 'top' : 'above').clock);
+    });
   }
   // The adjustments: a section for each part, the finer ones behind More.
   function lookSections() {
@@ -2002,6 +2028,12 @@
       card.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
     $('look-preview').innerHTML = lookLikeness(v, { mode: lookUi.mode, scale: scale, suits: suits, picture: lookUi.picture, pick: true });
+    lookFit($('look-panel'));
+    // The fit is of a size: made again when the panel's changes (the window's, a tab shown).
+    if (!lookUi.watch && window.ResizeObserver) {
+      lookUi.watch = new window.ResizeObserver(function () { lookFit($('look-panel')); });
+      lookUi.watch.observe($('look-panel'));
+    }
     Array.prototype.forEach.call($('look-mode').children, function (b) { b.classList.toggle('on', b.getAttribute('data-mode') === lookUi.mode); });
     Array.prototype.forEach.call($('look-sections').querySelectorAll('[data-key]'), function (el) {
       var key = el.getAttribute('data-key');
