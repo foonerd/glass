@@ -1,0 +1,37 @@
+name: builder
+
+# The image the CI and release builds run on (scripts/builder/Dockerfile),
+# built and pushed to ghcr.io/foonerd/glass-builder when what it is made of
+# changes, or by hand. A run's summary names the digest; ci.yml and
+# release.yml name the image by that digest, so a new image is used from
+# the commit that writes its digest into them.
+on:
+  push:
+    branches: [main]
+    paths:
+      - scripts/builder/**
+      - rust-toolchain.toml
+      - .github/workflows/builder.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  image:
+    name: build and push
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - name: Log in to the registry
+        run: echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+      - name: Build and push
+        run: |
+          image=ghcr.io/foonerd/glass-builder
+          tag=${GITHUB_SHA::12}
+          docker build -t "$image:$tag" -f scripts/builder/Dockerfile .
+          docker push "$image:$tag"
+          digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$image:$tag")
+          echo "$digest"
+          echo "The image: \`$digest\`" >> "$GITHUB_STEP_SUMMARY"

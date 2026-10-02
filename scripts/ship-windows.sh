@@ -2,10 +2,10 @@
 # Cross-compile the display for Windows (x86_64, MinGW-w64) and put
 # glass.exe with the SDL2.dll it loads into bin/windows-x64/. Runs on Linux
 # with mingw-w64 installed and the x86_64-pc-windows-gnu target added, or
-# inside the image scripts/windows/Dockerfile describes:
+# inside the builder image scripts/builder/Dockerfile describes:
 #
-#   docker build -t glass-windows scripts/windows
-#   docker run --rm -v "$PWD:/glass" -w /glass glass-windows scripts/ship-windows.sh
+#   docker build -t glass-builder -f scripts/builder/Dockerfile .
+#   docker run --rm --user "$(id -u):$(id -g)" -v "$PWD:/glass" -w /glass glass-builder scripts/ship-windows.sh
 #
 # SDL2 comes from the MinGW development package of the SDL project, pinned
 # here by version and checksum and kept under target/sysroot/windows.
@@ -21,7 +21,7 @@ SDL_DIR=$TARGET_DIR/sysroot/windows/SDL2-$SDL_VERSION/x86_64-w64-mingw32
 TRIPLE=x86_64-pc-windows-gnu
 
 command -v x86_64-w64-mingw32-gcc >/dev/null 2>&1 || {
-  echo "ship-windows: x86_64-w64-mingw32-gcc is missing (apt install mingw-w64, or use scripts/windows/Dockerfile)" >&2
+  echo "ship-windows: x86_64-w64-mingw32-gcc is missing (apt install mingw-w64, or use scripts/builder/Dockerfile)" >&2
   exit 1
 }
 
