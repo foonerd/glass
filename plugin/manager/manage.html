@@ -1625,7 +1625,7 @@
           ['MANAGER_ST_VERSION', s.version + ' (' + s.arch + (s.binary ? '' : ', ' + t('MANAGER_ST_NO_BINARY')) + ')' + (player && player.build && player.build.commit ? ' · ' + t('MANAGER_ST_BUILD') + ' ' + player.build.commit : '')],
           ['MANAGER_ST_VOLUMIO', !player ? '-' : (player.volumio || '?') + (player.hardware ? ' · ' + player.hardware : '') + (player.board ? ' · ' + player.board : '') + ' · ' + t('MANAGER_ST_BACKEND_UP') + ' ' + up(player.backendUptimeS || 0)],
           ['MANAGER_ST_MEMORY', !player || !player.memory ? '-' : fmtBytes(player.memory.totalMb * 1048576) + ' · ' + fmtBytes(player.memory.usedMb * 1048576) + ' ' + t('MANAGER_ST_MEM_USED') + ' · ' + fmtBytes(player.memory.availableMb * 1048576) + ' ' + t('MANAGER_ST_MEM_AVAILABLE') + (player.memory.swapUsedMb ? ' · ' + t('MANAGER_ST_MEM_SWAP') + ' ' + fmtBytes(player.memory.swapUsedMb * 1048576) : '')],
-          ['MANAGER_ST_PLUGINS', !player || !player.plugins ? '-' : !player.plugins.length ? t('MANAGER_ST_NONE') : player.plugins.map(function (p) {
+          ['MANAGER_ST_PLUGINS', !player || !player.plugins ? '-' : !player.plugins.length ? t('MANAGER_ST_PLUGINS_NONE') : player.plugins.map(function (p) {
             return p.title + (p.version ? ' ' + p.version : '') + ' (' + p.category + ') · ' + t(p.running ? 'MANAGER_ST_ON' : 'MANAGER_ST_OFF') + (p.audioPath ? ' · ' + t('MANAGER_ST_PLUGIN_AUDIO') : '');
           }).join('\n')],
           ['MANAGER_ST_ADDRESSES', !reveal ? t('MANAGER_ST_HIDDEN') : (s.hostname || '') + (addresses.length ? ' · ' + addresses.map(function (a) { return a.name + ' ' + a.address; }).join(' · ') : '')],
@@ -1644,7 +1644,7 @@
           ['MANAGER_ST_TAP', !audio ? '-' : (audio.tapInChain ? t('MANAGER_ST_TAP_IN') : t('MANAGER_ST_TAP_OUT')) + (audio.output ? ' · ' + t('MANAGER_ST_OUTPUT') + ' ' + audio.output : '')],
           ['MANAGER_ST_PLAYER', (s.channel.status || '-') + (s.channel.service ? ' · ' + s.channel.service : '') + (s.channel.title ? ' · ' + (s.channel.artist ? s.channel.artist + ' - ' : '') + s.channel.title : '') +
           (s.channel.status === 'play' ? ' · ' + (s.measured ? t('MANAGER_ST_MEASURED') : t('MANAGER_ST_NOT_MEASURED')) : '') + (audio && (audio.samplerate || audio.bitdepth || audio.trackType) ? ' · ' + [audio.trackType, audio.samplerate, audio.bitdepth].filter(Boolean).join(' ') : '')],
-          ['MANAGER_ST_RINGS', s.rings.length ? s.rings.map(function (r) { return r.name + ' (' + r.rate + ' Hz, ' + r.channels + ' ch, ' + (r.live ? t('MANAGER_ST_RING_LIVE') : t('MANAGER_ST_RING_QUIET') + (r.writtenAgoMs !== null ? ' ' + Math.round(r.writtenAgoMs / 1000) + ' s' : '')) + ')'; }).join('; ') : t('MANAGER_ST_NONE')],
+          ['MANAGER_ST_RINGS', s.rings.length ? s.rings.map(function (r) { return r.name + ' (' + r.rate + ' Hz, ' + r.channels + ' ch, ' + (r.live ? t('MANAGER_ST_RING_LIVE') : t('MANAGER_ST_RING_QUIET') + (r.writtenAgoMs !== null ? ' ' + Math.round(r.writtenAgoMs / 1000) + ' s' : '')) + ')'; }).join('; ') : t('MANAGER_ST_RINGS_NONE')],
           ['MANAGER_ST_CHANNEL', s.channel.clients + ' ' + t('MANAGER_ST_CLIENTS')]
         ]],
         ['MANAGER_ST_SECTION_THEMES', [
@@ -1670,9 +1670,9 @@
         ]],
         ['MANAGER_ST_SECTION_HOUSE', [
           ['MANAGER_ST_LOGGING', !s.logging ? '-' : String(s.logging.level || '') + (s.logging.targets && s.logging.targets.length ? ' · ' + s.logging.targets.join(', ') : '')],
-          ['MANAGER_ST_UPGRADE', !s.upgrade || !s.upgrade.last ? t('MANAGER_ST_NONE') : s.upgrade.last.from + ' · ' + s.upgrade.last.to + ' · ' + fmtDate(s.upgrade.last.at) + (s.upgrade.last.phase && s.upgrade.last.phase !== 'done' ? ' · ' + s.upgrade.last.phase : '')],
+          ['MANAGER_ST_UPGRADE', !s.upgrade || !s.upgrade.last ? t('MANAGER_ST_UPGRADE_NONE') : s.upgrade.last.from + ' · ' + s.upgrade.last.to + ' · ' + fmtDate(s.upgrade.last.at) + (s.upgrade.last.phase && s.upgrade.last.phase !== 'done' ? ' · ' + s.upgrade.last.phase : '')],
           ['MANAGER_ST_RELEASES', t(s.upgrade && s.upgrade.test ? 'MANAGER_ST_RELEASES_TEST' : 'MANAGER_ST_RELEASES_LATEST')],
-          ['MANAGER_ST_BACKUP', !house || !house.newestBackup ? t('MANAGER_ST_NONE') : house.newestBackup.name + (house.newestBackup.at ? ' · ' + fmtDate(house.newestBackup.at) : '')],
+          ['MANAGER_ST_BACKUP', !house || !house.newestBackup ? t('MANAGER_ST_BACKUP_NONE') : house.newestBackup.name + (house.newestBackup.at ? ' · ' + fmtDate(house.newestBackup.at) : '')],
           ['MANAGER_ST_DISK', s.diskFree !== null ? fmtBytes(s.diskFree) + ' ' + t('MANAGER_ST_FREE') : '-'],
           ['MANAGER_ST_PROBLEMS', !house || !house.problems || !house.problems.length ? t('MANAGER_ST_NO_PROBLEMS') : house.problems.join('\n')]
         ]]
