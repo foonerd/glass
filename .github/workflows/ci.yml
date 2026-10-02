@@ -36,7 +36,6 @@ jobs:
   ship:
     name: cross builds
     runs-on: ubuntu-24.04
-    needs: check
     container: ghcr.io/foonerd/glass-builder@sha256:1d6d085cbf23ff53628402be14e87a5ffe996416894684e596956143365800da
     steps:
       - uses: actions/checkout@v7
@@ -64,7 +63,6 @@ jobs:
     if: github.ref == 'refs/heads/main'
     name: windows cross build
     runs-on: ubuntu-24.04
-    needs: check
     container: ghcr.io/foonerd/glass-builder@sha256:1d6d085cbf23ff53628402be14e87a5ffe996416894684e596956143365800da
     steps:
       - uses: actions/checkout@v7
@@ -85,7 +83,6 @@ jobs:
     if: github.ref == 'refs/heads/main'
     name: android build
     runs-on: ubuntu-24.04
-    needs: check
     steps:
       - uses: actions/checkout@v7
       - run: rustup toolchain install && rustup show active-toolchain && rustup target add aarch64-linux-android armv7-linux-androideabi x86_64-linux-android
