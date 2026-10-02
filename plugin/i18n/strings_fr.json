@@ -551,6 +551,8 @@
     "MANAGER_FACE_FAILED": "La face n'a pas pu démarrer :",
     "MANAGER_FACE_STOPPED": "Le lecteur est arrêté. L'affichage a quitté l'écran ; les instruments reviennent quand il joue.",
     "MANAGER_FACE_PAUSED": "Le lecteur est en pause. L'affichage a quitté l'écran ; les instruments reviennent quand il joue.",
+    "MANAGER_FACE_STOPPED_STAYS": "Le lecteur est arrêté ; les instruments reprennent quand il joue.",
+    "MANAGER_FACE_PAUSED_STAYS": "Le lecteur est en pause ; les instruments reprennent quand il joue.",
     "MANAGER_TAB_CATALOG": "Catalogue",
     "MANAGER_TAB_ARTWORK": "Apparence",
     "MANAGER_FONTS_TITLE": "Polices",

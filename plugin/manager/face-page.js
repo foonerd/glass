@@ -278,7 +278,10 @@
   // ---- the truth after the period ----------------------------------------
   // The player's own display leaves the screen when the persist period ends
   // after a stop or a pause; a page stays, and says so instead of standing
-  // still: a banner over the picture until the player plays again.
+  // still: a banner over the picture until the player plays again. On a
+  // screen that is the display's own (no kiosk, or glass-evo holding it)
+  // the display stays too, and the banner says only that the player
+  // stands still.
   function truth() {
     var banner = $('face-truth');
     if (!banner) {
@@ -293,7 +296,7 @@
     var persist = face.persist || {};
     var left = stopped && persist.startedAt ? persist.seconds * 1000 - (Date.now() - persist.startedAt) : 0;
     if (stopped && (!persist.startedAt || left <= 0)) {
-      banner.textContent = face.t(face.status === 'pause' ? 'MANAGER_FACE_PAUSED' : 'MANAGER_FACE_STOPPED');
+      banner.textContent = face.t((face.status === 'pause' ? 'MANAGER_FACE_PAUSED' : 'MANAGER_FACE_STOPPED') + (persist.stays ? '_STAYS' : ''));
       banner.style.display = 'block';
     } else {
       banner.style.display = 'none';
@@ -319,7 +322,7 @@
       try { message = JSON.parse(line); } catch (err) { return; }
       if (message && message.kind === 'showing' && message.meter) face.playerMeter = message.meter;
       if (message && message.kind === 'state' && message.state) { face.status = String(message.state.status || ''); truth(); }
-      if (message && message.kind === 'persist') { face.persist = { mode: message.mode || '', seconds: message.seconds || 0, startedAt: message.startedAt || 0 }; truth(); }
+      if (message && message.kind === 'persist') { face.persist = { mode: message.mode || '', seconds: message.seconds || 0, startedAt: message.startedAt || 0, stays: !!message.stays }; truth(); }
       // Before the module is up the lines are kept for it: the feed
       // replays the player's state at once, ahead of the module's load.
       if (!face.ex) { face.earlyLines.push(line); return; }

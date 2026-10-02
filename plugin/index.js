@@ -1699,6 +1699,12 @@ Glass.prototype.watchScreen = function () {
                 exec('/usr/bin/sudo -n /bin/systemctl restart volumio-kiosk', { uid: 1000, gid: 1000 }, function (error) { if (error) { self.logger.warn(id + 'screen: the kiosk did not start: ' + error.message); } });
             }
         }
+        // Whose the screen is has changed: the pages are told again whether
+        // the display stays when the player stands still.
+        if (self.screenWasFree !== null && self.screenWasFree !== free && self.channel && self.channel.persist) {
+            var told = self.channel.persist;
+            try { self.pushPersist(told.mode, told.seconds, told.startedAt); } catch (e) { /* told at the next stop */ }
+        }
         self.screenWasFree = free;
     };
     // Two seconds while the display draws on the screen itself, where it
@@ -1716,11 +1722,15 @@ Glass.prototype.watchScreen = function () {
 // The display learns the persist countdown from the persist file; a
 // browser face cannot read it, so the same goes down the lines: the mode,
 // the seconds, and when the period began (epoch ms). Cleared with an
-// empty mode.
+// empty mode. `stays` says whether the display is still on the screen
+// when the period is over: it is where the screen is its own (no kiosk, or
+// glass-evo holding it), and a page then has no leaving to tell of.
 Glass.prototype.pushPersist = function (mode, seconds, startedAt) {
     var self = this;
     if (!self.channel) { return; }
-    var line = { kind: 'persist', mode: String(mode || ''), seconds: parseInt(seconds, 10) || 0, startedAt: parseInt(startedAt, 10) || 0 };
+    var stays = false;
+    try { stays = !!self.screenOurs(); } catch (e) { /* not known: as a display that leaves */ }
+    var line = { kind: 'persist', mode: String(mode || ''), seconds: parseInt(seconds, 10) || 0, startedAt: parseInt(startedAt, 10) || 0, stays: stays };
     self.channel.persist = line;
     self.channel.push(line);
 };
