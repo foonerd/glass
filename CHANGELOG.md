@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.17] - 2026-10-02
+
+One fix, to how a display that cannot start is started again.
+
+- **A display that dies at launch is tried again after a growing wait.** It was started again at the screensaver's own delay for as long as music played: with a delay of one second, a process and two lines in the player's log every second, without end. Each death at launch in a row now doubles the wait (1, 2, 4, 8 seconds and on, with a one-second delay), a minute at most unless the screensaver's delay is longer, and the log line says how many times in a row and when the next attempt comes. A display that ran for ten seconds, left by itself, or was ended by the plugin starts the count again, and so does a glass-evo component installed or put back. The same wait holds for the starts the screen's watcher makes on a screen that is the display's own.
+
 ## [0.8.16] - 2026-10-02
 
 One fix, to the installer.
