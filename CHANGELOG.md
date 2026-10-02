@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.9] - 2026-10-02
+
+Groundwork for showing glass-evo's face in the Face tab and Anymote. Nothing changes on a player or in a page yet.
+
+- **The contract of a face is a crate of its own, free of the window.** `Overlay`, `View`, `Cover` and the types a face is written against moved from the display's crate into `crates/overlay`, which builds for a browser as it does for a player; `glass` offers them as before, so a face written against `glass::` reads unchanged. `View` gains `wall`, the time of day where the player is, broken down (`Wall`): the display reads it from the system once a frame, and a face no longer has to ask the system itself.
+- **The browser module is a library with room for a face.** `crates/page` is the pipeline the Face tab and Anymote run, as before, and now takes a face over the theme: asked what it covers, drawn on its own copy of the frame, offered every pointer event before the theme's controls, with black behind it once the player has stood still past the countdown, as on a screen of the display's own. `page::exports!` writes the module's raw exports into whichever crate is its root; `glass-face` is that one line, and a module that carries a face is the same line with the face named. Three exports are new: `zone` (the page's minutes east of universal time and the zone's name), `taken` (what a face asked of the player at a frame) and `overlaid`.
+- The page tells the module its zone and takes what was asked after every frame; with no face in the module both do nothing.
+
 ## [0.8.8] - 2026-10-02
 
 One change, to the look panel of the Manager's Screen tab, for glass-evo 0.1.13.
