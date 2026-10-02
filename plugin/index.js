@@ -24,6 +24,7 @@ const { Manager, DEFAULT_PORT: MANAGER_DEFAULT_PORT } = require('./manager/serve
 const { FaceFeed } = require('./manager/facefeed');
 const { advanced } = require('./manager/statenow');
 const screenprobe = require('./manager/screenprobe');
+const playerfacts = require('./manager/playerfacts');
 const screenowner = require('./manager/screenowner');
 const facelook = require('./manager/facelook');
 const component = require('./manager/component');
@@ -510,7 +511,9 @@ Glass.prototype.sheetInfo = function () {
             hardware: release.VOLUMIO_HARDWARE || '',
             board: self.boardInfo().model,
             backendUptimeS: Math.round(process.uptime()),
-            build: build
+            build: build,
+            memory: self.playerMemory(),
+            plugins: self.otherPlugins()
         },
         addresses: addresses,
         screen: { size: self.screenSize(), mouse: mouse, since: self.displayStartedAt || null },
@@ -524,6 +527,31 @@ Glass.prototype.sheetInfo = function () {
         },
         housekeeping: { newestBackup: newest, problems: problems }
     };
+};
+
+// The player's memory as the kernel says it now; null where it does not.
+Glass.prototype.playerMemory = function () {
+    try { return playerfacts.memoryOf(fs.readFileSync('/proc/meminfo', 'utf8')); } catch (e) { return null; }
+};
+
+// The other plugins installed on the player, with whether each is on and
+// whether it is in the audio path: what someone reading a report needs to
+// know beside Glass's own state.
+Glass.prototype.otherPlugins = function () {
+    var installed = [];
+    var root = '/data/plugins';
+    try {
+        fs.readdirSync(root).forEach(function (category) {
+            var names = [];
+            try { names = fs.readdirSync(root + '/' + category); } catch (e) { return; }
+            names.forEach(function (name) {
+                try { installed.push({ category: category, name: name, package: fs.readFileSync(root + '/' + category + '/' + name + '/package.json', 'utf8') }); } catch (e) { /* not a plugin's folder */ }
+            });
+        });
+    } catch (e) { return []; }
+    var registry = {};
+    try { registry = JSON.parse(fs.readFileSync('/data/configuration/plugins.json', 'utf8')); } catch (e) {}
+    return playerfacts.pluginsOf(installed, registry);
 };
 
 // The screen's size as the X server has it, asked at most once a minute;
