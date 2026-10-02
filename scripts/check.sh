@@ -90,12 +90,20 @@ done
 echo "check: plugin files"
 # Volumio's core reads every plugin's strings at its start: one bad file
 # takes the whole backend down, so every JSON the plugin ships must parse.
+# A key written twice in one object parses, and the later one silently
+# wins: that is refused too.
 python3 - plugin/package.json plugin/config.json plugin/UIConfig.json plugin/i18n/*.json <<'PY'
 import json, sys
+def once(pairs):
+    keys = [k for k, _ in pairs]
+    twice = sorted({k for k in keys if keys.count(k) > 1})
+    if twice:
+        raise SystemExit(f'{path}: written twice in one object: {", ".join(twice)}')
+    return dict(pairs)
 for path in sys.argv[1:]:
     with open(path, encoding='utf-8') as f:
         text = f.read()
-    json.loads(text)
+    json.loads(text, object_pairs_hook=once)
     if not text.endswith('\n') or text.rstrip('\n') != text.rstrip():
         raise SystemExit(f'{path}: must end with one newline and nothing after the JSON')
 print(f'{len(sys.argv) - 1} plugin files parse')
