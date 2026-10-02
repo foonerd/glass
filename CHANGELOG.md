@@ -2,6 +2,13 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.12] - 2026-10-02
+
+Clock faces in the look panel, for glass-evo 0.1.15.
+
+- **The clock's face is chosen on the Screen tab.** Under Clock: the time in type as before, in 7 segments, in 16 segments, as a flip clock, or as a dial with hands, and for a dial its style (station, numbers, Roman numerals, marks only). Behind "More": how much of an unlit segment shows; a dial's hands, its marks and numerals, its second hand and the disc behind them, each as the face comes or in a colour of the user's; a flip clock's cards. The rows show where the glass-evo installed knows clock faces (0.1.15 or later).
+- **The likeness shows a drawn clock as glass-evo draws it.** The panel brings the module the glass-evo component carries for a browser and has it draw the clock alone (`clock_preview`), at the size and in the colours being chosen, before anything is saved: the same code that draws it on the screen. A clock in type is set by the page as before.
+
 ## [0.8.11] - 2026-10-02
 
 One change, to where the picture may be placed.
