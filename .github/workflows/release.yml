@@ -1,8 +1,8 @@
 name: release
 
 # A tag builds the release: the check, the Linux builds, the Windows build
-# and the Android app side by side, then one job that signs and publishes.
-# Run by hand it builds everything and publishes nothing.
+# and the Android app side by side, then one job that signs and publishes
+# it as a pre-release. Run by hand it builds everything and publishes nothing.
 on:
   push:
     tags: ["v*"]
@@ -194,8 +194,12 @@ jobs:
           (cd dist && zip -qr "$top.zip" "$top") && rm -rf "dist/$top"
       - name: Notes from the changelog
         run: scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > dist/notes.md
+      # Published as a pre-release: no player is offered it but one set to
+      # take test releases. It is made the latest by hand once it has been
+      # tried (gh release edit <tag> --prerelease=false --latest).
       - uses: softprops/action-gh-release@v3
         with:
+          prerelease: true
           body_path: dist/notes.md
           files: |
             dist/glass-*.zip
