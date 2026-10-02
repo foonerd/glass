@@ -110,7 +110,7 @@
   .lp-bar svg { height: 50%; }
   .lp-top { position: absolute; top: calc(var(--u) * 20); left: 50%; transform: translateX(-50%); }
   .lp-mid { position: absolute; left: 0; right: 0; top: var(--from); bottom: var(--barh); display: flex; align-items: center; justify-content: center; }
-  .lp-plate { display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 8); max-width: calc(100% - var(--u) * 40); overflow: hidden; }
+  .lp-plate { display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 8); flex: none; }
   .lp-top, .lp-plate { padding: calc(var(--u) * 12) calc(var(--u) * 28); }
   .lp [data-open] { cursor: pointer; }
   .lp [data-open]:hover, .lp [data-open]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
@@ -1903,17 +1903,17 @@
     var html = '';
     var from = '0px';
     if (opts.mode === 'idle') {
-      var clock = LOOK.isOn(v['clock.show']) ? '<div data-fit="clock" style="font-size:calc(var(--u) * ' + units('measure.clock') + ');color:' + words('clock') + '">' + esc(LOOK.strftime(v['clock.format'], now)) + '</div>' : '';
+      var clock = LOOK.isOn(v['clock.show']) ? '<div data-fit="clock"' + (opts.own && opts.own.clock ? ' data-own="1"' : '') + ' style="font-size:calc(var(--u) * ' + units('measure.clock') + ');color:' + words('clock') + '">' + esc(LOOK.strftime(v['clock.format'], now)) + '</div>' : '';
       var place = lookPlace(v);
       var dateWords = 'font-size:calc(var(--u) * ' + units('measure.date') + ');color:' + words('date') + ';';
       var dateText = esc(LOOK.strftime(v['date.format'], now));
       var beside = '';
       if (LOOK.isOn(v['date.show'])) {
         if (place === 'top') {
-          html += '<div class="lp-top"' + open('date') + ' style="' + glass('date.glass', v['date.tint'], '0 0 0 1px') + '"><div data-fit="date" style="' + dateWords + '">' + dateText + '</div></div>';
+          html += '<div class="lp-top"' + open('date') + ' style="' + glass('date.glass', v['date.tint'], '0 0 0 1px') + '"><div data-fit="date"' + (opts.own && opts.own.date ? ' data-own="1"' : '') + ' style="' + dateWords + '">' + dateText + '</div></div>';
           from = 'calc(var(--u) * ' + (64 + units('measure.date')) + ')';
         } else {
-          beside = '<div data-fit="date"' + open('date') + ' style="' + dateWords + '">' + dateText + '</div>';
+          beside = '<div data-fit="date"' + (opts.own && opts.own.date ? ' data-own="1"' : '') + open('date') + ' style="' + dateWords + '">' + dateText + '</div>';
         }
       }
       if (clock || beside) html += '<div class="lp-mid"><div class="lp-plate"' + open(clock ? 'clock' : 'date') + ' style="' + glass('clock.glass', v['clock.tint'], '0 0 0 1px') + '">' + (place === 'above' ? beside + clock : clock + beside) + '</div></div>';
@@ -1925,10 +1925,14 @@
     var picture = opts.picture ? ';background-image:url(&quot;' + esc(opts.picture.replace(/["\\()\s]/g, function (c) { return '%' + c.charCodeAt(0).toString(16); })) + '&quot;)' : '';
     return '<div class="lp" style="--s:' + opts.scale + ';--from:' + from + ';--barh:clamp(5.56cqh, calc(var(--u) * ' + units('measure.bar') + '), 33.3cqh)' + picture + '">' + html + '</div>';
   }
-  // The likenesses under `root` set their lines as the face does: the date
-  // and the clock no larger than fit beside the glass and the margins, the
-  // clock in what the date and the bar leave. The size wanted is the one
-  // the likeness was written with; it is measured again whenever asked.
+  // The likenesses under `root` set their lines as the face does. A size
+  // the user set (data-own) stands as set, and what does not fit runs over
+  // the likeness's edges as it will over the screen's; a size the look
+  // comes with is fitted, the date beside its glass and the margins, the
+  // clock in the whole width and in what the date and the bar leave. The
+  // glass keeps the room designed about its words while there is that much
+  // beside them, and less as they take more. The size wanted is the one
+  // the likeness was written with; all of it is measured again whenever asked.
   function lookFit(root) {
     Array.prototype.forEach.call(root.querySelectorAll('.lp'), function (lp) {
       var width = lp.clientWidth, height = lp.clientHeight;
@@ -1937,18 +1941,30 @@
       var unit = height / 720 * (parseFloat(lp.style.getPropertyValue('--s')) || 1);
       var bar = lp.querySelector('.lp-bar');
       var top = !!(date && date.parentNode.classList.contains('lp-top'));
+      var any = [Infinity, Infinity];
+      // The line at the size it is set at: its width and its height.
       var set = function (el, most) {
         if (el.dataset.wanted === undefined) el.dataset.wanted = el.style.fontSize;
         el.style.fontSize = el.dataset.wanted;
         var wanted = parseFloat(window.getComputedStyle(el).fontSize);
         var box = el.getBoundingClientRect();
-        var size = LOOK.fitted(wanted, [box.width, box.height], most);
+        var size = LOOK.fitted(wanted, [box.width, box.height], el.dataset.own ? any : most);
         if (size < wanted) el.style.fontSize = size + 'px';
-        return Math.min(box.height, box.height * size / wanted);
+        var by = Math.min(1, size / wanted);
+        return [box.width * by, box.height * by];
       };
       var below = bar ? bar.offsetHeight : 0;
-      var dateHeight = date ? set(date, LOOK.idleMost(width, height, unit, below, 0, 'top').date) : 0;
-      if (clock) set(clock, LOOK.idleMost(width, height, unit, below, dateHeight, top ? 'top' : 'above').clock);
+      var pad = [LOOK.IDLE.pad[0] * unit, LOOK.IDLE.pad[1] * unit], least = [LOOK.IDLE.least[0] * unit, LOOK.IDLE.least[1] * unit];
+      var dated = date ? set(date, LOOK.idleMost(width, height, unit, below, 0, 'top').date) : [0, 0];
+      var clocked = clock ? set(clock, LOOK.idleMost(width, height, unit, below, dated[1], top ? 'top' : 'above').clock) : [0, 0];
+      if (top) date.parentNode.style.padding = pad[1] + 'px ' + LOOK.padAbout(width, dated[0], pad[0], least[0]) + 'px';
+      var plate = lp.querySelector('.lp-plate');
+      if (plate) {
+        var beside = date && !top;
+        var words = [Math.max(clocked[0], beside ? dated[0] : 0), clocked[1] + (beside ? dated[1] + (clock ? LOOK.IDLE.gap * unit : 0) : 0)];
+        var from = top ? dated[1] + (2 * LOOK.IDLE.margin + 2 * LOOK.IDLE.pad[1]) * unit : 0;
+        plate.style.padding = LOOK.padAbout(height - below - from, words[1], pad[1], least[1]) + 'px ' + LOOK.padAbout(width, words[0], pad[0], least[0]) + 'px';
+      }
     });
   }
   // The adjustments: a section for each part, the finer ones behind More.
@@ -1988,14 +2004,14 @@
         field('MANAGER_LOOK_SHOW_CLOCK', onoff('clock.show', 'switch')),
         field('MANAGER_LOOK_SHOWS', pattern('clock.format', LOOK.CLOCK_PATTERNS), '', 'clock'),
         hint('own:clock.format'),
-        field('MANAGER_LOOK_SIZE', slider('measure.clock', 'size', 50, 250, 5, 'SMALL', 'LARGE'), '', 'clock')],
+        field('MANAGER_LOOK_SIZE', slider('measure.clock', 'size', 50, 400, 5, 'SMALL', 'LARGE'), '', 'clock')],
         'MANAGER_LOOK_MORE_PIECE', finer('clock', '')],
       ['date', 'MANAGER_LOOK_DATE', [
         field('MANAGER_LOOK_SHOW_DATE', onoff('date.show', 'switch')),
         field('MANAGER_LOOK_SHOWS', pattern('date.format', LOOK.DATE_PATTERNS), '', 'date'),
         hint('own:date.format'),
         field('MANAGER_LOOK_WHERE', places, '', 'date'),
-        field('MANAGER_LOOK_SIZE', slider('measure.date', 'size', 50, 250, 5, 'SMALL', 'LARGE'), '', 'date')],
+        field('MANAGER_LOOK_SIZE', slider('measure.date', 'size', 50, 400, 5, 'SMALL', 'LARGE'), '', 'date')],
         'MANAGER_LOOK_MORE_PIECE', finer('date', 'date-top')],
       ['buttons', 'MANAGER_LOOK_BUTTONS', [
         field('MANAGER_LOOK_SIZE', slider('measure.bar', 'size', 50, 250, 5, 'SMALL', 'LARGE'))],
@@ -2033,7 +2049,9 @@
       card.classList.toggle('on', on);
       card.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
-    $('look-preview').innerHTML = lookLikeness(v, { mode: lookUi.mode, scale: scale, suits: suits, picture: lookUi.picture, pick: true });
+    // A size is the user's own where it is not the one the look comes with.
+    var own = { clock: !!lookUi.base && v['measure.clock'] !== lookUi.base['measure.clock'], date: !!lookUi.base && v['measure.date'] !== lookUi.base['measure.date'] };
+    $('look-preview').innerHTML = lookLikeness(v, { mode: lookUi.mode, scale: scale, suits: suits, picture: lookUi.picture, pick: true, own: own });
     lookFit($('look-panel'));
     // The fit is of a size: made again when the panel's changes (the window's, a tab shown).
     if (!lookUi.watch && window.ResizeObserver) {
