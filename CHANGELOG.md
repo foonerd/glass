@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.3] - 2026-10-02
+
+One fix, to the analyser while the player stands still.
+
+- **A two-sided look keeps its two sides through silence.** The display takes two channels that read the same for a one-channel analyser and draws them as one, whatever layout the look asks for. Stopped or paused, both channels read nothing, which is the same too: the look fell back to one area in the one-channel palette. Bars showed nothing of it; a waterfall wrote its silent rows across both sides in that palette's lowest colour, the classic palette's green in a look that names only `palette.left` and `palette.right`. Silence now leaves the layout as the look asks. On the player's screen, in the Face tab, in Anymote and on remotes alike; a face built on this Glass has it, which for glass-evo is 0.1.12.
+
 ## [0.8.2] - 2026-10-02
 
 The display does less where there is nothing new to show, and the status sheet says more of the player. The figures are a Raspberry Pi 5 at sixty frames a second with a spectrum across the whole screen, glass-evo on the screen; a face built on this Glass has them, which for glass-evo is 0.1.11.
