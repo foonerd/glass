@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.11] - 2026-10-02
+
+One change, to where the picture may be placed.
+
+- **A position may be negative.** With the position set by hand, X and Y were taken from 0 up: a theme could be pushed right and down from the screen's corner, never left or up. The display always took a signed position; the Manager's Appearance tab, the plugin's check behind it and the settings page did not. X now runs from -7680 to 7680 and Y from -4320 to 4320 in the Manager (-3840 to 3840 and -2160 to 2160 on the settings page), so a theme larger than the screen, or a tailored one with a margin drawn into it, can be laid where it looks right.
+
 ## [0.8.10] - 2026-10-02
 
 The Face tab and Anymote show glass-evo's face, with glass-evo 0.1.14 or later.
