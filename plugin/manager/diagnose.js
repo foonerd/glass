@@ -87,7 +87,10 @@ const CHECKS = [
     run(f) {
       const sc = f.screen;
       if (!sc || !sc.fact || !sc.now) return null;
-      if (sc.fact.kiosk === 'failed') return cause('somewhere', 'DIAG_KIOSK_FAILED');
+      // Where glass-evo holds the screen the kiosk is not meant to run: its
+      // unit standing as failed (a take before 0.8.18 left it so) is no cause.
+      const evo = !!(sc.owner && sc.owner.owner === 'glass-evo');
+      if (sc.fact.kiosk === 'failed' && !evo) return cause('somewhere', 'DIAG_KIOSK_FAILED');
       if (sc.now.wouldDraw || (sc.now.display && sc.now.display.running)) return null;
       return !sc.fact.panel && !sc.fact.xserver ? cause('somewhere', 'DIAG_NO_PANEL') : cause('somewhere', 'DIAG_KIOSK_ON_ITS_WAY', { kiosk: sc.fact.kiosk || '?' });
     }
