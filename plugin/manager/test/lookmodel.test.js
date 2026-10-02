@@ -127,3 +127,18 @@ test('a glass gives its room to words that take more of the space', () => {
   assert.strictEqual(look.padAbout(1280, 2000, 28, 6), 6, 'words larger than the space: the least still');
   assert.strictEqual(look.padAbout(100, 10, 4, 6), 4, 'a room designed under the least stays as designed');
 });
+
+test('a clock has a face and a dial a style, as glass-evo names them', () => {
+  assert.strictEqual(look.clockFace(look.lay()), 'type', 'as it comes: set in type');
+  assert.strictEqual(look.clockFace({ 'clock.face': ' Dial ' }), 'dial');
+  assert.strictEqual(look.clockFace({ 'clock.face': 'sundial' }), 'type', 'a word that is none');
+  assert.strictEqual(look.dialStyle({ 'clock.dial': 'ROMAN' }), 'roman');
+  assert.strictEqual(look.dialStyle({}), 'station');
+  assert.deepStrictEqual(look.CLOCK_FACES, ['type', 'seven', 'sixteen', 'flip', 'dial']);
+  // The panel knows the drawn clock's keys, and lays a look's over the built-in ones.
+  const laid = look.lay({ 'clock.face': 'seven', 'clock.unlit': '0.2', 'clock.second': '#ff0000' });
+  assert.deepStrictEqual([laid['clock.face'], laid['clock.unlit'], laid['clock.second'], laid['clock.disc'], laid['clock.card']], ['seven', '0.2', '#ff0000', 'style', '#17171a']);
+  assert.ok(look.same('clock.unlit', '0.20', '0.2') && !look.same('clock.face', 'dial', 'flip'));
+  assert.strictEqual(look.colourOf(laid['clock.hands']), null, 'a word, not a colour');
+});
+

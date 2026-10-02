@@ -16,11 +16,25 @@
     'glass.bar': '0.75', 'glass.sheet': '0.78', 'glass.hairline': '0.12', 'glass.frost': 'auto',
     'buttons.ink': 'ink', 'buttons.opacity': '1.0',
     'clock.show': 'on', 'clock.format': '%H:%M', 'clock.ink': 'ink', 'clock.opacity': '0.86', 'clock.glass': '0.55', 'clock.tint': 'tint',
+    'clock.face': 'type', 'clock.dial': 'station', 'clock.unlit': '0.08', 'clock.hands': 'ink', 'clock.marks': 'ink', 'clock.second': 'accent', 'clock.disc': 'style', 'clock.card': '#17171a',
     'date.show': 'off', 'date.place': 'top', 'date.format': '%A %-d %B', 'date.ink': 'ink', 'date.opacity': '0.86', 'date.glass': '0.55', 'date.tint': 'tint',
     'measure.bar': '72', 'measure.clock': '144', 'measure.date': '40'
   };
   var KEYS = Object.keys(BUILTIN);
-  var NUMBERS = /^(glass\.(bar|sheet|hairline)|(buttons|clock|date)\.(opacity|glass)|measure\.[a-z]+)$/;
+  var NUMBERS = /^(glass\.(bar|sheet|hairline)|(buttons|clock|date)\.(opacity|glass)|clock\.unlit|measure\.[a-z]+)$/;
+  // The clock's faces, set in type or drawn, and a dial's styles, as
+  // glass-evo names them (from its 0.1.15).
+  var CLOCK_FACES = ['type', 'seven', 'sixteen', 'flip', 'dial'];
+  var DIAL_STYLES = ['station', 'numbers', 'roman', 'plain'];
+  // The face a look's clock has: the one it names, `type` for a word that is none.
+  function clockFace(v) {
+    var face = String((v || {})['clock.face'] || '').trim().toLowerCase();
+    return CLOCK_FACES.indexOf(face) === -1 ? 'type' : face;
+  }
+  function dialStyle(v) {
+    var style = String((v || {})['clock.dial'] || '').trim().toLowerCase();
+    return DIAL_STYLES.indexOf(style) === -1 ? 'station' : style;
+  }
   var PATTERNS = /\.format$/;
 
   // The keys of a theme or of the settings that the panel knows, under the
@@ -206,6 +220,7 @@
 
   return {
     BUILTIN: BUILTIN, KEYS: KEYS, CLOCK_PATTERNS: CLOCK_PATTERNS, DATE_PATTERNS: DATE_PATTERNS,
+    CLOCK_FACES: CLOCK_FACES, DIAL_STYLES: DIAL_STYLES, clockFace: clockFace, dialStyle: dialStyle,
     known: known, lay: lay, same: same, differs: differs, changes: changes,
     isOn: isOn, colourOf: colourOf, rgb: rgb, share: share, frostOn: frostOn, backgrounds: backgrounds,
     solidWord: solidWord, sizeOf: sizeOf, sizeWord: sizeWord, unitsOf: unitsOf, fitted: fitted, idleMost: idleMost, padAbout: padAbout, IDLE: IDLE,

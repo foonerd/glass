@@ -112,6 +112,7 @@
   .lp-mid { position: absolute; left: 0; right: 0; top: var(--from); bottom: var(--barh); display: flex; align-items: center; justify-content: center; }
   .lp-plate { display: flex; flex-direction: column; align-items: center; gap: calc(var(--u) * 8); flex: none; }
   .lp-top, .lp-plate { padding: calc(var(--u) * 12) calc(var(--u) * 28); }
+  .lp canvas[data-clock] { display: block; flex: none; }
   .lp [data-open] { cursor: pointer; }
   .lp [data-open]:hover, .lp [data-open]:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
   .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
@@ -1886,6 +1887,11 @@
   // the part shows now.
   function lookPick(key) {
     if (/\.ink$/.test(key)) return LOOK.colourOf(lookUi.v['colours.ink']) || LOOK.BUILTIN['colours.ink'];
+    // A dial's own parts start from a station dial's: dark on a light disc, a red second hand.
+    if (key === 'clock.hands' || key === 'clock.marks') return '#151515';
+    if (key === 'clock.second') return '#d62a1e';
+    if (key === 'clock.disc') return '#f5f5f2';
+    if (key === 'clock.card') return LOOK.BUILTIN['clock.card'];
     if (key === 'colours.accent') return '#ebebf0';
     return LOOK.colourOf(lookUi.v['colours.tint']) || '#0e0e10';
   }
@@ -1908,7 +1914,10 @@
     var html = '';
     var from = '0px';
     if (opts.mode === 'idle') {
-      var clock = LOOK.isOn(v['clock.show']) ? '<div data-fit="clock"' + (opts.own && opts.own.clock ? ' data-own="1"' : '') + ' style="font-size:calc(var(--u) * ' + units('measure.clock') + ');color:' + words('clock') + '">' + esc(LOOK.strftime(v['clock.format'], now)) + '</div>' : '';
+      var drawnFace = LOOK.clockFace(v) !== 'type' && lookModule();
+      var clock = !LOOK.isOn(v['clock.show']) ? '' : drawnFace
+        ? '<canvas data-fit="clock" data-clock="' + esc(JSON.stringify(v)) + '" data-units="' + units('measure.clock') + '"' + (opts.own && opts.own.clock ? ' data-own="1"' : '') + ' style="opacity:' + LOOK.share(v['clock.opacity'], 1) + '"></canvas>'
+        : '<div data-fit="clock"' + (opts.own && opts.own.clock ? ' data-own="1"' : '') + ' style="font-size:calc(var(--u) * ' + units('measure.clock') + ');color:' + words('clock') + '">' + esc(LOOK.strftime(v['clock.format'], now)) + '</div>';
       var place = lookPlace(v);
       var dateWords = 'font-size:calc(var(--u) * ' + units('measure.date') + ');color:' + words('date') + ';';
       var dateText = esc(LOOK.strftime(v['date.format'], now));
@@ -1930,6 +1939,44 @@
     var picture = opts.picture ? ';background-image:url(&quot;' + esc(opts.picture.replace(/["\\()\s]/g, function (c) { return '%' + c.charCodeAt(0).toString(16); })) + '&quot;)' : '';
     return '<div class="lp" style="--s:' + opts.scale + ';--from:' + from + ';--barh:clamp(5.56cqh, calc(var(--u) * ' + units('measure.bar') + '), 33.3cqh)' + picture + '">' + html + '</div>';
   }
+  // A drawn clock in a likeness is drawn by glass-evo itself: the module its
+  // component carries for a browser has the clock alone as an export
+  // (`clock_preview`, from glass-evo 0.1.15). Brought once, when a drawn
+  // face is first to be shown; until it is here, and where there is none,
+  // the likeness sets the time in type.
+  function lookModule() {
+    if (lookUi.module !== undefined) return lookUi.module;
+    lookUi.module = null;
+    fetch('/face/glass-evo-face.wasm').then(function (res) {
+      if (!res.ok) throw new Error('none');
+      return res.arrayBuffer();
+    }).then(function (bytes) { return WebAssembly.instantiate(bytes, {}); }).then(function (made) {
+      var ex = made.instance.exports;
+      if (typeof ex.clock_preview !== 'function') return;
+      lookUi.module = ex;
+      if (lookUi.f) paintLook(true);
+    }).catch(function () { /* no module: the time in type */ });
+    return null;
+  }
+  // The clock a look's keys draw, `size` CSS pixels high, onto a canvas;
+  // its width and height in CSS pixels, or nothing where the module draws none.
+  function lookDrawClock(canvas, size) {
+    var ex = lookUi.module;
+    if (!ex) return null;
+    var ratio = window.devicePixelRatio || 1;
+    var bytes = new TextEncoder().encode(canvas.dataset.clock);
+    var ptr = ex.alloc(bytes.length);
+    new Uint8Array(ex.memory.buffer, ptr, bytes.length).set(bytes);
+    var at = ex.clock_preview(ptr, bytes.length, Math.max(8, Math.round(size * ratio)), BigInt(Date.now()), -new Date().getTimezoneOffset());
+    ex.free(ptr, bytes.length);
+    var w = ex.clock_preview_width(), h = ex.clock_preview_height();
+    if (!at || !w || !h) return null;
+    canvas.width = w; canvas.height = h;
+    canvas.style.width = (w / ratio) + 'px'; canvas.style.height = (h / ratio) + 'px';
+    var image = new window.ImageData(new Uint8ClampedArray(ex.memory.buffer.slice(at, at + w * h * 4)), w, h);
+    canvas.getContext('2d').putImageData(image, 0, 0);
+    return [w / ratio, h / ratio];
+  }
   // The likenesses under `root` set their lines as the face does. A size
   // the user set (data-own) stands as set, and what does not fit runs over
   // the likeness's edges as it will over the screen's; a size the look
@@ -1949,6 +1996,14 @@
       var any = [Infinity, Infinity];
       // The line at the size it is set at: its width and its height.
       var set = function (el, most) {
+        // A drawn clock: at the size wanted, and again smaller where a size
+        // the look comes with does not fit.
+        if (el.dataset.clock !== undefined) {
+          var asked = parseFloat(el.dataset.units) * unit;
+          var drawn = lookDrawClock(el, asked) || [0, 0];
+          var fitted = LOOK.fitted(asked, drawn, el.dataset.own ? any : most);
+          return fitted < asked ? (lookDrawClock(el, fitted) || drawn) : drawn;
+        }
         if (el.dataset.wanted === undefined) el.dataset.wanted = el.style.fontSize;
         el.style.fontSize = el.dataset.wanted;
         var wanted = parseFloat(window.getComputedStyle(el).fontSize);
@@ -1988,6 +2043,9 @@
       return '<select data-key="' + key + '" data-kind="pattern">' + list.map(function (p) { return '<option value="' + esc(p) + '">' + esc(LOOK.strftime(p, LOOK.sample())) + '</option>'; }).join('') + '<option value="">' + esc(t('MANAGER_LOOK_PATTERN_OWN')) + '</option></select>' +
         '<input type="text" data-key="' + key + '" data-kind="own" maxlength="48" size="16" spellcheck="false">';
     };
+    var choice = function (key, list, label) {
+      return '<select data-key="' + key + '" data-kind="choice">' + list.map(function (p) { return '<option value="' + p + '">' + esc(t(label + p.toUpperCase())) + '</option>'; }).join('') + '</select>';
+    };
     var places = '<select data-key="date.place" data-kind="place">' + ['top', 'above', 'below'].map(function (p) { return '<option value="' + p + '">' + esc(t('MANAGER_LOOK_DATE_' + p.toUpperCase())) + '</option>'; }).join('') + '</select>';
     var hint = function (when) { return '<div class="help" data-when="' + when + '" style="padding:0 0 8px">' + esc(t('MANAGER_LOOK_PATTERN_HINT')) + '</div>'; };
     // A piece's own colour, strength and background, behind its More.
@@ -2009,8 +2067,16 @@
         field('MANAGER_LOOK_SHOW_CLOCK', onoff('clock.show', 'switch')),
         field('MANAGER_LOOK_SHOWS', pattern('clock.format', LOOK.CLOCK_PATTERNS), '', 'clock'),
         hint('own:clock.format'),
+        field('MANAGER_LOOK_FACE', choice('clock.face', LOOK.CLOCK_FACES, 'MANAGER_LOOK_FACE_'), '', 'faces'),
+        field('MANAGER_LOOK_DIAL', choice('clock.dial', LOOK.DIAL_STYLES, 'MANAGER_LOOK_DIAL_'), esc(t('MANAGER_LOOK_DIAL_HINT')), 'dial'),
         field('MANAGER_LOOK_SIZE', slider('measure.clock', 'size', 50, 400, 5, 'SMALL', 'LARGE'), '', 'clock')],
-        'MANAGER_LOOK_MORE_PIECE', finer('clock', '')],
+        'MANAGER_LOOK_MORE_PIECE', finer('clock', '').concat([
+          field('MANAGER_LOOK_UNLIT', slider('clock.unlit', 'share', 0, 50, 1, 'NONE', 'FAINT'), '', 'segments'),
+          field('MANAGER_LOOK_HANDS', word('clock.hands', 'MANAGER_LOOK_AS_STYLE'), '', 'dial'),
+          field('MANAGER_LOOK_MARKS', word('clock.marks', 'MANAGER_LOOK_AS_STYLE'), '', 'dial'),
+          field('MANAGER_LOOK_SECOND', word('clock.second', 'MANAGER_LOOK_AS_STYLE'), '', 'dial'),
+          field('MANAGER_LOOK_DISC', word('clock.disc', 'MANAGER_LOOK_AS_STYLE'), '', 'dial'),
+          field('MANAGER_LOOK_CARD', colour('clock.card'), '', 'flip')])],
       ['date', 'MANAGER_LOOK_DATE', [
         field('MANAGER_LOOK_SHOW_DATE', onoff('date.show', 'switch')),
         field('MANAGER_LOOK_SHOWS', pattern('date.format', LOOK.DATE_PATTERNS), '', 'date'),
@@ -2080,10 +2146,18 @@
       else if (kind === 'pattern') el.value = lookUi.own[key] ? '' : v[key];
       else if (kind === 'own') { el.hidden = !lookUi.own[key]; if (document.activeElement !== el) el.value = v[key]; }
       else if (kind === 'place') el.value = place;
+      else if (kind === 'choice') el.value = key === 'clock.face' ? LOOK.clockFace(v) : LOOK.dialStyle(v);
     });
     // A row shows while it has something to say: a clock's rows while the
     // clock shows, a date's own background while the date stands at the top.
     var when = { clock: LOOK.isOn(v['clock.show']), date: LOOK.isOn(v['date.show']), buttons: true };
+    // The clock's faces show where the glass-evo that is here knows them
+    // (its built-in look names the key), and each face's own rows with it.
+    var clockFace = LOOK.clockFace(v);
+    when.faces = when.clock && f.builtIn && f.builtIn['clock.face'] !== undefined;
+    when.dial = when.faces && clockFace === 'dial';
+    when.segments = when.faces && (clockFace === 'seven' || clockFace === 'sixteen');
+    when.flip = when.faces && clockFace === 'flip';
     when['date-top'] = when.date && place === 'top';
     when['own:clock.format'] = when.clock && lookUi.own['clock.format'];
     when['own:date.format'] = when.date && lookUi.own['date.format'];
@@ -2092,7 +2166,7 @@
     var sums = {
       colours: t(['MANAGER_LOOK_SUM_ARTWORK', 'MANAGER_LOOK_SUM_MIXED', 'MANAGER_LOOK_SUM_OWN'][fixed]),
       backgrounds: t('MANAGER_LOOK_SOLID_' + LOOK.solidWord(v['glass.bar'])) + (LOOK.frostOn(v, suits) ? ', ' + t('MANAGER_LOOK_SUM_BLURRED') : ''),
-      clock: when.clock ? LOOK.strftime(v['clock.format'], LOOK.sample()) + ' · ' + t('MANAGER_LOOK_SIZE_' + LOOK.sizeWord('measure.clock', v['measure.clock'])) : t('MANAGER_LOOK_SUM_OFF'),
+      clock: when.clock ? LOOK.strftime(v['clock.format'], LOOK.sample()) + (when.faces && clockFace !== 'type' ? ' · ' + t('MANAGER_LOOK_FACE_' + clockFace.toUpperCase()) : '') + ' · ' + t('MANAGER_LOOK_SIZE_' + LOOK.sizeWord('measure.clock', v['measure.clock'])) : t('MANAGER_LOOK_SUM_OFF'),
       date: when.date ? LOOK.strftime(v['date.format'], LOOK.sample()) + ' · ' + t('MANAGER_LOOK_DATE_' + place.toUpperCase()) : t('MANAGER_LOOK_SUM_OFF'),
       buttons: t('MANAGER_LOOK_SIZE_' + LOOK.sizeWord('measure.bar', v['measure.bar']))
     };
@@ -2162,7 +2236,7 @@
     else if (kind === 'size') v[key] = LOOK.unitsOf(key, el.value);
     else if (kind === 'pattern') { lookUi.own[key] = el.value === ''; if (el.value) v[key] = el.value; }
     else if (kind === 'own') { if (el.value.trim()) v[key] = el.value.trim(); }
-    else if (kind === 'place') v[key] = el.value;
+    else if (kind === 'place' || kind === 'choice') v[key] = el.value;
     paintLook();
   }
   $('look-cards').onclick = function (e) { var card = e.target.closest('[data-look]'); if (card) lookChoose(card.getAttribute('data-look')); };
