@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.14] - 2026-10-02
+
+One fix, to the strings of the Status sheet.
+
+- **"none" agrees with its row.** Four rows of the Status sheet (the last upgrade, the newest backup, the other plugins, the audio rings) shared one string for "none", and the strings files carried that string twice, so the later one stood for all four: in German "keine" for an upgrade, in French "aucun" for an upgrade and a backup. Each row has its own string now. The check refuses a strings file, or any JSON the plugin ships, in which a key is written twice in one object.
+
 ## [0.8.13] - 2026-10-02
 
 One fix, to the Manager's downloads.
