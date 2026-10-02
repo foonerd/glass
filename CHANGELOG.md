@@ -2,6 +2,13 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.22] - 2026-10-02
+
+The remote's settings page, for a remote built with a face; nothing changes on the player or on the standalone remote.
+
+- **A remote says which flavour it is.** A face has a name (`Overlay::name`, none unless the face gives one). A display built with one names it under the page's title ("with glass-evo 0.1.18"), in `GET /api/state` (`face`, null on the standalone remote) and to the player in its `hello` line (`face`, left out by the standalone remote).
+- **When the face shows is chosen on the page.** On a remote built with a face the page has "The Glass interface": what the player's screen shows, the Glass interface always, or the theme alone (`face` in the configuration: `follow`, `always`, `off`). The Status says whether it is shown now. The choice applies while the display runs, like every other setting. The standalone remote's page is as it was.
+
 ## [0.8.21] - 2026-10-02
 
 The remote's installer and its instructions; nothing changes on the player.
