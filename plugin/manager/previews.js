@@ -14,6 +14,19 @@ const SETTLE_SECONDS = 0.5;
 const RENDER_TIMEOUT_MS = 180000;
 const STAMP = '.stamp.json';
 
+// The environment a preview is rendered in: the display's own, with no
+// screen to open and no face. Where glass-evo holds the player's screen the
+// display's environment names its binary and the screen as its own; a
+// preview is a picture of the theme, so it is rendered by Glass's display,
+// with nothing laid over it.
+function renderEnv(env) {
+  const out = Object.assign({}, env);
+  delete out.DISPLAY;
+  delete out.GLASS_BIN;
+  delete out.GLASS_SCREEN_OURS;
+  return out;
+}
+
 class Previews {
   // dir: where the previews live; launcher: the run script; env(): the
   // environment the display is launched with; version: what stamps a render.
@@ -130,8 +143,7 @@ class Previews {
       try { await fsp.chown(work, self.uid, self.gid); } catch (e) { /* same user, or not permitted: the render says */ }
     }
     const args = ['--headless', '--snapshot', work, '--thumb', String(THUMB_WIDTH), '--theme', theme, '--settle', String(SETTLE_SECONDS)];
-    const env = Object.assign({}, self.env());
-    delete env.DISPLAY;
+    const env = renderEnv(self.env());
     const started = Date.now();
     const output = await new Promise(function (resolve, reject) {
       const options = { env: env, stdio: ['ignore', 'pipe', 'pipe'] };
@@ -218,4 +230,4 @@ function metersProduced(files, output, order) {
   return out;
 }
 
-module.exports = { Previews: Previews, THUMB_WIDTH: THUMB_WIDTH, metersProduced: metersProduced, sectionNames: sectionNames };
+module.exports = { Previews: Previews, renderEnv: renderEnv, THUMB_WIDTH: THUMB_WIDTH, metersProduced: metersProduced, sectionNames: sectionNames };

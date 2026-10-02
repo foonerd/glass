@@ -547,6 +547,10 @@ pub fn run_with(args: Vec<String>, mut face: Option<Box<dyn Overlay>>) -> ExitCo
         }
         return ExitCode::SUCCESS;
     }
+    // A snapshot is a picture of the theme: a face is not laid over it.
+    if run.snapshot.is_some() {
+        face = None;
+    }
     match session(&run, None, &mut None, &mut face) {
         Outcome::Exit(code) => code,
         Outcome::Reload(_) => ExitCode::SUCCESS,
