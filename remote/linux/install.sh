@@ -9,6 +9,16 @@
 #
 # PREFIX changes where things go (default ~/.local). SDL2 must be installed:
 #   sudo apt install libsdl2-2.0-0
+#
+# A remote comes in two flavours, and this installer installs whichever its
+# archive holds, in the same place under the same name, so one takes the
+# other's place and the settings and the menu entries stay:
+#   standalone  Glass's own archive: the player's theme and nothing over it.
+#   bundle      glass-evo's archive: the same display with the Glass
+#               interface in it, a clock when the player stands still and a
+#               bar of controls, shown where the player's own screen shows
+#               them unless the remote's settings say otherwise. The
+#               controls need a touch screen or a mouse.
 set -eu
 
 HERE=$(CDPATH= cd -- "$(dirname "$0")" && pwd)
@@ -18,7 +28,7 @@ SERVICE=no
 for arg in "$@"; do
   case "$arg" in
     --service) SERVICE=yes ;;
-    --help|-h) sed -n '2,12p' "$0"; exit 0 ;;
+    --help|-h) sed -n '2,21p' "$0"; exit 0 ;;
     *) echo "install.sh: unknown argument $arg" >&2; exit 2 ;;
   esac
 done
@@ -29,14 +39,24 @@ case "$(uname -m)" in
   armv7l|armv6l) ARCH=armv7 ;;
   *) echo "install.sh: no Glass build for $(uname -m)" >&2; exit 1 ;;
 esac
-BIN=$ROOT/bin/$ARCH/glass
-if [ ! -x "$BIN" ]; then
-  if [ -x "$ROOT/bin/arm/glass" ] && [ "$ARCH" = armv7 ]; then
-    BIN=$ROOT/bin/arm/glass
-  else
-    echo "install.sh: no binary at $BIN (this archive is for another architecture)" >&2
-    exit 1
+# The display this archive holds: glass-evo's where it is the bundle, else
+# Glass's own.
+binary_named() {
+  if [ -x "$ROOT/bin/$ARCH/$1" ]; then
+    echo "$ROOT/bin/$ARCH/$1"
+  elif [ "$ARCH" = armv7 ] && [ -x "$ROOT/bin/arm/$1" ]; then
+    echo "$ROOT/bin/arm/$1"
   fi
+}
+FLAVOUR=bundle
+BIN=$(binary_named glass-evo)
+if [ -z "$BIN" ]; then
+  FLAVOUR=standalone
+  BIN=$(binary_named glass)
+fi
+if [ -z "$BIN" ]; then
+  echo "install.sh: no binary under $ROOT/bin/$ARCH (this archive is for another architecture)" >&2
+  exit 1
 fi
 
 install -D -m 755 "$BIN" "$PREFIX/bin/glass"
@@ -50,6 +70,16 @@ command -v gtk-update-icon-cache >/dev/null 2>&1 && gtk-update-icon-cache -q -t 
 
 echo "installed: $PREFIX/bin/glass"
 echo "installed: $PREFIX/share/applications/glass-remote.desktop, glass-remote-settings.desktop"
+if [ "$FLAVOUR" = bundle ]; then
+  echo "flavour:   the bundle, $("$PREFIX/bin/glass" --version 2>/dev/null | head -n 1): the display with the Glass interface in it."
+  echo "           It shows the clock and the bar of controls where the player's own screen shows them;"
+  echo "           the settings page has it otherwise (always, or never). The controls need a touch screen or a mouse."
+  echo "           For the theme alone, install Glass's own archive in its place: https://github.com/foonerd/glass/releases"
+else
+  echo "flavour:   the standalone remote: the player's theme and nothing over it."
+  echo "           For the Glass interface on this remote (a clock when the player stands still, a bar of controls),"
+  echo "           install the bundle in its place, from glass-evo's releases: https://github.com/foonerd/glass-evo/releases"
+fi
 
 if ! ldconfig -p 2>/dev/null | grep -q 'libSDL2-2.0.so.0' && [ ! -e /usr/lib/libSDL2-2.0.so.0 ]; then
   echo "note: SDL2 was not found; the display needs it:  sudo apt install libsdl2-2.0-0"

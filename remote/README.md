@@ -2,6 +2,21 @@
 
 A remote display is the same `glass` binary run on another machine with `--remote`: it shows a player's meters with the player's theme, fonts and icons, fed with the player's measurements over the network. The wiki's Remotes page describes the wire and the settings; this directory holds what installs a remote.
 
+## Two flavours
+
+A remote comes in two flavours. Both are the same display with the same settings page, configuration and menu entries, and one is installed in the other's place whenever wanted: the settings stay.
+
+- **Standalone**, from [Glass's releases](https://github.com/foonerd/glass/releases): the player's theme and nothing over it. This is what the archives beside this file install.
+- **Bundle**, from [glass-evo's releases](https://github.com/foonerd/glass-evo/releases): the same display with the Glass interface in it, a clock and the date when the player stands still and a bar of controls (previous, play or pause, next, volume, and more). It shows them where the player's own screen shows them, which is when glass-evo holds that screen; the remote's settings page can have them always, or never. The controls need a touch screen or a mouse on the remote; the clock needs neither.
+
+| | Standalone | Bundle |
+| --- | --- | --- |
+| Linux (x64, armv8, armv7) | yes | yes, from glass-evo 0.1.18 |
+| Windows | yes | not yet |
+| Android | yes | not yet |
+
+Where the bundle is not built yet, Anymote shows the Glass interface in any browser, served by the player's manager at `/anymote`.
+
 ## Linux
 
 Unpack the release archive for the machine's architecture (`x64` for a PC, `armv8` for a 64-bit Raspberry Pi OS, `armv7` for a 32-bit one) and run the installer as the user who will run the display:
@@ -11,7 +26,7 @@ tar xzf glass-<version>-<arch>.tar.gz
 glass-<version>-<arch>/remote/linux/install.sh
 ```
 
-It puts `glass` in `~/.local/bin` and two entries in the applications menu: **Glass Remote**, the display, and **Glass Remote Settings**, which opens the display's settings page in a browser (starting the display when it is not running). SDL2 is needed: `sudo apt install libsdl2-2.0-0`.
+The installer installs whichever flavour its archive holds and says which. It puts `glass` in `~/.local/bin` and two entries in the applications menu: **Glass Remote**, the display, and **Glass Remote Settings**, which opens the display's settings page in a browser (starting the display when it is not running). SDL2 is needed: `sudo apt install libsdl2-2.0-0`.
 
 `install.sh --service` also installs a user service that starts the display with the session and keeps it running, for a screen on the wall. `sudo loginctl enable-linger $USER` starts it before anyone logs in. `uninstall.sh` takes everything out again; `--purge` also removes the configuration and the cache.
 
