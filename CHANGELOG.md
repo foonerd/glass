@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.16] - 2026-10-02
+
+One fix, to the installer.
+
+- **The display starts on a player that never had a kiosk.** On a fresh Volumio without the Touch Display plugin the display died at once, every time it was started, with `SDL error: EGL not initialized`. To draw on a screen of its own, with no X server, SDL loads EGL and OpenGL by name; its package does not depend on them, and the installer asked for SDL alone. A player with a kiosk has both through its X server, which is why this went unseen. The installer now brings `libegl1` and `libgl1` with `libsdl2-2.0-0` (about 5 MB), on a new install and on an upgrade, and says so in the install dialog when one of them could not be installed. On an earlier version: `sudo apt-get install -y libegl1 libgl1`.
+
 ## [0.8.15] - 2026-10-02
 
 One fix, to a spectrum look laid out for two channels.
