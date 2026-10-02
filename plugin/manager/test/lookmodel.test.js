@@ -108,13 +108,22 @@ test('a line is set no larger than the face would set it', () => {
   // A 1280 by 720 picture, the unit one pixel, the bar 72 high.
   const most = look.idleMost(1280, 720, 1, 72, 0, 'top');
   assert.deepStrictEqual(most.date, [1184, 180]);
-  assert.deepStrictEqual(most.clock, [1184, 360], 'half the picture at most');
+  assert.deepStrictEqual(most.clock, [1268, 640], 'the whole width and what the bar leaves, less the least room');
   assert.strictEqual(look.fitted(144, [600, 170], most.clock), 144, 'what fits stays as wanted');
-  assert.strictEqual(look.fitted(300, [1480, 350], most.clock), 240, 'too wide: smaller by as much');
-  assert.strictEqual(look.fitted(400, [1000, 480], most.clock), 300, 'too tall: smaller by as much');
+  assert.strictEqual(look.fitted(300, [1585, 350], most.clock), 240, 'too wide: smaller by as much');
+  assert.strictEqual(look.fitted(400, [1000, 800], most.clock), 320, 'too tall: smaller by as much');
   // A date at the top takes its glass and two margins; beside the clock, the gap.
-  assert.strictEqual(look.idleMost(1280, 720, 1, 300, 40, 'top').clock[1], 720 - 300 - (40 + 64) - 64);
-  assert.strictEqual(look.idleMost(1280, 720, 1, 300, 40, 'above').clock[1], 720 - 300 - 48 - 64);
+  assert.strictEqual(look.idleMost(1280, 720, 1, 300, 40, 'top').clock[1], 720 - 300 - (40 + 64) - 8);
+  assert.strictEqual(look.idleMost(1280, 720, 1, 300, 40, 'above').clock[1], 720 - 300 - 48 - 8);
   // A larger face: every measure grows with the unit.
-  assert.deepStrictEqual(look.idleMost(1280, 720, 2, 144, 0, 'top').clock, [1088, 360]);
+  assert.deepStrictEqual(look.idleMost(1280, 720, 2, 144, 0, 'top').clock, [1256, 560]);
+});
+
+test('a glass gives its room to words that take more of the space', () => {
+  assert.strictEqual(look.padAbout(1280, 600, 28, 6), 28, 'room to spare: as designed');
+  assert.strictEqual(look.padAbout(1280, 1224, 28, 6), 28);
+  assert.strictEqual(look.padAbout(1280, 1240, 28, 6), 20, 'the words take some of it');
+  assert.strictEqual(look.padAbout(1280, 1268, 28, 6), 6, 'the words fill the width: the least');
+  assert.strictEqual(look.padAbout(1280, 2000, 28, 6), 6, 'words larger than the space: the least still');
+  assert.strictEqual(look.padAbout(100, 10, 4, 6), 4, 'a room designed under the least stays as designed');
 });

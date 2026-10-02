@@ -138,18 +138,31 @@
     if (room[0] <= most[0] && room[1] <= most[1]) return wanted;
     return wanted * Math.min(most[0] / Math.max(room[0], 1), most[1] / Math.max(room[1], 1));
   }
-  // The most room the face gives the lines of the idle screen, on a picture
-  // of `width` by `height` whose unit is `unit` long: no line wider than
-  // the picture leaves beside its glass (28 units) and the margins (20);
-  // the date no taller than a quarter of the picture; the clock in what
-  // the bar (`below`) and the date (`dateHeight`, at the `top` with its
-  // glass and margins, or beside the clock with the gap) leave of the
-  // height, and never taller than half the picture.
+  // The measures the face lays the idle screen out with, in units: the
+  // screen's margin, the room a glass keeps about its words (sideways,
+  // above and below), the least of that room, and the gap between a clock
+  // and a date.
+  var IDLE = { margin: 20, pad: [28, 12], least: [6, 4], gap: 8 };
+  // The most room the face gives a line whose size the look comes with (a
+  // size the user set is drawn as set, whatever it runs over), on a
+  // picture of `width` by `height` whose unit is `unit` long: the date no
+  // wider than the picture leaves beside its glass and the margins and no
+  // taller than a quarter of the picture; the clock in the whole width and
+  // in what the bar (`below`) and the date (`dateHeight`, at the `top`
+  // with its glass and margins, or beside the clock with the gap) leave of
+  // the height, less the least room a glass keeps.
   function idleMost(width, height, unit, below, dateHeight, place) {
-    var widest = Math.max(0, width - 2 * (20 + 28) * unit);
-    var taken = !dateHeight ? 0 : place === 'top' ? dateHeight + (20 + 2 * 12 + 20) * unit : dateHeight + 8 * unit;
-    var tallest = Math.max(0, height - below - taken - 2 * (12 + 20) * unit);
-    return { date: [widest, height / 4], clock: [widest, Math.min(tallest, height / 2)] };
+    var taken = !dateHeight ? 0 : place === 'top' ? dateHeight + (2 * IDLE.margin + 2 * IDLE.pad[1]) * unit : dateHeight + IDLE.gap * unit;
+    return {
+      date: [Math.max(0, width - 2 * (IDLE.margin + IDLE.pad[0]) * unit), height / 4],
+      clock: [Math.max(0, width - 2 * IDLE.least[0] * unit), Math.max(0, height - below - taken - 2 * IDLE.least[1] * unit)]
+    };
+  }
+  // The room a glass keeps about words `words` long in a space `space`
+  // long: the room designed while that much is left on either side, less
+  // as the words take more of the space, never under the least.
+  function padAbout(space, words, designed, least) {
+    return Math.min(designed, Math.max(Math.min(least, designed), Math.max(0, space - words) / 2));
   }
 
   // The patterns offered for the clock and the date; any other is typed.
@@ -195,7 +208,7 @@
     BUILTIN: BUILTIN, KEYS: KEYS, CLOCK_PATTERNS: CLOCK_PATTERNS, DATE_PATTERNS: DATE_PATTERNS,
     known: known, lay: lay, same: same, differs: differs, changes: changes,
     isOn: isOn, colourOf: colourOf, rgb: rgb, share: share, frostOn: frostOn, backgrounds: backgrounds,
-    solidWord: solidWord, sizeOf: sizeOf, sizeWord: sizeWord, unitsOf: unitsOf, fitted: fitted, idleMost: idleMost,
+    solidWord: solidWord, sizeOf: sizeOf, sizeWord: sizeWord, unitsOf: unitsOf, fitted: fitted, idleMost: idleMost, padAbout: padAbout, IDLE: IDLE,
     sample: sample, strftime: strftime
   };
 });
