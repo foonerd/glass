@@ -27,6 +27,11 @@ RUN apt-get update \
     libsdl2-dev libasound2-dev alsa-utils \
   && rm -rf /var/lib/apt/lists/*
 
+# The checkout a build works in belongs to whoever mounted it, not to the
+# user inside; git answers for it all the same, so a package can name the
+# commit it was built from.
+RUN git config --system --add safe.directory '*'
+
 # Node, for the plugin's tests, its lint and the modules the plugin zip carries.
 ARG NODE_VERSION=20.20.2
 ARG NODE_SHA256=df770b2a6f130ed8627c9782c988fda9669fa23898329a61a871e32f965e007d
