@@ -1579,6 +1579,8 @@ Glass.prototype.startDisplayOnce = function () {
                         // The display's lines reach the journal as it writes them,
                         // through the same gate as the plugin's own.
                         var env = self.launchEnv();
+                        // After a death at launch the graphics libraries are asked to say what they do, so the journal names what would not load.
+                        Object.assign(env, relaunch.diagnosing(Math.max(self.displayDeaths || 0, self.faceFailures || 0)));
                         var child = spawn('/bin/sh', [LaunchScript], { uid: 1000, gid: 1000, env: env, stdio: ['ignore', 'pipe', 'pipe'] });
                         // The face, when glass-evo owns the screen: its failures to start are counted.
                         child.face = !!env.GLASS_BIN;
@@ -1587,7 +1589,7 @@ Glass.prototype.startDisplayOnce = function () {
                             String(chunk).split('\n').forEach(function (line) {
                                 line = line.trim();
                                 if (!line) { return; }
-                                if (isErr) { lastErr.push(line); if (lastErr.length > 5) { lastErr.shift(); } }
+                                if (isErr) { lastErr.push(line); if (lastErr.length > 40) { lastErr.shift(); } }
                                 // The display names what it opened the screen with; the Screen tab shows it.
                                 var opened = /renderer (\S+) on ([A-Za-z0-9]+)/.exec(line);
                                 if (opened) { self.displayRenderer = { renderer: opened[1], driver: opened[2].toLowerCase(), at: Date.now() }; }
@@ -1601,7 +1603,15 @@ Glass.prototype.startDisplayOnce = function () {
                         child.on('exit', function (code, signal) {
                             var error = (code === 0) ? null : new Error(signal ? 'signal ' + signal : 'exit ' + code);
                             if (error !== null) {
-                                self.logger.error(id + 'the display did not run: ' + error.message + (lastErr.length ? ' ' + lastErr.join(' | ') : ''));
+                                // Why, in a line: the display's last word, the faults said before it, and a library the loader does not know.
+                                var why = relaunch.reason(error.message, lastErr, 600);
+                                if (relaunch.aboutGraphics(why)) {
+                                    try {
+                                        var gone = relaunch.missingLibraries(require('child_process').execFileSync('/sbin/ldconfig', ['-p'], { encoding: 'utf8', timeout: 3000, stdio: ['ignore', 'pipe', 'ignore'] }));
+                                        if (gone.length) { why += ' | not on this player: ' + gone.join(', ') + ' (sudo apt-get install -y libegl1 libgl1)'; }
+                                    } catch (e) { /* the loader's list could not be read: the display's words stand alone */ }
+                                }
+                                self.logger.error(id + 'the display did not run: ' + why);
                                 // Lost to an X server closing under it: no launch for a moment, the watcher brings it back where it belongs.
                                 if (/x11 not available|X server/.test(lastErr.join(' '))) { self.screenYieldUntil = Date.now() + 3000; }
                             } else {
@@ -1609,7 +1619,7 @@ Glass.prototype.startDisplayOnce = function () {
                             }
                             if (child.face) {
                                 self.faceFailures = screenowner.faceFailures(self.faceFailures || 0, { clean: error === null, ranMs: Date.now() - (child.startedAt || 0), windowMs: METER_CRASH_BACKOFF_MS });
-                                self.faceError = error === null ? '' : error.message + (lastErr.length ? ' ' + lastErr.join(' | ') : '');
+                                self.faceError = error === null ? '' : why;
                                 try { self.guardScreen(false); } catch (e) {}
                             }
                             var dismissMarkerPresent = false;
@@ -2229,7 +2239,7 @@ Glass.prototype.guardScreen = function (stopped) {
     if (stopped) { try { enabled = self.commandRouter.pluginManager.isEnabled('user_interface', 'glass') === true; } catch (e) {} }
     var reason = screenowner.guard({ owner: state.owner, available: state.evo.available, failures: self.faceFailures || 0, stopped: !!stopped, enabled: enabled });
     if (!reason) { return null; }
-    var failure = reason === 'face-failed' ? String(self.faceError || '').slice(0, 300) : '';
+    var failure = reason === 'face-failed' ? String(self.faceError || '').slice(0, 600) : '';
     self.logger.warn(id + 'screen owner: glass-evo cannot hold the screen (' + reason + (failure ? ': ' + failure : '') + '); the kiosk gets it back');
     self.faceFailures = 0;
     self.screenGoingBack = self.setScreenOwner('kiosk').then(function (result) {

@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { deaths, wait, holdUntil, base, LAUNCH_MS, LONGEST_MS } = require('../relaunch');
+const { deaths, wait, holdUntil, base, diagnosing, missingLibraries, aboutGraphics, reason, LAUNCH_MS, LONGEST_MS } = require('../relaunch');
 
 test('deaths at launch are counted in a row; a display that ran or left cleanly starts the count again', function () {
   let count = 0;
@@ -58,4 +58,50 @@ test('a face that cannot start has failed three times within seconds, not minute
   };
   assert.equal(third(base(true, 30000)), 10000, 'three starts on three turns of the watcher');
   assert.ok(third(base(false, 30000)) >= 60000, 'at the screensaver\'s pace it took over a minute');
+});
+
+test('after a death at launch the graphics libraries are asked for their own words', function () {
+  assert.deepEqual(diagnosing(0), {}, 'a first start is as ever');
+  assert.deepEqual(diagnosing(undefined), {});
+  assert.deepEqual(diagnosing(1), { EGL_LOG_LEVEL: 'debug', LIBGL_DEBUG: 'verbose' });
+  assert.deepEqual(diagnosing(3), { EGL_LOG_LEVEL: 'debug', LIBGL_DEBUG: 'verbose' });
+});
+
+test('the libraries the loader does not know are named', function () {
+  const line = function (name) { return '\t' + name + ' (libc6,hard-float) => /usr/lib/arm-linux-gnueabihf/' + name + '\n'; };
+  const whole = '1200 libs found in cache `/etc/ld.so.cache\'\n' + ['libEGL.so.1', 'libGL.so.1', 'libgbm.so.1', 'libSDL2-2.0.so.0'].map(line).join('');
+  assert.deepEqual(missingLibraries(whole), []);
+  assert.deepEqual(missingLibraries(whole.replace(line('libGL.so.1'), '')), ['libGL.so.1']);
+  assert.deepEqual(missingLibraries(whole.replace(line('libGL.so.1'), line('libGLESv2.so.2'))), [], 'OpenGL ES serves in OpenGL\'s place');
+  assert.deepEqual(missingLibraries(line('libSDL2-2.0.so.0')), ['libEGL.so.1', 'libGL.so.1', 'libgbm.so.1']);
+  assert.deepEqual(missingLibraries(''), [], 'a list that could not be read names nothing');
+  assert.deepEqual(missingLibraries(undefined), []);
+});
+
+test('a failure speaks of the graphics libraries or it does not', function () {
+  assert.ok(aboutGraphics('exit 1 glass: SDL error: Can\'t load EGL/GL library on window creation.'));
+  assert.ok(aboutGraphics('glass: SDL error: EGL not initialized'));
+  assert.ok(aboutGraphics('MESA-LOADER: failed to open vc4'));
+  assert.ok(!aboutGraphics('exit 1 glass: no screen to draw on: no X server, no Wayland and no KMS/DRM device'));
+  assert.ok(!aboutGraphics('signal SIGSEGV'));
+  assert.ok(!aboutGraphics(undefined));
+});
+
+test('why a display died: its last word first, the faults before it after, each once', function () {
+  const lines = [
+    'libEGL debug: Native platform type: drm (environment)',
+    'MESA-LOADER: failed to open vc4: /usr/lib/dri/vc4_dri.so: cannot open shared object file: No such file or directory',
+    'libEGL warning: egl: failed to create dri2 screen',
+    'libEGL warning: egl: failed to create dri2 screen',
+    'glass: SDL error: Can\'t load EGL/GL library on window creation.'
+  ];
+  assert.equal(reason('exit 1', lines, 600),
+    'exit 1 glass: SDL error: Can\'t load EGL/GL library on window creation. | MESA-LOADER: failed to open vc4: /usr/lib/dri/vc4_dri.so: cannot open shared object file: No such file or directory | libEGL warning: egl: failed to create dri2 screen');
+  assert.equal(reason('exit 1', ['glass: SDL error: EGL not initialized'], 600), 'exit 1 glass: SDL error: EGL not initialized', 'one line reads as before');
+  assert.equal(reason('signal SIGSEGV', [], 600), 'signal SIGSEGV');
+  // The last word stands whatever came before, and a fault that does not fit is left out whole.
+  const short = reason('exit 1', lines, 80);
+  assert.equal(short, 'exit 1 glass: SDL error: Can\'t load EGL/GL library on window creation.');
+  assert.ok(reason('exit 1', lines, 130).length <= 130);
+  assert.ok(reason('exit 1', lines, 130).indexOf('libEGL warning: egl: failed to create dri2 screen') !== -1, 'a shorter fault that fits is kept');
 });
