@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.28] - 2026-10-02
+
+From the same report: "SDL error: Can't load EGL/GL library on window creation" does not say what would not load.
+
+- **A display that cannot open the screen says why.** Of a screen it cannot open SDL keeps one sentence, whichever step failed: a library that is not on the player, or the graphics driver refusing the screen's device. Three things tell them apart now. A display that died as it started is started again with the graphics libraries' own words switched on (`EGL_LOG_LEVEL=debug`, `LIBGL_DEBUG=verbose`), so the journal has what Mesa tried and what failed; a first start is as before. The line that says a display did not run, and the reason the Screen tab gives when the screen went back from glass-evo, put the display's last word first and after it what was said before that reads as a fault, each once (`relaunch.reason`); the Screen tab's reason may be 600 characters, from 300. And where the words speak of the graphics libraries, the system's loader is asked for EGL, OpenGL (or OpenGL ES) and the buffer manager, and one it does not know is named with the line that installs it.
+
 ## [0.8.27] - 2026-10-02
 
 Reported from a Raspberry Pi 5 with an HDMI panel, where glass-evo could not start.
