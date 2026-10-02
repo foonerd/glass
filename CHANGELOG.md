@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.8] - 2026-10-02
+
+One change, to the look panel of the Manager's Screen tab, for glass-evo 0.1.13.
+
+- **A clock as large as you set it.** glass-evo 0.1.13 draws a clock or a date at the size the user set, whatever it runs over, where it used to set it smaller to keep a margin and the glass's room. The size controls of the clock and the date now reach four times the look's own size (they stopped at two and a half), enough for any clock format to fill the screen; the likeness shows a size of the user's own as set, running over its edges as it will over the screen's, with the glass giving up its room as the words take more; and it fits a size the look comes with as the face now does, in the whole width. This Glass works with glass-evo 0.1.13 or later, and the System tab offers it.
+
 ## [0.8.7] - 2026-10-02
 
 One fix, completing 0.8.6, which was published as a test release and not made the latest.
