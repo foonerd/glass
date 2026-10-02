@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.21] - 2026-10-02
+
+The remote's installer and its instructions; nothing changes on the player.
+
+- **A remote comes in two flavours, and the installer says which it installed.** Standalone, from Glass's releases: the player's theme and nothing over it, as before. Bundle, from glass-evo's releases: the same display with the Glass interface in it. The Linux installer installs whichever its archive holds, in the same place under the same name, so one takes the other's place and the settings, the cache and the menu entries stay; it names the flavour, what it shows, that the controls need a touch screen or a mouse, and where the other flavour is. `remote/README.md` opens with the two flavours and a table of what each platform has; the Windows installer says that its archive is the standalone and that Anymote shows the Glass interface in a browser until the bundle is built for Windows.
+
 ## [0.8.20] - 2026-10-02
 
 A remote display can carry a face. Nothing changes for the remote Glass ships, which carries none.
