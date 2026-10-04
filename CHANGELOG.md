@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.39] - 2026-10-04
+
+Found while the wiki was read against the code: the Backups tab promised what the uninstaller did not keep.
+
+- **An uninstall keeps the settings backups, always.** The uninstaller removed Glass's whole folder under Internal Storage, the backups in it, unless "Do not delete themes" was on, while the Backups tab's own words say a backup survives an uninstall and is what a player is put back from after one. Without that switch an uninstall now removes the themes, the catalog's files, the previews, glass-evo and the rest, and leaves `backups/`; where nothing was backed up the folder goes whole, as before. With the switch on everything stays, as before.
+
 ## [0.8.38] - 2026-10-04
 
 Found while the wiki was read against the code.
