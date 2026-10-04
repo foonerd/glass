@@ -119,6 +119,12 @@ pub struct Scene {
     /// The fanart slot with the picture on show and its transition, when the skin has one.
     #[serde(default)]
     pub fanart: Option<Fanart>,
+    /// How turning pictures are paced, as `rotation.quality` sets it: how
+    /// many times a second a record, a reel or turning art is drawn anew,
+    /// and in steps of how many degrees. None draws every frame at the
+    /// exact angle.
+    #[serde(default)]
+    pub turn_pace: Option<(u32, u32)>,
     /// Whether the player plays, and whether a stop or pause is only a transition.
     #[serde(default)]
     pub playing: bool,
@@ -215,6 +221,7 @@ impl Default for Scene {
             analysers: Vec::new(),
             folder_layers: Vec::new(),
             fanart: None,
+            turn_pace: None,
             playing: false,
             transitional: false,
             progress_pct: 0.0,
@@ -639,6 +646,7 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
             transition_ms: input.metadata.fanart_transition_ms,
             elapsed_ms: input.metadata.fanart_elapsed_ms,
         }),
+        turn_pace: Some((skin.rotation.fps, skin.rotation.step)),
         playing: input.metadata.status == "play",
         transitional: input.metadata.volatile != Some(false),
         progress_pct: progress(&input.metadata).0,
@@ -1085,8 +1093,14 @@ mod tests {
         paths.sort();
         for path in &paths {
             let text = std::fs::read_to_string(path).unwrap();
-            let recorded: Recorded = serde_json::from_str(&text)
+            let mut recorded: Recorded = serde_json::from_str(&text)
                 .unwrap_or_else(|err| panic!("{}: {err}", path.display()));
+            // A frame recorded before scenes carried the turning pace says
+            // nothing of it: the pace is then the skin's, as `step` gives it.
+            if recorded.scene.turn_pace.is_none() {
+                recorded.scene.turn_pace =
+                    Some((recorded.skin.rotation.fps, recorded.skin.rotation.step));
+            }
             assert_eq!(
                 step(&recorded.skin, &recorded.input),
                 recorded.scene,

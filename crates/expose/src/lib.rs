@@ -586,7 +586,7 @@ pub fn raster_over<'m>(
     } else {
         art_rpm
     };
-    let angle = vinyl.advance(
+    vinyl.advance(
         turn_rpm,
         scene.vinyl.as_ref().is_none_or(|v| v.spec.clockwise),
         scene.playing,
@@ -595,6 +595,9 @@ pub fn raster_over<'m>(
         lift_s,
         now_ms,
     );
+    // Drawn at the pace the player's settings ask for: the record, and the
+    // art that turns with it or by itself.
+    let angle = vinyl.paced(scene.turn_pace, now_ms);
     let mut reel_angles = [0.0f32; 2];
     if let Some(spec) = &scene.reels {
         let spin = scene.playing || scene.transitional;
@@ -620,7 +623,8 @@ pub fn raster_over<'m>(
         ];
         for (i, (side, mult, turn)) in sides.into_iter().enumerate() {
             if let Some(side) = side {
-                reel_angles[i] = turn.advance(side.rpm * mult, spec.spec.clockwise, spin, now_ms);
+                turn.advance(side.rpm * mult, spec.spec.clockwise, spin, now_ms);
+                reel_angles[i] = turn.paced(scene.turn_pace, now_ms);
             }
         }
     }
@@ -3058,6 +3062,34 @@ fn draw_ring(band: &mut Band, cx: i32, cy: i32, r: i32, thickness: i32, color: [
     }
 }
 
+/// The angle a turning picture is shown at under a pace (`rotation.quality`):
+/// it stands as last shown until the pace's next moment, and is then the
+/// true angle to the nearest step. A picture that stands is not drawn
+/// again, which is what the pace saves on a small board.
+#[derive(Default)]
+struct Paced {
+    shown: f32,
+    at_ms: Option<u64>,
+}
+
+impl Paced {
+    fn show(&mut self, angle: f32, pace: Option<(u32, u32)>, now_ms: u64) -> f32 {
+        let Some((fps, step)) = pace else {
+            return angle;
+        };
+        let every = 1000 / u64::from(fps.max(1));
+        if self
+            .at_ms
+            .is_none_or(|at| now_ms.saturating_sub(at) >= every)
+        {
+            let step = step.max(1) as f32;
+            self.shown = ((angle / step).round() * step).rem_euclid(360.0);
+            self.at_ms = Some(now_ms);
+        }
+        self.shown
+    }
+}
+
 /// The record's turn: it spins while the player plays, while a stop is only
 /// a transition, while the tonearm moves, and while it slows to a halt over
 /// the tonearm's lift after playback stops.
@@ -3068,6 +3100,7 @@ pub struct VinylMotion {
     was_playing: bool,
     decel_start_ms: Option<u64>,
     decel_ms: u64,
+    paced: Paced,
 }
 
 impl VinylMotion {
@@ -3121,6 +3154,11 @@ impl VinylMotion {
     pub fn angle(&self) -> f32 {
         self.angle
     }
+
+    /// The angle to draw the record at under a pace.
+    pub fn paced(&mut self, pace: Option<(u32, u32)>, now_ms: u64) -> f32 {
+        self.paced.show(self.angle, pace, now_ms)
+    }
 }
 
 /// A tape reel's turn: it spins while the player plays or a stop is only a
@@ -3129,6 +3167,7 @@ impl VinylMotion {
 pub struct ReelMotion {
     angle: f32,
     last_ms: Option<u64>,
+    paced: Paced,
 }
 
 impl ReelMotion {
@@ -3142,6 +3181,11 @@ impl ReelMotion {
             self.angle = (self.angle + rpm * 6.0 * dt * direction).rem_euclid(360.0);
         }
         self.angle
+    }
+
+    /// The angle to draw the reel at under a pace.
+    pub fn paced(&mut self, pace: Option<(u32, u32)>, now_ms: u64) -> f32 {
+        self.paced.show(self.angle, pace, now_ms)
     }
 }
 
@@ -10118,5 +10162,47 @@ mod analyser_tests {
             [0, 0, 0],
             "and stops half way down"
         );
+    }
+
+    #[test]
+    fn a_turning_picture_is_shown_at_its_pace_and_in_its_steps() {
+        let mut paced = Paced::default();
+        // No pace: the exact angle, every frame.
+        assert_eq!(paced.show(13.4, None, 0), 13.4);
+        // Medium, eight times a second in steps of six degrees: the first
+        // frame shows the angle to the nearest step, and it stands until an
+        // eighth of a second has passed.
+        let medium = Some((8, 6));
+        assert_eq!(paced.show(13.4, medium, 1000), 12.0);
+        assert_eq!(paced.show(20.0, medium, 1016), 12.0);
+        assert_eq!(paced.show(31.0, medium, 1124), 12.0);
+        assert_eq!(paced.show(34.0, medium, 1125), 36.0);
+        assert_eq!(
+            paced.show(359.0, medium, 1250),
+            0.0,
+            "the turn closes on itself"
+        );
+        // A pace faster than the frames is every frame, to the step.
+        let fine = Some((25, 1));
+        let mut each = Paced::default();
+        assert_eq!(each.show(10.4, fine, 0), 10.0);
+        assert_eq!(each.show(12.6, fine, 40), 13.0);
+        // A record under a pace stands between its moments and so asks for no drawing.
+        let mut record = VinylMotion::default();
+        record.advance(33.0, true, true, false, false, 1.0, 0);
+        let first = record.paced(medium, 0);
+        record.advance(33.0, true, true, false, false, 1.0, 16);
+        assert_eq!(
+            record.paced(medium, 16),
+            first,
+            "the frame after is the same picture"
+        );
+        record.advance(33.0, true, true, false, false, 1.0, 130);
+        assert_ne!(
+            record.paced(medium, 130),
+            first,
+            "an eighth of a second on it has moved"
+        );
+        assert_eq!(record.paced(medium, 130) % 6.0, 0.0);
     }
 }
