@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.56] - 2026-10-04
+
+Asked by a theme maker: which icon name a track of a cue sheet takes.
+
+- **A track of a cue sheet has a type, `cue`.** The player reports no type at all for such a track, so the type area stayed empty and no icon name could match. Where the player names no type and the track's address is a cue sheet's (`cue://`), the type is `cue`: a theme's `format-icons/cue.png` or `cue.svg` shows, and the label reads the same. A type the player does name stands as before.
+
 ## [0.8.55] - 2026-10-04
 
 Found by running "Back to the stable release" on a player for the first time.
