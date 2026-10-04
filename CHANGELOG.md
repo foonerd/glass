@@ -2,6 +2,13 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.58] - 2026-10-04
+
+The Manager's part of upgrades on a remote display.
+
+- **The Remotes tab says which remotes are behind.** Each connected remote is listed as what it is, the standalone at its Glass or the bundle by its face's name and version with the Glass it is built on, and a remote for which a later release is out is marked "<product> <version> is out", with a line on how it is brought up to date: its own settings page does it on Linux, a new install over it on Windows and Android. The Manager only says so; it upgrades nothing on a remote. A remote is compared with the latest release the Manager last saw of exactly its product; where that is a test release, which no remote is offered, nothing is said.
+- `GET /api/remote/status` gives each remote its `face` and `upgrade` (`product`, `version`, `latest`, `behind`: true, false, or null where it cannot be said).
+
 ## [0.8.57] - 2026-10-04
 
 A setting carried over from PeppyMeter Screensaver that Glass read and never applied.
