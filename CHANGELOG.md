@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.47] - 2026-10-04
+
+Asked by a theme maker whose `webradio.png` did not show.
+
+- **A theme's format icon may carry the type's own name.** The icon a theme brings for what plays is looked for in its `format-icons` folder under the type's key, and the key of web radio is `radio`: a file named `webradio.png`, as the player itself calls the type, was never looked for, and the player's own radio icon showed in its place. The same held for every type whose key is shorter than its name (`tidal_connect` for `tidal`, `dab_radio` for `dab`, and the like). A theme's folder is searched under the key first, as before, and then under the type's name as the player reports it (`lead::format_name`: lower case, spaces as underscores), `.png` before `.svg` for each. The player's and Volumio's own sets are found by the key, as before.
+
 ## [0.8.46] - 2026-10-04
 
 Found on a Raspberry Pi 5 with a DSI panel: glass-evo could not take the screen, three starts ending in "kmsdrm not available", on a player where it had held the screen for days.
