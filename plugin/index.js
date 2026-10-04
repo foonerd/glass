@@ -136,6 +136,8 @@ Channel.prototype.attach = function (conn) {
                     id: String(r.id || '').slice(0, 64),
                     name: String(r.name || '').slice(0, 64),
                     release: String(r.release || '').slice(0, 32),
+                    // The face a bundle is built with, by name and version; empty on the standalone.
+                    face: String(r.face || '').slice(0, 64),
                     screen: Array.isArray(r.screen) ? r.screen.slice(0, 2).map(function (n) { return parseInt(n, 10) || 0; }) : [0, 0],
                     // The remote's own settings page, when it serves one.
                     page: /^https?:\/\/[^\s"'<>]{1,150}$/.test(String(r.page || '')) ? String(r.page) : '',

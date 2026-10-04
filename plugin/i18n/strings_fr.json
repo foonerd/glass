@@ -819,6 +819,8 @@
     "MANAGER_RM_NOT_SUBSCRIBED": "connecté, pas encore de trames",
     "MANAGER_RM_SCREEN": "écran",
     "MANAGER_RM_PAGE": "Réglages",
+    "MANAGER_RM_BEHIND": "{product} {latest} est sorti",
+    "MANAGER_RM_BEHIND_HELP": "Une version plus récente de cet affichage distant est sortie. Sous Linux, sa propre page de réglages le met à jour (Version) ; sous Windows et Android, installez la nouvelle version par-dessus.",
     "DISPLAY_OUTPUT_NONE": "Pas d'écran propre : écrans distants seulement",
     "MANAGER_RM_SETTINGS": "Diffusion",
     "MANAGER_RM_ENABLE": "Servir les écrans distants",

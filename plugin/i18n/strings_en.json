@@ -819,6 +819,8 @@
     "MANAGER_RM_NOT_SUBSCRIBED": "connected, no frames yet",
     "MANAGER_RM_SCREEN": "screen",
     "MANAGER_RM_PAGE": "Settings",
+    "MANAGER_RM_BEHIND": "{product} {latest} is out",
+    "MANAGER_RM_BEHIND_HELP": "A later release of this remote is out. On Linux its own settings page upgrades it (Version); on Windows and Android, install the new release over it.",
     "DISPLAY_OUTPUT_NONE": "No screen of its own: remote displays only",
     "MANAGER_RM_SETTINGS": "Serving",
     "MANAGER_RM_ENABLE": "Serve remote displays",

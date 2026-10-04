@@ -905,7 +905,7 @@
       var items = (r.remotes || []).map(function (m) {
         seen[m.address] = true;
         var s = subs[m.address];
-        return { name: m.name || m.id, address: m.address, release: m.release, screen: m.screen, since: m.since, page: m.page || '', frames: !!s, sent: s ? s.sent : 0 };
+        return { name: m.name || m.id, address: m.address, release: m.release, face: m.face || '', upgrade: m.upgrade || null, screen: m.screen, since: m.since, page: m.page || '', frames: !!s, sent: s ? s.sent : 0 };
       });
       Object.keys(subs).forEach(function (ip) {
         if (!seen[ip]) items.push({ name: subs[ip].name || subs[ip].id, address: ip, release: subs[ip].release, screen: null, since: null, frames: true, sent: subs[ip].sent });
@@ -914,7 +914,11 @@
       items.forEach(function (m) {
         var el = document.createElement('div');
         el.className = 'item';
-        el.innerHTML = '<div class="grow"><div class="name">' + esc(m.name) + ' <span class="muted" style="font-weight:normal">' + esc(m.address) + (m.release ? ' · ' + esc(m.release) : '') + '</span></div>' +
+        // What the remote is, and whether a later release of that is out: it upgrades itself, from its own page.
+        var behind = m.upgrade && m.upgrade.behind === true;
+        el.innerHTML = '<div class="grow"><div class="name">' + esc(m.name) + ' <span class="muted" style="font-weight:normal">' + esc(m.address) + (m.face ? ' · ' + esc(m.face) : '') + (m.release ? ' · ' + (m.face ? 'Glass ' : '') + esc(m.release) : '') + '</span>' +
+          (behind ? ' <span class="badge orange" title="' + esc(t('MANAGER_RM_BEHIND_HELP')) + '">' + esc(t('MANAGER_RM_BEHIND').replace('{product}', m.upgrade.product).replace('{latest}', m.upgrade.latest)) + '</span>' : '') + '</div>' +
+          (behind ? '<div class="help">' + esc(t('MANAGER_RM_BEHIND_HELP')) + '</div>' : '') +
           '<div class="muted" style="font-size:13px">' + (m.screen && m.screen[0] ? esc(t('MANAGER_RM_SCREEN')) + ' ' + m.screen[0] + 'x' + m.screen[1] + ' · ' : '') +
           esc(m.frames ? t('MANAGER_RM_SUBSCRIBED') + ' (' + m.sent + ')' : t('MANAGER_RM_NOT_SUBSCRIBED')) + (m.since ? ' · ' + esc(t('MANAGER_RM_SINCE')) + ' ' + esc(fmtDate(m.since)) : '') + '</div></div>' +
           // The remote's own settings page opens in this window: on the player's own display a new tab cannot be closed.

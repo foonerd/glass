@@ -22,6 +22,7 @@ const { Catalog, CatalogError } = require('./catalog');
 const { Previews } = require('./previews');
 const { Updater, UpdateError, compareVersions } = require('./update');
 const stable = require('./stable');
+const remotebehind = require('./remotebehind');
 const { Component, leastOf, pair } = require('./component');
 const views = require('./views');
 const picture = require('./picture');
@@ -791,8 +792,15 @@ class Manager {
     }));
 
     // Remote displays: what they bring into their own home, and who is connected.
+    // The remotes as they stand, each with where it stands against the
+    // latest release of what it is, as the Manager last saw the releases.
     app.get('/api/remote/status', function (req, res) {
-      res.json(self.plugin.remoteInfo());
+      const info = self.plugin.remoteInfo();
+      const latest = { Glass: self.updater.latest, 'glass-evo': self.component.latest };
+      if (info && Array.isArray(info.remotes)) {
+        info.remotes = info.remotes.map(function (r) { return Object.assign({}, r, { upgrade: remotebehind.standing(r, latest) }); });
+      }
+      res.json(info);
     });
 
     app.get('/api/remote/settings', function (req, res) {
