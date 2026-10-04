@@ -2,6 +2,17 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.53] - 2026-10-04
+
+A remote display brings itself up to date, on Linux; the first stage of upgrades offered on a remote.
+
+- **The remote's settings page has a Version panel.** It says what the remote is (Glass, or the display built with a face and the Glass it is built on), looks at the latest release of exactly that on GitHub when asked, soon after every start and once a day, and where a later release is there offers **Upgrade to** it. The upgrade fetches the archive for the machine, checks it against the size and the checksum the release states, takes the display's binary out of it, tries it (it must start on this machine and say the release's version), puts it in place of the one that runs with the one before kept beside it as `glass.prev`, and starts the display again as the new version: by the user service where that keeps it running, by replacing itself where it was started any other way. Settings, players and the cache stay as they are.
+- **A new version that cannot hold on does not stay.** Until a start has lived a minute the upgrade is on trial: the third start that finds it so puts the version before back in place and runs it, and the one given up is kept as `glass.failed`.
+- **What is fetched is not the request's to say.** The page's two routes, `POST /api/upgrade/check` and `POST /api/upgrade/install`, take nothing: the repository, the archive's name and the file inside it are fixed by what the display is, the address must be the release's own on GitHub, and only the latest release that is no test release is ever taken. `GET /api/state` says `product` (name, repository, version) and `upgrade` (phase, the latest release, whether it is later, the last error).
+- A display built with a face says where it is released through the contract (`Overlay::origin`, an `Origin` of repository, archive name, binary name and version); one that says nothing is offered no upgrade, since Glass's own release would take the face away. glass-evo says it from its 0.1.28.
+- `glass --version` answers `glass <version>`.
+- Not yet: Windows and Android remotes (the panel is not shown there), and the Manager's Remotes tab marking a remote that is behind.
+
 ## [0.8.52] - 2026-10-04
 
 The way out that test releases need, and a known state to ask for when something is wrong.
