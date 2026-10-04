@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.43] - 2026-10-04
+
+Found while the wiki was read against the code.
+
+- **Find a problem recognises a window the display could not open.** For a display that dies or keeps restarting, the diagnosis looked in Glass's lines for "could not open the window", a sentence nothing has ever written, so that finding never came and the cause was left to the general "the display died". It looks now for what the display does write: SDL's own words for a driver or a window it could not have ("SDL error: ...", "x11 not available", "No available video device") and the display's for a player with nothing to draw on ("no screen to draw on"). The finding quotes the last of them and points to the status sheet's Kiosk and Graphics rows, in English, German and French.
+
 ## [0.8.42] - 2026-10-04
 
 Found while the wiki was read against the code.
