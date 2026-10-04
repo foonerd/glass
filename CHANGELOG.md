@@ -2,6 +2,17 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.65] - 2026-10-04
+
+Asked for after a theme maker put the volume on a meter as a number: the number as a full text of the theme's own.
+
+- **The volume number takes an alignment, the italic style, words around it and a word for muted.** `volume.value.pos = x,y[,style]` has written the volume as a number since the first themes of Glass, with `fontsize`, `color`, `maxwidth` and `font`. Four things are new, each optional, and a theme that sets none draws as before:
+  - `volume.value.align = left | center | right`: where the number stands in its `maxwidth`; absent, as the meter aligns its texts.
+  - `italic` as a style in `pos`, beside `light`, `regular`, `bold` and `digi`.
+  - `volume.value.format`: words around the number, `{}` where it goes: `VOL {} %` shows "VOL 45 %". A pattern with no `{}` is none.
+  - `volume.value.mute`: what stands in the number's place while the player is muted, such as `MUTE`; absent, the number shows as ever.
+- The cutter keeps the three new keys as written when it cuts a theme to another size.
+
 ## [0.8.64] - 2026-10-04
 
 A small flaw of 0.8.63's look panel.
