@@ -1064,13 +1064,19 @@ pub fn existing_icon_file(dir: &str, basename: &str) -> Option<PathBuf> {
 
 /// The icon for a key: the skin's `format-icons` (`.png` then `.svg`), the
 /// player's own set (`.svg`), then Volumio's stock set. Empty when none.
-pub fn resolve_icon(key: &str, skin_icons: &str, plugin_icons: &str) -> String {
+/// In the skin's folder the icon may also carry the type's own name where
+/// that differs from its key (`webradio` for `radio`, `tidal_connect` for
+/// `tidal`): the key's file first, then the name's.
+pub fn resolve_icon(key: &str, name: &str, skin_icons: &str, plugin_icons: &str) -> String {
     if key.is_empty() {
         return String::new();
     }
-    for ext in [".png", ".svg"] {
-        if let Some(found) = existing_icon_file(skin_icons, &format!("{key}{ext}")) {
-            return found.to_string_lossy().into_owned();
+    let named = (!name.is_empty() && name != key).then_some(name);
+    for base in std::iter::once(key).chain(named) {
+        for ext in [".png", ".svg"] {
+            if let Some(found) = existing_icon_file(skin_icons, &format!("{base}{ext}")) {
+                return found.to_string_lossy().into_owned();
+            }
         }
     }
     if let Some(found) = existing_icon_file(plugin_icons, &format!("{key}.svg")) {
@@ -2239,7 +2245,12 @@ impl Source for TapSource {
                 );
                 let key = format_key(&playing.track_type);
                 if key != self.icon_cache.0 {
-                    let icon = resolve_icon(&key, &self.skin_icons, &self.plugin_icons);
+                    let icon = resolve_icon(
+                        &key,
+                        &lead::format_name(&playing.track_type),
+                        &self.skin_icons,
+                        &self.plugin_icons,
+                    );
                     self.icon_cache = (key, icon);
                 }
                 if let Some(show) = self.fanart.as_mut() {
@@ -3116,9 +3127,22 @@ mod tests {
         std::fs::write(plugin.join("flac.svg"), b"x").unwrap();
         let skin_s = skin.to_string_lossy().into_owned();
         let plugin_s = plugin.to_string_lossy().into_owned();
-        assert!(resolve_icon("flac", &skin_s, &plugin_s).ends_with("skin/flac.png"));
-        assert!(resolve_icon("youtube", &skin_s, &plugin_s).ends_with("plugin/YouTube.svg"));
-        assert_eq!(resolve_icon("", &skin_s, &plugin_s), "");
+        assert!(resolve_icon("flac", "flac", &skin_s, &plugin_s).ends_with("skin/flac.png"));
+        assert!(
+            resolve_icon("youtube", "youtube", &skin_s, &plugin_s).ends_with("plugin/YouTube.svg")
+        );
+        assert_eq!(resolve_icon("", "", &skin_s, &plugin_s), "");
+        // A theme's icon for web radio under the type's own name, where it
+        // has none under the key: taken before the player's set.
+        std::fs::write(plugin.join("radio.svg"), b"<svg/>").unwrap();
+        assert!(resolve_icon("radio", "webradio", &skin_s, &plugin_s).ends_with("plugin/radio.svg"));
+        std::fs::write(skin.join("webradio.png"), b"x").unwrap();
+        assert!(
+            resolve_icon("radio", "webradio", &skin_s, &plugin_s).ends_with("skin/webradio.png")
+        );
+        // The key's file wins where a theme has both.
+        std::fs::write(skin.join("radio.png"), b"x").unwrap();
+        assert!(resolve_icon("radio", "webradio", &skin_s, &plugin_s).ends_with("skin/radio.png"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 

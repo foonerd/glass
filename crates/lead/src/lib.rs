@@ -622,6 +622,28 @@ pub enum TypeLabel {
 /// Volumio's own icon set.
 pub const STOCK_ICONS: &str = "/volumio/http/www3/app/assets-common/format-icons";
 
+/// A reported track type as a file would be named after it: lower case,
+/// spaces to underscores, cut at the first character outside `[a-z0-9_]`.
+/// What the player calls web radio is `webradio` here, and `radio` as a
+/// key: a theme may name its icon either way.
+pub fn format_name(track_type: &str) -> String {
+    let name: String = track_type
+        .trim()
+        .to_ascii_lowercase()
+        .chars()
+        .map(|c| if c == ' ' { '_' } else { c })
+        .collect();
+    let clean: String = name
+        .chars()
+        .take_while(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == '_')
+        .collect();
+    if clean.is_empty() {
+        name
+    } else {
+        clean
+    }
+}
+
 /// The icon and label key for a reported track type: lower case, spaces to
 /// underscores, `dsf` is `dsd`, cut at the first character outside
 /// `[a-z0-9_]`, then the known aliases.
@@ -5941,6 +5963,10 @@ mod tests {
         assert_eq!(format_key("Tidal Connect"), "tidal");
         assert_eq!(format_key("The Main Mix - "), "the_main_mix_");
         assert_eq!(format_key("WebRadio"), "radio");
+        assert_eq!(format_name("WebRadio"), "webradio");
+        assert_eq!(format_name("DAB Radio"), "dab_radio");
+        assert_eq!(format_name("flac"), "flac");
+        assert_eq!(format_name(""), "");
         assert_eq!(format_label("radio"), "Webradio");
         assert_eq!(format_label("flac"), "FLAC");
         assert_eq!(format_label(""), "");
