@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.31] - 2026-10-04
+
+Reported from a player of a Lyrion server: the cover showed on Volumio's own page and not in Anymote.
+
+- **A cover is known by its content.** Album art was taken only from a server that called it an image in its `Content-Type`. The Squeezelite plugin hands a Lyrion server's covers on through a proxy of its own on the player, and that proxy passes the bytes with no `Content-Type` at all: a browser's own picture element shows such a cover, and Glass refused it, on the player's screen, on a remote display, and in the Face tab and Anymote, while covers that came by a plain address, a radio station's for one, showed. A picture is told by its first bytes now, as the display has always decoded it: JPEG, PNG, GIF or WebP is taken whatever the server calls it, and what is none of them is refused whatever it is called. In the display (`intake::picture_kind`) and in the Manager's route for the browser views (`manager/picture.js`, which passes the picture on under its own type). On a player whose screen glass-evo holds, the screen follows with the glass-evo built on this release; the Face tab and Anymote need only this Glass.
+
 ## [0.8.30] - 2026-10-02
 
 A line of the log that named the wrong file.
