@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.44] - 2026-10-04
+
+Found while the wiki was read against the code.
+
+- **The help of "Adaptive spool speeds" says what the spools do.** It said the left spool slows as the tape depletes and the right one speeds up, the reverse of what is drawn and of what a tape does. The spool the tape leaves turns faster as it empties and the one that takes it up slower as it fills, each from half to one and a half times its set speed over the track; with the reels turning counter-clockwise the left spool is the one that empties, clockwise the right. The text says so now, in English, German and French. Nothing changes in what is drawn.
+
 ## [0.8.43] - 2026-10-04
 
 Found while the wiki was read against the code.
