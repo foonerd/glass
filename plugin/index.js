@@ -29,6 +29,7 @@ const screenowner = require('./manager/screenowner');
 const views = require('./manager/views');
 const relaunch = require('./manager/relaunch');
 const picture = require('./manager/picture');
+const graphics = require('./manager/graphics');
 const facelook = require('./manager/facelook');
 const component = require('./manager/component');
 const { compact: compactQueue } = require('./manager/queue');
@@ -1053,6 +1054,8 @@ Glass.prototype.onStart = function () {
     self.pluginStartedAt = Date.now();
     try { self.migrateScreenDriver(); } catch (e) { self.logger.warn(id + 'screen: driver key not migrated: ' + (e && e.message ? e.message : e)); }
     try { self.watchScreen(); } catch (e) { self.logger.warn(id + 'screen: not watched: ' + (e && e.message ? e.message : e)); }
+    // The graphics are looked at once the player has settled, so the first page that asks is told.
+    setTimeout(function () { try { self.checkGraphics().catch(function () { self.graphicsChecking = null; }); } catch (e) { /* at the first page's look */ } }, 20000);
     // The board's word on frost is kept for the face, on a player that has one.
     try { if (self.screenOwnerState().here) { self.noteFrostSuits(); } } catch (e) { self.logger.warn(id + 'face: the board not noted: ' + (e && e.message ? e.message : e)); }
 
@@ -1880,6 +1883,7 @@ Glass.prototype.screenSettings = function () {
     if (['auto', 'show', 'hide'].indexOf(pointer) === -1) { pointer = 'auto'; }
     var found = self.screenProbe(false);
     var fact = self.screenFact();
+    var seen = self.graphicsSeen();
     var running = !!(self.meterChild && self.meterChild.exitCode === null);
     return {
         driver: driver,
@@ -1895,11 +1899,56 @@ Glass.prototype.screenSettings = function () {
             display: { running: running, driver: running && self.displayRenderer ? self.displayRenderer.driver : null, renderer: running && self.displayRenderer ? self.displayRenderer.renderer : null },
             wouldDraw: screenprobe.wouldDraw(fact)
         },
-        owner: self.screenOwnerState(),
+        owner: (function () {
+            // Whether a take is held back: the screen would be drawn on itself, and the graphics for that do not work.
+            var o = self.screenOwnerState();
+            o.blocked = graphics.blocksTake(o.mode, seen);
+            return o;
+        })(),
+        graphics: seen,
         views: (function () { var m = self.faceModule(); return { mode: m.mode, has: m.has, face: m.face }; })(),
         probe: found,
         touch: self.touchSettings()
     };
+};
+
+// ---- Graphics: whether the screen can be drawn on itself ----------------
+
+// The display's own probe of the system's graphics, the kiosk's X log and
+// Mesa's versions (manager/graphics.js). Asked afresh before a take; kept a
+// minute for the Screen tab and the status sheet, which read what was last
+// found and start a new look when that is old. The probe is Glass's own
+// binary's: the libraries are the system's, whichever display holds the
+// screen.
+Glass.prototype.checkGraphics = function () {
+    var self = this;
+    if (self.graphicsChecking) { return self.graphicsChecking; }
+    self.graphicsChecking = graphics.check({ bin: PluginPath + '/bin/' + self.volumioArch() + '/glass', uid: 1000, gid: 1000 })
+        .then(function (found) {
+            self.graphicsChecking = null;
+            var told = graphics.summary(found);
+            var before = self.graphicsFound ? graphics.summary(self.graphicsFound) : null;
+            // Said once, and again when it changes: a line for the journal a report carries.
+            if (!before || before.ok !== told.ok || before.reason !== told.reason || before.x.state !== told.x.state) {
+                var word = !told.asked ? 'not asked' : !told.applies ? 'no screen the kernel drives' : told.ok ? 'works' : 'DOES NOT WORK';
+                self.logger[told.asked && told.applies && told.ok === false ? 'warn' : 'info'](id + 'graphics: drawing on the screen itself: ' + word + (told.reason ? ' (' + told.reason + ')' : '') +
+                    '; the kiosk\'s X server: ' + told.x.state + (told.x.detail ? ' (' + told.x.detail + ')' : '') +
+                    '; Mesa ' + (told.mesa.agree ? (told.mesa.version || 'not found') : 'parts of different versions: ' + JSON.stringify(told.mesa.versions)));
+            }
+            self.graphicsFound = found;
+            return found;
+        });
+    return self.graphicsChecking;
+};
+
+// What was last found, for the pages; a new look is started when there is
+// none or it is over a minute old.
+Glass.prototype.graphicsSeen = function () {
+    var self = this;
+    if (!self.graphicsFound || Date.now() - self.graphicsFound.at > 60000) {
+        try { self.checkGraphics().catch(function () { self.graphicsChecking = null; }); } catch (e) { /* at the next look */ }
+    }
+    return graphics.summary(self.graphicsFound);
 };
 
 // What the player has for a screen, read from the kernel and the system
@@ -2272,7 +2321,7 @@ Glass.prototype.guardScreen = function (stopped) {
 // back has the display step aside first, so the kiosk's X never starts
 // against it, then restores in reverse order only what is still as the
 // take left it. The watcher does the rest by fact.
-Glass.prototype.setScreenOwner = function (owner) {
+Glass.prototype.setScreenOwner = function (owner, options) {
     var self = this;
     var systemctl = function (args) {
         return new Promise(function (resolve, reject) {
@@ -2318,6 +2367,19 @@ Glass.prototype.setScreenOwner = function (owner) {
         // Nothing is turned off for a face that would have no screen to draw on.
         var mode = self.holdMode(true);
         if (!mode) { return Promise.resolve({ error: 'GLASS.MANAGER_OWNER_NO_SCREEN' }); }
+        // Nothing is turned off either where the screen would be drawn on itself and the graphics for that do
+        // not work: asked afresh, said with the reason, and passed over only at the user's own word.
+        if (mode === 'kms' && !(options && options.force) && !(options && options.checked)) {
+            return self.checkGraphics().then(function (found) {
+                var seenNow = graphics.summary(found);
+                if (graphics.blocksTake(mode, seenNow)) {
+                    self.logger.warn(id + 'screen owner: the take is held back, the graphics to draw on the screen itself do not work: ' + seenNow.reason);
+                    return { error: 'GLASS.MANAGER_OWNER_NO_GRAPHICS', message: seenNow.reason };
+                }
+                return self.setScreenOwner(owner, { checked: true });
+            });
+        }
+        if (options && options.force) { self.logger.warn(id + 'screen owner: the take goes on at the user\'s word, whatever the graphics check said'); }
         var register = { owner: 'glass-evo', takenAt: new Date().toISOString(), evo: state.evo.version, mode: mode, found: self.screenFact(), changes: [] };
         var pluginSteps = screenowner.planTakePlugins(self.kioskPluginStates());
         self.logger.info(id + 'screen owner: glass-evo takes the screen (' + pluginSteps.length + ' plugin' + (pluginSteps.length === 1 ? '' : 's') + ' to turn off)');

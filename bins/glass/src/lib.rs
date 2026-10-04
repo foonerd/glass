@@ -25,6 +25,7 @@ use std::time::Duration;
 pub mod android;
 mod governor;
 mod package;
+pub mod probe;
 mod remote;
 mod tailor;
 
@@ -315,6 +316,7 @@ pub fn run_with(args: Vec<String>, mut face: Option<Box<dyn Overlay>>) -> ExitCo
                 }
             },
             "--list" => list = true,
+            "--probe-graphics" => return probe::main(),
             "--tailor" => match args.next().and_then(|s| tailor::parse_size(&s)) {
                 Some(size) => tailor_to = Some(size),
                 None => {
@@ -354,7 +356,7 @@ pub fn run_with(args: Vec<String>, mut face: Option<Box<dyn Overlay>>) -> ExitCo
                 println!(
                     "glass [--once] [--headless] [--print] [--output frame.png|frame.ppm] [--record step.json]\n      \
                      [--theme FOLDER] [--meter NAME|random|a,b,c] [--interval SECONDS] [--fps N] [--threads N]\n      \
-                     [--list] [--snapshot DIR [--settle SECONDS] [--thumb WIDTH]]\n      \
+                     [--list] [--probe-graphics] [--snapshot DIR [--settle SECONDS] [--thumb WIDTH]]\n      \
                      [--tailor WxH --theme FOLDER|NAME [--out DIR] [--spectrum FOLDER] [--from WxH] [--stretch]] [--package]\n      \
                      [--remote [HOST|discover] [--name NAME] [--cache DIR] [--config FILE] [--manager-port N] [--settings]] [--dev]\n\
                      {ring}\n\
@@ -364,6 +366,9 @@ pub fn run_with(args: Vec<String>, mut face: Option<Box<dyn Overlay>>) -> ExitCo
                      --theme, --meter, --interval and --fps stand in for the installed configuration's values.\n\
                      --threads N paints every frame on N threads; by default a frame takes from one thread up to one a core as it needs.\n\
                      --list prints the installed themes and their meters.\n\
+                     --probe-graphics says, as one line of JSON, whether this system can draw on a screen without\n\
+                       an X server: the screen's card, a GBM device, the EGL vendor's library, an EGL display and\n\
+                       its initialising, step by step, with the loader's own words where one fails. Nothing is drawn.\n\
                      --tailor writes a copy of a theme and its spectrum twin at another size under --out (the working folder\n\
                        without it): one scale factor and the theme centred, or --stretch to the screen's shape.\n\
                      --package writes a theme (or the cut just made) as the catalogue takes it: the meters snapshotted\n\

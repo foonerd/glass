@@ -202,3 +202,35 @@ test('slow: a rate the display lowered, a rate above what suits the board, and w
   // Facts that are missing make no finding and no crash.
   assert.deepStrictEqual(diagnose('touch', { status: {} }).findings, []);
 });
+
+test('graphics that cannot draw on the screen itself are named as the cause, with the reason found', () => {
+  const find = function (graphics, symptom) {
+    const f = healthy();
+    f.screen = Object.assign({}, f.screen || {}, { graphics: graphics });
+    return diagnose(symptom || 'restarts', f).findings.find(function (x) { return x.check === 'graphics'; });
+  };
+  const x = { state: 'unknown', detail: '' };
+  // The case it was written for.
+  const broken = find({ asked: true, applies: true, ok: false, reason: 'EGL gave no display for /dev/dri/card1 (EGL_SUCCESS); the EGL vendor library libEGL_mesa.so.0 would not load: libxshmfence.so.1: cannot open shared object file', x: { state: 'software', detail: 'eglGetDisplay() failed' } });
+  assert.strictEqual(broken.kind, 'cause');
+  assert.strictEqual(broken.key, 'DIAG_GRAPHICS_BROKEN');
+  assert.ok(broken.with.reason.indexOf('libxshmfence.so.1') !== -1);
+  assert.strictEqual(broken.go, 'screen');
+  assert.ok(strings['MANAGER_' + broken.key].indexOf('{reason}') !== -1);
+  // The probe passes but the kiosk's X server draws in software: worth knowing.
+  const soft = find({ asked: true, applies: true, ok: true, reason: 'EGL works', x: { state: 'software', detail: 'glamor initialization failed' } });
+  assert.deepStrictEqual([soft.kind, soft.key, soft.with.detail], ['note', 'DIAG_GRAPHICS_X_SOFTWARE', 'glamor initialization failed']);
+  // Drawn in software by the processor: works, and is said.
+  const cpu = find({ asked: true, applies: true, ok: true, software: true, renderer: 'llvmpipe (LLVM 15.0.6, 128 bits)', reason: 'EGL works', x: x }, 'screen');
+  assert.deepStrictEqual([cpu.kind, cpu.key], ['note', 'DIAG_GRAPHICS_SOFTWARE']);
+  // In order: checked and found right.
+  const fine = find({ asked: true, applies: true, ok: true, software: false, renderer: 'V3D 7.1.10.2', reason: 'EGL works on the screen\'s device (EGL 1.5); rendered by V3D 7.1.10.2', x: { state: 'accelerated', detail: 'V3D 7.1.10.2' } }, 'no-meters');
+  assert.deepStrictEqual([fine.kind, fine.key], ['ok', 'DIAG_GRAPHICS_OK']);
+  // Not asked, or no screen of the kernel's: nothing said.
+  assert.strictEqual(find({ asked: false }), undefined);
+  assert.strictEqual(find({ asked: true, applies: false, ok: true, reason: 'no screen', x: x }), undefined);
+  assert.strictEqual(find(undefined), undefined);
+  // Another symptom does not ask.
+  assert.strictEqual(find({ asked: true, applies: true, ok: false, reason: 'x', x: x }, 'artwork'), undefined);
+  for (const key of ['DIAG_GRAPHICS_BROKEN', 'DIAG_GRAPHICS_X_SOFTWARE', 'DIAG_GRAPHICS_SOFTWARE', 'DIAG_GRAPHICS_OK']) assert.ok(strings['MANAGER_' + key], key);
+});

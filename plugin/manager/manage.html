@@ -2307,7 +2307,22 @@
     }
     return lines;
   }
-  function renderScreenOwner(o) {
+  // The graphics check in a line: whether the screen can be drawn on itself and by whom, what the
+  // kiosk's X server says of itself, and Mesa's version or the parts that differ.
+  function graphicsLine(g) {
+    if (!g || !g.asked) return t('MANAGER_ST_GFX_NOT_ASKED');
+    var screen = [g.driver, g.connector].filter(Boolean).join(', ');
+    var parts = [];
+    if (!g.applies) parts.push(t('MANAGER_ST_GFX_NA') + (g.reason ? ' (' + g.reason + ')' : ''));
+    else if (g.ok) parts.push(t('MANAGER_ST_GFX_OK') + (screen ? ' (' + screen + ')' : '') + ': ' + (g.renderer ? (g.software ? t('MANAGER_ST_GFX_SOFTWARE') + ', ' : '') + g.renderer : g.reason));
+    else parts.push(t('MANAGER_ST_GFX_FAIL') + ' ' + g.reason);
+    if (g.x && g.x.state === 'accelerated') parts.push(t('MANAGER_ST_GFX_X_ACCEL') + ' (' + g.x.detail + ')');
+    if (g.x && g.x.state === 'software') parts.push(t('MANAGER_ST_GFX_X_SOFT') + ' (' + g.x.detail + ')');
+    if (g.mesa && !g.mesa.agree) parts.push(t('MANAGER_ST_GFX_MESA_MIXED') + ' ' + Object.keys(g.mesa.versions).map(function (k) { return k + ' ' + g.mesa.versions[k]; }).join(', '));
+    else if (g.mesa && g.mesa.version) parts.push('Mesa ' + g.mesa.version);
+    return parts.join(' · ');
+  }
+  function renderScreenOwner(o, graphics) {
     o = o || {};
     var evo = o.evo || {};
     // A player with no glass-evo is told nothing of it.
@@ -2319,14 +2334,20 @@
     else if (evo.available && o.holdable) acts.push(['glass-evo', 'MANAGER_OWNER_USE_EVO', 'MANAGER_OWNER_CONFIRM_TAKE']);
     // The kiosk's screen, with glass-evo here and nothing for it to draw on by itself: said, not offered.
     if (o.owner !== 'glass-evo' && evo.available && !o.holdable) $('screen-owner').innerHTML += '<div class="help">' + esc(t('MANAGER_OWNER_NO_SCREEN')) + '</div>';
-    $('screen-owner-actions').innerHTML = acts.map(function (a) { return '<button class="small" data-owner="' + a[0] + '" data-label="' + a[1] + '" data-ask="' + a[2] + '">' + esc(t(a[1])) + '</button>'; }).join(' ');
+    // The screen would be drawn on itself and the graphics for that do not work: said with the reason
+    // the check found, and the take offered only as a try at the user's own word.
+    if (o.owner !== 'glass-evo' && evo.available && o.holdable && o.blocked) {
+      acts = [['glass-evo', 'MANAGER_OWNER_TRY_ANYWAY', 'MANAGER_OWNER_CONFIRM_TRY', 'force']];
+      $('screen-owner').innerHTML += '<div class="help" style="color:var(--warn)">' + esc(t('MANAGER_OWNER_NO_GRAPHICS') + ' ' + ((graphics && graphics.reason) || '')) + '</div><div class="help">' + esc(t('MANAGER_OWNER_NO_GRAPHICS_HELP')) + '</div>';
+    }
+    $('screen-owner-actions').innerHTML = acts.map(function (a) { return '<button class="small" data-owner="' + a[0] + '" data-label="' + a[1] + '" data-ask="' + a[2] + '"' + (a[3] ? ' data-force="1"' : '') + '>' + esc(t(a[1])) + '</button>'; }).join(' ');
     Array.prototype.forEach.call($('screen-owner-actions').querySelectorAll('button'), function (b) {
       b.onclick = function () {
         var label = t(b.getAttribute('data-label'));
         confirmDialog(label, t(b.getAttribute('data-ask')), label).then(function (yes) {
           if (!yes) return;
           b.disabled = true; b.textContent = t('MANAGER_OWNER_BUSY');
-          api('POST', '/api/screen/owner', { owner: b.getAttribute('data-owner') }).then(function (r) { renderScreen(r.screen || {}); toast(t('MANAGER_OWNER_DONE')); }).catch(function (e) { toast(errorText(e), 'error'); loadScreen(); });
+          api('POST', '/api/screen/owner', { owner: b.getAttribute('data-owner'), force: b.getAttribute('data-force') === '1' }).then(function (r) { renderScreen(r.screen || {}); toast(t('MANAGER_OWNER_DONE')); }).catch(function (e) { toast(errorText(e), 'error'); loadScreen(); });
         });
       };
     });
@@ -2334,7 +2355,7 @@
   function renderScreen(sc) {
     var free = !!sc.free;
     renderScreenNow(sc.now || {}, free, !!sc.ownX);
-    renderScreenOwner(sc.owner);
+    renderScreenOwner(sc.owner, sc.graphics);
     // The face's size: shown once glass-evo is here to draw at it; saved as it is chosen.
     // The face's size and look are for a face that can be on this screen: glass-evo here,
     // and the screen its own or one it could hold.
@@ -2415,6 +2436,7 @@
     var rows = [
       ['MANAGER_ST_DRAWN_ON', drawn + ' · ' + t(sc.free ? 'MANAGER_ST_SCREEN_GLASS' : 'MANAGER_ST_SCREEN_KIOSK')],
       ['MANAGER_ST_KIOSK', kiosk],
+      ['MANAGER_ST_GRAPHICS', graphicsLine(sc.graphics)],
       ['MANAGER_ST_SCREEN_SETTINGS', settings],
       ['MANAGER_ST_TOUCH_MAP', mapping],
       ['MANAGER_SCREEN_PANELS', panels.length ? panels.join(' · ') : none],

@@ -525,7 +525,8 @@ class Manager {
     // back, through the plugins' own lifecycles, with the register kept.
     app.post('/api/screen/owner', wrap(async function (req, res) {
       const owner = String((req.body || {}).owner || '');
-      const result = await self.exclusive(function () { return self.plugin.setScreenOwner(owner); });
+      const force = (req.body || {}).force === true;
+      const result = await self.exclusive(function () { return self.plugin.setScreenOwner(owner, { force: force }); });
       if (result && result.error) return res.status(400).json(result);
       res.json(Object.assign({ ok: true }, result, { screen: self.plugin.screenSettings() }));
     }));

@@ -115,6 +115,20 @@ const CHECKS = [
     }
   },
 
+  {
+    // Whether the system's graphics can draw on a screen of the display's
+    // own (the Manager's check: the display's probe, the kiosk's X log).
+    id: 'graphics', symptoms: ['no-meters', 'restarts', 'screen'],
+    run(f) {
+      const g = f.screen && f.screen.graphics;
+      if (!g || !g.asked) return null;
+      if (g.applies && g.ok === false) return cause('graphics', 'DIAG_GRAPHICS_BROKEN', { reason: g.reason }, 'screen');
+      if (g.x && g.x.state === 'software') return note('graphics', 'DIAG_GRAPHICS_X_SOFTWARE', { detail: g.x.detail });
+      if (g.applies && g.ok && g.software) return note('graphics', 'DIAG_GRAPHICS_SOFTWARE', { renderer: g.renderer });
+      return g.applies && g.ok ? ok('graphics', 'DIAG_GRAPHICS_OK', { reason: g.reason }) : null;
+    }
+  },
+
   // ---- the meters show but do not move ---------------------------------
   {
     id: 'tap', symptoms: ['not-moving', 'remotes'],
