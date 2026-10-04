@@ -30,6 +30,7 @@ const views = require('./manager/views');
 const relaunch = require('./manager/relaunch');
 const picture = require('./manager/picture');
 const graphics = require('./manager/graphics');
+const automaticBackup = require('./manager/update').automaticBackup;
 const facelook = require('./manager/facelook');
 const component = require('./manager/component');
 const { compact: compactQueue } = require('./manager/queue');
@@ -4769,7 +4770,8 @@ Glass.prototype.backupCreate = function (name, options) {
             name: backupName,
             files: ['config.json', PeppyConfBackupName, SpectrumConfBackupName]
         };
-        if (options.automatic) { manifest.automatic = true; }
+        // Said either way: an upgrade's own are kept to the newest few, a user's are never touched.
+        manifest.automatic = options.automatic === true;
         fs.writeFileSync(targetDir + '/' + BackupManifestName, JSON.stringify(manifest, null, 2));
         self.logger.info(id + 'backupCreate: created backup "' + backupName + '"');
         return { ok: true, name: backupName, warn: self.listSettingsBackups().length >= BackupWarnCount ? 'GLASS.BACKUP_COUNT_WARN' : null };
@@ -4781,9 +4783,9 @@ Glass.prototype.backupCreate = function (name, options) {
 
 // The backups an upgrade writes on its own accumulate one per upgrade or
 // rollback; the newest `keep` stay and the rest go. A backup counts as
-// automatic by its manifest, or by the `before-<version>` name the
-// upgrades gave them before the manifest said so. Named backups are
-// never touched.
+// automatic by its manifest; one whose manifest does not say, by the
+// `before-<version>` name the upgrades gave theirs before the manifest
+// said so (update.automaticBackup). A user's backups are never touched.
 Glass.prototype.backupPruneAutomatic = function (keep) {
     var self = this;
     var removed = [];
@@ -4791,7 +4793,7 @@ Glass.prototype.backupPruneAutomatic = function (keep) {
         var automatic = self.listSettingsBackups().filter(function (b) {
             try {
                 var manifest = JSON.parse(fs.readFileSync(b.path + '/' + BackupManifestName, 'utf8'));
-                return manifest.automatic === true || /^before-\d+\.\d+\.\d+(-\d{8}-\d{6})?$/.test(b.name);
+                return automaticBackup(manifest, b.name);
             } catch (e) {
                 return false;
             }

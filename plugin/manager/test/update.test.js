@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const http = require('http');
-const { compareVersions, parseRelease, newestRelease, offered, fetchChecked, Updater } = require('../update');
+const { compareVersions, parseRelease, newestRelease, offered, fetchChecked, Updater, automaticBackup } = require('../update');
 const { zipDirectory } = require('../zipwrite');
 const zip = require('../zip');
 
@@ -191,4 +191,19 @@ test('a download whose connection breaks is made again from its first byte, and 
   assert.deepEqual(await fsp.readdir(dir), []);
 
   await fsp.rm(dir, { recursive: true, force: true });
+});
+
+test('an upgrade\'s own backups are told from a user\'s by what the manifest says', () => {
+  // Said either way since 0.8.41.
+  assert.equal(automaticBackup({ automatic: true }, 'before-0.8.40'), true);
+  assert.equal(automaticBackup({ automatic: true }, 'anything'), true);
+  assert.equal(automaticBackup({ automatic: false }, 'before-0.8.40'), false, 'a user may name a backup as the upgrades name theirs');
+  assert.equal(automaticBackup({ automatic: false }, 'my settings'), false);
+  // A manifest from before backups said it: by the upgrades' name.
+  assert.equal(automaticBackup({}, 'before-0.7.12'), true);
+  assert.equal(automaticBackup({}, 'before-0.7.12-20260901-101500'), true);
+  assert.equal(automaticBackup({}, 'before the party'), false);
+  assert.equal(automaticBackup({}, 'before-0.7'), false);
+  assert.equal(automaticBackup(undefined, 'before-0.7.12'), true);
+  assert.equal(automaticBackup(null, ''), false);
 });

@@ -324,4 +324,16 @@ class Updater {
   }
 }
 
-module.exports = { Updater: Updater, UpdateError: UpdateError, compareVersions: compareVersions, parseRelease: parseRelease, newestRelease: newestRelease, offered: offered, fetchChecked: fetchChecked, RELEASES_URL: RELEASES_URL, KEEP_AUTOMATIC_BACKUPS: KEEP_AUTOMATIC_BACKUPS };
+// Whether a settings backup is one an upgrade wrote on its own, and so one
+// of those kept to the newest few: its manifest says so, either way. One
+// whose manifest says nothing was made before backups said it, and is taken
+// for automatic by the name the upgrades gave theirs, `before-<version>`.
+// A backup a user makes says it is not, whatever it is named.
+function automaticBackup(manifest, name) {
+  const said = manifest && typeof manifest === 'object' ? manifest.automatic : undefined;
+  if (said === true) return true;
+  if (said === false) return false;
+  return /^before-\d+\.\d+\.\d+(-\d{8}-\d{6})?$/.test(String(name || ''));
+}
+
+module.exports = { automaticBackup: automaticBackup, Updater: Updater, UpdateError: UpdateError, compareVersions: compareVersions, parseRelease: parseRelease, newestRelease: newestRelease, offered: offered, fetchChecked: fetchChecked, RELEASES_URL: RELEASES_URL, KEEP_AUTOMATIC_BACKUPS: KEEP_AUTOMATIC_BACKUPS };
