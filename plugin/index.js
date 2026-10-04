@@ -28,6 +28,7 @@ const playerfacts = require('./manager/playerfacts');
 const screenowner = require('./manager/screenowner');
 const views = require('./manager/views');
 const relaunch = require('./manager/relaunch');
+const picture = require('./manager/picture');
 const facelook = require('./manager/facelook');
 const component = require('./manager/component');
 const { compact: compactQueue } = require('./manager/queue');
@@ -1139,6 +1140,8 @@ Glass.prototype.onStart = function () {
         if (self.channel) {
             self.channel.state = state;
             self.channel.stateAt = Date.now();
+            // The cover's addresses of late, for the route that fetches only what the player reported.
+            self.channel.arts = picture.reported(self.channel.arts, state && state.albumart);
             self.channel.push({ kind: 'state', state: state });
         }
         self.logger.info(id + 'pushState: status=' + status + ' service=' + state.service + ' volatile=' + state.volatile);

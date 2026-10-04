@@ -1392,12 +1392,38 @@ fn fetch_folder_files(manager: &str, home: &str, uri: &str, groups: &[Vec<String
         .collect()
 }
 
+/// The cover to show: `found`, the file of the wanted location, when it is
+/// there. While it is not, the cover on show stays where it is of the same
+/// track: a player may give one track's cover a new address at every state
+/// it pushes (the Squeezelite plugin stamps the address with the time), and
+/// a cover that went dark for every fetch blinked at each pause and each
+/// change of volume. A new track's cover is waited for with none on show,
+/// and no location at all shows none.
+fn cover_to_show<'a>(
+    found: &'a str,
+    wanted: &str,
+    track: &str,
+    shown: &'a (String, String),
+) -> &'a str {
+    if !found.is_empty() {
+        found
+    } else if !wanted.is_empty() && !shown.0.is_empty() && shown.1 == track {
+        &shown.0
+    } else {
+        ""
+    }
+}
+
 /// Fetches the picture for the current album art location in the background
 /// and remembers the file it landed in. One fetch runs at a time; a location
 /// that changes meanwhile is fetched once the running one returns.
 #[derive(Default)]
 struct ArtFetcher {
     wanted: String,
+    /// The track the wanted location is the cover of.
+    track: String,
+    /// The cover on show and the track it is of.
+    shown: (String, String),
     #[cfg(not(target_arch = "wasm32"))]
     have_url: String,
     #[cfg(not(target_arch = "wasm32"))]
@@ -1407,12 +1433,27 @@ struct ArtFetcher {
 }
 
 impl ArtFetcher {
-    fn want(&mut self, reported: &str) {
+    /// The cover's location as the player reports it, and the track it is
+    /// the cover of.
+    fn want(&mut self, reported: &str, track: &str) {
         self.wanted = reported.to_string();
+        self.track = track.to_string();
+    }
+
+    /// The file to show: the one for the wanted location, or, while that
+    /// is not there, the cover on show where it is of the same track; else
+    /// empty.
+    fn file(&mut self) -> String {
+        let found = self.found();
+        let file = cover_to_show(&found, &self.wanted, &self.track, &self.shown).to_string();
+        if !found.is_empty() {
+            self.shown = (found, self.track.clone());
+        }
+        file
     }
 
     /// The file for the wanted location, or empty while it is not there yet.
-    fn file(&mut self) -> String {
+    fn found(&mut self) -> String {
         if wants::host_pictures() {
             if self.wanted.is_empty() {
                 return String::new();
@@ -2187,7 +2228,15 @@ impl Source for TapSource {
             if self.rederive {
                 self.rederive = false;
                 let playing = self.playing_held.clone();
-                self.art.want(&playing.albumart);
+                // A cover is a track's: its place, its title, its artist and
+                // its album say which, whatever address the cover comes by.
+                self.art.want(
+                    &playing.albumart,
+                    &format!(
+                        "{}\0{}\0{}\0{}",
+                        playing.uri, playing.title, playing.artist, playing.album
+                    ),
+                );
                 let key = format_key(&playing.track_type);
                 if key != self.icon_cache.0 {
                     let icon = resolve_icon(&key, &self.skin_icons, &self.plugin_icons);
@@ -2940,6 +2989,48 @@ mod tests {
         prune_art(&dir, 8, &newest);
         assert!(old.exists() && newest.exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn the_cover_on_show_stays_while_the_same_tracks_next_address_is_fetched() {
+        let shown = ("/tmp/glass-art/a.img".to_string(), "track one".to_string());
+        // The wanted one is there: that one.
+        assert_eq!(
+            cover_to_show("/tmp/glass-art/b.img", "http://x/b", "track one", &shown),
+            "/tmp/glass-art/b.img"
+        );
+        // Another address of the same track's cover, not fetched yet: the one on show stays.
+        assert_eq!(
+            cover_to_show("", "http://x/cover?ms=2", "track one", &shown),
+            "/tmp/glass-art/a.img"
+        );
+        // A new track: its cover is waited for with none on show.
+        assert_eq!(cover_to_show("", "http://x/c", "track two", &shown), "");
+        // No location at all: none, the same track or not.
+        assert_eq!(cover_to_show("", "", "track one", &shown), "");
+        // Nothing was on show yet.
+        let nothing = (String::new(), String::new());
+        assert_eq!(cover_to_show("", "http://x/a", "", &nothing), "");
+    }
+
+    #[test]
+    fn the_fetcher_holds_the_cover_across_a_new_address_of_the_same_track() {
+        // A fetcher that has shown a cover, then is told a new address the
+        // host has not brought (nothing answers on that port).
+        let mut art = ArtFetcher {
+            shown: ("/tmp/glass-art/a.img".to_string(), "one".to_string()),
+            ..ArtFetcher::default()
+        };
+        art.want("http://127.0.0.1:9/cover?ms=2", "one");
+        assert_eq!(
+            art.file(),
+            "/tmp/glass-art/a.img",
+            "held while the fetch is under way"
+        );
+        art.want("http://127.0.0.1:9/other", "two");
+        assert_eq!(art.file(), "", "a new track waits with none on show");
+        art.want("", "one");
+        assert_eq!(art.file(), "", "no cover reported shows none");
     }
 
     #[test]

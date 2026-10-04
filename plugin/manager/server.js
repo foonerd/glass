@@ -614,14 +614,14 @@ class Manager {
 
     // A picture the face wants: the album art the player reports for the
     // playing track, or a fanart picture, fetched from the player itself.
-    // Only the player's own albumart route and the very address the player
-    // reports are fetched; anything else is not found.
+    // Only the player's own albumart route and the addresses the player
+    // itself reported of late are fetched; anything else is not found.
     app.get('/api/face/picture', function (req, res) {
       const at = String(req.query.at || '');
       const state = (self.plugin.channel && self.plugin.channel.state) || {};
       let target = null;
       if (at.startsWith('/albumart')) target = 'http://127.0.0.1:3000' + at;
-      else if (/^https?:\/\//.test(at) && at === String(state.albumart || '')) target = at;
+      else if (/^https?:\/\//.test(at) && (at === String(state.albumart || '') || ((self.plugin.channel && self.plugin.channel.arts) || []).indexOf(at) !== -1)) target = at;
       if (!target) return res.status(404).json({ error: 'not-found' });
       // A picture by the server's word or by its own first bytes.
       picture.relay(target, res, { limit: MAX_TRACK_FILE_BYTES });

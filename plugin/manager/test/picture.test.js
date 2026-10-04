@@ -5,7 +5,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const http = require('http');
-const { kindOf, relay } = require('../picture');
+const { kindOf, relay, reported, ADDRESSES_KEPT } = require('../picture');
 
 const JPEG = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10]), Buffer.from('JFIF'), Buffer.alloc(40, 7)]);
 const PNG = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(24, 1)]);
@@ -94,4 +94,26 @@ test('a refusal, a picture too large and a server that is not there', async (t) 
   const large = await upstream(t, function (res) { res.writeHead(200, { 'Content-Type': 'image/jpeg', 'Content-Length': JPEG.length }); res.end(JPEG); });
   assert.equal((await relayed(t, large, { limit: 10 })).status, 404);
   assert.equal((await relayed(t, 'http://127.0.0.1:9/cover')).status, 502);
+});
+
+test('the cover\'s addresses of late are remembered, each once, the newest last', () => {
+  let list = [];
+  list = reported(list, 'http://lms:9000/music/current/cover.jpg?ms=1');
+  list = reported(list, 'http://lms:9000/music/current/cover.jpg?ms=2');
+  assert.deepEqual(list, ['http://lms:9000/music/current/cover.jpg?ms=1', 'http://lms:9000/music/current/cover.jpg?ms=2']);
+  // The one a page was told a moment ago is still known after the next state.
+  assert.ok(reported(list, 'http://lms:9000/music/current/cover.jpg?ms=3').indexOf('http://lms:9000/music/current/cover.jpg?ms=2') !== -1);
+  // Reported again, it moves to the end and is not doubled.
+  assert.deepEqual(reported(list, 'http://lms:9000/music/current/cover.jpg?ms=1'), ['http://lms:9000/music/current/cover.jpg?ms=2', 'http://lms:9000/music/current/cover.jpg?ms=1']);
+  // No address adds nothing, and nothing that is no list breaks it.
+  assert.deepEqual(reported(list, ''), list);
+  assert.deepEqual(reported(list, undefined), list);
+  assert.deepEqual(reported(undefined, '/albumart'), ['/albumart']);
+  // Only so many are kept.
+  let many = [];
+  for (let n = 0; n < 30; n++) many = reported(many, 'http://x/' + n);
+  assert.equal(many.length, ADDRESSES_KEPT);
+  assert.equal(many[many.length - 1], 'http://x/29');
+  assert.equal(many[0], 'http://x/' + (30 - ADDRESSES_KEPT));
+  assert.deepEqual(reported(['a', 'b', 'c'], 'd', 2), ['c', 'd']);
 });

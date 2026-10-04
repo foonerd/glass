@@ -74,4 +74,19 @@ function relay(target, res, options) {
   return request;
 }
 
-module.exports = { kindOf: kindOf, relay: relay };
+// How many of the addresses a player reported for its cover are remembered.
+const ADDRESSES_KEPT = 8;
+
+// The addresses a player reported for its cover, newest last, with one more:
+// each once, at most `most`. A player may give a cover a new address with
+// every state it pushes (the Squeezelite plugin stamps it with the time),
+// and a page asks for the one it was told a moment ago: the route that
+// fetches only what the player itself reported must still know that one.
+function reported(list, address, most) {
+  const value = String(address || '');
+  const kept = (Array.isArray(list) ? list : []).filter(function (a) { return a !== value; });
+  if (value) kept.push(value);
+  return kept.slice(-Math.max(1, most || ADDRESSES_KEPT));
+}
+
+module.exports = { kindOf: kindOf, relay: relay, reported: reported, ADDRESSES_KEPT: ADDRESSES_KEPT };
