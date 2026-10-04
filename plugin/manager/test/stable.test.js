@@ -190,10 +190,12 @@ function player(options) {
     stable: async () => { said('glass.stable'); failing('glass.stable'); return { version: o.stableGlass }; },
     stage: async (job, release) => { said('glass.stage', release.version); failing('glass.stage'); return { name: 'glass-' + release.version + '.zip', file: '/staged', version: release.version }; },
     backupName: (word) => 'before-' + word,
+    forget: async () => { said('glass.forget'); },
     apply: async (job, staged, opts) => { said('glass.apply', staged.version + ' backup=' + opts.backup); failing('glass.apply'); job.state = 'restarting'; job.target = staged.version; }
   };
   const component = {
     least: '0.1.13',
+    forget: async () => { said('evo.forget'); },
     installed: () => ({ installed: !!state.evo, version: state.evo }),
     stable: async () => { said('evo.stable'); return { version: o.stableEvo }; },
     installRelease: async (job, release, target) => { said('evo.install', release.version + ' for Glass ' + target.glass + ' least ' + target.least); failing('evo.install'); state.evo = release.version; },
@@ -221,7 +223,7 @@ test('the act goes in an order that changes nothing before what it needs is here
   const done = await stable.run(job, keep, p.with_);
   assert.deepStrictEqual(p.calls, [
     'glass.stable', 'evo.stable', 'glass.stage 0.8.46', 'defaults from the zip', 'backup before-stable automatic',
-    'evo.install 0.1.24 for Glass 0.8.46 least 0.1.20', 'screen kiosk', 'settings.write', 'glass.apply 0.8.46 backup=before-stable'
+    'evo.install 0.1.24 for Glass 0.8.46 least 0.1.20', 'screen kiosk', 'settings.write', 'glass.forget', 'evo.forget', 'glass.apply 0.8.46 backup=before-stable'
   ]);
   assert.deepStrictEqual([done.glass.action, done.evo.action, done.backup, done.kept], ['back', 'back', 'before-stable', ['screen', 'network']]);
   assert.deepStrictEqual([job.state, job.target], ['restarting', '0.8.46']);
@@ -235,7 +237,7 @@ test('a player on the stable release keeps its versions and its backend starts a
   const p = player({ glass: '0.8.46', evo: '0.1.24', holds: false });
   const job = {};
   const done = await stable.run(job, stable.answers({ show: true }, { evo: true }), p.with_);
-  assert.deepStrictEqual(p.calls, ['glass.stable', 'evo.stable', 'defaults from the plugin here', 'backup before-stable automatic', 'settings.write', 'backend.restart']);
+  assert.deepStrictEqual(p.calls, ['glass.stable', 'evo.stable', 'defaults from the plugin here', 'backup before-stable automatic', 'settings.write', 'glass.forget', 'evo.forget', 'backend.restart']);
   assert.deepStrictEqual([done.glass.action, done.evo.action], ['none', 'none']);
   assert.deepStrictEqual([job.state, job.target], ['restarting', '0.8.46']);
   assert.strictEqual(p.settings.written.meter.current['meter.folder'], '1280x400_Deck', 'the theme on show was kept');
@@ -247,6 +249,10 @@ test('a player on the stable release keeps its versions and its backend starts a
   const held = player();
   await stable.run({}, stable.answers({ owner: true }, { holds: true, evo: true }), held.with_);
   assert.ok(held.calls.indexOf('screen kiosk') === -1, 'glass-evo keeps the screen where the user said so');
+  // Test releases kept: the release last seen is still what the player is offered.
+  const testing = player();
+  await stable.run({}, stable.answers({ tests: true }, { holds: true, evo: true, tests: true }), testing.with_);
+  assert.ok(testing.calls.indexOf('glass.forget') === -1 && testing.calls.indexOf('evo.forget') === -1);
 });
 
 test('a step that fails leaves the player as it was, or puts it back', async () => {

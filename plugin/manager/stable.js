@@ -252,6 +252,13 @@ async function run(job, keep, with_) {
     // Said before the writing: one that breaks half way is put back too.
     written = true;
     plugin.stableWrite(planned);
+    // Test releases are off from here: the test release seen while they
+    // were on is not what this player is offered any more, and the answer
+    // kept from that look would offer it again for a day.
+    if (!keep.tests) {
+      await updater.forget();
+      await component.forget();
+    }
     const kept = Object.keys(keep).filter(function (k) { return keep[k]; });
     logger.info('glass: manager stable: ' + changed(current, planned) + ' settings changed; kept: ' + (kept.join(', ') || 'nothing') + '; backup ' + backup);
     if (staged) {

@@ -228,6 +228,13 @@ class Component {
     return this.view();
   }
 
+  // The release last seen is forgotten, and the next look asks afresh.
+  async forget() {
+    this.latest = null;
+    this.checkedAt = null;
+    await fsp.rm(path.join(this.stateDir, 'latest.json'), { force: true });
+  }
+
   // The latest release that is not a test release, asked afresh, whatever
   // this player takes: what "back to the stable release" goes to.
   async stable() {

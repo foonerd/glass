@@ -221,6 +221,14 @@ class Updater {
     return this.view();
   }
 
+  // The release last seen is forgotten, and the next look asks afresh:
+  // for when what this player is offered changes under the answer kept.
+  async forget() {
+    this.latest = null;
+    this.checkedAt = null;
+    await fsp.rm(path.join(this.dir, 'latest.json'), { force: true });
+  }
+
   previous() {
     const p = this.state.previous;
     if (!p || !p.zip || !fs.existsSync(p.zip)) return null;
