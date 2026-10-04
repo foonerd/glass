@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.42] - 2026-10-04
+
+Found while the wiki was read against the code.
+
+- **The clock digits can be set in one of the player's own fonts.** The Appearance tab offers the player's fonts for every text style, the clock digits among them, and writes the chosen font by its bare file name. The display looked for the four text styles' fonts under `font.path` and took the clock's (`font.digi`) as written, so a player font chosen for the digits was a name it could not open, and the clock was drawn in no face at all. `font.digi` is found under `font.path` now as the others are; `builtin` is still DSEG7, and an uploaded font, a whole path to a file that is there, is still taken as it is.
+
 ## [0.8.41] - 2026-10-04
 
 Found while the wiki was read against the code.
