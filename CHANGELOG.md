@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.60] - 2026-10-04
+
+Asked by a theme maker: a universal back cover for the albums that have none.
+
+- **A picture the theme brings stands in for a folder layer.** A folder layer (`folderlayer.files`) shows the first of its names found in the playing track's folder, a back cover, a logo. Where the track's folder has none of them, the same names are now looked for in the theme's own folder, in the layer's order, and the first found there is shown: a skin that ships `CoverSamp.jpg` and lists it after `back.png, Back.png, back.jpg` shows the album's own back cover where there is one and the sample where there is none. What the track's folder has always stands before the theme's, and a layer whose names the theme does not bring stays empty as before. It travels with the theme's folder, so remote displays and the browser views show the same; on those the stand-in appears once the look at the track's folder has come back with nothing.
+
 ## [0.8.59] - 2026-10-04
 
 The second stage of upgrades on a remote display: Windows.
