@@ -500,6 +500,8 @@ pub fn remote_main(
     open_settings: bool,
     face: &mut Option<Box<dyn overlay::Overlay>>,
 ) -> ExitCode {
+    // Started by the display before it, after an upgrade: that one leaves first.
+    super::upgrade::after_handover();
     let config_path = super::config::config_path(config_file);
     let cache_dir = crate::cache_dir(run.cache.as_deref());
     let (mut config, note) = RemoteConfig::load(&config_path);
@@ -637,9 +639,13 @@ pub fn remote_main(
                 if super::upgrade::under_service() {
                     return ExitCode::from(1);
                 }
-                let why = super::upgrade::become_new(exe);
-                eprintln!("glass: {why}");
-                return ExitCode::from(1);
+                return match super::upgrade::become_new(exe) {
+                    Ok(()) => ExitCode::SUCCESS,
+                    Err(why) => {
+                        eprintln!("glass: {why}");
+                        ExitCode::from(1)
+                    }
+                };
             }
         }
     }
@@ -667,12 +673,17 @@ pub fn remote_main(
             if super::upgrade::under_service() {
                 return ExitCode::SUCCESS;
             }
-            let why = exe
-                .as_deref()
-                .map(super::upgrade::become_new)
-                .unwrap_or_else(|| "this binary's own path is not known".to_string());
-            eprintln!("glass: upgrade: {why}");
-            return ExitCode::from(1);
+            let became = match exe.as_deref() {
+                Some(exe) => super::upgrade::become_new(exe),
+                None => Err("this binary's own path is not known".to_string()),
+            };
+            return match became {
+                Ok(()) => ExitCode::SUCCESS,
+                Err(why) => {
+                    eprintln!("glass: upgrade: {why}");
+                    ExitCode::from(1)
+                }
+            };
         }
         let config = app.config();
         let generation = app.generation();

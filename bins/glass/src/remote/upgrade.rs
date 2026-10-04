@@ -52,8 +52,12 @@ pub struct Product {
 
 /// The product a display is: Glass's own where it carries no face, the
 /// face's where the face says where it is released, none where a face
-/// says nothing (the display's own release would take the face away).
+/// says nothing (the display's own release would take the face away), and
+/// none on a machine no upgrade is offered for yet.
 pub fn product(has_face: bool, origin: Option<overlay::Origin>) -> Option<Product> {
+    if arch_folders().is_empty() {
+        return None;
+    }
     match (has_face, origin) {
         (false, _) => Some(Product {
             name: "Glass".to_string(),
@@ -73,9 +77,15 @@ pub fn product(has_face: bool, origin: Option<overlay::Origin>) -> Option<Produc
     }
 }
 
-/// The folders an archive keeps this machine's binary under, the first
-/// that is there taken; none on a machine no upgrade is offered for yet.
+/// What this machine's archive is called after the version, and with it
+/// the folder its binary lies under: the first that is there taken. None on
+/// a machine no upgrade is offered for yet. A Windows archive is a zip with
+/// the display at `bin/<name>.exe`; the others are tars with it at
+/// `bin/<arch>/<name>`.
 pub fn arch_folders() -> &'static [&'static str] {
+    if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
+        return &["windows-x64"];
+    }
     if !cfg!(target_os = "linux") {
         return &[];
     }
@@ -89,9 +99,14 @@ pub fn arch_folders() -> &'static [&'static str] {
 
 /// The archive's name for this machine at a version.
 pub fn archive_name(asset: &str, version: &str, folders: &[&str]) -> Option<String> {
-    folders
-        .first()
-        .map(|arch| format!("{asset}{version}-{arch}.tar.gz"))
+    folders.first().map(|arch| {
+        let packed = if arch.starts_with("windows") {
+            "zip"
+        } else {
+            "tar.gz"
+        };
+        format!("{asset}{version}-{arch}.{packed}")
+    })
 }
 
 /// A release as far as an upgrade needs it.
@@ -353,14 +368,131 @@ pub fn file_from_tar_gz(archive: &[u8], ends: &[String]) -> Result<Vec<u8>, Stri
 pub fn binary_paths(binary: &str, folders: &[&str]) -> Vec<String> {
     folders
         .iter()
-        .map(|arch| format!("bin/{arch}/{binary}"))
+        .map(|arch| {
+            if arch.starts_with("windows") {
+                format!("bin/{binary}.exe")
+            } else {
+                format!("bin/{arch}/{binary}")
+            }
+        })
         .collect()
 }
 
+fn le(bytes: &[u8], at: usize, len: usize) -> Option<usize> {
+    let part = bytes.get(at..at + len)?;
+    Some(
+        part.iter()
+            .rev()
+            .fold(0usize, |n, b| (n << 8) | *b as usize),
+    )
+}
+
+/// The first regular file of a zip whose path ends in one of `ends`, the
+/// earlier of them before the later: stored or deflated, read from the
+/// zip's own table at its end.
+pub fn file_from_zip(archive: &[u8], ends: &[String]) -> Result<Vec<u8>, String> {
+    let broken = || "the archive's table is not readable".to_string();
+    // The end record: its signature, searched from the back past a comment.
+    let end = (0..=archive.len().saturating_sub(22))
+        .rev()
+        .take(66_000)
+        .find(|at| archive[*at..].starts_with(b"PK\x05\x06"))
+        .ok_or_else(broken)?;
+    let count = le(archive, end + 10, 2).ok_or_else(broken)?;
+    let mut at = le(archive, end + 16, 4).ok_or_else(broken)?;
+    let mut found: Vec<Option<(usize, usize, usize, usize)>> = vec![None; ends.len()];
+    for _ in 0..count {
+        if !archive
+            .get(at..)
+            .is_some_and(|rest| rest.starts_with(b"PK\x01\x02"))
+        {
+            return Err(broken());
+        }
+        let method = le(archive, at + 10, 2).ok_or_else(broken)?;
+        let packed = le(archive, at + 20, 4).ok_or_else(broken)?;
+        let size = le(archive, at + 24, 4).ok_or_else(broken)?;
+        let name_len = le(archive, at + 28, 2).ok_or_else(broken)?;
+        let extra_len = le(archive, at + 30, 2).ok_or_else(broken)?;
+        let comment_len = le(archive, at + 32, 2).ok_or_else(broken)?;
+        let local = le(archive, at + 42, 4).ok_or_else(broken)?;
+        let name = archive
+            .get(at + 46..at + 46 + name_len)
+            .map(|n| String::from_utf8_lossy(n).replace('\\', "/"))
+            .ok_or_else(broken)?;
+        if !name.ends_with('/') {
+            for (slot, end) in found.iter_mut().zip(ends) {
+                if slot.is_none() && (name == *end || name.ends_with(&format!("/{end}"))) {
+                    *slot = Some((method, packed, size, local));
+                }
+            }
+        }
+        at += 46 + name_len + extra_len + comment_len;
+    }
+    let (method, packed, size, local) = found
+        .into_iter()
+        .flatten()
+        .next()
+        .ok_or_else(|| format!("the archive holds no {}", ends.join(" or ")))?;
+    if size as u64 > MAX_UNPACKED {
+        return Err("the archive unpacks to more than allowed".to_string());
+    }
+    if !archive
+        .get(local..)
+        .is_some_and(|rest| rest.starts_with(b"PK\x03\x04"))
+    {
+        return Err(broken());
+    }
+    let data = local
+        + 30
+        + le(archive, local + 26, 2).ok_or_else(broken)?
+        + le(archive, local + 28, 2).ok_or_else(broken)?;
+    let bytes = archive
+        .get(data..data + packed)
+        .ok_or("the archive is cut short")?;
+    match method {
+        0 => Ok(bytes.to_vec()),
+        8 => {
+            let mut out = Vec::with_capacity(size);
+            flate2::read::DeflateDecoder::new(bytes)
+                .take(MAX_UNPACKED + 1)
+                .read_to_end(&mut out)
+                .map_err(|e| format!("the archive could not be unpacked: {e}"))?;
+            if out.len() != size {
+                return Err("the archive could not be unpacked: a file is not its size".to_string());
+            }
+            Ok(out)
+        }
+        other => Err(format!(
+            "the archive packs a file in a way not read here ({other})"
+        )),
+    }
+}
+
+/// The display's binary out of a release's archive, a zip or a gzipped tar
+/// by what it begins with.
+pub fn binary_from(archive: &[u8], paths: &[String]) -> Result<Vec<u8>, String> {
+    if archive.starts_with(b"PK") {
+        file_from_zip(archive, paths)
+    } else {
+        file_from_tar_gz(archive, paths)
+    }
+}
+
 fn beside(exe: &Path, suffix: &str) -> PathBuf {
-    let mut name = exe.file_name().unwrap_or_default().to_os_string();
-    name.push(suffix);
-    exe.with_file_name(name)
+    let name = exe
+        .file_name()
+        .unwrap_or_default()
+        .to_string_lossy()
+        .into_owned();
+    // On Windows a program is one by its ending: glass.exe keeps it, as
+    // glass.prev.exe.
+    let named = match name.len().checked_sub(4) {
+        Some(at) if name.is_char_boundary(at) && name[at..].eq_ignore_ascii_case(".exe") => {
+            format!("{}{suffix}{}", &name[..at], &name[at..])
+        }
+        _ => format!("{name}{suffix}"),
+    };
+    exe.with_file_name(named)
 }
 
 /// What a binary answers to `--version`, its first line; an error where it
@@ -451,7 +583,47 @@ fn version_said(binary: &Path) -> Result<String, String> {
     Ok(said.lines().next().unwrap_or("").trim().to_string())
 }
 
-#[cfg(any(not(unix), target_os = "android"))]
+/// On Windows the standard library's own spawn serves: there is no glibc
+/// to be newer than the player's. No console window opens for the try.
+#[cfg(windows)]
+fn version_said(binary: &Path) -> Result<String, String> {
+    use std::os::windows::process::CommandExt;
+    const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+    let mut child = std::process::Command::new(binary)
+        .arg("--version")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(CREATE_NO_WINDOW)
+        .spawn()
+        .map_err(|e| format!("the new binary does not start: {e}"))?;
+    let started = Instant::now();
+    loop {
+        match child.try_wait() {
+            Ok(Some(status)) => {
+                let mut said = String::new();
+                if let Some(mut out) = child.stdout.take() {
+                    let _ = out.read_to_string(&mut said);
+                }
+                if !status.success() {
+                    return Err("the new binary ended in failure".to_string());
+                }
+                return Ok(said.lines().next().unwrap_or("").trim().to_string());
+            }
+            Ok(None) if started.elapsed() < TRY_WITHIN => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Ok(None) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                return Err("the new binary did not answer in time".to_string());
+            }
+            Err(e) => return Err(format!("the new binary could not be waited for: {e}")),
+        }
+    }
+}
+
+#[cfg(not(any(windows, all(unix, not(target_os = "android")))))]
 fn version_said(binary: &Path) -> Result<String, String> {
     Err(format!(
         "{}: not tried on this system yet",
@@ -578,15 +750,23 @@ pub fn under_service() -> bool {
     std::env::var_os("INVOCATION_ID").is_some()
 }
 
-/// Replace this process with the binary now in its place, with the
-/// arguments this one was started with. Returns only where that failed.
-/// Through `execv` directly, for the reason `version_said` gives.
+/// How long a display started by the one before it waits before it looks
+/// for its page's port, so the one before has left it.
+const HANDOVER: Duration = Duration::from_millis(1500);
+const HANDOVER_SAID: &str = "GLASS_AFTER_UPGRADE";
+
+/// Become the binary now in this one's place, with the arguments this one
+/// was started with. On Unix the process is replaced and this returns only
+/// where that failed (through `execv` directly, for the reason
+/// `version_said` gives). On Windows, where a process cannot be replaced,
+/// the new one is started on its own and this one is to leave at once: the
+/// new one is told to wait a moment for the page's port.
 #[cfg(all(unix, not(target_os = "android")))]
-pub fn become_new(exe: &Path) -> String {
+pub fn become_new(exe: &Path) -> Result<(), String> {
     use std::ffi::CString;
     use std::os::unix::ffi::{OsStrExt, OsStringExt};
     let Ok(program) = CString::new(exe.as_os_str().as_bytes()) else {
-        return format!("{}: not a path a program can have", exe.display());
+        return Err(format!("{}: not a path a program can have", exe.display()));
     };
     let args: Vec<CString> = std::iter::once(program.clone())
         .chain(
@@ -600,12 +780,41 @@ pub fn become_new(exe: &Path) -> String {
     // SAFETY: the program and every argument live until the call, the
     // array ends with a null, and execv returns only where it failed.
     unsafe { libc::execv(program.as_ptr(), argv.as_ptr()) };
-    format!("{}: {}", exe.display(), std::io::Error::last_os_error())
+    Err(format!(
+        "{}: {}",
+        exe.display(),
+        std::io::Error::last_os_error()
+    ))
 }
 
-#[cfg(any(not(unix), target_os = "android"))]
-pub fn become_new(exe: &Path) -> String {
-    format!("{}: not on this system yet", exe.display())
+#[cfg(windows)]
+pub fn become_new(exe: &Path) -> Result<(), String> {
+    use std::os::windows::process::CommandExt;
+    const DETACHED_PROCESS: u32 = 0x0000_0008;
+    std::process::Command::new(exe)
+        .args(std::env::args_os().skip(1))
+        .env(HANDOVER_SAID, "1")
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .creation_flags(DETACHED_PROCESS)
+        .spawn()
+        .map(|_| ())
+        .map_err(|e| format!("{}: {e}", exe.display()))
+}
+
+#[cfg(not(any(windows, all(unix, not(target_os = "android")))))]
+pub fn become_new(exe: &Path) -> Result<(), String> {
+    Err(format!("{}: not on this system yet", exe.display()))
+}
+
+/// At a start: a display started by the one before it, after an upgrade,
+/// waits a moment before anything else, so the one before has gone and its
+/// page's port is free.
+pub fn after_handover() {
+    if std::env::var_os(HANDOVER_SAID).is_some() {
+        std::thread::sleep(HANDOVER);
+    }
 }
 
 /// Where an upgrade stands, for the page.
@@ -817,6 +1026,120 @@ mod tests {
         assert_eq!(
             file_from_tar_gz(&archive, &binary_paths("glass", &["x64"])).unwrap(),
             big
+        );
+    }
+
+    /// A zip of one stored and one deflated file, as `zip` writes them.
+    fn zip_of(files: &[(&str, &[u8], bool)]) -> Vec<u8> {
+        let mut out = Vec::new();
+        let mut table = Vec::new();
+        for (name, data, deflate) in files {
+            let packed: Vec<u8> = if *deflate {
+                let mut z =
+                    flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::fast());
+                z.write_all(data).unwrap();
+                z.finish().unwrap()
+            } else {
+                data.to_vec()
+            };
+            let at = out.len() as u32;
+            let method: u16 = if *deflate { 8 } else { 0 };
+            let mut local = vec![b'P', b'K', 3, 4, 20, 0, 0, 0];
+            local.extend_from_slice(&method.to_le_bytes());
+            local.extend_from_slice(&[0; 8]);
+            local.extend_from_slice(&(packed.len() as u32).to_le_bytes());
+            local.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            local.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            local.extend_from_slice(&[0, 0]);
+            local.extend_from_slice(name.as_bytes());
+            out.extend_from_slice(&local);
+            out.extend_from_slice(&packed);
+            let mut entry = vec![b'P', b'K', 1, 2, 20, 0, 20, 0, 0, 0];
+            entry.extend_from_slice(&method.to_le_bytes());
+            entry.extend_from_slice(&[0; 8]);
+            entry.extend_from_slice(&(packed.len() as u32).to_le_bytes());
+            entry.extend_from_slice(&(data.len() as u32).to_le_bytes());
+            entry.extend_from_slice(&(name.len() as u16).to_le_bytes());
+            entry.extend_from_slice(&[0; 12]);
+            entry.extend_from_slice(&at.to_le_bytes());
+            entry.extend_from_slice(name.as_bytes());
+            table.extend_from_slice(&entry);
+        }
+        let table_at = out.len() as u32;
+        out.extend_from_slice(&table);
+        let mut end = vec![b'P', b'K', 5, 6, 0, 0, 0, 0];
+        end.extend_from_slice(&(files.len() as u16).to_le_bytes());
+        end.extend_from_slice(&(files.len() as u16).to_le_bytes());
+        end.extend_from_slice(&(table.len() as u32).to_le_bytes());
+        end.extend_from_slice(&table_at.to_le_bytes());
+        end.extend_from_slice(&[0, 0]);
+        out.extend_from_slice(&end);
+        out
+    }
+
+    #[test]
+    fn a_windows_archive_is_a_zip_with_the_display_under_bin() {
+        assert_eq!(
+            archive_name("glass-", "0.9.0", &["windows-x64"]).as_deref(),
+            Some("glass-0.9.0-windows-x64.zip")
+        );
+        assert_eq!(
+            archive_name("glass-evo-", "0.2.0", &["armv7", "arm"]).as_deref(),
+            Some("glass-evo-0.2.0-armv7.tar.gz")
+        );
+        let paths = binary_paths("glass-evo", &["windows-x64"]);
+        assert_eq!(paths, vec!["bin/glass-evo.exe"]);
+        let big = vec![9u8; 5000];
+        let archive = zip_of(&[
+            (
+                "glass-evo-0.2.0-windows-x64/bin/SDL2.dll",
+                b"a library",
+                false,
+            ),
+            ("glass-evo-0.2.0-windows-x64/bin/glass-evo.exe", &big, true),
+            (
+                "glass-evo-0.2.0-windows-x64/remote/windows/install.ps1",
+                b"# installer",
+                true,
+            ),
+        ]);
+        assert_eq!(binary_from(&archive, &paths).unwrap(), big);
+        assert_eq!(
+            file_from_zip(&archive, &["bin/SDL2.dll".to_string()]).unwrap(),
+            b"a library",
+            "a stored file too"
+        );
+        assert!(
+            binary_from(&archive, &binary_paths("glass", &["windows-x64"]))
+                .unwrap_err()
+                .contains("holds no")
+        );
+        assert!(file_from_zip(b"PK but nothing of a zip", &paths).is_err());
+        assert!(
+            file_from_zip(&archive[..archive.len() - 30], &paths).is_err(),
+            "cut short"
+        );
+        // A tar is still read as a tar.
+        let tar = tar_gz(&[("x/bin/x64/glass", b"the display")]);
+        assert_eq!(
+            binary_from(&tar, &binary_paths("glass", &["x64"])).unwrap(),
+            b"the display"
+        );
+    }
+
+    #[test]
+    fn what_is_kept_beside_a_program_keeps_its_ending() {
+        assert_eq!(
+            beside(Path::new("/home/u/.local/bin/glass"), ".prev"),
+            Path::new("/home/u/.local/bin/glass.prev")
+        );
+        assert_eq!(
+            beside(Path::new("C:/P/glass.exe"), ".prev"),
+            Path::new("C:/P/glass.prev.exe")
+        );
+        assert_eq!(
+            beside(Path::new("C:/P/GLASS.EXE"), ".new"),
+            Path::new("C:/P/GLASS.new.EXE")
         );
     }
 

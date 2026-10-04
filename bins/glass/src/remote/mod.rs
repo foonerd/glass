@@ -180,7 +180,7 @@ impl RemoteApp {
             })?;
             self.set_upgrade(|state| state.phase = "installing".to_string());
             let paths = upgrade::binary_paths(&product.binary, upgrade::arch_folders());
-            let binary = upgrade::file_from_tar_gz(&archive, &paths)?;
+            let binary = upgrade::binary_from(&archive, &paths)?;
             let exe =
                 std::env::current_exe().map_err(|e| format!("this binary's own path: {e}"))?;
             upgrade::install(&binary, &exe, &self.cache, &product, &release)
