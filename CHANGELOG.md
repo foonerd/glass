@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.32] - 2026-10-04
+
+Found while reading for 0.8.31: what is fetched to be shown was never let go.
+
+- **The pictures fetched for the display are kept to the newest 48.** A cover arrives with every track, a fanart set with every artist, and none was ever dropped: on a player and on a remote each address left a file in the temp dir's `glass-art` for as long as the system was up, and in the Face tab or Anymote each left its picture in the page's memory for as long as the page was open. A player up for weeks and a tablet on the wall for days grew without bound, and faster with a source that stamps its cover's address with the time, as the Squeezelite plugin does at every state it pushes. Now the art cache keeps its newest 48 files (`prune_art`; a picture taken up again counts as new), and the host's table keeps 48 files in each of the folders that fill track by track, covers with fanart and the track folders' pictures, dropping what was asked for longest ago (`lead::vfs::bound`); the notes of pictures a player does not have are bounded with them. Forty-eight is a whole fanart set, thirty at most, with the covers beside it. What is on show is never dropped, and what is wanted again is fetched again. A theme's own files, fonts and icons are kept as before.
+
 ## [0.8.31] - 2026-10-04
 
 Reported from a player of a Lyrion server: the cover showed on Volumio's own page and not in Anymote.
