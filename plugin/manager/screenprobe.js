@@ -216,4 +216,18 @@ function wouldDraw(fact) {
   return screenFree(f) ? 'kmsdrm' : null;
 }
 
-module.exports = { parseInputDevices, parseUdev, classifyInputs, parseDrm, parseBacklights, suggest, pointerShown, screenFree, screenOwn, wouldDraw, gather };
+// The number of the card with the connected screen, as SDL counts the
+// cards (`card1` is 1): of the first connected connector by name, as the
+// display itself chooses. Null where nothing is connected. SDL's own
+// search for the card gives up or not by the order the system lists the
+// cards in, which changes from boot to boot; told the number, it does not
+// search (`SDL_KMSDRM_DEVICE_INDEX`).
+function kmsCard(found) {
+  const connected = ((found && found.connectors) || [])
+    .filter(function (c) { return c.status === 'connected' && /^card\d+$/.test(String(c.card || '')); })
+    .map(function (c) { return c.card + '-' + c.name; })
+    .sort();
+  return connected.length ? parseInt(connected[0].slice(4), 10) : null;
+}
+
+module.exports = { parseInputDevices, parseUdev, classifyInputs, parseDrm, parseBacklights, suggest, pointerShown, screenFree, screenOwn, wouldDraw, kmsCard, gather };

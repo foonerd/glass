@@ -106,23 +106,7 @@ pub fn no_card_reason(framebuffer: Option<&str>) -> String {
     }
 }
 
-/// The card to draw on, from the connectors the kernel lists as
-/// `cardN-NAME` with their status: the card of the first connector that is
-/// connected, else of the first connector there is. `None` where the kernel
-/// lists no connector: it drives no screen.
-pub fn pick_card(connectors: &[(String, String)]) -> Option<String> {
-    let card_of = |name: &str| name.split('-').next().map(str::to_string);
-    let mut sorted: Vec<&(String, String)> = connectors
-        .iter()
-        .filter(|(name, _)| name.starts_with("card") && name.contains('-'))
-        .collect();
-    sorted.sort();
-    sorted
-        .iter()
-        .find(|(_, status)| status.trim() == "connected")
-        .or(sorted.first())
-        .and_then(|(name, _)| card_of(name))
-}
+pub use pane::kms::pick_card;
 
 /// The library a vendor registration names: `ICD.library_path` of a file
 /// under `egl_vendor.d`, or `None` when the file says nothing of the kind.
@@ -282,21 +266,6 @@ mod linux {
         unsafe { libc::dlsym(library, c.as_ptr()) }
     }
 
-    /// The connectors the kernel lists, as `(cardN-NAME, status)`.
-    fn connectors() -> Vec<(String, String)> {
-        let Ok(entries) = std::fs::read_dir("/sys/class/drm") else {
-            return Vec::new();
-        };
-        entries
-            .filter_map(|e| e.ok())
-            .filter_map(|e| {
-                let name = e.file_name().to_string_lossy().into_owned();
-                let status = std::fs::read_to_string(e.path().join("status")).ok()?;
-                Some((name, status))
-            })
-            .collect()
-    }
-
     /// Every vendor library the system registers, each once, in order.
     fn vendors() -> Vec<String> {
         let mut found = Vec::new();
@@ -327,7 +296,7 @@ mod linux {
         };
 
         // The screen's card, its driver and the connector that is connected.
-        let listed = connectors();
+        let listed = pane::kms::connectors();
         let Some(card) = pick_card(&listed) else {
             let framebuffer = std::fs::read_to_string("/proc/fb")
                 .ok()
@@ -663,28 +632,6 @@ mod tests {
 
     fn connector(name: &str, status: &str) -> (String, String) {
         (name.to_string(), status.to_string())
-    }
-
-    #[test]
-    fn the_card_is_the_one_with_a_connected_screen() {
-        // A Raspberry Pi 5 with a DSI panel: the render card has no
-        // connector, the DSI card has the panel, the HDMI card nothing.
-        let pi = [
-            connector("card2-HDMI-A-1", "disconnected\n"),
-            connector("card2-HDMI-A-2", "disconnected\n"),
-            connector("card1-DSI-2", "connected\n"),
-            connector("version", ""),
-        ];
-        assert_eq!(pick_card(&pi).as_deref(), Some("card1"));
-        // Nothing connected: the first card that has a connector at all.
-        let bare = [
-            connector("card1-HDMI-A-2", "disconnected"),
-            connector("card1-HDMI-A-1", "disconnected"),
-        ];
-        assert_eq!(pick_card(&bare).as_deref(), Some("card1"));
-        // No connector listed: the kernel drives no screen.
-        assert_eq!(pick_card(&[connector("card0", "")]), None);
-        assert_eq!(pick_card(&[]), None);
     }
 
     #[test]

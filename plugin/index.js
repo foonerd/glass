@@ -960,6 +960,12 @@ Glass.prototype.launchEnv = function () {
     var ours = false;
     try { var fact = self.screenFact(); draws = screenprobe.wouldDraw(fact); ours = screenprobe.screenOwn(fact); } catch (e) {}
     if (draws) { env.SDL_VIDEODRIVER = draws; } else { delete env.SDL_VIDEODRIVER; }
+    // On the screen itself SDL is told which card has the screen: its own search gives up or not by the
+    // order the system lists the cards in. Said here too, for a face built before the display said it itself.
+    delete env.SDL_KMSDRM_DEVICE_INDEX;
+    if (draws === 'kmsdrm') {
+        try { var card = screenprobe.kmsCard(self.screenProbe(false)); if (card !== null) { env.SDL_KMSDRM_DEVICE_INDEX = String(card); } } catch (e) { /* the display chooses */ }
+    }
     // An X server brought up for the face is the display's own screen: it stays on it and turns the picture itself.
     if (ours) { env.GLASS_SCREEN_OURS = '1'; } else { delete env.GLASS_SCREEN_OURS; }
     // When glass-evo owns the screen and its component is here, the face

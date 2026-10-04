@@ -147,6 +147,81 @@ pub struct Surface {
     recording_lifts: bool,
 }
 
+/// The screen's card, for a display that draws on the screen itself.
+///
+/// SDL finds the card by going through `/dev/dri` in the order the system
+/// lists it, and its search does not stop at the card it can use: a card
+/// listed after it that has connectors and nothing connected, the HDMI
+/// card of a Raspberry Pi whose panel is on DSI, makes it forget what it
+/// found, and it ends with "kmsdrm not available". The order is the order
+/// the kernel made the cards in, which changes from one boot to the next,
+/// so the same player draws on its screen after one start and not after
+/// another. SDL takes the card's number from `SDL_KMSDRM_DEVICE_INDEX`
+/// where that is set; the display sets it, from the connectors the kernel
+/// lists, and the search is not run.
+pub mod kms {
+    /// The connectors the kernel lists, as `(cardN-NAME, status)`.
+    #[cfg(target_os = "linux")]
+    pub fn connectors() -> Vec<(String, String)> {
+        let Ok(entries) = std::fs::read_dir("/sys/class/drm") else {
+            return Vec::new();
+        };
+        entries
+            .filter_map(|e| e.ok())
+            .filter_map(|e| {
+                let name = e.file_name().to_string_lossy().into_owned();
+                let status = std::fs::read_to_string(e.path().join("status")).ok()?;
+                Some((name, status))
+            })
+            .collect()
+    }
+
+    /// The connectors that belong to a card, by name: `card1-DSI-2`.
+    fn of_cards(connectors: &[(String, String)]) -> Vec<&(String, String)> {
+        let mut sorted: Vec<&(String, String)> = connectors
+            .iter()
+            .filter(|(name, _)| name.starts_with("card") && name.contains('-'))
+            .collect();
+        sorted.sort();
+        sorted
+    }
+
+    fn card_of(name: &str) -> Option<String> {
+        name.split('-').next().map(str::to_string)
+    }
+
+    /// The card with a screen connected: of the first connector, by name,
+    /// that is connected. `None` where nothing is connected.
+    pub fn connected_card(connectors: &[(String, String)]) -> Option<String> {
+        of_cards(connectors)
+            .iter()
+            .find(|(_, status)| status.trim() == "connected")
+            .and_then(|(name, _)| card_of(name))
+    }
+
+    /// The card to look at: the one with a screen connected, else the
+    /// first that has a connector at all. `None` where the kernel lists no
+    /// connector: it drives no screen.
+    pub fn pick_card(connectors: &[(String, String)]) -> Option<String> {
+        connected_card(connectors).or_else(|| {
+            of_cards(connectors)
+                .first()
+                .and_then(|(name, _)| card_of(name))
+        })
+    }
+
+    /// A card's number, as SDL counts the cards: `card1` is 1.
+    pub fn card_index(card: &str) -> Option<u32> {
+        card.strip_prefix("card")?.parse().ok()
+    }
+
+    /// The number of the card with the connected screen, for SDL.
+    #[cfg(target_os = "linux")]
+    pub fn screen_card_index() -> Option<u32> {
+        connected_card(&connectors()).and_then(|card| card_index(&card))
+    }
+}
+
 /// Whether an SDL video driver shows nothing on any screen: the ones made
 /// for drawing with no screen at all.
 fn shows_nothing(driver: &str) -> bool {
@@ -244,6 +319,15 @@ impl Surface {
             90 | 180 | 270 => options.rotation,
             _ => 0,
         };
+        // SDL is told which card has the screen: its own search for it gives
+        // up or not by the order the system lists the cards in (see `kms`).
+        // A number set from outside stands.
+        #[cfg(target_os = "linux")]
+        if std::env::var_os("SDL_KMSDRM_DEVICE_INDEX").is_none() {
+            if let Some(index) = kms::screen_card_index() {
+                std::env::set_var("SDL_KMSDRM_DEVICE_INDEX", index.to_string());
+            }
+        }
         let sdl = sdl2::init()?;
         let video = sdl.video()?;
         // With no X server, no Wayland and no screen of its own to open,
@@ -700,9 +784,51 @@ pub fn write_ppm(path: impl AsRef<Path>, frame: &Frame) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        asked_for, finger_pixel, fitted_rect, keep_mouse, rotated_center, shows_nothing, through,
-        unrotate_point, IDENTITY, TOUCH_MOUSEID,
+        asked_for, finger_pixel, fitted_rect, keep_mouse, kms, rotated_center, shows_nothing,
+        through, unrotate_point, IDENTITY, TOUCH_MOUSEID,
     };
+
+    fn connector(name: &str, status: &str) -> (String, String) {
+        (name.to_string(), status.to_string())
+    }
+
+    #[test]
+    fn the_card_is_the_one_with_a_connected_screen() {
+        // A Raspberry Pi 5 with a DSI panel: the render card has no
+        // connector, the DSI card has the panel, the HDMI card nothing.
+        // Whatever order the system lists them in, the answer is the same.
+        let pi = [
+            connector("card2-HDMI-A-1", "disconnected\n"),
+            connector("card2-HDMI-A-2", "disconnected\n"),
+            connector("card1-DSI-2", "connected\n"),
+            connector("version", ""),
+        ];
+        let turned: Vec<_> = pi.iter().rev().cloned().collect();
+        for listed in [&pi[..], &turned[..]] {
+            assert_eq!(kms::connected_card(listed).as_deref(), Some("card1"));
+            assert_eq!(kms::pick_card(listed).as_deref(), Some("card1"));
+        }
+        assert_eq!(kms::card_index("card1"), Some(1));
+        assert_eq!(kms::card_index("card12"), Some(12));
+        assert_eq!(kms::card_index("renderD128"), None);
+        // Nothing connected: no card for SDL, and for a look the first
+        // card that has a connector at all.
+        let bare = [
+            connector("card1-HDMI-A-2", "disconnected"),
+            connector("card1-HDMI-A-1", "disconnected"),
+        ];
+        assert_eq!(kms::connected_card(&bare), None);
+        assert_eq!(kms::pick_card(&bare).as_deref(), Some("card1"));
+        // No connector listed: the kernel drives no screen.
+        assert_eq!(kms::pick_card(&[connector("card0", "")]), None);
+        assert_eq!(kms::pick_card(&[]), None);
+        // Two screens connected: the first by name, the same at every start.
+        let two = [
+            connector("card2-HDMI-A-1", "connected"),
+            connector("card1-DSI-2", "connected"),
+        ];
+        assert_eq!(kms::connected_card(&two).as_deref(), Some("card1"));
+    }
 
     #[test]
     fn a_driver_that_shows_nothing_is_taken_only_when_asked_for_by_name() {

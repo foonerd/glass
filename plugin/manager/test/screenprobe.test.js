@@ -116,3 +116,19 @@ test('an X server brought up for the face is Glass\'s own screen while no kiosk 
   assert.equal(probe.screenOwn(Object.assign({}, own, { touchDisplay: true })), false);
   assert.equal(probe.screenOwn(null), false);
 });
+
+test('SDL is told the card with the connected screen, whatever order the cards come in', () => {
+  const kmsCard = probe.kmsCard;
+  // A Raspberry Pi 5 with a DSI panel and nothing on HDMI, as the kernel numbered it on two boots.
+  const dsiFirst = { connectors: [{ card: 'card1', name: 'DSI-2', status: 'connected' }, { card: 'card2', name: 'HDMI-A-1', status: 'disconnected' }, { card: 'card2', name: 'HDMI-A-2', status: 'disconnected' }] };
+  const dsiLast = { connectors: [{ card: 'card1', name: 'HDMI-A-1', status: 'disconnected' }, { card: 'card1', name: 'HDMI-A-2', status: 'disconnected' }, { card: 'card2', name: 'DSI-2', status: 'connected' }] };
+  assert.equal(kmsCard(dsiFirst), 1);
+  assert.equal(kmsCard(dsiLast), 2);
+  assert.equal(kmsCard({ connectors: dsiFirst.connectors.slice().reverse() }), 1, 'the listing\'s order does not matter');
+  // Two screens: the first by name, the same at every start.
+  assert.equal(kmsCard({ connectors: [{ card: 'card2', name: 'HDMI-A-1', status: 'connected' }, { card: 'card1', name: 'DSI-2', status: 'connected' }] }), 1);
+  // Nothing connected, or nothing known: no card is named and SDL searches as before.
+  assert.equal(kmsCard({ connectors: [{ card: 'card1', name: 'HDMI-A-1', status: 'disconnected' }] }), null);
+  assert.equal(kmsCard({}), null);
+  assert.equal(kmsCard(undefined), null);
+});
