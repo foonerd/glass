@@ -4008,7 +4008,8 @@ pub fn meter_text_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Opti
 /// or a file name under `font.path`, the player's own fonts. An older
 /// configuration's `use.system.fonts = False` sets every style to the
 /// built-in face, as it always meant. `font.digi` is the clock font,
-/// DSEG7 unless a file is named. The fallback is the built-in regular face.
+/// DSEG7 unless a file is named, by a path or under `font.path` as the
+/// others. The fallback is the built-in regular face.
 pub fn fonts_from_config(text: &str, plugin_fonts: &Path) -> FontFiles {
     let base = current_value(text, "font.path").unwrap_or_default();
     let base = base.trim().trim_end_matches('/').to_string();
@@ -4045,8 +4046,11 @@ pub fn fonts_from_config(text: &str, plugin_fonts: &Path) -> FontFiles {
             .join("DSEG7Classic-Italic.ttf")
             .to_string_lossy()
             .into_owned()
-    } else {
+    } else if base.is_empty() || digi.starts_with('/') && is_file(Path::new(digi)) {
         digi.to_string()
+    } else {
+        // A player font by its name, under `font.path` as the other styles'.
+        format!("{base}/{}", digi.trim_start_matches('/'))
     };
     FontFiles {
         light: style("font.light", "PeppyFont-Light.ttf"),
@@ -5993,6 +5997,30 @@ mod tests {
         assert_eq!(fonts.fallback, "");
         let own = fonts_from_config("[current]\nfont.path = /f\nfont.italic = /I.ttf\n", none);
         assert_eq!(own.italic, "/f/I.ttf");
+        // The clock digits in a player font: a bare name is found under font.path, as the Manager writes it.
+        let digits = fonts_from_config(
+            "[current]\nfont.path = /fonts\nfont.digi = Orbitron.ttf\n",
+            none,
+        );
+        assert_eq!(digits.digi, "/fonts/Orbitron.ttf");
+        // With no font.path the value stands as written; the built-in word is DSEG7.
+        let bare = fonts_from_config("[current]\nfont.digi = Orbitron.ttf\n", none);
+        assert_eq!(bare.digi, "Orbitron.ttf");
+        let builtin =
+            fonts_from_config("[current]\nfont.path = /fonts\nfont.digi = builtin\n", none);
+        assert_eq!(builtin.digi, "/nowhere/fonts/DSEG7Classic-Italic.ttf");
+        // A font uploaded to the player is a whole path to a file that is there: kept as it is.
+        let uploaded = std::env::temp_dir().join(format!("glass-digi-{}.ttf", std::process::id()));
+        std::fs::write(&uploaded, b"").unwrap();
+        let text = format!(
+            "[current]\nfont.path = /fonts\nfont.digi = {}\n",
+            uploaded.display()
+        );
+        assert_eq!(
+            fonts_from_config(&text, none).digi,
+            uploaded.to_string_lossy()
+        );
+        let _ = std::fs::remove_file(&uploaded);
         let speeds = scroll_speeds_from_config("[current]\nscrolling.mode = custom\nscrolling.speed.title = 8\nscrolling.speed.artist = 10\n");
         assert_eq!(
             (
