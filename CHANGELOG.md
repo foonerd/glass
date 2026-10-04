@@ -2,6 +2,13 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.33] - 2026-10-04
+
+Reported by theme makers: the sample rate would not sit under the format icon.
+
+- **The sample rate line is aligned as the theme says.** The line (`playinfo.samplerate.pos`) was always drawn from the left of its box, whatever the theme asked of its texts. PeppyMeter Screensaver placed it in its box as the meter's other texts are placed, by `playinfo.align` or `playinfo.center`, and that is what themes are drawn for: of the 1,554 meters of the collection that show the line, 1,368 centre their texts and give the line a box (`playinfo.samplerate.maxwidth`), so in all of them it stood left of where its maker put it. It is centred or right aligned in its box now as the meter says. A line with no width of its own in a meter that gives its texts one (`playinfo.maxwidth`) is aligned in a box as wide as the widest line expected, "-44.1 kHz 24 bit-" set in its own type, as PeppyMeter Screensaver measured it, and is not cut by that box. New: `playinfo.samplerate.align = left`, `center` or `right` aligns the line by itself, over the meter's word. `playinfo.type.align` is the format icon's and label's own, as before. A line with no box at all starts at its position.
+- For a face built against Glass: `plot::Text` and `lead::TextSpec` have one field more, `box_as`, a text whose width is the box where `max_width` is zero; empty for none.
+
 ## [0.8.32] - 2026-10-04
 
 Found while reading for 0.8.31: what is fetched to be shown was never let go.
