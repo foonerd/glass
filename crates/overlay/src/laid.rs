@@ -3,39 +3,8 @@
 //! screen and the views cannot come to differ in it.
 
 use expose::Frame;
-use lead::Metadata;
 
 use crate::{Cover, Overlay, View};
-
-/// Whether a player that stands still has stood past its countdown: where
-/// the picture is the display's to keep (a screen of its own, a page with
-/// a face) it is then black, and the theme is not drawn behind it.
-pub fn stands_black(metadata: &Metadata) -> bool {
-    metadata.status != "play" && metadata.persist_mode == "countdown" && metadata.persist_left == 0
-}
-
-/// The black picture behind a player standing still, kept between frames.
-#[derive(Default)]
-pub struct Black(Option<Frame>);
-
-impl Black {
-    /// Black of this size.
-    pub fn frame(&mut self, width: u32, height: u32) -> &Frame {
-        if self
-            .0
-            .as_ref()
-            .is_some_and(|b| b.width != width || b.height != height)
-        {
-            self.0 = None;
-        }
-        self.0.get_or_insert_with(|| Frame {
-            blend: expose::Blend::Normal,
-            width,
-            height,
-            rgba: vec![0; width as usize * height as usize * 4],
-        })
-    }
-}
 
 /// What laying a face over a frame came to.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -237,38 +206,5 @@ mod tests {
             }
         );
         assert_eq!(laid.frame().map(|f| (f.width, f.rgba.len())), Some((8, 64)));
-    }
-
-    #[test]
-    fn black_is_kept_and_follows_the_size() {
-        let mut black = Black::default();
-        let first = black.frame(4, 2).rgba.as_ptr();
-        assert_eq!(
-            black.frame(4, 2).rgba.as_ptr(),
-            first,
-            "kept between frames"
-        );
-        let other = black.frame(6, 2);
-        assert_eq!((other.width, other.rgba.len()), (6, 48));
-        assert!(other.rgba.iter().all(|v| *v == 0));
-    }
-
-    #[test]
-    fn a_player_stands_black_only_past_its_countdown() {
-        let mut m = Metadata {
-            status: "stop".into(),
-            persist_mode: "countdown".into(),
-            persist_left: 0,
-            ..Metadata::default()
-        };
-        assert!(stands_black(&m));
-        m.persist_left = 3;
-        assert!(!stands_black(&m));
-        m.persist_left = 0;
-        m.status = "play".into();
-        assert!(!stands_black(&m));
-        m.status = "pause".into();
-        m.persist_mode = String::new();
-        assert!(!stands_black(&m));
     }
 }

@@ -16,7 +16,7 @@ use intake::{Overrides, Selector, Source, TapSource};
 use lead::{
     frame_period, should_mark_dismiss, Input, InteractiveMode, SkinDesc, DISMISS_FILE_VAR, RUN_FLAG,
 };
-use overlay::{stands_black, Black, Laid};
+use overlay::Laid;
 use pane::{publish, write_ppm, PointerKind, Shown, Surface, WindowMode, WindowOptions};
 use plot::{step, Scene};
 use std::time::Duration;
@@ -114,18 +114,16 @@ fn paced(period: Duration, ours: bool, quiet_for: Duration) -> Duration {
     }
 }
 
-/// What lies over the theme on a frame: black for a player standing still
-/// on a screen that is the display's own, a calibration's target, a face.
+/// What lies over the theme on a frame: a calibration's target, a face.
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 struct Over {
-    black: bool,
     target: bool,
     face: bool,
 }
 
 impl Over {
     fn any(self) -> bool {
-        self.black || self.target || self.face
+        self.target || self.face
     }
 }
 
@@ -903,19 +901,14 @@ fn session(
     let mut touch = Touch::new();
     // A calibration of the touch panel, while the plugin asks for one.
     let mut calibration: Option<Calibration> = None;
-    // The screen is ours when no X server holds it: the display never
-    // leaves it, and after the countdown it shows black rather than the
-    // console.
     // The screen is ours when the display draws on it itself, by the driver
     // key or by the launcher's word when the key is Auto, or when the
     // launcher says the X server is there for the display alone.
     let screen_ours = screen_is_ours(&skin.run.driver);
     // A face on a remote has the window as it has a screen of the display's
-    // own: it shows its clock while the player stands still, the picture
-    // behind it goes black past the countdown as on the player, and a touch
-    // beside it does nothing.
+    // own: it shows its clock while the player stands still over the theme,
+    // as on the player, and a touch beside it does nothing.
     let remote_face = remote.is_some() && face.is_some();
-    let mut black_frame = Black::default();
     loop {
         let frame_started = Instant::now();
         if let Some(step) = meter_step.take() {
@@ -1069,15 +1062,10 @@ fn session(
         }
         if surface.is_some() || write_file {
             pictures.follow(&scene, &assets);
-            // The screen is ours and the player has stopped past the
-            // countdown: black, never the console. The theme is not drawn
-            // behind a black screen, unless a file is to be written of it.
-            let idle_black = (screen_ours || remote_face) && stands_black(&input.metadata);
-            let rastered = !idle_black || write_file;
-            if profiling && rastered {
+            if profiling {
                 motion.profile = Some(Vec::new());
             }
-            let (mut frame, mut damage): (&Frame, &[Rect]) = if rastered {
+            let (mut frame, mut damage): (&Frame, &[Rect]) = {
                 let painted = raster_over(
                     &scene,
                     Stack {
@@ -1103,20 +1091,10 @@ fn session(
                     started.elapsed().as_millis() as u64,
                 );
                 (painted.frame, painted.damage)
-            } else {
-                (&assets.base, &[])
             };
-            if idle_black {
-                frame = black_frame.frame(frame.width, frame.height);
-            }
             // Whether the picture under whatever lies over the theme is the
-            // one of the frame before: black after black, or a theme that
-            // did not move.
-            let base_same = if idle_black {
-                was_over.black
-            } else {
-                !was_over.black && damage.is_empty()
-            };
+            // one of the frame before: a theme that did not move.
+            let base_same = damage.is_empty();
             let mut overlay: Option<Frame> = None;
             if let Some(cal) = calibration.as_ref() {
                 if let Some(target) = cal.targets.get(cal.samples.len()) {
@@ -1170,7 +1148,6 @@ fn session(
                 h: frame.height,
             }];
             let over = Over {
-                black: idle_black,
                 target: overlay.is_some(),
                 face: face_drew,
             };
@@ -1460,18 +1437,12 @@ fn session(
                 }
             }
             let shown_at = Instant::now();
-            // Only what was painted on this frame counts: behind a black
-            // screen the theme is not painted at all.
-            let behind_black =
-                (screen_ours || remote_face) && stands_black(&input.metadata) && !write_file;
-            if !behind_black {
-                profile_painted += motion
-                    .damage()
-                    .iter()
-                    .map(|r| u64::from(r.w) * u64::from(r.h))
-                    .sum::<u64>();
-                profile_boxes += motion.damage().len() as u64;
-            }
+            profile_painted += motion
+                .damage()
+                .iter()
+                .map(|r| u64::from(r.w) * u64::from(r.h))
+                .sum::<u64>();
+            profile_boxes += motion.damage().len() as u64;
             profile_loop[0] += polled_at.duration_since(frame_started).as_micros() as u64;
             profile_loop[1] += stepped_at.duration_since(polled_at).as_micros() as u64;
             profile_loop[2] += rastered_at.duration_since(stepped_at).as_micros() as u64;
@@ -1595,8 +1566,8 @@ fn ours_said(value: Option<&str>) -> bool {
 
 /// Whether the screen is the display's own: it draws on the screen itself,
 /// or the launcher says the X server it draws on is there for it alone.
-/// The display then never leaves the screen, shows black after the
-/// countdown rather than what lies under it, and turns the picture itself.
+/// The display then never leaves the screen: the theme stands while the
+/// player stands still. And it turns the picture itself.
 fn screen_is_ours(driver: &lead::ScreenDriver) -> bool {
     draws_on_kms(driver) || ours_said(env::var("GLASS_SCREEN_OURS").ok().as_deref())
 }
@@ -1724,8 +1695,8 @@ mod tests {
         use super::{show_of, Over, Show};
         let none = Over::default();
         let face = Over { face: true, ..none };
-        let black = Over {
-            black: true,
+        let target = Over {
+            target: true,
             ..none
         };
         // The theme alone: by what changed.
@@ -1736,7 +1707,7 @@ mod tests {
         assert_eq!(show_of(face, face, false), Show::Whole);
         // The face gone this frame: whole once more, so its last frame does not stay.
         assert_eq!(show_of(none, face, true), Show::Whole);
-        assert_eq!(show_of(none, black, false), Show::Whole);
+        assert_eq!(show_of(none, target, false), Show::Whole);
     }
 
     #[test]
@@ -1765,30 +1736,14 @@ mod tests {
         use super::{show_of, Over, Show};
         let none = Over::default();
         let face = Over { face: true, ..none };
-        let black = Over {
-            black: true,
-            ..none
-        };
-        let black_face = Over {
-            black: true,
-            face: true,
-            ..none
-        };
         let target = Over {
             target: true,
             ..none
         };
-        // Black comes: whole once, then nothing while it stays black.
-        assert_eq!(show_of(black, none, false), Show::Whole);
-        assert_eq!(show_of(black, black, true), Show::Kept);
-        // The clock on black: whole when it comes and when it changes,
-        // nothing while it says the same.
-        assert_eq!(show_of(black_face, black, true), Show::Whole);
-        assert_eq!(show_of(black_face, black_face, true), Show::Kept);
-        assert_eq!(show_of(black_face, black_face, false), Show::Whole);
-        assert_eq!(show_of(black, black_face, true), Show::Whole);
-        // The bar over a theme that stands still, drawn the same: nothing;
-        // the theme moves, or the bar fades: whole.
+        // A face comes: whole. The clock or the bar over a theme that
+        // stands still, drawn the same: nothing; the theme moves, or the
+        // face draws another picture: whole.
+        assert_eq!(show_of(face, none, true), Show::Whole);
         assert_eq!(show_of(face, face, true), Show::Kept);
         assert_eq!(show_of(face, face, false), Show::Whole);
         // A calibration's target is shown every frame.

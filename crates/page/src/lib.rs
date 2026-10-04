@@ -21,10 +21,10 @@
 //!
 //! A module may carry a face, drawn over the theme as on the player's own
 //! screen (the `overlay` crate has the contract). The pipeline asks it what
-//! it covers, hands it a copy of the frame to draw on, offers it every
-//! pointer event before the theme's controls, and puts black behind it when
-//! the player has stood still past the persist countdown, as the display
-//! does on a screen of its own. For a face the page does two things more:
+//! it covers, hands it a copy of the frame to draw on, and offers it every
+//! pointer event before the theme's controls; the theme stands behind it
+//! while the player stands still, as on a screen that is the display's
+//! own. For a face the page does two things more:
 //!
 //! 7. `zone` with the page's minutes east of universal time and the zone's
 //!    short name, at the start and whenever they change: a face tells the
@@ -46,7 +46,7 @@ use intake::bring::{
 use intake::hops::WireHops;
 use intake::{decode_event, Event, Hops, Source, Taken, TapSource};
 use lead::{vfs, Input, SkinDesc};
-use overlay::{stands_black, Black, Laid, View, Wall};
+use overlay::{Laid, View, Wall};
 use plot::Indicators;
 
 pub use controls::PointerKind;
@@ -118,10 +118,6 @@ pub struct Page {
     overlay: Option<Box<dyn Overlay>>,
     /// The face over the picture, on its copy kept between frames.
     laid: Laid,
-    /// The black behind a face on a player standing still, and whether the
-    /// frame before was that.
-    black: Black,
-    was_black: bool,
     /// What the face asked of the player, until the page takes it.
     asked: Vec<Happened>,
     /// The page's clock at the last frame, its zone, and the time of day
@@ -405,8 +401,6 @@ impl Page {
             landed,
             overlay,
             laid,
-            black,
-            was_black,
             asked,
             wall,
             ..
@@ -422,16 +416,7 @@ impl Page {
         showing.indicators = scene.indicators.clone();
         showing.pictures.follow(&scene, &showing.assets);
         let assets = &showing.assets;
-        // Under a face a player that has stood still past the countdown is
-        // black, as on a screen that is the display's own; the theme is not
-        // painted behind it.
-        let idle_black = overlay.is_some() && stands_black(&input.metadata);
-        let (base, moved): (&expose::Frame, bool) = if idle_black {
-            (
-                black.frame(showing.skin.width, showing.skin.height),
-                !*was_black,
-            )
-        } else {
+        let (base, moved): (&expose::Frame, bool) = {
             let stack = Stack {
                 screen: None,
                 face: None,
@@ -452,9 +437,8 @@ impl Page {
                 base: Some(&assets.base),
             };
             let painted = raster_over(&scene, stack, &mut showing.motion, now_ms);
-            (painted.frame, *was_black || !painted.damage.is_empty())
+            (painted.frame, !painted.damage.is_empty())
         };
-        *was_black = idle_black;
         let Some(face) = overlay.as_deref_mut() else {
             return Some(base);
         };
@@ -1471,7 +1455,7 @@ mod tests {
     }
 
     #[test]
-    fn under_a_face_a_player_standing_still_past_the_countdown_is_black() {
+    fn under_a_face_the_theme_stands_past_the_countdown() {
         let _serial = serial();
         let cover = Rc::new(std::cell::Cell::new(Cover::Nothing));
         let mut page = Page::with_overlay(Box::new(Mark {
@@ -1502,8 +1486,9 @@ mod tests {
             frame.rgba.iter().any(|b| *b != 0),
             "the theme, while the countdown runs"
         );
-        // The countdown is over (a period that began sixteen seconds ago):
-        // black, and the face's mark over it when it draws.
+        // The countdown is over (a period that began sixteen seconds ago)
+        // and the line that clears it has not come yet: the theme stands
+        // all the same, and the face's mark over it when it draws.
         let over = format!(
             r#"{{"kind":"persist","mode":"countdown","seconds":15,"startedAt":{}}}"#,
             now - 16_000
@@ -1511,28 +1496,17 @@ mod tests {
         assert!(page.event(over.as_bytes()));
         let frame = page.frame(now + 11_000).expect("a frame");
         assert!(
-            frame
-                .rgba
-                .as_chunks::<4>()
-                .0
-                .iter()
-                .all(|p| p[0] == 0 && p[1] == 0 && p[2] == 0),
-            "black behind a face on a player standing still"
+            frame.rgba.iter().any(|b| *b != 0),
+            "the theme behind a face on a player standing still"
         );
+        let theme_alone = frame.rgba.clone();
         cover.set(Cover::New);
         let frame = page.frame(now + 11_033).expect("a frame");
         assert_eq!(corner(frame), [255, 255, 255, 255]);
         assert_eq!(
-            &frame.rgba[frame.rgba.len() - 4..frame.rgba.len() - 1],
-            &[0, 0, 0]
+            frame.rgba[8 * 480 * 4..],
+            theme_alone[8 * 480 * 4..],
+            "under the face's mark the theme is as it was"
         );
-        // Without a face the page keeps the theme: its banner is the page's own.
-        let mut plain = Page::new();
-        plain.configure(&config_json()).expect("a plan");
-        plain.start(None).expect("the meter on show");
-        assert!(plain.event(br#"{"kind":"state","state":{"status":"stop","title":"A"}}"#));
-        assert!(plain.event(over.as_bytes()));
-        let frame = plain.frame(now + 11_000).expect("a frame");
-        assert!(frame.rgba.iter().any(|b| *b != 0));
     }
 }
