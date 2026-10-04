@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.54] - 2026-10-04
+
+0.8.53 was tagged and never released: its build was refused, rightly, and this release is that one made to load on a player.
+
+- **The display loads on Volumio again with the remote's upgrade in it.** The upgrade of 0.8.53 tried and started the new binary through the standard library's process calls, which refer to two functions of glibc 2.39; a binary that refers to them, even weakly, is refused whole by the loader of Volumio's glibc 2.36. The release build checks for exactly that and stopped, so nothing of 0.8.53 was published. Both places go through `posix_spawn` and `execv` directly now, as the display's one other start of a program always did.
+- The same check runs in the workshop pass (`scripts/check.sh`, "glibc") on the machine's own build, so a change that brings such a symbol in is stopped before a tag, wherever the machine's glibc is newer than the player's.
+- Everything 0.8.53's notes say holds for this release: the Version panel on a Linux remote's settings page, the upgrade checked, tried and kept reversible, `Overlay::origin`, `glass --version`.
+
 ## [0.8.53] - 2026-10-04
 
 A remote display brings itself up to date, on Linux; the first stage of upgrades offered on a remote.
