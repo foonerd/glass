@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.59] - 2026-10-04
+
+The second stage of upgrades on a remote display: Windows.
+
+- **A remote on Windows brings itself up to date.** The Version panel on its settings page works there as on Linux: it looks at the latest release of what the remote is and upgrades to it. The release's zip is fetched and checked against its size and checksum, `glass.exe` (or the bundle's display) is taken out of it and tried, the one that runs is renamed to `glass.prev.exe`, the new one takes its name, and it is started while the old one leaves; the new one waits a moment for the old one's page port. A new version that cannot hold on is given up for the one before at its third start, and kept as `glass.failed.exe`. `SDL2.dll` stays as installed.
+- From 0.8.54 to 0.8.58 the panel showed on Windows and Android and answered that no upgrade is offered there. It is not shown on a machine it cannot upgrade: Android, until its own stage.
+- Tried under Wine, not yet on a Windows machine.
+
 ## [0.8.58] - 2026-10-04
 
 The Manager's part of upgrades on a remote display.
