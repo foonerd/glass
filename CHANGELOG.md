@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.57] - 2026-10-04
+
+A setting carried over from PeppyMeter Screensaver that Glass read and never applied.
+
+- **Rotation quality paces the turning again.** PeppyMeter Screensaver drew a turning record, a tape reel and turning album art anew only so many times a second, in steps of so many degrees: Low 4 times in steps of 12, Medium 8 in steps of 6, High 15 in steps of 3, and Custom at `rotation.fps` (with a step of 45 over that number, between 1 and 12). Glass has read `rotation.quality` and `rotation.fps` since its first turntable and applied only the speed: the pictures turned at every frame, whatever the setting, the performance profiles and the wiki said. The pace is applied now. Between two of its moments a turning picture stands exactly as last drawn, and a picture that stands is not painted again, which is the saving the setting is for on a small board. How fast a record turns is unchanged.
+- What this changes on a screen: with Custom at a number near the frame rate (the template's 25) nothing to the eye; with Low, Medium or High a record turns in visible steps, as it did under PeppyMeter Screensaver. The performance profiles set this quality, and their rotation column now does what it says.
+- A scene carries the pace (`turn_pace`, times a second and degrees), so remote displays and the browser views turn alike.
+
 ## [0.8.56] - 2026-10-04
 
 Asked by a theme maker: which icon name a track of a cue sheet takes.
