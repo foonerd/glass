@@ -971,7 +971,7 @@ mod tests {
         face.configure(&config_json()).expect("a plan");
         let meters = theme_into_table(&mut face, "480x320");
         let bar_at = meters.find("[bar]").expect("the bar meter");
-        let extended = "[bar]\nconfig.extend = True\ninteractive = True\nvolume.pos = 40,300\nvolume.dim = 200,4\nvolume.style = slider\n";
+        let extended = "[bar]\nconfig.extend = True\ninteractive = True\nvolume.pos = 40,300\nvolume.dim = 200,4\nvolume.style = slider\nvolume.slider.orientation = horizontal\n";
         let meters = format!("{}{}{}", &meters[..bar_at], extended, &meters[bar_at + 5..]);
         face.put_file("templates/480x320/meters.txt", meters.into_bytes());
         assert!(face.event(

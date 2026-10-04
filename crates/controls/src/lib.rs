@@ -38,13 +38,22 @@ fn inside(x: i32, y: i32, at: (i32, i32), size: (u32, u32)) -> bool {
     x >= at.0 && y >= at.1 && x < at.0 + size.0 as i32 && y < at.1 + size.1 as i32
 }
 
-/// Where along a gauge a point lies, 0 to 1: left to right along a wide
-/// one, bottom to top along a tall one.
+/// Where along a gauge a point lies, 0 to 1. A bar is read the way it is
+/// drawn: bottom to top where it is vertical, by its orientation or, where
+/// that says neither way, by its box; left to right otherwise. A fader
+/// that moves up and down in a wide box is dragged up and down. A knob, an
+/// arc and a number have no direction of their own and are read by the
+/// shape of their box: left to right along a wide one, bottom to top along
+/// a tall one.
 pub fn gauge_fraction(gauge: &GaugeSpec, x: i32, y: i32) -> f32 {
-    let f = if gauge.w >= gauge.h {
-        (x - gauge.x) as f32 / gauge.w.max(1) as f32
-    } else {
+    let vertical = match gauge.style {
+        lead::GaugeStyle::Slider => gauge.vertical(),
+        _ => gauge.h > gauge.w,
+    };
+    let f = if vertical {
         1.0 - (y - gauge.y) as f32 / gauge.h.max(1) as f32
+    } else {
+        (x - gauge.x) as f32 / gauge.w.max(1) as f32
     };
     f.clamp(0.0, 1.0)
 }
@@ -478,7 +487,7 @@ mod tests {
 
     fn volume_bar() -> (GaugeSpec, Vec<Control>) {
         let spec = lead::meter_indicators(
-            "[m]\nconfig.extend = True\nvolume.pos = 0,300\nvolume.dim = 200,4\nvolume.style = slider\n",
+            "[m]\nconfig.extend = True\nvolume.pos = 0,300\nvolume.dim = 200,4\nvolume.style = slider\nvolume.slider.orientation = horizontal\n",
             "m",
             "/t",
         )
@@ -528,6 +537,46 @@ mod tests {
         assert_eq!(controls[0].grown(24), ((81, 81), (48, 48)));
     }
 
+    /// A bar is dragged the way it is drawn, whatever the shape of its box.
+    #[test]
+    fn a_touch_along_a_bar_follows_the_bars_own_direction() {
+        let gauge = |keys: &str| {
+            let text = format!("[m]\nconfig.extend = True\nvolume.pos = 100,100\n{keys}");
+            lead::meter_indicators(&text, "m", "/t")
+                .expect("extended")
+                .volume
+                .expect("a volume gauge")
+        };
+        // A fader that moves up and down, its box wider than tall: read
+        // bottom to top, as it is drawn. A quarter down from the top is 0.75.
+        let fader = gauge(
+            "volume.dim = 120,80\nvolume.style = slider\nvolume.slider.orientation = vertical\n",
+        );
+        assert_eq!(gauge_fraction(&fader, 110, 120), 0.75);
+        assert_eq!(
+            gauge_fraction(&fader, 215, 120),
+            0.75,
+            "left or right makes no difference"
+        );
+        assert_eq!(gauge_fraction(&fader, 150, 180), 0.0);
+        // The same box said to be horizontal: left to right.
+        let bar = gauge(
+            "volume.dim = 120,80\nvolume.style = slider\nvolume.slider.orientation = horizontal\n",
+        );
+        assert_eq!(gauge_fraction(&bar, 130, 120), 0.25);
+        // No word on it: a volume bar is vertical, as it is drawn.
+        let plain = gauge("volume.dim = 120,80\nvolume.style = slider\n");
+        assert_eq!(gauge_fraction(&plain, 110, 120), 0.75);
+        // A word that is neither: by the box, as the drawing takes it.
+        let other = gauge(
+            "volume.dim = 120,80\nvolume.style = slider\nvolume.slider.orientation = hotizontal\n",
+        );
+        assert_eq!(gauge_fraction(&other, 130, 120), 0.25);
+        // A knob has no direction of its own: by its box's shape.
+        let knob = gauge("volume.dim = 120,80\nvolume.style = knob\n");
+        assert_eq!(gauge_fraction(&knob, 130, 120), 0.25);
+    }
+
     fn at(kind: PointerKind, x: i32, y: i32) -> Pointer {
         Pointer { kind, x, y }
     }
@@ -553,7 +602,7 @@ mod tests {
         let again = touch.pointer(at(PointerKind::Move, 120, 301), &controls, 24, &meta);
         assert!(again.acts.is_empty(), "within 150 ms nothing more goes");
         let spec = lead::meter_indicators(
-            "[m]\nconfig.extend = True\nvolume.pos = 0,300\nvolume.dim = 200,4\nvolume.style = slider\n",
+            "[m]\nconfig.extend = True\nvolume.pos = 0,300\nvolume.dim = 200,4\nvolume.style = slider\nvolume.slider.orientation = horizontal\n",
             "m",
             "/t",
         )
