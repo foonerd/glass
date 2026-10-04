@@ -364,39 +364,99 @@ fn beside(exe: &Path, suffix: &str) -> PathBuf {
 }
 
 /// What a binary answers to `--version`, its first line; an error where it
-/// does not start, does not answer in time or ends in failure.
+/// does not start, does not answer in time or ends in failure. Started
+/// through `posix_spawn` directly, its answer taken from a file: the
+/// standard library's spawn refers to glibc 2.39's `pidfd_spawnp`, and a
+/// binary linked against a 2.39 sysroot then refuses to load on Volumio's
+/// glibc 2.36.
+#[cfg(all(unix, not(target_os = "android")))]
 fn version_said(binary: &Path) -> Result<String, String> {
-    let mut child = std::process::Command::new(binary)
-        .arg("--version")
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| format!("the new binary does not start: {e}"))?;
-    let started = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let mut said = String::new();
-                if let Some(mut out) = child.stdout.take() {
-                    let _ = out.read_to_string(&mut said);
-                }
-                if !status.success() {
-                    return Err(format!("the new binary ended with {status}"));
-                }
-                return Ok(said.lines().next().unwrap_or("").trim().to_string());
-            }
-            Ok(None) if started.elapsed() < TRY_WITHIN => {
-                std::thread::sleep(Duration::from_millis(50));
-            }
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Err("the new binary did not answer in time".to_string());
-            }
-            Err(e) => return Err(format!("the new binary could not be waited for: {e}")),
-        }
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    extern "C" {
+        static environ: *const *mut libc::c_char;
     }
+    let c = |bytes: &[u8]| CString::new(bytes).map_err(|e| e.to_string());
+    let program = c(binary.as_os_str().as_bytes())?;
+    let said_file = beside(binary, ".said");
+    let said_c = c(said_file.as_os_str().as_bytes())?;
+    let null = c(b"/dev/null")?;
+    let arg = c(b"--version")?;
+    let argv = [
+        program.as_ptr() as *mut libc::c_char,
+        arg.as_ptr() as *mut libc::c_char,
+        std::ptr::null_mut(),
+    ];
+    let mut pid: libc::pid_t = 0;
+    // SAFETY: every pointer handed over lives until the call returns, the
+    // argument array ends with a null, and posix_spawn reads and does not
+    // keep them; the file actions are made and destroyed here.
+    let rc = unsafe {
+        let mut actions: libc::posix_spawn_file_actions_t = std::mem::zeroed();
+        libc::posix_spawn_file_actions_init(&mut actions);
+        libc::posix_spawn_file_actions_addopen(&mut actions, 0, null.as_ptr(), libc::O_RDONLY, 0);
+        libc::posix_spawn_file_actions_addopen(
+            &mut actions,
+            1,
+            said_c.as_ptr(),
+            libc::O_WRONLY | libc::O_CREAT | libc::O_TRUNC,
+            0o600,
+        );
+        libc::posix_spawn_file_actions_addopen(&mut actions, 2, null.as_ptr(), libc::O_WRONLY, 0);
+        let rc = libc::posix_spawn(
+            &mut pid,
+            program.as_ptr(),
+            &actions,
+            std::ptr::null(),
+            argv.as_ptr(),
+            environ,
+        );
+        libc::posix_spawn_file_actions_destroy(&mut actions);
+        rc
+    };
+    if rc != 0 {
+        let _ = std::fs::remove_file(&said_file);
+        return Err(format!(
+            "the new binary does not start: {}",
+            std::io::Error::from_raw_os_error(rc)
+        ));
+    }
+    let started = Instant::now();
+    let mut status = 0;
+    let ended = loop {
+        // SAFETY: waiting on the child started above.
+        let done = unsafe { libc::waitpid(pid, &mut status, libc::WNOHANG) };
+        if done == pid {
+            break Ok(());
+        }
+        if done < 0 {
+            break Err("the new binary could not be waited for".to_string());
+        }
+        if started.elapsed() >= TRY_WITHIN {
+            // SAFETY: ending and reaping the child started above.
+            unsafe {
+                libc::kill(pid, libc::SIGKILL);
+                libc::waitpid(pid, &mut status, 0);
+            }
+            break Err("the new binary did not answer in time".to_string());
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    };
+    let said = std::fs::read_to_string(&said_file).unwrap_or_default();
+    let _ = std::fs::remove_file(&said_file);
+    ended?;
+    if !(libc::WIFEXITED(status) && libc::WEXITSTATUS(status) == 0) {
+        return Err("the new binary ended in failure".to_string());
+    }
+    Ok(said.lines().next().unwrap_or("").trim().to_string())
+}
+
+#[cfg(any(not(unix), target_os = "android"))]
+fn version_said(binary: &Path) -> Result<String, String> {
+    Err(format!(
+        "{}: not tried on this system yet",
+        binary.display()
+    ))
 }
 
 /// The note kept from an upgrade until a start has lived a minute.
@@ -520,19 +580,32 @@ pub fn under_service() -> bool {
 
 /// Replace this process with the binary now in its place, with the
 /// arguments this one was started with. Returns only where that failed.
+/// Through `execv` directly, for the reason `version_said` gives.
+#[cfg(all(unix, not(target_os = "android")))]
 pub fn become_new(exe: &Path) -> String {
-    #[cfg(unix)]
-    {
-        use std::os::unix::process::CommandExt;
-        let error = std::process::Command::new(exe)
-            .args(std::env::args_os().skip(1))
-            .exec();
-        format!("{}: {error}", exe.display())
-    }
-    #[cfg(not(unix))]
-    {
-        format!("{}: not on this system yet", exe.display())
-    }
+    use std::ffi::CString;
+    use std::os::unix::ffi::{OsStrExt, OsStringExt};
+    let Ok(program) = CString::new(exe.as_os_str().as_bytes()) else {
+        return format!("{}: not a path a program can have", exe.display());
+    };
+    let args: Vec<CString> = std::iter::once(program.clone())
+        .chain(
+            std::env::args_os()
+                .skip(1)
+                .filter_map(|a| CString::new(a.into_vec()).ok()),
+        )
+        .collect();
+    let mut argv: Vec<*const libc::c_char> = args.iter().map(|a| a.as_ptr()).collect();
+    argv.push(std::ptr::null());
+    // SAFETY: the program and every argument live until the call, the
+    // array ends with a null, and execv returns only where it failed.
+    unsafe { libc::execv(program.as_ptr(), argv.as_ptr()) };
+    format!("{}: {}", exe.display(), std::io::Error::last_os_error())
+}
+
+#[cfg(any(not(unix), target_os = "android"))]
+pub fn become_new(exe: &Path) -> String {
+    format!("{}: not on this system yet", exe.display())
 }
 
 /// Where an upgrade stands, for the page.

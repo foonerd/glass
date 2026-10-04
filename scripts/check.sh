@@ -14,6 +14,23 @@ cargo clippy --workspace --all-targets --locked -- -D warnings
 echo "check: tests"
 cargo test --workspace --locked
 
+echo "check: glibc"
+# The display must load on Volumio's glibc 2.36: a symbol versioned above
+# it, even a weak one, makes the loader refuse the whole binary (the
+# standard library's process spawn brings two such). The release build
+# refuses such a binary (scripts/ship.sh); here the same is asked of this
+# machine's build, which shows it wherever this machine's glibc is newer
+# than the player's.
+cargo build --locked -p glass
+newest=$(readelf -W --dyn-syms target/debug/glass | grep -o 'GLIBC_2\.[0-9]*' | sort -t. -k2,2n -u | tail -n1)
+case "$newest" in
+  GLIBC_2.3[7-9]|GLIBC_2.[4-9]*|GLIBC_2.[1-9][0-9][0-9])
+    echo "check: the display refers to $newest, newer than Volumio's glibc 2.36:" >&2
+    readelf -W --dyn-syms target/debug/glass | grep "$newest" >&2
+    exit 1
+    ;;
+esac
+
 echo "check: browser module"
 # The face: the pipeline for a browser, linted and built for its own target.
 cargo clippy -p page -p glass-face --target wasm32-unknown-unknown --locked -- -D warnings
