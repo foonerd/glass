@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.64] - 2026-10-04
+
+A small flaw of 0.8.63's look panel.
+
+- **The picture's tile is marked while its chooser is open.** "Picture when nothing plays" opened its chooser without showing that it was the tile in hand: the mark was taken off again with the looks' own. It keeps it now.
+
 ## [0.8.63] - 2026-10-04
 
 Asked on the forum: a photograph of one's own behind the clock and the date when nothing plays, in the theme's place. Glass's half; glass-evo draws it from its 0.1.32.
