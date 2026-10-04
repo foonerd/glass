@@ -77,6 +77,10 @@ function aboutGraphics(text) {
 // then what was said before that reads as a fault, each once, as far as
 // `limit` characters go. The last word is never cut out by what came before.
 const FAULT = /warning|error|fail|cannot|could not|unable|no such|not found|denied|missing/i;
+// What reads as a fault and is none: Mesa, asked to speak, notes at every
+// start that it has no `drirc` to read, a settings file hardly any system
+// has. Quoted in a reason it pointed a reader at a file that does not matter.
+const HARMLESS = /drirc/i;
 function reason(exitWord, lines, limit) {
   const all = (lines || []).map(function (l) { return String(l).trim(); }).filter(Boolean);
   const last = all.length ? all[all.length - 1] : '';
@@ -84,7 +88,7 @@ function reason(exitWord, lines, limit) {
   let out = [String(exitWord || '').trim(), last].filter(Boolean).join(' ').slice(0, max);
   const said = [last];
   all.slice(0, -1).forEach(function (line) {
-    if (!FAULT.test(line) || said.indexOf(line) !== -1) return;
+    if (!FAULT.test(line) || HARMLESS.test(line) || said.indexOf(line) !== -1) return;
     said.push(line);
     if ((out + ' | ' + line).length <= max) out += ' | ' + line;
   });

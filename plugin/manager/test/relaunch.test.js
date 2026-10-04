@@ -125,3 +125,16 @@ test('a second take after a failed one is as quick as the first, the count havin
   assert.equal(lasts(0), 10000, 'the count started again when the screen changed hands');
   assert.ok(lasts(3) >= 25000, 'carried over from the first take, the second waited 8 and 16 seconds');
 });
+
+test('Mesa\'s notes that it has no drirc are not quoted as the reason', function () {
+  // As a player sent it on 0.8.30: the fault was elsewhere, and these two lines were all the reason said.
+  const lines = [
+    'libGL: Can\'t open configuration file /etc/drirc: No such file or directory.',
+    'libGL: Can\'t open configuration file /home/volumio/.drirc: No such file or directory.',
+    'glass: SDL error: Can\'t load EGL/GL library on window creation.'
+  ];
+  assert.equal(reason('exit 1', lines, 600), 'exit 1 glass: SDL error: Can\'t load EGL/GL library on window creation.');
+  // A fault beside them is still quoted.
+  const more = lines.slice(0, 2).concat(['MESA-LOADER: failed to open vc4: cannot open shared object file'], lines.slice(2));
+  assert.equal(reason('exit 1', more, 600), 'exit 1 glass: SDL error: Can\'t load EGL/GL library on window creation. | MESA-LOADER: failed to open vc4: cannot open shared object file');
+});
