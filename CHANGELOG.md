@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.50] - 2026-10-04
+
+Glass's half of a meter theme that brings a look for the face; glass-evo draws it from its 0.1.26.
+
+- **A face is told which theme is on show.** What a face sees each frame (`overlay::View`) now names the folder of the theme on show (`theme_dir`, empty where there is none), on the player's screen, on a remote and in a browser alike. A theme's whole folder already travels to remotes and to the pages, so what a theme brings for a face beside its `meters.txt` is there wherever the theme is drawn. A face written against the contract fills or ignores the new field; one built against an earlier Glass is unchanged until it is built against this one.
+- **The look panel shows what the theme on show brings.** Where the theme on show has a `face.txt`, `GET /api/face` gives its keys as `themeLook` (`{ folder, keys }`, else null), and the panel under Screen lays them where the face does: over the look chosen there, under the user's own adjustments. The likeness shows the result, and a line under the looks says that the theme brings a look of its own and which stands over which.
+- **A save leaves alone what is stored as it stands.** The panel named every key at a save and removed each that agreed with the look beneath it. With a theme's look in between, an adjustment of the user's that the theme on show happened to agree with would have been removed, and missed under the next theme. A key stored with the value it has now is no longer named; one moved back to what stands beneath it is removed, as before.
+
 ## [0.8.49] - 2026-10-04
 
 A precaution for the graphics check of 0.8.37.
