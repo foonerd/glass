@@ -2,6 +2,17 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.63] - 2026-10-04
+
+Asked on the forum: a photograph of one's own behind the clock and the date when nothing plays, in the theme's place. Glass's half; glass-evo draws it from its 0.1.32.
+
+- **A picture when nothing plays, chosen in the look panel.** After the row of looks on the Screen tab stands one more tile, "Picture when nothing plays". It opens the pictures to choose from: none (the theme shows, as before), each picture on the player, and an upload. The picture is apart from the looks and goes with whichever is chosen. The likeness under "When nothing plays" shows it behind the clock and the date, and the Backgrounds section gains "Darken the picture" while one is chosen. Nothing reaches the screen until Save, as with the rest of the panel.
+- **Where the pictures are kept.** In `glass/backgrounds` on the player's Internal Storage share (`/data/INTERNAL/glass/backgrounds`): put them there over the network, or upload them from the tile. JPEG, PNG and WebP, told by their first bytes, at most 32 MB; an uploaded one is kept under a name of letters, digits, spaces and `. _ ( ) -` with the ending of what it is, and only files so named are listed. Removing the picture that is on show takes the choice with it.
+- The choice and the darkening are the face's settings `face.idle.picture` and `face.idle.dim`, kept with the look: a settings backup holds them, and "Back to the stable release" asks about them with the look.
+- Routes: `GET /api/backgrounds`, `GET /api/backgrounds/<name>/file`, `POST /api/backgrounds/upload?name=`, `DELETE /api/backgrounds/<name>`; `GET /api/face` lists `backgrounds`.
+- For a face: `face::read_covering(path, w, h)` reads a picture scaled to cover a screen and cut from its middle, and the launcher names the folder in `GLASS_BACKGROUNDS`.
+- Not yet: the picture on remote displays and in the browser views that carry the Glass interface; they show the theme.
+
 ## [0.8.62] - 2026-10-04
 
 The way back to the stable release for a player whose Manager does not come up.
