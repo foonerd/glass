@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.51] - 2026-10-04
+
+A leftover removed: the black a player was to show after standing still past its countdown.
+
+- **The theme stands behind a player that stands still, without a black frame at the countdown's end.** Where the screen is the display's own (glass-evo holding it, a remote or a browser view that carries the face), the display turned the picture black once a player that does not play had a persist period in `countdown` mode with no second left. The plugin clears that period at the moment it ends, so the black never stood: it could show for a frame or a few at the end of the countdown, longer in a browser view whose line from the plugin came late, and after a plugin that stopped in the middle of a countdown it stayed until the next play. What stands on a still screen is the theme under the clock, and that is now all there is: the black and what decided on it are gone from the display's loop and from the browser's pipeline (`overlay::stands_black` and `overlay::Black` are removed; no face used them).
+
 ## [0.8.50] - 2026-10-04
 
 Glass's half of a meter theme that brings a look for the face; glass-evo draws it from its 0.1.26.
