@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.52] - 2026-10-04
+
+The way out that test releases need, and a known state to ask for when something is wrong.
+
+- **Back to the stable release, on the System tab.** One act puts the latest release that is not a test release in place, of Glass and of glass-evo where it is installed, newer or older than what runs, and the settings back to what that release comes with. Before it does anything it asks, part by part, what is kept, yes or no, each with an answer suggested: the screen's set-up (rotation, touch, calibration, position, output) and the network set-up (remote displays, ports, the Manager's address, the share) are kept unless the answer is no; glass-evo on the player's screen, the theme on show with the fonts and the fanart show, glass-evo's look, when the display shows and what a touch does, performance and logging, and taking test releases go back to the default unless the answer is yes. A question is asked only where it means something on this player. Then the whole is said once more, with the versions it goes from and to, and nothing happens before "Go back to the stable release".
+- What the user brought is not touched by any answer: installed themes, fonts, looks and backups, the fanart key, and whether an uninstall leaves the themes.
+- **In an order that changes nothing before what it needs is here.** The stable Glass is downloaded and checked first; a settings backup named `before-stable` is written, and without it nothing is changed; glass-evo is stepped to its stable release, held to the Glass that will be here; the screen is given back to the kiosk unless kept; the settings are laid as answered over the defaults of the stable release itself, read from its own zip; Glass is replaced through the player's plugin manager and the backend restarts. On a player that already runs the stable release only the settings change and the backend restarts on them. A step that fails puts the settings back from the backup and glass-evo back to the version before. The backup is on the Backups tab: restoring it brings the settings back as they were.
+- A setting a later release wrote and the stable one does not know goes with the reset. Every setting the plugin ships, reads or writes is named in one table with the part it belongs to (`plugin/manager/stable.js`), and a test fails when one is added without it.
+- Routes: `GET /api/stable` says what the act would do here (`glass` and `evo`, each `{ action: none | back | forward, from, to }`, the `questions` with their suggested answers, the `facts` they follow from); `POST /api/stable` with `{ "keep": { "<part>": true | false } }` starts it as a job, an answer left out being the suggested one; 409 `busy` while an upgrade runs.
+
 ## [0.8.51] - 2026-10-04
 
 A leftover removed: the black a player was to show after standing still past its countdown.
