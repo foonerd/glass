@@ -1307,6 +1307,30 @@ impl RemoteFolder {
     }
 }
 
+/// Where the track's folder has none of a layer's pictures, one the theme
+/// brings under one of the layer's names stands in: the names in the
+/// layer's order, looked for in the theme's own folder, where the display
+/// reads the theme's files.
+fn theme_stand_ins(theme_dir: &str, layers: &[Vec<String>], mut files: Vec<String>) -> Vec<String> {
+    if theme_dir.is_empty() {
+        return files;
+    }
+    for (file, names) in files.iter_mut().zip(layers) {
+        if !file.is_empty() {
+            continue;
+        }
+        let found = names
+            .iter()
+            .filter_map(|name| plain_name(name))
+            .map(|name| Path::new(theme_dir).join(name))
+            .find(|candidate| lead::is_file(candidate));
+        if let Some(found) = found {
+            *file = found.to_string_lossy().into_owned();
+        }
+    }
+    files
+}
+
 /// The track's folder under the home: `track/<folder hash>`.
 fn track_folder_dir(uri: &str) -> String {
     use sha2::{Digest, Sha256};
@@ -1654,6 +1678,8 @@ pub struct TapSource {
     /// The skin's folder layers' file lists, and the files found for the
     /// current track folder, resolved once per folder.
     folder_layers: Vec<Vec<String>>,
+    /// The theme's own folder, where a layer's stand-in picture may lie.
+    folder_theme_dir: String,
     folder_key: String,
     folder_files: Vec<String>,
     /// The fanart slideshow, run only when the skin has a slot.
@@ -1814,6 +1840,7 @@ impl TapSource {
             icon_cache: (String::new(), String::new()),
             wants_next: false,
             folder_layers: Vec::new(),
+            folder_theme_dir: String::new(),
             folder_key: String::new(),
             folder_files: Vec::new(),
             fanart: None,
@@ -1883,21 +1910,30 @@ impl TapSource {
         self
     }
 
-    /// The folder layer files for a track, looked up once per track folder:
-    /// for each layer, the first of its candidates that exists, or empty.
+    /// The folder layer files for a track: for each layer, the first of its
+    /// candidates the track's folder has; where it has none, the first of
+    /// them the theme brings in its own folder, which stands in (a back
+    /// cover for the albums that have none); else empty. While a remote's
+    /// look at the track's folder is under way, nothing stands in yet.
     fn folder_files_for(&mut self, uri: &str) -> Vec<String> {
+        match self.track_folder_files(uri) {
+            Some(files) => theme_stand_ins(&self.folder_theme_dir, &self.folder_layers, files),
+            None => vec![String::new(); self.folder_layers.len()],
+        }
+    }
+
+    /// The track's own folder's part of that, looked up once per track
+    /// folder; `None` while a remote's look is under way.
+    fn track_folder_files(&mut self, uri: &str) -> Option<Vec<String>> {
         if self.folder_layers.is_empty() {
-            return Vec::new();
+            return Some(Vec::new());
         }
         if let Some(manager) = manager_url() {
             if folder_candidates(uri, &["x.png".to_string()]).is_empty() {
-                return vec![String::new(); self.folder_layers.len()];
+                return Some(vec![String::new(); self.folder_layers.len()]);
             }
             let groups: Vec<Vec<String>> = self.folder_layers.clone();
-            return self
-                .remote_layers
-                .want(uri, &groups, &manager)
-                .unwrap_or_else(|| vec![String::new(); self.folder_layers.len()]);
+            return self.remote_layers.want(uri, &groups, &manager);
         }
         let key = uri.rfind('/').map(|i| &uri[..i]).unwrap_or(uri).to_string();
         if key != self.folder_key || self.folder_files.len() != self.folder_layers.len() {
@@ -1913,7 +1949,7 @@ impl TapSource {
                 })
                 .collect();
         }
-        self.folder_files.clone()
+        Some(self.folder_files.clone())
     }
 
     /// The reel pictures for a track, as for the record.
@@ -2043,6 +2079,7 @@ impl TapSource {
         self.icon_cache = (String::new(), String::new());
         self.rederive = true;
         self.folder_layers = skin.folder_layers.iter().map(|l| l.files.clone()).collect();
+        self.folder_theme_dir = skin.theme_dir.clone();
         self.folder_key = String::new();
         self.folder_files = Vec::new();
         self.vinyl_album_file = skin
@@ -2775,6 +2812,39 @@ mod tests {
         assert_eq!(playing.bitrate, "320", "a number reads as its text");
         assert_eq!(playing.track_type, "flac");
         assert_eq!(playing.volatile, None);
+    }
+
+    #[test]
+    fn a_picture_the_theme_brings_stands_in_where_the_tracks_folder_has_none() {
+        let theme = std::env::temp_dir().join(format!("glass-standin-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&theme);
+        std::fs::create_dir_all(&theme).unwrap();
+        std::fs::write(theme.join("CoverSamp.jpg"), b"a sample back cover").unwrap();
+        let dir = theme.to_string_lossy().into_owned();
+        let names = |list: &[&str]| list.iter().map(|n| n.to_string()).collect::<Vec<_>>();
+        let layers = vec![
+            names(&["back.png", "Back.png", "back.jpg", "CoverSamp.jpg"]),
+            names(&["logo.png"]),
+            names(&["../CoverSamp.jpg", "sub/CoverSamp.jpg"]),
+        ];
+        let none = vec![String::new(); 3];
+        let stood = theme_stand_ins(&dir, &layers, none.clone());
+        assert_eq!(stood[0], theme.join("CoverSamp.jpg").to_string_lossy());
+        assert_eq!(stood[1], "", "the theme brings none of that layer's names");
+        assert_eq!(stood[2], "", "a name that walks is no name");
+        // What the track's folder has stands before the theme's.
+        let own = vec![
+            "/music/album/back.jpg".to_string(),
+            String::new(),
+            String::new(),
+        ];
+        assert_eq!(
+            theme_stand_ins(&dir, &layers, own.clone())[0],
+            "/music/album/back.jpg"
+        );
+        // No theme folder: as found.
+        assert_eq!(theme_stand_ins("", &layers, none.clone()), none);
+        let _ = std::fs::remove_dir_all(&theme);
     }
 
     #[test]
