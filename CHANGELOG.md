@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.40] - 2026-10-04
+
+Found while the wiki was read against the code.
+
+- **A change of the screen's owner that does not finish says why.** When handing the screen to glass-evo, or giving it back, failed part of the way, the Screen tab said "The change did not finish:" and nothing after it: the reason was sent under `data.message`, where the page, and every other error of the Manager, has `message`. `POST /api/screen/owner` answers `GLASS.MANAGER_OWNER_FAILED` with the reason as `message` now, and the page shows it.
+
 ## [0.8.39] - 2026-10-04
 
 Found while the wiki was read against the code: the Backups tab promised what the uninstaller did not keep.
