@@ -23,6 +23,7 @@ const { Previews } = require('./previews');
 const { Updater, UpdateError } = require('./update');
 const { Component, leastOf, pair } = require('./component');
 const views = require('./views');
+const picture = require('./picture');
 const { zipDirectory } = require('./zipwrite');
 const tailor = require('./tailor');
 const { SYMPTOMS, diagnose } = require('./diagnose');
@@ -622,20 +623,8 @@ class Manager {
       if (at.startsWith('/albumart')) target = 'http://127.0.0.1:3000' + at;
       else if (/^https?:\/\//.test(at) && at === String(state.albumart || '')) target = at;
       if (!target) return res.status(404).json({ error: 'not-found' });
-      const lib = target.startsWith('https') ? require('https') : require('http');
-      const request = lib.get(target, { timeout: 8000 }, function (upstream) {
-        const kind = String(upstream.headers['content-type'] || '');
-        const length = parseInt(upstream.headers['content-length'], 10) || 0;
-        if (upstream.statusCode !== 200 || kind.indexOf('image') === -1 || length > MAX_TRACK_FILE_BYTES) {
-          upstream.resume();
-          return res.status(404).json({ error: 'not-found' });
-        }
-        res.setHeader('Content-Type', kind);
-        res.setHeader('Cache-Control', 'no-cache');
-        upstream.pipe(res);
-      });
-      request.on('timeout', function () { request.destroy(new Error('timeout')); });
-      request.on('error', function () { if (!res.headersSent) res.status(502).json({ error: 'unreachable' }); });
+      // A picture by the server's word or by its own first bytes.
+      picture.relay(target, res, { limit: MAX_TRACK_FILE_BYTES });
     });
 
     // The artist's fanart set for the face, as the display asks the plugin

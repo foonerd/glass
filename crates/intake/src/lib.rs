@@ -1126,6 +1126,24 @@ fn table_file(relative: &str, url: &str) -> Option<String> {
     None
 }
 
+/// What picture a file is, by how it begins: the media type of a format
+/// the display draws (JPEG, PNG, GIF, WebP), or `None`. A server's word
+/// for what it sends is not needed, and not every server gives one: a
+/// proxy that passes a cover on unlabelled sends a picture all the same.
+pub fn picture_kind(bytes: &[u8]) -> Option<&'static str> {
+    if bytes.starts_with(&[0xff, 0xd8, 0xff]) {
+        Some("image/jpeg")
+    } else if bytes.starts_with(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]) {
+        Some("image/png")
+    } else if bytes.starts_with(b"GIF87a") || bytes.starts_with(b"GIF89a") {
+        Some("image/gif")
+    } else if bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP" {
+        Some("image/webp")
+    } else {
+        None
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn fetch_art(reported: &str) -> Option<PathBuf> {
     let dir = std::env::temp_dir().join("glass-art");
@@ -1139,16 +1157,19 @@ fn fetch_art(reported: &str) -> Option<PathBuf> {
         .build()
         .new_agent();
     let mut response = agent.get(art_url(reported)).call().ok()?;
-    let kind = response
+    let labelled = response
         .headers()
         .get("content-type")
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
-        .to_ascii_lowercase();
-    if !kind.contains("image") {
+        .to_ascii_lowercase()
+        .contains("image");
+    let bytes = response.body_mut().read_to_vec().ok()?;
+    // A picture by the server's word, or by its own first bytes where the
+    // server gives no word or another.
+    if !labelled && picture_kind(&bytes).is_none() {
         return None;
     }
-    let bytes = response.body_mut().read_to_vec().ok()?;
     std::fs::write(&path, bytes).ok()?;
     Some(path)
 }
@@ -2762,6 +2783,79 @@ mod tests {
         let mut fixed = Selector::seeded(rotation(true, Vec::new()), 1);
         assert!(!fixed.rotates());
         assert_eq!(fixed.next(), None);
+    }
+
+    #[test]
+    fn a_picture_is_known_by_how_it_begins() {
+        assert_eq!(
+            picture_kind(&[0xff, 0xd8, 0xff, 0xe0, 0, 16]),
+            Some("image/jpeg")
+        );
+        assert_eq!(
+            picture_kind(&[0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0]),
+            Some("image/png")
+        );
+        assert_eq!(picture_kind(b"GIF89a\x01\x00"), Some("image/gif"));
+        assert_eq!(
+            picture_kind(b"RIFF\x10\x00\x00\x00WEBPVP8 "),
+            Some("image/webp")
+        );
+        assert_eq!(picture_kind(b"<!doctype html><html>"), None);
+        assert_eq!(
+            picture_kind(b"RIFF\x10\x00\x00\x00WAVEfmt "),
+            None,
+            "a sound is no picture"
+        );
+        assert_eq!(picture_kind(b""), None);
+        assert_eq!(picture_kind(&[0xff, 0xd8]), None, "too short to tell");
+    }
+
+    /// One answer from a server on this machine, as written, to whoever asks.
+    #[cfg(not(target_arch = "wasm32"))]
+    fn serve_once(answer: Vec<u8>) -> String {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = listener.accept() {
+                let mut asked = [0u8; 2048];
+                let _ = stream.read(&mut asked);
+                let _ = stream.write_all(&answer);
+            }
+        });
+        format!("http://127.0.0.1:{port}/cover-{}", lead::epoch_nanos())
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn album_art_a_server_sends_unlabelled_is_taken_by_its_content() {
+        let jpeg = [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, b'J', b'F', b'I', b'F'];
+        let answer = |head: &str, body: &[u8]| {
+            let mut out = format!(
+                "HTTP/1.1 200 OK\r\n{head}Content-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .into_bytes();
+            out.extend_from_slice(body);
+            out
+        };
+        // No word from the server on what it sends, as a proxy that only passes the bytes on.
+        let unlabelled = serve_once(answer("", &jpeg));
+        let file = fetch_art(&unlabelled).expect("a picture by its content");
+        assert_eq!(std::fs::read(&file).unwrap(), jpeg);
+        let _ = std::fs::remove_file(file);
+        // Another word than image for a picture.
+        let mislabelled = serve_once(answer("Content-Type: application/octet-stream\r\n", &jpeg));
+        let file = fetch_art(&mislabelled).expect("a picture whatever it is called");
+        let _ = std::fs::remove_file(file);
+        // A page is no picture, labelled or not.
+        let page = serve_once(answer(
+            "Content-Type: text/html\r\n",
+            b"<html>no cover</html>",
+        ));
+        assert!(fetch_art(&page).is_none());
+        let bare = serve_once(answer("", b"<html>no cover</html>"));
+        assert!(fetch_art(&bare).is_none());
     }
 
     #[test]
