@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.46] - 2026-10-04
+
+Found on a Raspberry Pi 5 with a DSI panel: glass-evo could not take the screen, three starts ending in "kmsdrm not available", on a player where it had held the screen for days.
+
+- **The display tells SDL which card has the screen.** On a screen with no X server SDL looks for the card to draw on by going through `/dev/dri` in the order the system lists it, and its search (SDL 2.26.5, `get_driindex`) does not stop at the card it can use: a card listed after it that has connectors and nothing connected makes it forget what it found, and it ends with "kmsdrm not available". A Raspberry Pi with its panel on DSI and nothing on HDMI has exactly that pair of cards, and which is listed first is decided by the order the kernel made them in at boot. So the same player drew on its screen after one boot and could not after another: glass-evo failed three times and the kiosk took the screen back, and a display on a player with no kiosk died at every start. SDL takes the card's number from `SDL_KMSDRM_DEVICE_INDEX` where it is set, and searches for nothing. The display sets it now before it opens the screen, to the card of the connected connector as the kernel lists the connectors (`pane::kms`), the choice the graphics check makes too; and the plugin sets the same in the display's environment, so a glass-evo built before this release is told as well. A number set from outside stands. With two screens connected the first by name is taken, the same at every start.
+
 ## [0.8.45] - 2026-10-04
 
 Found while the wiki was read against the code.
