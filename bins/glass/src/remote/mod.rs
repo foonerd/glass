@@ -418,6 +418,7 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
                     "face": app.face(),
                     "product": app.product(),
                     "upgrade": app.upgrade(),
+                    "upgradeInPlace": upgrade::in_place(),
                     "configPath": app.path.to_string_lossy(),
                     "cache": app.cache.to_string_lossy(),
                 }),
@@ -441,6 +442,14 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
                 return respond_error(request, 409, "busy", "an upgrade is under way");
             }
             let install = path == "/api/upgrade/install";
+            if install && !upgrade::in_place() {
+                return respond_error(
+                    request,
+                    400,
+                    "by-hand",
+                    "on this system the release is installed by the system's installer: open the release's package",
+                );
+            }
             if install && !state.available {
                 return respond_error(
                     request,

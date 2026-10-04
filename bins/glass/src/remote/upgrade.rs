@@ -86,6 +86,10 @@ pub fn arch_folders() -> &'static [&'static str] {
     if cfg!(all(target_os = "windows", target_arch = "x86_64")) {
         return &["windows-x64"];
     }
+    // One package for every Android device; the system installs it.
+    if cfg!(target_os = "android") {
+        return &["android"];
+    }
     if !cfg!(target_os = "linux") {
         return &[];
     }
@@ -102,11 +106,20 @@ pub fn archive_name(asset: &str, version: &str, folders: &[&str]) -> Option<Stri
     folders.first().map(|arch| {
         let packed = if arch.starts_with("windows") {
             "zip"
+        } else if *arch == "android" {
+            "apk"
         } else {
             "tar.gz"
         };
         format!("{asset}{version}-{arch}.{packed}")
     })
+}
+
+/// Whether this display can put a release in its own place. An Android app
+/// cannot: its page links the release's package, and the system's installer
+/// asks the user and checks the package's signature against the app's.
+pub fn in_place() -> bool {
+    !cfg!(target_os = "android")
 }
 
 /// A release as far as an upgrade needs it.
@@ -1086,6 +1099,11 @@ mod tests {
         assert_eq!(
             archive_name("glass-evo-", "0.2.0", &["armv7", "arm"]).as_deref(),
             Some("glass-evo-0.2.0-armv7.tar.gz")
+        );
+        assert_eq!(
+            archive_name("glass-", "0.9.0", &["android"]).as_deref(),
+            Some("glass-0.9.0-android.apk"),
+            "an Android release is one package"
         );
         let paths = binary_paths("glass-evo", &["windows-x64"]);
         assert_eq!(paths, vec!["bin/glass-evo.exe"]);

@@ -197,8 +197,11 @@
     if (doing) lines.push(doing);
     if (u.error) lines.push('Not done: ' + u.error + '.');
     $('upgrade-body').innerHTML = lines.map(function (l) { return '<div>' + esc(l) + '</div>'; }).join('');
+    // Where the display cannot replace itself (Android), the release's package is linked: the system's installer asks and installs.
+    var byHand = s.upgradeInPlace === false;
+    if (byHand && u.available && u.latest) $('upgrade-body').innerHTML += '<div style="margin-top:8px"><a href="' + esc(u.latest.url) + '">Get ' + esc(p.name + ' ' + u.latest.version) + '</a>: the system\'s installer asks, and installs it over this one with the settings kept.</div>';
     $('btn-upgrade-check').disabled = !idle;
-    $('btn-upgrade-install').classList.toggle('hidden', !(u.available && u.latest));
+    $('btn-upgrade-install').classList.toggle('hidden', byHand || !(u.available && u.latest));
     $('btn-upgrade-install').disabled = !idle;
     $('btn-upgrade-install').textContent = u.latest ? 'Upgrade to ' + u.latest.version : '';
   }

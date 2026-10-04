@@ -820,7 +820,7 @@
     "MANAGER_RM_SCREEN": "screen",
     "MANAGER_RM_PAGE": "Settings",
     "MANAGER_RM_BEHIND": "{product} {latest} is out",
-    "MANAGER_RM_BEHIND_HELP": "A later release of this remote is out. On Linux its own settings page upgrades it (Version); on Windows and Android, install the new release over it.",
+    "MANAGER_RM_BEHIND_HELP": "A later release of this remote is out. Its own settings page brings it up to date (Version): on Linux and Windows it upgrades itself, on Android the page links the new release and the system installs it.",
     "DISPLAY_OUTPUT_NONE": "No screen of its own: remote displays only",
     "MANAGER_RM_SETTINGS": "Serving",
     "MANAGER_RM_ENABLE": "Serve remote displays",

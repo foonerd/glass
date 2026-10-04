@@ -820,7 +820,7 @@
     "MANAGER_RM_SCREEN": "Bildschirm",
     "MANAGER_RM_PAGE": "Einstellungen",
     "MANAGER_RM_BEHIND": "{product} {latest} ist erschienen",
-    "MANAGER_RM_BEHIND_HELP": "Eine neuere Version dieser entfernten Anzeige ist erschienen. Unter Linux aktualisiert ihre eigene Einstellungsseite sie (Version); unter Windows und Android die neue Version darüber installieren.",
+    "MANAGER_RM_BEHIND_HELP": "Eine neuere Version dieser entfernten Anzeige ist erschienen. Ihre eigene Einstellungsseite bringt sie auf den Stand (Version): Unter Linux und Windows aktualisiert sie sich selbst, unter Android verlinkt die Seite die neue Version und das System installiert sie.",
     "DISPLAY_OUTPUT_NONE": "Kein eigener Bildschirm: nur Fernanzeigen",
     "MANAGER_RM_SETTINGS": "Bereitstellung",
     "MANAGER_RM_ENABLE": "Fernanzeigen bedienen",
