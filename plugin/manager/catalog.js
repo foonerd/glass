@@ -179,12 +179,20 @@ class Catalog {
       const installed = JSON.parse(await fsp.readFile(path.join(this.dir, 'installed.json'), 'utf8'));
       if (installed && typeof installed === 'object') this.installed = installed;
     } catch (e) { /* nothing installed from the catalog yet */ }
-    // Downloads left by an interrupted install.
-    try {
-      for (const name of await fsp.readdir(this.downloadsDir)) {
-        await fsp.rm(path.join(this.downloadsDir, name), { force: true });
+    // What an earlier run left in the downloads folder: the zip of an
+    // interrupted install, a package kept for its Download link, and the
+    // folders a cut, a package or an uploaded backup was staged in. Each is
+    // removed by itself, a folder with what it holds, so that one that will
+    // not go does not keep the rest.
+    let left = [];
+    try { left = await fsp.readdir(this.downloadsDir); } catch (e) { /* nothing to clear */ }
+    for (const name of left) {
+      try {
+        await fsp.rm(path.join(this.downloadsDir, name), { recursive: true, force: true });
+      } catch (e) {
+        this.logger.warn('glass: manager catalog: ' + name + ' could not be cleared from the downloads: ' + e.message);
       }
-    } catch (e) { /* nothing to clear */ }
+    }
   }
 
   // Fetch the index when it changed; the cached one stays on 304 or failure.

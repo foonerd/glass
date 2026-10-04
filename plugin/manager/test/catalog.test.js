@@ -122,3 +122,18 @@ test('a theme pack whose connection breaks is downloaded again', async function 
   assert.equal(s.state.hits.zip, 4);
   await fsp.rm(dir, { recursive: true, force: true });
 });
+
+test('the downloads folder is cleared at the start, folders with what they hold', async function () {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glass-catalog-'));
+  const downloads = path.join(dir, 'downloads');
+  // As a player's folder came to look: a staged package's folder among the zips, in the middle of the listing.
+  await fsp.mkdir(path.join(downloads, 'package-3', '1280x720_amber'), { recursive: true });
+  await fsp.writeFile(path.join(downloads, 'package-3', '1280x720_amber', 'meters.txt'), '[m]\n');
+  await fsp.mkdir(path.join(downloads, 'tailor-7'), { recursive: true });
+  await fsp.writeFile(path.join(downloads, 'a-first.zip'), 'zip');
+  await fsp.writeFile(path.join(downloads, 'z-last.zip'), 'zip');
+  const catalog = new Catalog({ dir: dir, logger: { info() {}, warn() {}, error() {} } });
+  await catalog.init();
+  assert.deepEqual(await fsp.readdir(downloads), [], 'nothing left, whatever came before or after a folder');
+  await fsp.rm(dir, { recursive: true, force: true });
+});
