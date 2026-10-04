@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.49] - 2026-10-04
+
+A precaution for the graphics check of 0.8.37.
+
+- **The probe never holds the screen's card.** The first process to open a graphics card that has no master becomes its master, and SDL passes over a card it cannot be master of. The probe opens the screen's card to look at it; run at a moment when nothing holds the screen, it was the card's master for the fraction of a second it runs, and a display starting in exactly that moment would have been refused the card. The probe gives the card up as soon as it has opened it. Not seen to happen; the two can now not meet.
+
 ## [0.8.48] - 2026-10-04
 
 Found while a finding of the wiki's review was checked against PeppyMeter Screensaver and the collection.
