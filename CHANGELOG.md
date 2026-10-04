@@ -2,6 +2,18 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.37] - 2026-10-04
+
+From a take that failed on a player whose graphics libraries did not work, where the kiosk's own X log had said so all along and nothing looked.
+
+- **The Manager asks whether the screen can be drawn on before it is handed over.** On a screen with no X server the display draws through GBM and EGL, the system's graphics libraries; where they do not work, a take left the screen black until the kiosk had it back, with one sentence of SDL's for a reason. Three things say it beforehand now.
+  - **A probe the display runs itself**, `glass --probe-graphics`: the steps SDL takes, one by one and without drawing, so it runs while a kiosk holds the screen. The screen's card with its kernel driver and its connector, a GBM device on it, every EGL vendor library the system registers loaded by itself, an EGL display for the device, its initialising, and who renders, by the renderer's own name. It prints one line of JSON: whether it works, the step that failed, and why in the loader's own words, which libglvnd keeps to itself when a vendor library is there and will not load. A screen Mesa has no renderer for is drawn on in software, by the processor: that passes and is said. A screen the kernel does not drive through KMS at all, a framebuffer-only one, is said to be drawn on through an X server only.
+  - **The kiosk's X server's own word**: its log says whether it draws with the GPU ("glamor X acceleration enabled on ...") or fell back to software ("eglGetDisplay() failed"), and the Manager reads it.
+  - **Mesa's parts**, which belong together, and whether they are of one version.
+- **A take that could not hold is held back, with the reason.** "Use glass-evo on the screen" asks afresh first, where the screen would be drawn on itself: when the probe fails nothing is turned off, and the Screen tab says what the probe found. The take stays possible at the user's own word, **Try glass-evo on the screen anyway**, for a check that should ever be wrong; a failed try gives the screen back as before. Where glass-evo draws on an X server brought up for it, the probe has no say.
+- **The status sheet has a Graphics row** in its Screen section: whether drawing on the screen itself works and who renders (the GPU, or in software), the screen's driver and connector, what the kiosk's X server says of itself, and Mesa's version or the parts that differ. Copy as text and a report carry it, and the journal has a line of it when it changes. Find a problem names graphics that cannot draw as the cause, for a display that dies and for a screen that stays the kiosk's.
+- Routes: `GET /api/screen` answers `graphics` and `owner.blocked`; `POST /api/screen/owner` takes `force: true` and may answer `GLASS.MANAGER_OWNER_NO_GRAPHICS` with the reason as `message`.
+
 ## [0.8.36] - 2026-10-04
 
 Asked on the forum: what is the difference between "what the player's screen shows" and "the theme alone"?
