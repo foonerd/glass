@@ -582,6 +582,11 @@ pub fn remote_main(
         face.as_ref()
             .map(|f| f.name().unwrap_or_else(|| "a face".to_string())),
     );
+    // What this display is a release of, for its own upgrade.
+    app.set_product(super::upgrade::product(
+        face.is_some(),
+        face.as_ref().and_then(|f| f.origin()),
+    ));
     super::apply_log_level(&app.config());
     let page_port = match super::serve(app.clone()) {
         Ok(port) => {
@@ -612,8 +617,63 @@ pub fn remote_main(
         }
     };
 
+    // An upgrade on trial: a start is counted against it, and a binary
+    // that never lived a minute is given up for the one before. Counted
+    // here, past the point where a second start on this machine has left
+    // for the first one's page: only a start that is the display counts.
+    let exe = std::env::current_exe().ok();
+    if let Some(exe) = exe.as_deref() {
+        match super::upgrade::at_start(&cache_dir, exe) {
+            super::upgrade::AtStart::Nothing => {}
+            super::upgrade::AtStart::Trying(n) => {
+                logline::say!(Info, "remotes", "upgrade: start {n} of the new version");
+            }
+            super::upgrade::AtStart::PutBack(new, old) => {
+                logline::say!(
+                    Info,
+                    "remotes",
+                    "upgrade: {new} did not hold on; {old} is back in place"
+                );
+                if super::upgrade::under_service() {
+                    return ExitCode::from(1);
+                }
+                let why = super::upgrade::become_new(exe);
+                eprintln!("glass: {why}");
+                return ExitCode::from(1);
+            }
+        }
+    }
+    // A start that lives its minute settles an upgrade; and the releases
+    // are looked at soon after the start and once a day from then.
+    {
+        let app = app.clone();
+        let cache = cache_dir.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(super::upgrade::SETTLED_AFTER);
+            super::upgrade::settled(&cache);
+            loop {
+                app.check_upgrade();
+                std::thread::sleep(Duration::from_secs(24 * 60 * 60));
+            }
+        });
+    }
     let mut window: Option<(WindowOptions, Surface)> = None;
     loop {
+        // An upgrade is in place: the window goes, and the display starts
+        // again as the new binary, by the service that keeps it running or
+        // by becoming it.
+        if app.restart_asked() {
+            drop(window.take());
+            if super::upgrade::under_service() {
+                return ExitCode::SUCCESS;
+            }
+            let why = exe
+                .as_deref()
+                .map(super::upgrade::become_new)
+                .unwrap_or_else(|| "this binary's own path is not known".to_string());
+            eprintln!("glass: upgrade: {why}");
+            return ExitCode::from(1);
+        }
         let config = app.config();
         let generation = app.generation();
         let Some((_, player)) = config.player().map(|(id, p)| (id.to_string(), p.clone())) else {

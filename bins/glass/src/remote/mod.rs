@@ -6,10 +6,11 @@
 
 pub mod config;
 pub mod run;
+pub mod upgrade;
 
 use std::io::Read;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
@@ -70,6 +71,12 @@ pub struct RemoteApp {
     /// The face the display was built with, by its name; none on the
     /// standalone remote.
     face: Mutex<Option<String>>,
+    /// What this display is a release of, where it can bring itself up to
+    /// date, and where an upgrade stands.
+    product: Mutex<Option<upgrade::Product>>,
+    upgrade: Mutex<upgrade::State>,
+    /// An upgrade is in place: the display is to become the new binary.
+    restart: AtomicBool,
 }
 
 impl RemoteApp {
@@ -82,7 +89,129 @@ impl RemoteApp {
             status: Mutex::new(Status::default()),
             window_request: Mutex::new(None),
             face: Mutex::new(None),
+            product: Mutex::new(None),
+            upgrade: Mutex::new(upgrade::State {
+                phase: "idle".to_string(),
+                ..Default::default()
+            }),
+            restart: AtomicBool::new(false),
         })
+    }
+
+    /// What this display is a release of, said once at the start.
+    pub fn set_product(&self, product: Option<upgrade::Product>) {
+        *self.product.lock().unwrap_or_else(|e| e.into_inner()) = product;
+    }
+
+    pub fn product(&self) -> Option<upgrade::Product> {
+        self.product
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    /// Where an upgrade stands.
+    pub fn upgrade(&self) -> upgrade::State {
+        self.upgrade
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+
+    fn set_upgrade(&self, change: impl FnOnce(&mut upgrade::State)) {
+        change(&mut self.upgrade.lock().unwrap_or_else(|e| e.into_inner()));
+    }
+
+    /// Take the upgrade's one turn: true where nothing else is at it, and
+    /// the phase is then `phase`.
+    fn begin_upgrade(&self, phase: &str) -> bool {
+        let mut state = self.upgrade.lock().unwrap_or_else(|e| e.into_inner());
+        if state.phase != "idle" {
+            return false;
+        }
+        state.phase = phase.to_string();
+        state.error.clear();
+        state.done = 0;
+        true
+    }
+
+    /// Ask GitHub for the latest release of what this display is, and keep
+    /// the answer for the page. Nothing where another look or an upgrade is
+    /// under way, or the display is offered none.
+    pub fn check_upgrade(&self) {
+        let Some(product) = self.product() else {
+            return;
+        };
+        if !self.begin_upgrade("checking") {
+            return;
+        }
+        let found = upgrade::latest(&product);
+        let now = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or(0);
+        self.set_upgrade(|state| {
+            state.phase = "idle".to_string();
+            state.checked_at = now;
+            match found {
+                Ok(release) => {
+                    state.available = upgrade::newer(&release.version, &product.version);
+                    state.latest = Some(release);
+                }
+                Err(why) => state.error = why,
+            }
+        });
+    }
+
+    /// Bring the display up to the latest release known: fetched, checked,
+    /// tried and put in place; the frame loop is then asked to become it.
+    /// What fails is said in the state, and the display runs on as it is.
+    pub fn run_upgrade(&self) {
+        let (Some(product), Some(release)) = (self.product(), self.upgrade().latest) else {
+            return;
+        };
+        if !upgrade::newer(&release.version, &product.version) || !self.begin_upgrade("downloading")
+        {
+            return;
+        }
+        let done = (|| {
+            let archive = upgrade::download(&release, |bytes| {
+                self.set_upgrade(|state| state.done = bytes);
+            })?;
+            self.set_upgrade(|state| state.phase = "installing".to_string());
+            let paths = upgrade::binary_paths(&product.binary, upgrade::arch_folders());
+            let binary = upgrade::file_from_tar_gz(&archive, &paths)?;
+            let exe =
+                std::env::current_exe().map_err(|e| format!("this binary's own path: {e}"))?;
+            upgrade::install(&binary, &exe, &self.cache, &product, &release)
+        })();
+        match done {
+            Ok(()) => {
+                logline::say!(
+                    Info,
+                    "remotes",
+                    "upgrade: {} {} is in place of {}; starting again as it",
+                    product.name,
+                    release.version,
+                    product.version
+                );
+                self.set_upgrade(|state| state.phase = "restarting".to_string());
+                self.restart.store(true, Ordering::Release);
+                self.generation.fetch_add(1, Ordering::AcqRel);
+            }
+            Err(why) => {
+                logline::say!(Info, "remotes", "upgrade: not done: {why}");
+                self.set_upgrade(|state| {
+                    state.phase = "idle".to_string();
+                    state.error = why;
+                });
+            }
+        }
+    }
+
+    /// Whether an upgrade is in place and the display is to become it.
+    pub fn restart_asked(&self) -> bool {
+        self.restart.load(Ordering::Acquire)
     }
 
     /// The face the display was built with, said once at the start.
@@ -287,10 +416,48 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
                     "release": env!("CARGO_PKG_VERSION"),
                     "protocol": tap::wire::PROTOCOL,
                     "face": app.face(),
+                    "product": app.product(),
+                    "upgrade": app.upgrade(),
                     "configPath": app.path.to_string_lossy(),
                     "cache": app.cache.to_string_lossy(),
                 }),
             );
+        }
+        // The display's own upgrade: a look at the releases, and the
+        // upgrade to the latest one known. Neither takes anything from the
+        // request: what is fetched is fixed by what the display is. Both
+        // answer at once; the state says how it goes.
+        (Method::Post, "/api/upgrade/check") | (Method::Post, "/api/upgrade/install") => {
+            if app.product().is_none() {
+                return respond_error(
+                    request,
+                    400,
+                    "no-upgrade",
+                    "this display is offered no upgrade",
+                );
+            }
+            let state = app.upgrade();
+            if state.phase != "idle" {
+                return respond_error(request, 409, "busy", "an upgrade is under way");
+            }
+            let install = path == "/api/upgrade/install";
+            if install && !state.available {
+                return respond_error(
+                    request,
+                    400,
+                    "up-to-date",
+                    "no later release is known; check first",
+                );
+            }
+            let worker = app.clone();
+            std::thread::spawn(move || {
+                if install {
+                    worker.run_upgrade();
+                } else {
+                    worker.check_upgrade();
+                }
+            });
+            respond_json(request, 202, json!({ "ok": true }));
         }
         // The window, live: full screen, or a window so the desktop behind
         // it can be used (Escape and F on the keyboard do the same).

@@ -79,6 +79,25 @@ pub trait Overlay {
     fn name(&self) -> Option<String> {
         None
     }
+    /// Where the display built with this face is released, for a remote
+    /// display to bring itself up to date as what it is. A face that says
+    /// nothing is offered no upgrade: the display's own release would take
+    /// the face away.
+    fn origin(&self) -> Option<Origin> {
+        None
+    }
+}
+
+/// Where a display built with a face is released: the repository on
+/// GitHub (`owner/name`), what its archives are called before the version
+/// (`glass-evo-` for `glass-evo-0.1.27-x64.tar.gz`), the name of its
+/// binary in an archive, and the version that runs.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Origin {
+    pub repository: String,
+    pub asset: String,
+    pub binary: String,
+    pub version: String,
 }
 
 /// The types a face is written against, in one place.

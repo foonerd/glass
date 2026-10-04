@@ -171,7 +171,7 @@ fn kind_of(kind: PointerKind) -> controls::PointerKind {
 // The contract a face is written against, the same on a screen and in a
 // browser, lives in the `overlay` crate; it is offered from here as it
 // always was, so a face written against `glass::` reads as before.
-pub use overlay::{face, Cover, Overlay, View, Wall};
+pub use overlay::{face, Cover, Origin, Overlay, View, Wall};
 
 /// The display with a face over it: the same arguments and environment as
 /// `run`, the face drawn and asked as the loop goes.
@@ -315,6 +315,12 @@ pub fn run_with(args: Vec<String>, mut face: Option<Box<dyn Overlay>>) -> ExitCo
             },
             "--list" => list = true,
             "--probe-graphics" => return probe::main(),
+            // What this binary is: a display built with a face says the
+            // face's name before this is reached.
+            "--version" | "-V" => {
+                println!("glass {}", env!("CARGO_PKG_VERSION"));
+                return ExitCode::SUCCESS;
+            }
             "--tailor" => match args.next().and_then(|s| tailor::parse_size(&s)) {
                 Some(size) => tailor_to = Some(size),
                 None => {

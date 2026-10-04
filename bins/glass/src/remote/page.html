@@ -132,6 +132,13 @@
     </div>
   </div>
 
+  <div class="panel hidden" id="upgrade-panel">
+    <h2>Version</h2>
+    <div id="upgrade-body"></div>
+    <div style="margin-top:10px"><button class="small" id="btn-upgrade-check">Look for a later release</button> <button class="small primary hidden" id="btn-upgrade-install"></button></div>
+    <div class="help" style="margin-top:8px">An upgrade fetches the latest release of this remote from GitHub, checks it against the release's checksum, tries it, puts it in place of the one that runs and starts the display again as it. The one before is kept beside it, as glass.prev, and comes back by itself if the new one cannot hold on.</div>
+  </div>
+
   <div class="panel">
     <h2>Levels</h2>
     <div class="form">
@@ -174,6 +181,34 @@
   }
   function setDirty(on) { state.dirty = on; $('dirty').classList.toggle('hidden', !on); }
 
+  // ---- the remote's own version ----
+  // What runs, the latest release when it has been looked at, and the
+  // upgrade to it. Only on a display that can bring itself up to date.
+  function renderUpgrade(s) {
+    var p = s.product;
+    var u = s.upgrade || {};
+    $('upgrade-panel').classList.toggle('hidden', !p);
+    if (!p) return;
+    var idle = u.phase === 'idle';
+    var lines = ['This remote is ' + p.name + ' ' + p.version + (p.name === 'Glass' ? '.' : ', on Glass ' + s.release + '.')];
+    if (u.latest) lines.push(u.available ? 'The latest release is ' + u.latest.version + '.' : 'That is the latest release.');
+    var doing = { checking: 'Looking at the releases.', installing: 'Putting it in place.', restarting: 'Starting again as the new version.' }[u.phase];
+    if (u.phase === 'downloading') doing = 'Fetching ' + (u.latest ? u.latest.version : '') + (u.latest && u.latest.bytes ? ', ' + Math.round((u.done || 0) * 100 / u.latest.bytes) + '%' : '') + '.';
+    if (doing) lines.push(doing);
+    if (u.error) lines.push('Not done: ' + u.error + '.');
+    $('upgrade-body').innerHTML = lines.map(function (l) { return '<div>' + esc(l) + '</div>'; }).join('');
+    $('btn-upgrade-check').disabled = !idle;
+    $('btn-upgrade-install').classList.toggle('hidden', !(u.available && u.latest));
+    $('btn-upgrade-install').disabled = !idle;
+    $('btn-upgrade-install').textContent = u.latest ? 'Upgrade to ' + u.latest.version : '';
+  }
+  $('btn-upgrade-check').onclick = function () {
+    api('POST', '/api/upgrade/check').then(function () { return load(); }).catch(function (e) { toast(e.message, 'error'); });
+  };
+  $('btn-upgrade-install').onclick = function () {
+    api('POST', '/api/upgrade/install').then(function () { return load(); }).catch(function (e) { toast(e.message, 'error'); });
+  };
+
   // ---- state ----
   function load() {
     return api('GET', '/api/state').then(function (s) {
@@ -185,6 +220,7 @@
       $('face-panel').classList.toggle('hidden', !s.face);
       $('face-help').textContent = s.face ? 'This remote is the bundle: the display with ' + s.face + ' in it, a clock and the date when the player stands still and a bar of controls. The first choice shows them when the player\'s own screen does, which is when glass-evo holds it. The controls need a touch screen or a mouse here; the clock needs neither.' : '';
       $('paths').textContent = 'Configuration: ' + s.configPath + ' · cache: ' + s.cache;
+      renderUpgrade(s);
       renderStatus(s.status);
       if (!state.dirty) fill(s.config);
       renderPlayers(s.config);
@@ -381,7 +417,7 @@
     });
   }
   loadOrSay();
-  setInterval(function () { api('GET', '/api/state').then(function (s) { renderStatus(s.status); }).catch(function () {}); }, 2000);
+  setInterval(function () { api('GET', '/api/state').then(function (s) { renderStatus(s.status); renderUpgrade(s); }).catch(function () {}); }, 2000);
 })();
 </script>
 </body>
