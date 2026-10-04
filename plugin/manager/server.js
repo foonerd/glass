@@ -20,13 +20,31 @@ const { trackFileFor } = require('./trackfile');
 const logging = require('./logging');
 const { Catalog, CatalogError } = require('./catalog');
 const { Previews } = require('./previews');
-const { Updater, UpdateError } = require('./update');
+const { Updater, UpdateError, compareVersions } = require('./update');
+const stable = require('./stable');
 const { Component, leastOf, pair } = require('./component');
 const views = require('./views');
 const picture = require('./picture');
 const { zipDirectory } = require('./zipwrite');
 const tailor = require('./tailor');
 const { SYMPTOMS, diagnose } = require('./diagnose');
+
+// What a release's zip says of itself: its package, and the three files
+// its settings start from. One that is missing is left out.
+async function releaseTexts(file) {
+  const names = { package: 'package.json', config: 'config.json', meter: 'config/meter.txt.tmpl', spectrum: 'config/spectrum.txt.tmpl' };
+  const texts = {};
+  const zip = await Zip.open(file);
+  try {
+    for (const key of Object.keys(names)) {
+      const entry = zip.entries.find(function (e) { return e.isRegular && e.name === names[key]; });
+      if (entry && entry.size <= 1024 * 1024) texts[key] = (await zip.read(entry)).toString('utf8');
+    }
+  } finally {
+    await zip.close();
+  }
+  return texts;
+}
 const { Capture, CaptureError } = require('./capture');
 
 const MAX_BACKUP_UPLOAD_BYTES = 32 * 1024 * 1024;
@@ -905,7 +923,7 @@ class Manager {
     // the restart did not happen; it no longer stands in the way.
     const upgrading = function () {
       return self.jobs.some(function (j) {
-        if (j.kind !== 'upgrade' && j.kind !== 'rollback') return false;
+        if (j.kind !== 'upgrade' && j.kind !== 'rollback' && j.kind !== 'stable') return false;
         if (j.state === 'done' || j.state === 'failed') return false;
         if (j.state === 'restarting' && Date.now() - Date.parse(j.endedAt || j.startedAt) > 180000) return false;
         return true;
@@ -930,6 +948,25 @@ class Manager {
       job.target = previous.version;
       self.runUpgrade(job, true);
       res.status(202).json({ ok: true, job: job });
+    }));
+
+    // Back to the stable release: what the act would do on this player
+    // and the questions it asks first, then the act itself with the
+    // answers. An answer left out is the suggested one.
+    app.get('/api/stable', wrap(async function (req, res) {
+      res.json(await self.stableView());
+    }));
+
+    app.post('/api/stable', wrap(async function (req, res) {
+      if (upgrading()) return res.status(409).json({ error: 'busy' });
+      const view = await self.stableView();
+      if (view.error) return res.status(502).json(view);
+      const keep = stable.answers((req.body || {}).keep, view.facts);
+      const job = self.newJob('stable', 'Glass ' + view.glass.to);
+      job.target = view.glass.to;
+      job.same = view.glass.action === 'none';
+      self.runStable(job, keep);
+      res.status(202).json({ ok: true, job: job, keep: keep });
     }));
 
     // glass-evo, the component: what is here, the latest release, and
@@ -1274,6 +1311,41 @@ class Manager {
         }
         job.endedAt = new Date().toISOString();
         self.logger.info('glass: manager ' + job.kind + ' from ' + result.from + ' to ' + result.to + ': plugin replaced, backend restarting');
+      } catch (e) {
+        self.finish(job, e);
+      }
+    });
+  }
+
+  // What the way back to the stable release would do here: the step of
+  // Glass and of glass-evo to their latest release that is no test
+  // release, and the questions asked first. The releases are asked of
+  // GitHub at every call; what cannot be asked is said as an error.
+  async stableView() {
+    const self = this;
+    const facts = self.plugin.stableFacts();
+    const out = { facts: facts, questions: stable.questions(facts), glass: null, evo: null };
+    try {
+      const glass = await self.updater.stable();
+      out.glass = stable.step(self.updater.version, glass.version, compareVersions);
+      const here = self.component.installed();
+      const evo = here.installed ? await self.component.stable() : null;
+      out.evo = stable.step(here.installed ? here.version : null, evo ? evo.version : null, compareVersions);
+    } catch (e) {
+      out.error = failure(e);
+    }
+    return out;
+  }
+
+  // Back to the stable release, with the user's answers: the act is the
+  // module's own (`stable.run`), given what it works with here. The job
+  // ends in `restarting`, as an upgrade's does.
+  runStable(job, keep) {
+    const self = this;
+    self.exclusive(async function () {
+      try {
+        await stable.run(job, keep, { updater: self.updater, component: self.component, plugin: self.plugin, texts: releaseTexts, least: leastOf, logger: self.logger });
+        job.endedAt = new Date().toISOString();
       } catch (e) {
         self.finish(job, e);
       }

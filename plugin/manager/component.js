@@ -228,9 +228,15 @@ class Component {
     return this.view();
   }
 
-  // The latest release's zip, checked against the release's digest.
-  async download(job) {
-    const latest = this.latest;
+  // The latest release that is not a test release, asked afresh, whatever
+  // this player takes: what "back to the stable release" goes to.
+  async stable() {
+    return offered(this.fetch, this.releasesUrl, false, ASSET);
+  }
+
+  // A release's zip, checked against the release's digest.
+  async download(job, release) {
+    const latest = release || this.latest;
     if (!latest) throw new ComponentError('no-release', 'no release known; check first');
     if (!latest.sha256) throw new ComponentError('no-digest', 'the release carries no checksum for its zip');
     if (!latest.bytes || latest.bytes > MAX_ZIP_BYTES) throw new ComponentError('bad-release', 'the release zip has an unusable size');
@@ -321,7 +327,16 @@ class Component {
     if (!latest) throw new ComponentError('no-release', 'no release known; check first');
     const now = this.installed();
     if (now.installed && compareVersions(latest.version, now.version) <= 0) throw new ComponentError('up-to-date', 'glass-evo ' + now.version + ' is the latest');
-    const file = await this.download(job);
+    return this.installRelease(job, latest, target);
+  }
+
+  // A given release in place, newer than the one installed or not: the
+  // stable one, for the way back to it. The one before is kept as ever.
+  async installRelease(job, release, target) {
+    const latest = release;
+    if (!latest || !latest.version) throw new ComponentError('no-release', 'no release to install');
+    const now = this.installed();
+    const file = await this.download(job, latest);
     try {
       const manifest = await this.unpack(file, target || { glass: this.glass, least: this.least }, latest.version);
       job.state = 'applying';

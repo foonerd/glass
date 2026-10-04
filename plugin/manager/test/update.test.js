@@ -121,6 +121,47 @@ test('the updater asks whether test releases are taken at every check, and says 
   await fsp.rm(dir, { recursive: true, force: true });
 });
 
+test('the stable release is the latest that is no test release, whatever the player takes, and is staged newer or not', async function () {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glass-upd-stable-'));
+  const zip = Buffer.from('the stable plugin, zipped');
+  const stable = listed('0.8.4');
+  stable.assets[0].size = zip.length;
+  stable.assets[0].digest = 'sha256:' + crypto.createHash('sha256').update(zip).digest('hex');
+  const asked = [];
+  const updater = new Updater({
+    dir: dir,
+    version: '0.8.6',
+    pluginPath: dir,
+    plugin: {},
+    logger: { info: function () {}, warn: function () {} },
+    releasesUrl: 'r/latest',
+    stagingDir: path.join(dir, 'staging'),
+    test: function () { return true; },
+    fetch: async function (url, opts) {
+      asked.push(url);
+      if (opts && opts.sink) { opts.sink(zip, zip.length); return {}; }
+      return { body: Buffer.from(JSON.stringify(url === 'r/latest' ? stable : [listed('0.8.6', { prerelease: true }), stable])) };
+    }
+  });
+  await updater.init();
+  // The player takes test releases and runs one: nothing newer is offered.
+  const view = await updater.check(true);
+  assert.deepEqual([view.latest.version, view.available], ['0.8.6', false]);
+  await assert.rejects(updater.download({}), { code: 'up-to-date' });
+  // The stable release is asked of the latest, not of the list.
+  const release = await updater.stable();
+  assert.deepEqual([release.version, release.prerelease, asked[asked.length - 1]], ['0.8.4', false, 'r/latest']);
+  // And staged, older than what runs here.
+  const job = {};
+  const staged = await updater.stage(job, release);
+  assert.deepEqual([staged.name, staged.version], ['glass-0.8.4.zip', '0.8.4']);
+  assert.deepEqual(await fsp.readFile(staged.file), zip);
+  await assert.rejects(updater.stage(job, null), { code: 'no-release' });
+  await assert.rejects(updater.stage(job, Object.assign({}, release, { sha256: null })), { code: 'no-digest' });
+  await assert.rejects(updater.stage(job, Object.assign({}, release, { sha256: 'f'.repeat(64) })), { code: 'checksum' });
+  await fsp.rm(dir, { recursive: true, force: true });
+});
+
 // A server of one zip that breaks the connection part way through the body
 // for its first `breaks` requests, and answers `status` when one is set.
 function brittle(zip) {

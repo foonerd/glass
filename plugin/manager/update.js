@@ -245,13 +245,27 @@ class Updater {
     const latest = this.latest;
     if (!latest) throw new UpdateError('no-release', 'no release known; check first');
     if (compareVersions(latest.version, this.version) <= 0) throw new UpdateError('up-to-date', 'Glass ' + this.version + ' is the latest');
-    if (!latest.sha256) throw new UpdateError('no-digest', 'the release carries no checksum for its zip');
-    if (!latest.bytes || latest.bytes > MAX_ZIP_BYTES) throw new UpdateError('bad-release', 'the release zip has an unusable size');
+    return this.stage(job, latest);
+  }
+
+  // The latest release that is not a test release, asked afresh, whatever
+  // this player takes: what "back to the stable release" goes to.
+  async stable() {
+    return offered(this.fetch, this.releasesUrl, false, ASSET);
+  }
+
+  // A release's zip in the staging directory, checked against the
+  // release's digest: the latest for an upgrade, the stable one for the
+  // way back to it, newer than what is installed or not.
+  async stage(job, release) {
+    if (!release || !release.version) throw new UpdateError('no-release', 'no release to stage');
+    if (!release.sha256) throw new UpdateError('no-digest', 'the release carries no checksum for its zip');
+    if (!release.bytes || release.bytes > MAX_ZIP_BYTES) throw new UpdateError('bad-release', 'the release zip has an unusable size');
     await fsp.mkdir(this.stagingDir, { recursive: true });
-    const name = 'glass-' + latest.version + '.zip';
+    const name = 'glass-' + release.version + '.zip';
     const file = path.join(this.stagingDir, name);
-    await fetchChecked(latest, file, job, { logger: this.logger });
-    return { name: name, file: file, version: latest.version };
+    await fetchChecked(release, file, job, { fetch: this.fetch, logger: this.logger });
+    return { name: name, file: file, version: release.version };
   }
 
   // The kept zip of the version before the last upgrade, staged for the
@@ -270,11 +284,12 @@ class Updater {
   // Replace the installed plugin with a staged zip: settings backed up,
   // the installed plugin kept as a zip, the configuration files
   // snapshotted and put back after the plugin manager has run its
-  // install script, then the backend restarted.
-  async apply(job, staged) {
+  // install script, then the backend restarted. `options.backup` names a
+  // settings backup the caller made already, and none is made here.
+  async apply(job, staged, options) {
     const self = this;
     job.state = 'backing-up';
-    const backup = self.plugin.backupCreate(self.backupName(staged.version), { automatic: true });
+    const backup = options && options.backup ? { name: options.backup } : self.plugin.backupCreate(self.backupName(staged.version), { automatic: true });
     if (backup.error) self.logger.warn('glass: manager upgrade: settings backup ' + backup.error);
     if (typeof self.plugin.backupPruneAutomatic === 'function') {
       try { self.plugin.backupPruneAutomatic(KEEP_AUTOMATIC_BACKUPS); } catch (e) { /* said in the log */ }
@@ -315,6 +330,8 @@ class Updater {
     return { from: self.version, to: staged.version };
   }
 
+  // A name for an automatic settings backup: `before-<version>` for an
+  // upgrade, `before-<word>` for another act, with the time where taken.
   backupName(version) {
     const base = 'before-' + version;
     const names = (this.plugin.backupList() || []).map(function (b) { return b.name; });

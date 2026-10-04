@@ -464,6 +464,12 @@
       </div>
       <pre id="evo-notes" class="hidden" style="white-space:pre-wrap;margin-top:10px;font:inherit;font-size:13px;color:#ccc;background:#1a1a1a;border:1px solid var(--line);border-radius:8px;padding:10px"></pre>
     </div>
+    <div class="panel" id="stable-panel">
+      <h2 id="stable-title" style="margin:0 0 6px"></h2>
+      <div class="help" id="stable-lead"></div>
+      <div id="stable-body" style="margin-top:10px"></div>
+      <div class="jobs" id="jobs-stable" style="margin-top:10px"></div>
+    </div>
     <div class="panel" id="perf-panel">
       <h2 id="perf-title" style="margin:0 0 10px"></h2>
       <div class="help" id="perf-help" style="margin-bottom:10px"></div>
@@ -854,7 +860,7 @@
     if (name === 'artwork') { loadDisplay(); loadArtwork(); } loadFonts();
     if (name === 'backups') loadBackups();
     if (name === 'status') { loadStatus(); }
-    if (name === 'system') { loadUpdate(false); loadEvo(false); loadPerformance(); loadSharing(); loadTouch(); loadLogging(); loadLegacy(); }
+    if (name === 'system') { loadUpdate(false); loadEvo(false); if (!stableUi) stableIdle(); loadPerformance(); loadSharing(); loadTouch(); loadLogging(); loadLegacy(); }
     if (name === 'screen') { loadScreen(); }
     if (name === 'remotes') loadRemotes();
     if (window.GlassFace) { if (name === 'face') { GlassFace.show(); } else { GlassFace.hide(); } }
@@ -2686,14 +2692,21 @@
     });
   };
   // The job runs until the backend restarts; then the page waits for the target version to answer.
-  function followUpgrade(job) {
+  // `where`: the element the job is drawn in, where not the update panel's;
+  // `same`, the version stays and only the backend restarts, so the page
+  // waits for it to go before it takes an answer for the one that came
+  // back; `failed`, called when the job fails.
+  function followUpgrade(job, where) {
     var target = job.target;
+    var opts = where || {};
+    var jobsEl = $(opts.jobs || 'jobs-update');
+    var wentDown = !opts.same;
     $('btn-upd-install').disabled = true;
     $('btn-upd-rollback').disabled = true;
     var draw = function (j, extra) {
       var pct = j.progress && j.progress.total ? Math.round(j.progress.done * 100 / j.progress.total) : 0;
       var label = { queued: 'MANAGER_JOB_QUEUED', downloading: 'MANAGER_JOB_DOWNLOADING', verifying: 'MANAGER_JOB_CHECKING', 'backing-up': 'MANAGER_JOB_BACKING_UP', applying: 'MANAGER_JOB_APPLYING', restarting: 'MANAGER_UPD_RESTARTING', failed: 'MANAGER_JOB_FAILED' }[j.state] || j.state;
-      $('jobs-update').innerHTML = '<div class="job"><b>' + esc(j.name) + '</b> · ' + esc(t(label)) + (extra ? ' · ' + esc(extra) : '') +
+      jobsEl.innerHTML = '<div class="job"><b>' + esc(j.name) + '</b> · ' + esc(t(label)) + (extra ? ' · ' + esc(extra) : '') +
         (j.state === 'downloading' || j.state === 'backing-up' ? ' ' + pct + '%<div class="progress"><div style="width:' + pct + '%"></div></div>' : '') +
         (j.state === 'failed' && j.error ? ' <span class="muted">' + esc(errorText({ code: j.error.error, message: j.error.message })) + '</span>' : '') + '</div>';
     };
@@ -2704,12 +2717,13 @@
       if (!restarting) {
         api('GET', '/api/jobs/' + job.id).then(function (data) {
           draw(data.job);
-          if (data.job.state === 'failed') { $('btn-upd-install').disabled = false; $('btn-upd-rollback').disabled = false; loadUpdate(false); return; }
-          if (data.job.state === 'restarting') { restarting = true; started = Date.now(); }
+          if (data.job.state === 'failed') { $('btn-upd-install').disabled = false; $('btn-upd-rollback').disabled = false; loadUpdate(false); if (opts.failed) opts.failed(); return; }
+          if (data.job.state === 'restarting') { restarting = true; started = Date.now(); if (data.job.target) target = data.job.target; }
           setTimeout(tick, 1000);
         }).catch(function () {
           // The plugin manager stopped the plugin, and this page's server with it.
           restarting = true;
+          wentDown = true;
           started = Date.now();
           draw({ name: job.name, state: 'restarting' });
           setTimeout(tick, 3000);
@@ -2717,7 +2731,8 @@
         return;
       }
       api('GET', '/api/status').then(function (s) {
-        if (s.version === target) {
+        // An answer from the backend that has not gone yet is not the one waited for.
+        if (s.version === target && (wentDown || Date.now() - started > 30000)) {
           draw({ name: job.name, state: 'restarting' }, t('MANAGER_UPD_DONE') + ' ' + s.version);
           toast(t('MANAGER_UPD_DONE') + ' ' + s.version);
           setTimeout(function () { window.location.reload(); }, 2500);
@@ -2727,6 +2742,7 @@
         if (Date.now() - started > 240000) { draw({ name: job.name, state: 'restarting' }, t('MANAGER_UPD_NOT_BACK')); return; }
         setTimeout(tick, 3000);
       }).catch(function () {
+        wentDown = true;
         draw({ name: job.name, state: 'restarting' }, t('MANAGER_UPD_WAITING'));
         if (Date.now() - started > 240000) { draw({ name: job.name, state: 'restarting' }, t('MANAGER_UPD_NOT_BACK')); return; }
         setTimeout(tick, 3000);
@@ -2734,6 +2750,87 @@
     };
     setTimeout(tick, 1000);
   }
+
+  // ---- back to the stable release ------------------------------------------
+  // The latest release that is no test release, of Glass and of glass-evo,
+  // and the settings back to what it comes with: asked part by part what is
+  // kept, yes or no, then said whole before it is done.
+  var stableUi = null;
+  function stableIdle() {
+    stableUi = null;
+    $('stable-title').textContent = t('MANAGER_STABLE_TITLE');
+    $('stable-lead').textContent = t('MANAGER_STABLE_LEAD');
+    $('stable-body').innerHTML = '<div class="row"><button id="btn-stable-start">' + esc(t('MANAGER_STABLE_START')) + '</button></div>';
+    $('btn-stable-start').onclick = stableStart;
+  }
+  function stableStart() {
+    $('stable-body').textContent = t('MANAGER_LOADING');
+    $('jobs-stable').innerHTML = '';
+    var failed = function (text) {
+      stableIdle();
+      $('stable-body').insertAdjacentHTML('beforeend', '<div class="help">' + esc(t('MANAGER_UPD_CHECK_FAILED') + ' ' + text) + '</div>');
+    };
+    api('GET', '/api/stable').then(function (view) {
+      if (view.error) return failed(view.error.message || view.error.error);
+      stableUi = { view: view, at: 0, keep: {} };
+      view.questions.forEach(function (q) { stableUi.keep[q.id] = q.keep; });
+      stableStep();
+    }).catch(function (e) { failed(errorText(e)); });
+  }
+  // What the act does about one of the two releases, as a sentence.
+  function stableStepLine(name, step) {
+    if (!step || !step.from) return '';
+    return t(step.action === 'none' ? 'MANAGER_STABLE_SUM_STAYS' : 'MANAGER_STABLE_SUM_REPLACED').replace('{name}', name).replace('{from}', step.from).replace('{to}', step.to || '');
+  }
+  function stableStep() {
+    var ui = stableUi;
+    var qs = ui.view.questions;
+    var html;
+    var links = (ui.at > 0 ? '<button class="textlink" data-stable="back">' + esc(t('MANAGER_STABLE_BACK')) + '</button>' : '') + '<button class="textlink" data-stable="cancel">' + esc(t('MANAGER_CANCEL')) + '</button>';
+    if (ui.at < qs.length) {
+      var q = qs[ui.at];
+      var key = q.id.toUpperCase();
+      var said = ui.keep[q.id];
+      html = '<div class="help">' + esc(t('MANAGER_STABLE_STEP').replace('{n}', ui.at + 1).replace('{total}', qs.length)) + '</div>' +
+        '<h3 style="margin:6px 0">' + esc(t('MANAGER_STABLE_Q_' + key)) + '</h3>' +
+        '<div class="help">' + esc(t('MANAGER_STABLE_H_' + key)) + '</div>' +
+        '<div class="row" style="margin-top:10px"><button data-stable="yes"' + (said ? ' class="primary"' : '') + '>' + esc(t('MANAGER_STABLE_YES')) + '</button>' +
+        '<button data-stable="no"' + (said ? '' : ' class="primary"') + '>' + esc(t('MANAGER_STABLE_NO')) + '</button>' + links + '</div>' +
+        '<div class="help" style="margin-top:6px">' + esc(t(q.keep ? 'MANAGER_STABLE_SUGGEST_YES' : 'MANAGER_STABLE_SUGGEST_NO')) + '</div>';
+    } else {
+      var part = function (q) { return t('MANAGER_STABLE_P_' + q.id.toUpperCase()); };
+      // The screen's owner and the test releases are said as what happens, not as settings.
+      var settings = qs.filter(function (q) { return q.id !== 'owner' && q.id !== 'tests'; });
+      var kept = qs.filter(function (q) { return ui.keep[q.id]; }).map(part);
+      var reset = settings.filter(function (q) { return !ui.keep[q.id]; }).map(part);
+      var lines = [stableStepLine('Glass', ui.view.glass), stableStepLine('glass-evo', ui.view.evo)].filter(Boolean);
+      if (ui.view.facts.holds && !ui.keep.owner) lines.push(t('MANAGER_STABLE_SUM_OWNER_BACK'));
+      if (ui.view.facts.tests && !ui.keep.tests) lines.push(t('MANAGER_STABLE_SUM_TESTS_OFF'));
+      lines.push(t('MANAGER_STABLE_SUM_KEPT') + ' ' + (kept.length ? kept.join(', ') : t('MANAGER_STABLE_NOTHING')) + '.');
+      lines.push(t('MANAGER_STABLE_SUM_RESET') + ' ' + (reset.length ? reset.join(', ') : t('MANAGER_STABLE_NOTHING')) + '.');
+      html = '<h3 style="margin:6px 0">' + esc(t('MANAGER_STABLE_SUM_TITLE')) + '</h3>' +
+        '<ul style="margin:6px 0 6px 18px;padding:0">' + lines.map(function (l) { return '<li>' + esc(l) + '</li>'; }).join('') + '</ul>' +
+        '<div class="help">' + esc(t('MANAGER_STABLE_SUM_BACKUP')) + '</div>' +
+        '<div class="row" style="margin-top:10px"><button class="primary" data-stable="do">' + esc(t('MANAGER_STABLE_DO')) + '</button>' + links + '</div>';
+    }
+    $('stable-body').innerHTML = html;
+  }
+  $('stable-body').addEventListener('click', function (e) {
+    var b = e.target.closest('[data-stable]');
+    var ui = stableUi;
+    if (!b || !ui) return;
+    var what = b.getAttribute('data-stable');
+    if (what === 'cancel') return stableIdle();
+    if (what === 'back') { ui.at = Math.max(0, ui.at - 1); return stableStep(); }
+    if (what === 'yes' || what === 'no') { ui.keep[ui.view.questions[ui.at].id] = what === 'yes'; ui.at++; return stableStep(); }
+    if (what === 'do') {
+      b.disabled = true;
+      api('POST', '/api/stable', { keep: ui.keep }).then(function (data) {
+        $('stable-body').innerHTML = '';
+        followUpgrade(data.job, { jobs: 'jobs-stable', same: data.job.same === true, failed: stableIdle });
+      }).catch(function (err) { b.disabled = false; toast(errorText(err), 'error'); });
+    }
+  });
 
   // ---- the kiosk's keyboard ----------------------------------------------
   // Inside Volumio's page on the player's own display, text is typed on

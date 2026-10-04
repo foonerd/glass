@@ -145,6 +145,31 @@ test('getting the component: checked, unpacked for this player, and kept through
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('the way back to the stable release puts an older component in place, checked as any', async () => {
+  const { root, component, offer, job } = rig();
+  await component.init();
+  // A test release is here.
+  offer('0.1.12', { requires: '0.8.0' });
+  await component.check(true);
+  await component.install(job());
+  // The stable release is older. An update does not step back; the way back does.
+  offer('0.1.10', { requires: '0.8.0' });
+  const stable = await component.stable();
+  assert.equal(stable.version, '0.1.10');
+  await component.check(true);
+  await assert.rejects(component.install(job()), { code: 'up-to-date' });
+  assert.deepEqual(await component.installRelease(job(), stable, { glass: '0.8.0', least: '0.1.9' }), { from: '0.1.12', to: '0.1.10' });
+  assert.equal(fs.readFileSync(path.join(root, 'evo/bin/arm/glass-evo'), 'utf8'), 'binary 0.1.10 for arm');
+  assert.deepEqual([component.view().installed.version, component.view().previous.version], ['0.1.10', '0.1.12']);
+  // And the one before goes back in if the rest of the act fails.
+  assert.deepEqual(await component.rollback(), { from: '0.1.10', to: '0.1.12' });
+  // A stable release the Glass going in does not work with is not installed.
+  await assert.rejects(component.installRelease(job(), stable, { glass: '0.8.0', least: '0.1.11' }), { code: 'too-old' });
+  assert.equal(component.view().installed.version, '0.1.12', 'what is here stays');
+  await assert.rejects(component.installRelease(job(), null), { code: 'no-release' });
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('a component that does not check out is not installed, and what is here stays', async () => {
   const { root, component, offer, job } = rig();
   await component.init();

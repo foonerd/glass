@@ -5762,6 +5762,61 @@ Glass.prototype.backupList = function () {
 // directory, unpacks the zip, runs the install script and enables the
 // plugin again. The settings in /data/configuration stay. The code that
 // then runs is still this module until the backend restarts.
+// ---- Back to the stable release: the settings -----------------------------
+
+// What decides which questions the way back asks: whether glass-evo holds
+// the screen, whether it is here, whether this player takes test releases.
+Glass.prototype.stableFacts = function () {
+    var self = this;
+    var owner = { owner: 'kiosk', evo: null };
+    try { owner = self.screenOwnerState(); } catch (e) { /* as the kiosk's */ }
+    return { holds: owner.owner === 'glass-evo', evo: !!(owner.evo && owner.evo.installed), tests: self.testReleases() };
+};
+
+// The settings as they stand, for the plan: the plugin's configuration by
+// key, the meter and the spectrum configuration by section.
+Glass.prototype.stableCurrent = function () {
+    var self = this;
+    var configFile = self.commandRouter.pluginManager.getConfigurationFile(self.context, 'config.json');
+    var read = function (file, parse) { try { return parse(fs.readFileSync(file, 'utf8')); } catch (e) { return {}; } };
+    return { config: read(configFile, JSON.parse), meter: read(MeterConfigFile, ini.parse), spectrum: read(SpectrumConfigFile, ini.parse) };
+};
+
+// The settings a release comes with, from the texts of its three files
+// (config.json and the two templates under config/); a text left out is
+// read from the plugin installed here.
+Glass.prototype.stableDefaults = function (texts) {
+    var given = texts || {};
+    var text = function (name, file) { return typeof given[name] === 'string' ? given[name] : fs.readFileSync(PluginPath + '/' + file, 'utf8'); };
+    return {
+        config: JSON.parse(text('config', 'config.json')),
+        meter: ini.parse(text('meter', 'config/meter.txt.tmpl')),
+        spectrum: ini.parse(text('spectrum', 'config/spectrum.txt.tmpl'))
+    };
+};
+
+// A plan's settings written in place of the ones that stand, and read
+// again so that later saves build on them; the display starts again with
+// them. What the configuration decides beyond its files is applied as
+// after a restore: the display's output and whether the themes stay.
+Glass.prototype.stableWrite = function (planned) {
+    var self = this;
+    var configFile = self.commandRouter.pluginManager.getConfigurationFile(self.context, 'config.json');
+    var write = function (file, text) { fs.writeFileSync(file + '.new', text); fs.renameSync(file + '.new', file); };
+    write(configFile, JSON.stringify(planned.config, null, 4));
+    write(MeterConfigFile, ini.stringify(planned.meter, { whitespace: true }));
+    write(SpectrumConfigFile, ini.stringify(planned.spectrum, { whitespace: true }));
+    self.config.loadFile(configFile);
+    self.loadConfigs();
+    try { self.switch_DisplayPort(parseInt(self.config.get('displayOutput'), 10)); } catch (e) { self.logger.warn(id + 'stable: display output: ' + e.message); }
+    try { self.syncPreserveFlag(self.config.get('doNotDeleteThemes') === true); } catch (e) { self.logger.warn(id + 'stable: preserve flag: ' + e.message); }
+    try { self.noteFrostSuits(); } catch (e) { /* noted at the next start */ }
+    try { self.updateConfigVersion(); } catch (e) { /* at the next change */ }
+    if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+    uiNeedsUpdate = true;
+    try { self.updateUIConfig(); } catch (e) { /* the settings page reads them when opened */ }
+};
+
 Glass.prototype.updateApply = function (stagedName) {
     var self = this;
     var name = String(stagedName || '');
