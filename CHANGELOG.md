@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.61] - 2026-10-04
+
+The last stage of upgrades on a remote display: Android.
+
+- **An Android remote says when a later release is out, and links it.** The Version panel is shown in the Android app's settings page too: it looks at the latest release of what the remote is, and where a later one is out it links that release's package. Opening the link hands it to Android's own installer, which asks, checks the package's signature against the installed app's, and installs it over the app with the settings kept. The app does not install anything by itself, and `POST /api/upgrade/install` answers 400 `by-hand` there. `GET /api/state` says `upgradeInPlace`, false on Android.
+- The Remotes tab's line on a remote that is behind says how each system is brought up to date.
+- Not tried on an Android device or emulator: the look at the releases is the one Linux and Windows use.
+
 ## [0.8.60] - 2026-10-04
 
 Asked by a theme maker: a universal back cover for the albums that have none.
