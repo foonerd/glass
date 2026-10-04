@@ -113,8 +113,6 @@ const RULES: &[(&str, Kind)] = &[
     ("right.origin.y", Kind::YRel),
     ("mono.origin.x", Kind::XRel),
     ("mono.origin.y", Kind::YRel),
-    ("flip.left.x", Kind::XRel),
-    ("flip.right.x", Kind::XRel),
     ("distance", Kind::Len),
     ("step.width.regular", Kind::LenX),
     ("step.width.overload", Kind::LenX),
@@ -191,7 +189,8 @@ const RULES: &[(&str, Kind)] = &[
     ("*.icon.glow", Kind::Len),
     ("*.led", Kind::Size),
     ("*.led.glow", Kind::Len),
-    ("*.marker.*.pos", Kind::Offset),
+    // A marker's place is a share of its gauge, 0 to 100: no pixels in it.
+    ("*.marker.*.pos", Kind::Keep),
     ("*.marker.*.fontsize", Kind::Font),
     ("*.marker.*.image", Kind::Picture),
     // The playinfo fields' other keys, and what does not scale.
@@ -260,6 +259,8 @@ const KEPT: &[&str] = &[
     "fanart.scale",
     "fanart.zorder",
     "fill.alpha",
+    "flip.left.x",
+    "flip.right.x",
     "folderlayer.*",
     "folderlayer.enabled",
     "font.bold",
@@ -565,44 +566,47 @@ pub fn tailor_text(text: &str, plan: &Plan) -> Tailored {
         if trimmed.starts_with('[') {
             section = trimmed.to_string();
         }
-        let rewritten =
-            if trimmed.is_empty() || trimmed.starts_with('#') || trimmed.starts_with('[') {
-                None
-            } else if let Some(eq) = line.find('=') {
-                let key = line[..eq].trim();
-                let value = &line[eq + 1..];
-                match kind_of(key) {
-                    None => {
-                        warnings.push(format!(
-                            "{section} {key}: not a key the cutter knows; kept as it is"
-                        ));
-                        None
-                    }
-                    Some(Kind::Picture) => {
-                        for name in value.split(',').map(str::trim).filter(|n| !n.is_empty()) {
-                            noted(&mut pictures, name);
-                        }
-                        None
-                    }
-                    Some(Kind::Backdrop) => {
-                        for name in value.split(',').map(str::trim).filter(|n| !n.is_empty()) {
-                            noted(&mut pictures, name);
-                            noted(&mut backdrops, name);
-                        }
-                        None
-                    }
-                    Some(kind) => match transform(key, kind, value, plan) {
-                        Ok(Some(new)) => Some(format!("{} = {}", line[..eq].trim_end(), new)),
-                        Ok(None) => None,
-                        Err(why) => {
-                            warnings.push(format!("{section} {why}; kept as it is"));
-                            None
-                        }
-                    },
+        let rewritten = if trimmed.is_empty()
+            || trimmed.starts_with('#')
+            || trimmed.starts_with(';')
+            || trimmed.starts_with('[')
+        {
+            None
+        } else if let Some(eq) = line.find('=') {
+            let key = line[..eq].trim();
+            let value = &line[eq + 1..];
+            match kind_of(key) {
+                None => {
+                    warnings.push(format!(
+                        "{section} {key}: not a key the cutter knows; kept as it is"
+                    ));
+                    None
                 }
-            } else {
-                None
-            };
+                Some(Kind::Picture) => {
+                    for name in value.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+                        noted(&mut pictures, name);
+                    }
+                    None
+                }
+                Some(Kind::Backdrop) => {
+                    for name in value.split(',').map(str::trim).filter(|n| !n.is_empty()) {
+                        noted(&mut pictures, name);
+                        noted(&mut backdrops, name);
+                    }
+                    None
+                }
+                Some(kind) => match transform(key, kind, value, plan) {
+                    Ok(Some(new)) => Some(format!("{} = {}", line[..eq].trim_end(), new)),
+                    Ok(None) => None,
+                    Err(why) => {
+                        warnings.push(format!("{section} {why}; kept as it is"));
+                        None
+                    }
+                },
+            }
+        } else {
+            None
+        };
         out.push_str(rewritten.as_deref().unwrap_or(line));
         out.push_str(ending);
     }
@@ -644,6 +648,20 @@ mod tests {
     /// The parser's own source, held to the table: every key it reads by
     /// a helper, a match arm or a comparison, and every dotted literal,
     /// is a key the table names or a word this list says is a value.
+    #[test]
+    fn flags_percentages_and_comments_are_left_as_they_are() {
+        // A flag is no position and a marker's place is a share of the
+        // gauge, not pixels: neither is scaled. A line that opens with a
+        // semicolon is a comment, as the display reads it.
+        let text = "[m]\nflip.left.x = True\nflip.right.x = False\nprogress.marker.1.pos = 50\nvolume.marker.2.pos = 12.5\n; left.x = 100\n# right.x = 100\nleft.x = 100\n";
+        let t = tailor_text(text, &Plan::fit((1000, 500), (2000, 1000)));
+        assert_eq!(
+            t.text,
+            "[m]\nflip.left.x = True\nflip.right.x = False\nprogress.marker.1.pos = 50\nvolume.marker.2.pos = 12.5\n; left.x = 100\n# right.x = 100\nleft.x = 200\n"
+        );
+        assert!(t.warnings.is_empty(), "{:?}", t.warnings);
+    }
+
     #[test]
     fn every_key_the_parser_reads_is_classified() {
         const VALUES: &[&str] = &[
@@ -861,9 +879,9 @@ mod tests {
     fn the_text_is_rewritten_by_the_kind_of_each_key() {
         let plan = Plan::fit((1000, 500), (2000, 1200));
         assert_eq!((plan.sx, plan.ox, plan.oy), (2.0, 0.0, 100.0));
-        let text = "# a comment\r\n[gold]\r\nmeter.type = circular\r\nmeter.x = 10\r\nmeter.y = 20\r\nleft.x = 5\r\nleft.origin.y = 7\r\ndistance = 30\r\nbgr.filename = gold-bgr.png\r\nalbumart.pos = 100,50\r\nalbumart.dimension = 40,40\r\nplayinfo.title.pos = 10,20,bold\r\nfont.size.bold = 16\r\nvolume.pos = 1,2\r\nvolume.dim = 3,4\r\nvolume.slider.travel = 5,9\r\nvolume.marker.1.pos = 6,6\r\nbutton.play.image = play.png, play-lit.png\r\nvinyl.pos = 10,10\r\nvinyl.center = 20,30\r\nreel.left.center = 5,5\r\ntonearm.pivot.image = 3,4\r\nscreen.bgr = wall.jpg\r\nstart.angle = 45\r\nbar.space = 0.25\r\nscreen.width = 1000\r\nmystery.key = 4\r\nleft.y = oops\r\n";
+        let text = "# a comment\r\n[gold]\r\nmeter.type = circular\r\nmeter.x = 10\r\nmeter.y = 20\r\nleft.x = 5\r\nleft.origin.y = 7\r\ndistance = 30\r\nbgr.filename = gold-bgr.png\r\nalbumart.pos = 100,50\r\nalbumart.dimension = 40,40\r\nplayinfo.title.pos = 10,20,bold\r\nfont.size.bold = 16\r\nvolume.pos = 1,2\r\nvolume.dim = 3,4\r\nvolume.slider.travel = 5,9\r\nvolume.marker.1.pos = 50\r\nbutton.play.image = play.png, play-lit.png\r\nvinyl.pos = 10,10\r\nvinyl.center = 20,30\r\nreel.left.center = 5,5\r\ntonearm.pivot.image = 3,4\r\nscreen.bgr = wall.jpg\r\nstart.angle = 45\r\nbar.space = 0.25\r\nscreen.width = 1000\r\nmystery.key = 4\r\nleft.y = oops\r\n";
         let t = tailor_text(text, &plan);
-        let want = "# a comment\r\n[gold]\r\nmeter.type = circular\r\nmeter.x = 20\r\nmeter.y = 140\r\nleft.x = 10\r\nleft.origin.y = 14\r\ndistance = 60\r\nbgr.filename = gold-bgr.png\r\nalbumart.pos = 200,200\r\nalbumart.dimension = 80,80\r\nplayinfo.title.pos = 20,140,bold\r\nfont.size.bold = 32\r\nvolume.pos = 2,104\r\nvolume.dim = 6,8\r\nvolume.slider.travel = 10,18\r\nvolume.marker.1.pos = 12,12\r\nbutton.play.image = play.png, play-lit.png\r\nvinyl.pos = 20,120\r\nvinyl.center = 40,160\r\nreel.left.center = 10,110\r\ntonearm.pivot.image = 6,8\r\nscreen.bgr = wall.jpg\r\nstart.angle = 45\r\nbar.space = 0.25\r\nscreen.width = 2000\r\nmystery.key = 4\r\nleft.y = oops\r\n";
+        let want = "# a comment\r\n[gold]\r\nmeter.type = circular\r\nmeter.x = 20\r\nmeter.y = 140\r\nleft.x = 10\r\nleft.origin.y = 14\r\ndistance = 60\r\nbgr.filename = gold-bgr.png\r\nalbumart.pos = 200,200\r\nalbumart.dimension = 80,80\r\nplayinfo.title.pos = 20,140,bold\r\nfont.size.bold = 32\r\nvolume.pos = 2,104\r\nvolume.dim = 6,8\r\nvolume.slider.travel = 10,18\r\nvolume.marker.1.pos = 50\r\nbutton.play.image = play.png, play-lit.png\r\nvinyl.pos = 20,120\r\nvinyl.center = 40,160\r\nreel.left.center = 10,110\r\ntonearm.pivot.image = 6,8\r\nscreen.bgr = wall.jpg\r\nstart.angle = 45\r\nbar.space = 0.25\r\nscreen.width = 2000\r\nmystery.key = 4\r\nleft.y = oops\r\n";
         assert_eq!(t.text, want);
         assert_eq!(
             t.pictures,
