@@ -2587,7 +2587,16 @@ impl NowPlaying {
             duration: number("duration").unwrap_or(0.0),
             seek: number("seek").unwrap_or(0.0) / 1000.0,
             albumart: text("albumart"),
-            track_type: text("trackType"),
+            track_type: {
+                // A track of a cue sheet is reported with no type at all:
+                // its address says what it is.
+                let said = text("trackType");
+                if said.is_empty() && text("uri").starts_with("cue://") {
+                    "cue".to_string()
+                } else {
+                    said
+                }
+            },
             bitrate: text("bitrate"),
             position: number("position").map(|p| p as i64).unwrap_or(0),
         }
@@ -2766,6 +2775,19 @@ mod tests {
         assert_eq!(playing.bitrate, "320", "a number reads as its text");
         assert_eq!(playing.track_type, "flac");
         assert_eq!(playing.volatile, None);
+    }
+
+    #[test]
+    fn a_track_of_a_cue_sheet_is_of_the_type_cue() {
+        let of = |text: &str| NowPlaying::from_value(&serde_json::from_str::<Value>(text).unwrap());
+        let cue = r#"{"status":"play","title":"Sacrifice","uri":"cue://NAS/Test/Disc1/CD1.cue@0","samplerate":"44.1 kHz","service":"mpd"}"#;
+        assert_eq!(of(cue).track_type, "cue");
+        // A type the player names stands, whatever the address.
+        let named = r#"{"status":"play","uri":"cue://NAS/a.cue@1","trackType":"flac"}"#;
+        assert_eq!(of(named).track_type, "flac");
+        // And another address with no type stays without one.
+        let none = r#"{"status":"play","uri":"mnt/NAS/a.flac"}"#;
+        assert_eq!(of(none).track_type, "");
     }
 
     #[test]
