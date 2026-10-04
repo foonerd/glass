@@ -2,6 +2,13 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.55] - 2026-10-04
+
+Found by running "Back to the stable release" on a player for the first time.
+
+- **After the way back, the test release left behind is not offered again.** The Manager keeps the release it last saw for a day. A player that took test releases had a test release kept there, and after "Back to the stable release" turned test releases off, the System tab still offered that test release until the next daily look. The act now forgets what was last seen, of Glass and of glass-evo, when test releases are not kept, so the next look asks for the stable release.
+- The act itself went as written on a Raspberry Pi 5 with glass-evo holding its screen: both stepped back to their stable releases, the screen stayed where it was kept, the kept parts of the settings stayed and the rest went to the defaults, and the backup named `before-stable` brought the settings back.
+
 ## [0.8.54] - 2026-10-04
 
 0.8.53 was tagged and never released: its build was refused, rightly, and this release is that one made to load on a player.
