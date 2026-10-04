@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.36] - 2026-10-04
+
+Asked on the forum: what is the difference between "what the player's screen shows" and "the theme alone"?
+
+- **The first choice of "The Face tab and Anymote show" says what it does.** It read "what the player's screen shows", which reads as a copy of the screen, the kiosk's own pages included; the browser views show Glass's theme and never a copy of the kiosk's screens, and the choice only says when glass-evo's clock and controls lie over the theme. It reads "the Glass interface while glass-evo holds the player's screen" now, in English, German and French, and the same on a bundle remote's settings page ("This remote shows"). The line under the choice names "the first choice" and says that the pages are never a copy of the kiosk's screens. Nothing changes in what the choices do, or in the configuration (`follow`, `face`, `theme`; on a remote `follow`, `always`, `off`).
+
 ## [0.8.35] - 2026-10-04
 
 From the first real failure the reason of 0.8.28 was read in.
