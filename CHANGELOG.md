@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.35] - 2026-10-04
+
+From the first real failure the reason of 0.8.28 was read in.
+
+- **Mesa's notes that it has no `drirc` are not quoted as the reason.** A display that died as it started is started again with the graphics libraries' own words on, and what reads as a fault among them joins the reason on the Screen tab. Asked to speak, Mesa notes at every start that it cannot open `/etc/drirc` and `~/.drirc`, a settings file hardly any system has; "No such file or directory" read as a fault, and in the one report that came, those two lines were all the reason added, pointing at a file that does not matter. They are left out (`relaunch.reason`).
+
 ## [0.8.34] - 2026-10-04
 
 For a player that gives one cover many addresses: the Squeezelite plugin stamps the address of a Lyrion server's cover with the time of every state it pushes, so each play, pause and change of volume names the same cover anew.
