@@ -980,6 +980,10 @@ Glass.prototype.launchEnv = function () {
     // Where face themes are kept, the user's before the ones glass-evo
     // ships, for the face to read the one chosen.
     env.GLASS_FACES = FACES_DIR + ':' + EVO_LOOKS_DIR;
+    // Where the face finds the picture it shows when nothing plays; the
+    // folder is there for the share from the first launch.
+    try { fs.ensureDirSync(BACKGROUNDS_DIR); } catch (e) { /* made at the first upload */ }
+    env.GLASS_BACKGROUNDS = BACKGROUNDS_DIR;
     return env;
 };
 
@@ -2143,6 +2147,9 @@ const EVO_DIR = DATA_DIR + '/evo';
 // Face themes: a folder each, with the theme's text in face.txt. The
 // user's own, and the looks the glass-evo component ships.
 const FACES_DIR = DATA_DIR + '/faces';
+// The user's own pictures for the screen when nothing plays.
+const BACKGROUNDS_DIR = DATA_DIR + '/backgrounds';
+const backgrounds = require('./manager/backgrounds');
 const EVO_LOOKS_DIR = EVO_DIR + '/themes';
 // The unit of the X server brought up for the face, shipped with the plugin and enabled by this path on a take.
 const OWN_X_UNIT_FILE = PluginPath + '/' + screenowner.OWN_X_UNIT + '.service';
@@ -2150,6 +2157,64 @@ const OWN_X_UNIT_FILE = PluginPath + '/' + screenowner.OWN_X_UNIT + '.service';
 // The face's own settings, as the display's configuration has them: the
 // look's keys by name, the face themes installed, and the plugin's word on
 // whether frost over a moving theme suits this board.
+// ---- The user's pictures for the screen when nothing plays -----------------
+
+// The pictures in the folder, by name: those dropped there through the
+// share and those uploaded here.
+Glass.prototype.backgroundsList = function () {
+    var names = [];
+    try { names = fs.readdirSync(BACKGROUNDS_DIR).filter(backgrounds.isName).sort(); } catch (e) { /* no folder yet */ }
+    return names.map(function (name) {
+        var bytes = 0;
+        try { bytes = fs.statSync(BACKGROUNDS_DIR + '/' + name).size; } catch (e) {}
+        return { name: name, bytes: bytes };
+    });
+};
+
+// One picture's file, only from inside the folder.
+Glass.prototype.backgroundPath = function (name) {
+    if (!backgrounds.isName(name)) { return null; }
+    var file = BACKGROUNDS_DIR + '/' + name;
+    try { return fs.statSync(file).isFile() ? file : null; } catch (e) { return null; }
+};
+
+// An uploaded file taken into the folder where its first bytes say it is a
+// picture the face reads, under a name the settings can carry.
+Glass.prototype.backgroundAdd = function (file, rawName) {
+    var self = this;
+    var head = Buffer.alloc(backgrounds.TELLING);
+    var fd;
+    try {
+        fd = fs.openSync(file, 'r');
+        fs.readSync(fd, head, 0, backgrounds.TELLING, 0);
+    } catch (e) { return { error: 'not-a-picture' }; } finally { if (fd !== undefined) { try { fs.closeSync(fd); } catch (e) {} } }
+    var ending = backgrounds.endingOf(head);
+    if (!ending) { return { error: 'not-a-picture' }; }
+    var name = backgrounds.safeName(rawName, ending);
+    if (!name) { return { error: 'bad-name' }; }
+    fs.ensureDirSync(BACKGROUNDS_DIR);
+    fs.moveSync(file, BACKGROUNDS_DIR + '/' + name, { overwrite: true });
+    self.logger.info(id + 'backgrounds: uploaded ' + name);
+    // One uploaded over the picture on show: the face reads it again.
+    self.loadConfigs();
+    if (meterConfig && meterConfig.current && meterConfig.current['face.idle.picture'] === name && fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+    return { name: name };
+};
+
+// A picture removed; where it was the one on show, the choice goes with it.
+Glass.prototype.backgroundRemove = function (name) {
+    var self = this;
+    var file = self.backgroundPath(name);
+    if (!file) { return { error: 'not-found' }; }
+    fs.removeSync(file);
+    self.loadConfigs();
+    if (meterConfig && meterConfig.current && meterConfig.current['face.idle.picture'] === name) {
+        self.applyFaceChanges({ 'face.idle.picture': null });
+    }
+    self.logger.info(id + 'backgrounds: removed ' + name);
+    return { removed: name };
+};
+
 Glass.prototype.faceSettings = function () {
     var self = this;
     self.loadConfigs();
@@ -2183,6 +2248,7 @@ Glass.prototype.faceSettings = function () {
         builtIn: builtIn,
         looks: looks,
         themeLook: themeLook,
+        backgrounds: self.backgroundsList().map(function (b) { return b.name; }),
         frostSuits: facelook.frostSuits(self.boardInfo().class)
     };
 };

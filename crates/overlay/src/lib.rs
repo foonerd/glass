@@ -103,7 +103,7 @@ pub struct Origin {
 /// The types a face is written against, in one place.
 pub mod face {
     pub use controls::PointerKind;
-    pub use expose::{blur, fit_art, read_art, render_text, ui, Fonts, Frame};
+    pub use expose::{blur, fit_art, read_art, read_covering, render_text, ui, Fonts, Frame};
     pub use intake::Command;
     /// A text file and whether one is there, read where the display reads
     /// its own: the file system on a player, the page's file table in a browser.

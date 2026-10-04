@@ -355,6 +355,45 @@ pub fn read_art(path: &Path, w: u32, h: u32, mask: Option<&Frame>) -> Option<Fra
     Some(fitted)
 }
 
+/// A picture file made to cover `w` by `h`: scaled, keeping its shape, until
+/// it fills both ways, and what then stands over is cut off evenly on both
+/// sides. A photograph behind a whole screen. None where the file is no
+/// picture.
+pub fn read_covering(path: &Path, w: u32, h: u32) -> Option<Frame> {
+    let (w, h) = (w.max(1), h.max(1));
+    let image = image::ImageReader::new(std::io::Cursor::new(read_file(path)?))
+        .with_guessed_format()
+        .ok()?
+        .decode()
+        .ok()?
+        .into_rgba8();
+    let (iw, ih) = (image.width().max(1), image.height().max(1));
+    // The larger of the two ratios fills both ways.
+    let (sw, sh) = if u64::from(w) * u64::from(ih) >= u64::from(h) * u64::from(iw) {
+        (
+            w,
+            ((u64::from(ih) * u64::from(w)).div_ceil(u64::from(iw)) as u32).max(h),
+        )
+    } else {
+        (
+            ((u64::from(iw) * u64::from(h)).div_ceil(u64::from(ih)) as u32).max(w),
+            h,
+        )
+    };
+    let scaled = if (sw, sh) == (iw, ih) {
+        image
+    } else {
+        image::imageops::resize(&image, sw, sh, image::imageops::FilterType::Triangle)
+    };
+    let cut = image::imageops::crop_imm(&scaled, (sw - w) / 2, (sh - h) / 2, w, h).to_image();
+    Some(Frame {
+        blend: Blend::Normal,
+        width: w,
+        height: h,
+        rgba: cut.into_raw(),
+    })
+}
+
 /// Stretch a frame to `w` by `h` with bilinear filtering.
 pub fn fit_art(frame: &Frame, w: u32, h: u32) -> Frame {
     let (w, h) = (w.max(1), h.max(1));
@@ -10204,5 +10243,44 @@ mod analyser_tests {
             "an eighth of a second on it has moved"
         );
         assert_eq!(record.paced(medium, 130) % 6.0, 0.0);
+    }
+
+    #[test]
+    fn a_picture_covers_a_screen_of_another_shape_from_its_middle() {
+        // Four columns by two rows: red, green, blue, white, the same in both rows.
+        let dir = std::env::temp_dir().join(format!("glass-covering-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let file = dir.join("wide.png");
+        let mut wide = image::RgbaImage::new(4, 2);
+        for y in 0..2 {
+            for (x, colour) in [
+                [255, 0, 0, 255],
+                [0, 255, 0, 255],
+                [0, 0, 255, 255],
+                [255, 255, 255, 255],
+            ]
+            .iter()
+            .enumerate()
+            {
+                wide.put_pixel(x as u32, y, image::Rgba(*colour));
+            }
+        }
+        wide.save(&file).unwrap();
+        // A square screen takes the two middle columns and both rows.
+        let square = read_covering(&file, 2, 2).expect("a picture");
+        assert_eq!((square.width, square.height), (2, 2));
+        assert_eq!(&square.rgba[0..4], &[0, 255, 0, 255]);
+        assert_eq!(&square.rgba[4..8], &[0, 0, 255, 255]);
+        // Its own size is itself; a larger screen is filled whole.
+        let same = read_covering(&file, 4, 2).expect("a picture");
+        assert_eq!(&same.rgba[0..4], &[255, 0, 0, 255]);
+        assert_eq!(&same.rgba[12..16], &[255, 255, 255, 255]);
+        let tall = read_covering(&file, 3, 6).expect("a picture");
+        assert_eq!((tall.width, tall.height, tall.rgba.len()), (3, 6, 72));
+        assert!(tall.rgba.chunks(4).all(|p| p[3] == 255), "no gap is left");
+        std::fs::write(dir.join("not.png"), b"not a picture").unwrap();
+        assert!(read_covering(&dir.join("not.png"), 4, 4).is_none());
+        assert!(read_covering(&dir.join("absent.png"), 4, 4).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

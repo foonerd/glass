@@ -404,6 +404,7 @@
       <div class="help" id="look-lead"></div>
       <div class="help" id="look-theme-note" hidden></div>
       <div class="looks" id="look-cards"></div>
+      <div id="look-pictures" hidden></div>
       <div class="look-cols">
         <div class="look-side">
           <div id="look-preview"></div>
@@ -1950,7 +1951,8 @@
     html += '<div class="lp-bar"' + open('buttons') + ' style="' + glass('glass.bar', v['colours.tint'], '0 1px') + '">' + ['previous', opts.mode === 'idle' ? 'play' : 'pause', 'next', 'minus', 'plus', 'more'].map(function (name) {
       return '<svg viewBox="0 0 24 24" style="fill:' + fill + '">' + LOOK_ICONS[name] + '</svg>';
     }).join('') + '</div>';
-    var picture = opts.picture ? ';background-image:url(&quot;' + esc(opts.picture.replace(/["\\()\s]/g, function (c) { return '%' + c.charCodeAt(0).toString(16); })) + '&quot;)' : '';
+    var dimmed = opts.dim ? 'linear-gradient(rgba(0,0,0,' + opts.dim + '),rgba(0,0,0,' + opts.dim + ')),' : '';
+    var picture = opts.picture ? ';background-image:' + dimmed + 'url(&quot;' + esc(opts.picture.replace(/["\\()\s]/g, function (c) { return '%' + c.charCodeAt(0).toString(16); })) + '&quot;)' : '';
     return '<div class="lp" style="--s:' + opts.scale + ';--from:' + from + ';--barh:clamp(5.56cqh, calc(var(--u) * ' + units('measure.bar') + '), 33.3cqh)' + picture + '">' + html + '</div>';
   }
   // A drawn clock in a likeness is drawn by glass-evo itself: the module its
@@ -2076,7 +2078,8 @@
         field('MANAGER_LOOK_INK', colour('colours.ink'))]],
       ['backgrounds', 'MANAGER_LOOK_BACKGROUNDS', [
         field('MANAGER_LOOK_HOW_SOLID', slider('glass.bar', 'solid', 10, 100, 1, 'CLEAR', 'SOLID')),
-        field('MANAGER_LOOK_BLUR', onoff('glass.frost', 'frost'), esc(t(lookUi.f.frostSuits ? 'MANAGER_LOOK_BLUR_SUITS' : 'MANAGER_LOOK_BLUR_HEAVY')))]],
+        field('MANAGER_LOOK_BLUR', onoff('glass.frost', 'frost'), esc(t(lookUi.f.frostSuits ? 'MANAGER_LOOK_BLUR_SUITS' : 'MANAGER_LOOK_BLUR_HEAVY'))),
+        field('MANAGER_LOOK_PICTURE_DIM', slider('idle.dim', 'share', 0, 90, 1, 'NONE', 'FULL'), '', 'idlepic')]],
       ['clock', 'MANAGER_LOOK_CLOCK', [
         field('MANAGER_LOOK_SHOW_CLOCK', onoff('clock.show', 'switch')),
         field('MANAGER_LOOK_SHOWS', pattern('clock.format', LOOK.CLOCK_PATTERNS), '', 'clock'),
@@ -2114,10 +2117,33 @@
     var cards = [{ name: '', title: t('MANAGER_LOOK_BUILTIN'), says: t('MANAGER_LOOK_BUILTIN_SAYS'), keys: {} }].concat((f.looks || []).map(function (l) {
       return { name: l.name, title: l.name, says: l.keys['theme.description'] || '', keys: l.keys };
     }));
+    // After the looks, and apart from them: the picture of the user's own
+    // for when nothing plays, which goes with whichever look is chosen.
+    var pic = lookUi.v['idle.picture'];
+    var tile = '<button class="look-card' + (lookUi.pictures ? ' on' : '') + '" data-idle-pic="1" aria-expanded="' + (lookUi.pictures ? 'true' : 'false') + '">' +
+      lookLikeness(lookUi.v, { mode: 'idle', scale: scale, suits: !!f.frostSuits, picture: pic ? lookPicUrl(pic) : null, dim: pic ? LOOK.share(lookUi.v['idle.dim'], 0.25) : 0, pick: false }) +
+      '<div class="cap">' + esc(t('MANAGER_LOOK_PICTURE')) + '<small>' + esc(pic || t('MANAGER_LOOK_PICTURE_NONE')) + '</small></div></button>';
     return cards.map(function (c) {
       return '<button class="look-card" data-look="' + esc(c.name) + '">' + lookLikeness(LOOK.lay(f.builtIn, c.keys), { mode: 'idle', scale: scale, suits: !!f.frostSuits, picture: lookUi.picture, pick: false }) +
         '<div class="cap">' + esc(c.title) + '<small>' + esc(c.says) + '</small></div></button>';
-    }).join('');
+    }).join('') + tile;
+  }
+  function lookPicUrl(name) { return '/api/backgrounds/' + encodeURIComponent(name) + '/file'; }
+  // The pictures to choose from: none (the theme), each in the folder, and an upload.
+  function lookPictures() {
+    var box = $('look-pictures');
+    box.hidden = !lookUi.pictures;
+    if (!lookUi.pictures) return;
+    var chosen = lookUi.v['idle.picture'];
+    var thumb = function (name) {
+      var art = name ? 'background:#111 center/cover url(&quot;' + esc(lookPicUrl(name).replace(/["\\()\s]/g, function (c) { return '%' + c.charCodeAt(0).toString(16); })) + '&quot;)' : 'background:#111';
+      return '<div style="position:relative"><button class="look-card' + (name === chosen ? ' on' : '') + '" data-pic="' + esc(name) + '" style="width:100%"><div style="aspect-ratio:16/9;' + art + '"></div>' +
+        '<div class="cap">' + esc(name || t('MANAGER_LOOK_PICTURE_THEME')) + '</div></button>' +
+        (name ? '<button class="small" data-pic-del="' + esc(name) + '" title="' + esc(t('MANAGER_DELETE')) + '" style="position:absolute;top:6px;right:6px">\u00d7</button>' : '') + '</div>';
+    };
+    box.innerHTML = '<div class="help">' + esc(t('MANAGER_LOOK_PICTURE_HELP')) + '</div>' +
+      '<div class="looks">' + [''].concat(lookUi.f.backgrounds || []).map(thumb).join('') + '</div>' +
+      '<div class="row" style="margin:-6px 0 16px"><label class="help" for="look-pic-file">' + esc(t('MANAGER_LOOK_PICTURE_UPLOAD')) + '</label> <input type="file" id="look-pic-file" accept="image/jpeg,image/png,image/webp"></div>';
   }
   // The panel as the model stands: the cards too where the looks, the
   // picture or the face size may have changed.
@@ -2128,7 +2154,7 @@
     var suits = !!f.frostSuits;
     var scale = { large: 1.4, car: 2 }[$('screen-face').value] || 1;
     var place = lookPlace(v);
-    if (cards) $('look-cards').innerHTML = lookCards(scale);
+    if (cards) { $('look-cards').innerHTML = lookCards(scale); lookPictures(); }
     Array.prototype.forEach.call($('look-cards').children, function (card) {
       var on = card.getAttribute('data-look') === lookUi.chosen;
       card.classList.toggle('on', on);
@@ -2136,7 +2162,9 @@
     });
     // A size is the user's own where it is not the one the look comes with.
     var own = { clock: !!lookUi.base && v['measure.clock'] !== lookUi.base['measure.clock'], date: !!lookUi.base && v['measure.date'] !== lookUi.base['measure.date'] };
-    $('look-preview').innerHTML = lookLikeness(v, { mode: lookUi.mode, scale: scale, suits: suits, picture: lookUi.picture, pick: true, own: own });
+    // When nothing plays, a picture of the user's own stands in the theme's place.
+    var idlePic = lookUi.mode === 'idle' && v['idle.picture'];
+    $('look-preview').innerHTML = lookLikeness(v, { mode: lookUi.mode, scale: scale, suits: suits, picture: idlePic ? lookPicUrl(v['idle.picture']) : lookUi.picture, dim: idlePic ? LOOK.share(v['idle.dim'], 0.25) : 0, pick: true, own: own });
     lookFit($('look-panel'));
     // The fit is of a size: made again when the panel's changes (the window's, a tab shown).
     if (!lookUi.watch && window.ResizeObserver) {
@@ -2164,7 +2192,7 @@
     });
     // A row shows while it has something to say: a clock's rows while the
     // clock shows, a date's own background while the date stands at the top.
-    var when = { clock: LOOK.isOn(v['clock.show']), date: LOOK.isOn(v['date.show']), buttons: true };
+    var when = { clock: LOOK.isOn(v['clock.show']), date: LOOK.isOn(v['date.show']), buttons: true, idlepic: !!v['idle.picture'] };
     // The clock's faces show where the glass-evo that is here knows them
     // (its built-in look names the key), and each face's own rows with it.
     var clockFace = LOOK.clockFace(v);
@@ -2255,7 +2283,38 @@
     else if (kind === 'place' || kind === 'choice') v[key] = el.value;
     paintLook();
   }
-  $('look-cards').onclick = function (e) { var card = e.target.closest('[data-look]'); if (card) lookChoose(card.getAttribute('data-look')); };
+  $('look-cards').onclick = function (e) {
+    if (e.target.closest('[data-idle-pic]')) { lookUi.pictures = !lookUi.pictures; paintLook(true); return; }
+    var card = e.target.closest('[data-look]'); if (card) lookChoose(card.getAttribute('data-look'));
+  };
+  // The pictures: one chosen (or none, the theme), one removed from the player, one uploaded and chosen.
+  $('look-pictures').onclick = function (e) {
+    var del = e.target.closest('[data-pic-del]');
+    if (del) {
+      var name = del.getAttribute('data-pic-del');
+      confirmDialog(t('MANAGER_DELETE'), t('MANAGER_LOOK_PICTURE_DELETE_ASK') + ' ' + name, t('MANAGER_DELETE')).then(function (yes) {
+        if (!yes) return;
+        api('DELETE', '/api/backgrounds/' + encodeURIComponent(name)).then(function (r) {
+          lookUi.f.backgrounds = r.backgrounds || [];
+          if (lookUi.v['idle.picture'] === name) { lookUi.v['idle.picture'] = ''; lookUi.saved.v['idle.picture'] = ''; }
+          paintLook(true);
+        }).catch(function (err) { toast(errorText(err), 'error'); });
+      });
+      return;
+    }
+    var pick = e.target.closest('[data-pic]');
+    if (pick) { lookUi.v['idle.picture'] = pick.getAttribute('data-pic'); lookUi.mode = 'idle'; paintLook(true); }
+  };
+  $('look-pictures').onchange = function (e) {
+    var input = e.target;
+    if (input.id !== 'look-pic-file' || !input.files || !input.files[0]) return;
+    var file = input.files[0];
+    api('POST', '/api/backgrounds/upload?name=' + encodeURIComponent(file.name), file, 'application/octet-stream').then(function (r) {
+      lookUi.f.backgrounds = (r.backgrounds || []).map(function (b) { return b.name; });
+      lookUi.v['idle.picture'] = r.name; lookUi.mode = 'idle';
+      paintLook(true);
+    }).catch(function () { toast(t('MANAGER_LOOK_PICTURE_BAD'), 'error'); });
+  };
   $('look-mode').onclick = function (e) { var b = e.target.closest('[data-mode]'); if (b) { lookUi.mode = b.getAttribute('data-mode'); paintLook(); } };
   $('look-preview').onclick = function (e) { var part = e.target.closest('[data-open]'); if (part) lookOpen(part.getAttribute('data-open'), true); };
   $('look-preview').onkeydown = function (e) {

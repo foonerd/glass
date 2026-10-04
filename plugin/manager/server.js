@@ -23,6 +23,7 @@ const { Previews } = require('./previews');
 const { Updater, UpdateError, compareVersions } = require('./update');
 const stable = require('./stable');
 const remotebehind = require('./remotebehind');
+const backgrounds = require('./backgrounds');
 const { Component, leastOf, pair } = require('./component');
 const views = require('./views');
 const picture = require('./picture');
@@ -717,6 +718,36 @@ class Manager {
       const result = self.plugin.removeCustomFont(String(req.params.name));
       if (result.error) return res.status(result.error === 'not-found' ? 404 : 400).json(result);
       res.json(Object.assign({ ok: true, removed: result.removed, freed: result.freed }, self.plugin.fontsSettings()));
+    }));
+
+    // The user's pictures for the screen when nothing plays: listed, one
+    // served for the page to show, uploaded, removed.
+    app.get('/api/backgrounds', function (req, res) {
+      res.json({ backgrounds: self.plugin.backgroundsList() });
+    });
+    app.get('/api/backgrounds/:name/file', function (req, res) {
+      const file = self.plugin.backgroundPath(String(req.params.name));
+      if (!file) return res.status(404).json({ error: 'not-found' });
+      res.sendFile(file, { maxAge: 0 });
+    });
+    app.post('/api/backgrounds/upload', wrap(async function (req, res) {
+      const rawName = String(req.query.name || req.headers['x-file-name'] || 'picture');
+      const file = path.join(os.tmpdir(), 'glass-background-' + process.pid + '-' + Date.now());
+      try {
+        await self.receive(req, file, backgrounds.MAX_BYTES);
+      } catch (e) {
+        await fsp.rm(file, { force: true });
+        return res.status(e.code === 'too-large' ? 413 : 400).json(failure(e));
+      }
+      const result = self.plugin.backgroundAdd(file, rawName);
+      await fsp.rm(file, { force: true });
+      if (result.error) return res.status(400).json(result);
+      res.json({ ok: true, name: result.name, backgrounds: self.plugin.backgroundsList() });
+    }));
+    app.delete('/api/backgrounds/:name', wrap(async function (req, res) {
+      const result = self.plugin.backgroundRemove(String(req.params.name));
+      if (result.error) return res.status(404).json(result);
+      res.json(Object.assign({ ok: true, removed: result.removed }, self.plugin.faceSettings()));
     }));
 
     app.post('/api/artwork/clear-cache', wrap(async function (req, res) {
