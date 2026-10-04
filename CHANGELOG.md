@@ -2,6 +2,13 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.34] - 2026-10-04
+
+For a player that gives one cover many addresses: the Squeezelite plugin stamps the address of a Lyrion server's cover with the time of every state it pushes, so each play, pause and change of volume names the same cover anew.
+
+- **The cover on show stays while the same track's next address is fetched.** A cover went dark from the moment its address changed until the picture at the new address had arrived, which was right for a new track and wrong for the same one: the cover blinked at every pause, every change of volume and three seconds into every song. The picture on show is kept now for as long as the track is the same (its place, title, artist and album) and replaced when the next one is there; a new track's cover is waited for with none on show, as before (`intake::cover_to_show`). On the player's screen, on a remote and in the browser views.
+- **The Manager's route for the browser views takes the addresses the player reported of late.** It fetched only the one address the player's state names now, so a page asking for the address it was told a moment before, with another state pushed in between, was answered "not found" and showed no cover until the next state. The last eight addresses the player reported are known to the route (`picture.reported`); anything the player did not report is refused as before.
+
 ## [0.8.33] - 2026-10-04
 
 Reported by theme makers: the sample rate would not sit under the format icon.
