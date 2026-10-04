@@ -316,6 +316,7 @@ const KEPT: &[&str] = &[
     "play.pause",
     "playinfo.align",
     "playinfo.center",
+    "playinfo.samplerate.align",
     "playinfo.scrolling.speed",
     "playinfo.scrolling.speed.*",
     "playinfo.text.center",

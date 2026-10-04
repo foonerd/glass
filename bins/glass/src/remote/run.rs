@@ -245,6 +245,7 @@ fn status_frame(lines: &[String]) -> expose::Frame {
                         direction: Default::default(),
                         loop_thirds: false,
                         font_file: String::new(),
+                        box_as: String::new(),
                     },
                     Some(fonts),
                 );

@@ -210,6 +210,9 @@ pub struct TextMotion {
     /// style, size, colour and font stay the same; glyphs are set once, not
     /// every frame.
     lines: HashMap<(u32, u32), (String, Frame)>,
+    /// The width of each text a box is measured by, in its type, kept as
+    /// the lines are.
+    measures: HashMap<String, u32>,
 }
 
 impl TextMotion {
@@ -1772,6 +1775,32 @@ impl TextMotion {
             self.lines.insert(key, (line_key, line));
         }
         let line_w = self.lines[&key].1.width;
+        // A text with no box of its own may be given one by measure: as
+        // wide as another text set in the same type. It is aligned in that
+        // box and never cut by it.
+        if text.max_width == 0 && !text.box_as.is_empty() {
+            let measure_key = format!(
+                "{}\0{:?}\0{}\0{}",
+                text.box_as, text.style, text.size, text.font_file
+            );
+            let box_w = *self.measures.entry(measure_key).or_insert_with(|| {
+                let font = fonts.and_then(|f| f.get_for(text.style, &text.font_file));
+                let fallback = fonts.and_then(Fonts::fallback);
+                render_line(font, fallback, text.size, text.color, &text.box_as, 0)
+                    .unwrap_or_else(|| bitmap_line(&text.box_as))
+                    .width
+            });
+            self.states.remove(&key);
+            return TextPlan {
+                key,
+                at: (
+                    align_text_x(text.x, box_w, line_w, text.align) as i32,
+                    text.y as i32,
+                ),
+                width: None,
+                clip: None,
+            };
+        }
         let box_w = text.max_width;
         if box_w == 0 || line_w <= box_w || text.speed <= 0.0 {
             self.states.remove(&key);
@@ -8631,6 +8660,7 @@ mod tests {
                 direction: ScrollDirection::Bounce,
                 loop_thirds: false,
                 font_file: String::new(),
+                box_as: String::new(),
             }],
             ..Scene::default()
         };
@@ -8746,6 +8776,7 @@ mod tests {
                 direction: ScrollDirection::Bounce,
                 loop_thirds: false,
                 font_file: String::new(),
+                box_as: String::new(),
             }],
             ..Scene::default()
         };
@@ -8921,6 +8952,59 @@ mod tests {
     }
 
     #[test]
+    fn a_text_is_aligned_in_its_box_and_in_a_box_given_by_measure() {
+        // Without fonts a line is set in the built-in bitmap face: sixteen
+        // pixels a character, so the widths are known.
+        let text = |content: &str, max_width: u32, align: TextAlign, box_as: &str| Text {
+            x: 100,
+            y: 50,
+            style: TextStyle::Regular,
+            size: 20,
+            color: [255, 255, 255],
+            max_width,
+            text: content.into(),
+            align,
+            speed: 0.0,
+            direction: ScrollDirection::Bounce,
+            loop_thirds: false,
+            font_file: String::new(),
+            box_as: box_as.into(),
+        };
+        let place = |t: &Text| {
+            let plan = TextMotion::default().advance(t, None, 0);
+            (plan.at.0, plan.width)
+        };
+        // "44.1 kHz" is 8 characters, 128 pixels, in a box of 200.
+        assert_eq!(
+            place(&text("44.1 kHz", 200, TextAlign::Left, "")),
+            (100, Some(128))
+        );
+        assert_eq!(
+            place(&text("44.1 kHz", 200, TextAlign::Center, "")),
+            (136, Some(128))
+        );
+        assert_eq!(
+            place(&text("44.1 kHz", 200, TextAlign::Right, "")),
+            (172, Some(128))
+        );
+        // A box by measure: "-44.1 kHz 24 bit-" is 17 characters, 272 pixels.
+        let measured = |content: &str, align| place(&text(content, 0, align, lead::SAMPLE_BOX_AS));
+        assert_eq!(measured("44.1 kHz", TextAlign::Center), (172, None));
+        assert_eq!(measured("44.1 kHz", TextAlign::Right), (244, None));
+        assert_eq!(measured("44.1 kHz", TextAlign::Left), (100, None));
+        // A line wider than the measure starts at the box's left and is not cut.
+        assert_eq!(
+            measured("DSD 11.28 MHz 1 bit!", TextAlign::Center),
+            (100, None)
+        );
+        // No box and no measure: at its position, whatever the alignment.
+        assert_eq!(
+            place(&text("44.1 kHz", 0, TextAlign::Center, "")),
+            (100, None)
+        );
+    }
+
+    #[test]
     fn theme_text_draws_below_its_top_and_clips_at_max_width() {
         let Some(file) = any_font() else {
             println!("no TrueType font on this host; fallback path only");
@@ -8950,6 +9034,7 @@ mod tests {
             direction: ScrollDirection::Bounce,
             loop_thirds: false,
             font_file: String::new(),
+            box_as: String::new(),
         };
         draw_text_styled(&mut frame, &text, Some(&fonts));
         let lit = |frame: &Frame, x0: u32, x1: u32| -> usize {
@@ -9011,6 +9096,7 @@ mod tests {
             direction: ScrollDirection::Bounce,
             loop_thirds: false,
             font_file: String::new(),
+            box_as: String::new(),
         };
         draw_text_moving(&mut frame, &text, Some(&fonts), &mut motion, 0);
         assert_eq!(motion.offset(10, 2), Some(0.0), "starts at the left end");

@@ -48,6 +48,10 @@ pub struct Text {
     /// A font file of its own, or empty for the style's font.
     #[serde(default)]
     pub font_file: String,
+    /// With no box of its own (`max_width` zero): a text whose width, set
+    /// in the same type, is the box this one is aligned in. Empty for none.
+    #[serde(default)]
+    pub box_as: String,
 }
 
 /// The album art to show: the box from the skin and the file holding the picture.
@@ -434,6 +438,7 @@ fn text(spec: &TextSpec, content: String, color: [u8; 3]) -> Text {
         direction: ScrollDirection::Bounce,
         loop_thirds: false,
         font_file: spec.font_file.clone(),
+        box_as: spec.box_as.clone(),
     }
 }
 
@@ -853,6 +858,7 @@ mod tests {
             align: TextAlign::Left,
             speed: 40.0,
             font_file: String::new(),
+            box_as: String::new(),
         }
     }
 

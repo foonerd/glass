@@ -720,7 +720,16 @@ pub struct TextSpec {
     /// name one with `time.*.font`.
     #[serde(default)]
     pub font_file: String,
+    /// For a text with no box of its own: a text whose width, set in the
+    /// same type, is the box it is aligned in. Empty for none.
+    #[serde(default)]
+    pub box_as: String,
 }
+
+/// The widest sample rate line a player is expected to send, with a hair of
+/// room at either end: the box of a sample rate line that names no width in
+/// a meter that gives its texts one, as PeppyMeter Screensaver measured it.
+pub const SAMPLE_BOX_AS: &str = "-44.1 kHz 24 bit-";
 
 /// The meter engine's `[data.source]` conditioning of the pipe levels.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -4205,6 +4214,7 @@ pub fn meter_texts(
                 align,
                 speed,
                 font_file: String::new(),
+                box_as: String::new(),
             })
         };
     // Time fields: none or `digi` picks the clock font, which `time.*.font`
@@ -4245,6 +4255,7 @@ pub fn meter_texts(
             align: TextAlign::Left,
             speed: 0.0,
             font_file,
+            box_as: String::new(),
         })
     };
     // A number placed by the theme: the volume beside its gauge. `x,y[,style]`,
@@ -4275,6 +4286,7 @@ pub fn meter_texts(
                 .unwrap_or("")
                 .trim()
                 .to_string(),
+            box_as: String::new(),
         })
     };
     let volume_value = value_field("volume.value");
@@ -4299,7 +4311,23 @@ pub fn meter_texts(
         {
             s.color = type_color;
         }
+        // The line's box is its own width; where it names none and the
+        // meter gives its texts one, room for the widest line. In its box
+        // the line is aligned as its own key says, else as the meter's
+        // texts are: a centred theme centres it under its format icon.
         s.max_width = number("playinfo.samplerate.maxwidth", 0);
+        if s.max_width == 0 && global_max > 0 {
+            s.box_as = SAMPLE_BOX_AS.to_string();
+        }
+        s.align = match get("playinfo.samplerate.align")
+            .map(|w| w.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("left") => TextAlign::Left,
+            Some("center") | Some("centre") => TextAlign::Center,
+            Some("right") => TextAlign::Right,
+            _ => align,
+        };
     }
     let title = spec(
         "playinfo.title.pos",
@@ -5017,6 +5045,57 @@ mod tests {
         assert_eq!(
             meter_indicator("[bar]\nindicator.filename = bar-indicator.png\n", "bar").as_deref(),
             Some("bar-indicator.png")
+        );
+    }
+
+    #[test]
+    fn the_sample_rate_line_is_aligned_in_its_box_as_the_theme_says() {
+        let speeds = ScrollSpeeds {
+            mode: "default".into(),
+            title: 0.0,
+            artist: 0.0,
+            album: 0.0,
+        };
+        let sample = |keys: &str| {
+            let text = format!("[m]\nplayinfo.samplerate.pos = 100,200,regular\n{keys}");
+            meter_texts(&text, "m", 1280, &speeds).sample.unwrap()
+        };
+        // A centred theme with a box for the line: centred in it, as the
+        // theme's other texts are. Most of the collection is this.
+        let line = sample("playinfo.center = True\nplayinfo.samplerate.maxwidth = 180\n");
+        assert_eq!(
+            (line.x, line.max_width, line.align, line.box_as.as_str()),
+            (100, 180, TextAlign::Center, "")
+        );
+        let line = sample("playinfo.align = right\nplayinfo.samplerate.maxwidth = 180\n");
+        assert_eq!(line.align, TextAlign::Right);
+        // Its own word wins over the meter's.
+        let line = sample(
+            "playinfo.center = True\nplayinfo.samplerate.maxwidth = 180\nplayinfo.samplerate.align = left\n",
+        );
+        assert_eq!(line.align, TextAlign::Left);
+        let line =
+            sample("playinfo.samplerate.maxwidth = 180\nplayinfo.samplerate.align = Center\n");
+        assert_eq!(line.align, TextAlign::Center);
+        // No width of its own in a meter that gives its texts one: the box
+        // is measured, room for the widest line.
+        let line = sample("playinfo.center = True\nplayinfo.maxwidth = 500\n");
+        assert_eq!(
+            (line.max_width, line.align, line.box_as.as_str()),
+            (0, TextAlign::Center, SAMPLE_BOX_AS)
+        );
+        // No box at all: the line starts at its position, whatever the word.
+        let line = sample("playinfo.center = True\n");
+        assert_eq!((line.max_width, line.box_as.as_str()), (0, ""));
+        // A theme that says nothing is left aligned, as it was.
+        let line = sample("playinfo.samplerate.maxwidth = 180\n");
+        assert_eq!(line.align, TextAlign::Left);
+        // The meter's other texts take no measured box.
+        let text =
+            "[m]\nplayinfo.title.pos = 10,20\nplayinfo.maxwidth = 500\nplayinfo.center = True\n";
+        assert_eq!(
+            meter_texts(text, "m", 1280, &speeds).title.unwrap().box_as,
+            ""
         );
     }
 
