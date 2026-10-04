@@ -2420,7 +2420,7 @@ Glass.prototype.setScreenOwner = function (owner, options) {
                 register.error = problem(e);
                 self.writeRegister(register);
                 self.logger.warn(id + 'screen owner: the take did not finish: ' + register.error);
-                return { error: 'GLASS.MANAGER_OWNER_FAILED', data: { message: register.error } };
+                return { error: 'GLASS.MANAGER_OWNER_FAILED', message: register.error };
             });
     }
     if (owner === 'kiosk') {
@@ -2445,7 +2445,7 @@ Glass.prototype.setScreenOwner = function (owner, options) {
             }, function (e) {
                 self.screenYieldUntil = 0;
                 self.logger.warn(id + 'screen owner: the way back did not finish: ' + problem(e));
-                return { error: 'GLASS.MANAGER_OWNER_FAILED', data: { message: problem(e) } };
+                return { error: 'GLASS.MANAGER_OWNER_FAILED', message: problem(e) };
             });
     }
     return Promise.resolve({ error: 'GLASS.MANAGER_BAD_REQUEST' });
