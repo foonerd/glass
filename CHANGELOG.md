@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.62] - 2026-10-04
+
+The way back to the stable release for a player whose Manager does not come up.
+
+- **`get-glass.sh --stable`.** The installer run with `--stable` on a player that has Glass does from a shell what the System tab's "Back to the stable release" does, for the case where the Manager cannot be reached to press it: `curl -fsSL https://raw.githubusercontent.com/foonerd/glass/main/get-glass.sh | sh -s -- --stable`, as the volumio user. It fetches the latest release that is no test release, writes a settings backup named `before-stable` that the Backups tab restores, hands the release to the player's plugin manager as an update where another version is installed, lays the settings as that release's own plan makes them (its defaults, with the screen's and the network's set-up kept and test releases off), and restarts the backend. It asks nothing: the answers are the suggested ones.
+- It leaves glass-evo and whose the screen is as they are; the Manager, once it is back, steps glass-evo and offers the screen's question.
+- The plan is not the script's: it runs `manager/stable.js` out of the release's own zip, so the shell and the Manager cannot come to differ. A release older than 0.8.52 has none, and the script says so.
+
 ## [0.8.61] - 2026-10-04
 
 The last stage of upgrades on a remote display: Android.
