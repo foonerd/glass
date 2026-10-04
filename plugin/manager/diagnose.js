@@ -107,8 +107,13 @@ const CHECKS = [
     run(f) {
       const lines = linesOfThisRun(f);
       if (lines.some((l) => /missing or is the wrong CPU/.test(l))) return cause('deaths', 'DIAG_LOG_WRONG_BINARY', { arch: f.status.arch || '?' });
-      const window = lines.filter((l) => /could not open the window/.test(l));
-      if (window.length) return cause('deaths', 'DIAG_LOG_NO_WINDOW', { count: window.length });
+      // A window that would not open, in the display's own words: SDL's
+      // for a driver or a window it could not have, or the display's for
+      // a player with nothing to draw on. The line that sums a death up
+      // repeats them and is not counted twice.
+      const window = lines.filter((l) => !/the display did not run/.test(l) &&
+        /glass: (SDL error: |x11 not available|wayland not available|kmsdrm not available|No available video device|no screen to draw on)/.test(l));
+      if (window.length) return cause('deaths', 'DIAG_LOG_NO_WINDOW', { count: window.length, last: window[window.length - 1].replace(/^.*?glass:\s*/, '') });
       const died = lines.filter((l) => /the display died \d+ s after launch/.test(l));
       if (died.length) return cause('deaths', 'DIAG_LOG_DIED', { count: died.length, last: died[died.length - 1].replace(/^.*?glass:\s*/, '') }, 'system');
       return ok('deaths', 'DIAG_LOG_NO_DEATHS', { lines: lines.length });

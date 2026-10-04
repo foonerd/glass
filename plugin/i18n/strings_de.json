@@ -487,7 +487,7 @@
     "MANAGER_DIAG_DISPLAY_UP": "Die Anzeige ist auf dem Bildschirm.",
     "MANAGER_DIAG_DISPLAY_NOT_UP": "Der Player spielt, und die Anzeige ist nicht auf dem Bildschirm. Sie öffnet sich {timeout} s nach Beginn der Wiedergabe. Bleibt sie weg, sagt das Protokoll im Tab System, warum.",
     "MANAGER_DIAG_LOG_WRONG_BINARY": "Der Starter meldet, dass das Programm der Anzeige fehlt oder für eine andere CPU ist ({arch}). Installiere das Zip von der Release-Seite für diesen Player.",
-    "MANAGER_DIAG_LOG_NO_WINDOW": "Die Anzeige konnte ihr Fenster nicht öffnen ({count}-mal seit dem Start des Players): kein X-Server unter der gewählten Display-Nummer, oder der Kiosk lief nicht.",
+    "MANAGER_DIAG_LOG_NO_WINDOW": "Die Anzeige konnte ihr Fenster nicht öffnen ({count} Mal seit dem Start des Players). In ihren eigenen Worten: {last}. Kein X-Server unter der gewählten Display-Nummer, ein Kiosk, der nicht lief, oder Grafikbibliotheken, die nicht funktionieren: der Abschnitt Bildschirm der Statusübersicht sagt in den Zeilen Kiosk und Grafik, was davon.",
     "MANAGER_DIAG_LOG_DIED": "Die Anzeige ist seit dem Start des Players {count}-mal gestorben. Zuletzt: {last}. Die Zeilen davor im Protokoll, im Tab System, sagen, was schiefging.",
     "MANAGER_DIAG_LOG_NO_DEATHS": "Kein Absturz der Anzeige in den {lines} Zeilen von Glass seit dem Start des Players.",
     "MANAGER_DIAG_TAP_IN": "Der Audio-Abgriff steht am Anfang des Tonwegs.",

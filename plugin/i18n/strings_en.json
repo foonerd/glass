@@ -487,7 +487,7 @@
     "MANAGER_DIAG_DISPLAY_UP": "The display is on the screen.",
     "MANAGER_DIAG_DISPLAY_NOT_UP": "The player plays and the display is not on the screen. It opens {timeout} s after playback begins. If it stays away, the log on the System tab says why.",
     "MANAGER_DIAG_LOG_WRONG_BINARY": "The launcher says the display's binary is missing or is for another CPU ({arch}). Install the zip from the releases page for this player.",
-    "MANAGER_DIAG_LOG_NO_WINDOW": "The display could not open its window ({count} times since the player started): no X server at the display number chosen, or the kiosk was not running.",
+    "MANAGER_DIAG_LOG_NO_WINDOW": "The display could not open its window ({count} times since the player started). In its own words: {last}. No X server at the display number chosen, a kiosk that was not running, or graphics libraries that do not work: the status sheet’s Screen section says which, in its Kiosk and Graphics rows.",
     "MANAGER_DIAG_LOG_DIED": "The display died {count} times since the player started. The last: {last}. The lines before it in the log, on the System tab, say what went wrong.",
     "MANAGER_DIAG_LOG_NO_DEATHS": "No display death in Glass's {lines} lines since the player started.",
     "MANAGER_DIAG_TAP_IN": "The audio tap heads the sound path.",

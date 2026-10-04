@@ -234,3 +234,27 @@ test('graphics that cannot draw on the screen itself are named as the cause, wit
   assert.strictEqual(find({ asked: true, applies: true, ok: false, reason: 'x', x: x }, 'artwork'), undefined);
   for (const key of ['DIAG_GRAPHICS_BROKEN', 'DIAG_GRAPHICS_X_SOFTWARE', 'DIAG_GRAPHICS_SOFTWARE', 'DIAG_GRAPHICS_OK']) assert.ok(strings['MANAGER_' + key], key);
 });
+
+test('a window the display could not open is found by what the display really writes', () => {
+  const at = '2026-10-01T04:58:0';
+  const line = (n, words) => at + n + '+0100 player volumio[9]: info: glass: ' + words;
+  const find = function (lines) {
+    const f = healthy();
+    f.log = lines;
+    return diagnose('restarts', f).findings.find(function (x) { return x.check === 'deaths'; });
+  };
+  // As a player wrote it: SDL's words, relayed, then the line that sums the death up.
+  const egl = find([
+    line(1, "SDL error: Can't load EGL/GL library on window creation."),
+    at + '1+0100 player volumio[9]: error: glass: the display did not run: exit 1 glass: SDL error: Can\'t load EGL/GL library on window creation.',
+    at + '1+0100 player volumio[9]: warn: glass: the display died 0 s after launch; next attempt in 1 s'
+  ]);
+  assert.deepStrictEqual([egl.kind, egl.key, egl.with.count], ['cause', 'DIAG_LOG_NO_WINDOW', 1]);
+  assert.strictEqual(egl.with.last, "SDL error: Can't load EGL/GL library on window creation.");
+  // An X server that does not admit the display, and a player with nothing to draw on.
+  assert.strictEqual(find([line(1, 'x11 not available'), line(2, 'x11 not available')]).with.count, 2);
+  assert.strictEqual(find([line(1, 'no screen to draw on: no X server, no Wayland and no KMS/DRM device (SDL fell back to offscreen)')]).key, 'DIAG_LOG_NO_WINDOW');
+  // The sentence the check looked for until 0.8.42 was never written by anything.
+  assert.notStrictEqual(find([line(1, 'something else entirely')]).key, 'DIAG_LOG_NO_WINDOW');
+  assert.ok(strings.MANAGER_DIAG_LOG_NO_WINDOW.indexOf('{last}') !== -1);
+});
