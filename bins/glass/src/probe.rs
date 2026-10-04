@@ -347,6 +347,16 @@ mod linux {
             ),
         );
 
+        // Whoever opens a card that has no master becomes its master, and a
+        // display that starts in that moment would find the card taken and
+        // give up. The probe is no display: it lets go of it at once.
+        const DRM_IOCTL_DROP_MASTER: u32 = 0x641f;
+        // SAFETY: an ioctl with no argument on a descriptor that is open;
+        // its failing, where another holds the card, changes nothing.
+        unsafe {
+            libc::ioctl(file.as_raw_fd(), DRM_IOCTL_DROP_MASTER as _);
+        }
+
         // A GBM device on it.
         let gbm = match load("libgbm.so.1") {
             Ok(library) => library,
