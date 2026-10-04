@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.41] - 2026-10-04
+
+Found while the wiki was read against the code.
+
+- **A backup you make is never pruned, whatever you name it.** The backups an upgrade writes on its own are kept to the newest five, and one made before backups carried a mark was known by its name, `before-<version>`. A backup made by hand under such a name was taken for one of them and removed with the oldest. A backup now says in its manifest whether an upgrade wrote it or a user did (`automatic`, true or false), and only what the manifest leaves unsaid is judged by its name (`update.automaticBackup`). Backups made by hand before this release under such a name are still judged by it.
+
 ## [0.8.40] - 2026-10-04
 
 Found while the wiki was read against the code.
