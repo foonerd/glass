@@ -554,7 +554,13 @@ pub fn texts(skin: &SkinDesc, meta: &Metadata) -> Vec<Text> {
         }
     }
     if let Some(spec) = &skin.volume_value {
-        out.push(text(spec, meta.volume.to_string(), spec.color));
+        let words = volume_words(
+            &skin.volume_format,
+            &skin.volume_mute,
+            meta.volume,
+            meta.mute,
+        );
+        out.push(text(spec, words, spec.color));
     }
     if let Some(spec) = &skin.time {
         // While the display persists after a pause in countdown mode, the
@@ -583,6 +589,22 @@ pub fn texts(skin: &SkinDesc, meta: &Metadata) -> Vec<Text> {
 }
 
 /// One step of the line. Headless mode may publish this and skip raster.
+/// The volume as the theme words it: the number alone; inside the theme's
+/// pattern where it has one (`VOL {} %`, the first `{}` taking the number; a
+/// pattern with no `{}` is none); and, while the player is muted, the
+/// theme's word for that where it has one.
+fn volume_words(format: &str, mute: &str, volume: impl std::fmt::Display, muted: bool) -> String {
+    if muted && !mute.is_empty() {
+        return mute.to_string();
+    }
+    let number = volume.to_string();
+    if format.contains("{}") {
+        format.replacen("{}", &number, 1)
+    } else {
+        number
+    }
+}
+
 pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
     let meter_max = skin.meter_max.max(1.0);
     let spectrum_max = skin.spectrum_max.max(1.0);
@@ -1373,5 +1395,26 @@ mod analyser_tests {
             a.levels[0][3]
         );
         assert!((a.hold[0][3] - want).abs() < 1e-6, "the hold's mean too");
+    }
+
+    #[test]
+    fn the_volume_is_worded_as_the_theme_asks() {
+        assert_eq!(volume_words("", "", 45, false), "45");
+        assert_eq!(volume_words("VOL {} %", "", 45, false), "VOL 45 %");
+        assert_eq!(volume_words("{}%", "", 100, false), "100%");
+        assert_eq!(
+            volume_words("{} of {}", "", 7, false),
+            "7 of {}",
+            "the first takes the number"
+        );
+        assert_eq!(
+            volume_words("VOL", "", 45, false),
+            "45",
+            "a pattern with no place for the number is none"
+        );
+        // Muted: the theme's word where it has one, else the number as ever.
+        assert_eq!(volume_words("VOL {} %", "MUTE", 45, true), "MUTE");
+        assert_eq!(volume_words("VOL {} %", "", 45, true), "VOL 45 %");
+        assert_eq!(volume_words("VOL {} %", "MUTE", 45, false), "VOL 45 %");
     }
 }

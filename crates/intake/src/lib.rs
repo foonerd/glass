@@ -2493,6 +2493,8 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         skin.time_elapsed = time_elapsed;
         skin.time_total = time_total;
         skin.volume_value = volume_value;
+        skin.volume_format = texts.volume_format;
+        skin.volume_mute = texts.volume_mute;
         skin.next_title = texts.next_title;
         skin.next_artist = texts.next_artist;
         skin.next_album = texts.next_album;

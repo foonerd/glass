@@ -3382,6 +3382,11 @@ pub struct MeterTexts {
     pub ticker: Option<TickerSpec>,
     /// `volume.value.pos`: the volume as a number, beside its gauge.
     pub volume_value: Option<TextSpec>,
+    /// `volume.value.format`: words around the number, `{}` where it goes;
+    /// empty for the number alone. `volume.value.mute`: what stands in its
+    /// place while the player is muted; empty for the number as ever.
+    pub volume_format: String,
+    pub volume_mute: String,
 }
 
 /// One snapshot of the outside world. `plot` turns it into a scene.
@@ -3433,6 +3438,12 @@ pub struct SkinDesc {
     /// The volume as a number, beside its gauge.
     #[serde(default)]
     pub volume_value: Option<TextSpec>,
+    /// Words around that number, `{}` where it goes, and what stands in
+    /// its place while the player is muted; empty for neither.
+    #[serde(default)]
+    pub volume_format: String,
+    #[serde(default)]
+    pub volume_mute: String,
     #[serde(default)]
     pub time: Option<TextSpec>,
     #[serde(default)]
@@ -3516,6 +3527,8 @@ impl SkinDesc {
             album: None,
             sample: None,
             volume_value: None,
+            volume_format: String::new(),
+            volume_mute: String::new(),
             time: None,
             art: None,
             type_area: None,
@@ -4285,7 +4298,7 @@ pub fn meter_texts(
         })
     };
     // A number placed by the theme: the volume beside its gauge. `x,y[,style]`,
-    // its own size, colour and width, centred as the meter's texts are.
+    // its own size, colour, width and alignment (the meter's unless said).
     let value_field = |prefix: &str| -> Option<TextSpec> {
         let pos = get(&format!("{prefix}.pos"))?;
         let mut parts = pos.split(',');
@@ -4294,8 +4307,18 @@ pub fn meter_texts(
         let style = match parts.next().map(|w| w.trim().to_ascii_lowercase()) {
             Some(word) if word == "bold" => TextStyle::Bold,
             Some(word) if word == "regular" => TextStyle::Regular,
+            Some(word) if word == "italic" => TextStyle::Italic,
             Some(word) if word == "digi" => TextStyle::Digi,
             _ => TextStyle::Light,
+        };
+        let own_align = match get(&format!("{prefix}.align"))
+            .map(|w| w.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("left") => TextAlign::Left,
+            Some("center") | Some("centre") => TextAlign::Center,
+            Some("right") => TextAlign::Right,
+            _ => align,
         };
         Some(TextSpec {
             x,
@@ -4306,7 +4329,7 @@ pub fn meter_texts(
                 .and_then(color_triplet)
                 .unwrap_or(font_color),
             max_width: number(&format!("{prefix}.maxwidth"), 0),
-            align,
+            align: own_align,
             speed: 0.0,
             font_file: get(&format!("{prefix}.font"))
                 .unwrap_or("")
@@ -4316,6 +4339,9 @@ pub fn meter_texts(
         })
     };
     let volume_value = value_field("volume.value");
+    let volume_words = |key: &str| get(key).map(|w| w.trim().to_string()).unwrap_or_default();
+    let volume_format = volume_words("volume.value.format");
+    let volume_mute = volume_words("volume.value.mute");
     let time = time_field("remaining", font_color);
     let time_color = time.as_ref().map(|t| t.color).unwrap_or(font_color);
     let time_elapsed = time_field("elapsed", time_color);
@@ -4425,6 +4451,8 @@ pub fn meter_texts(
         ),
         sample,
         volume_value,
+        volume_format,
+        volume_mute,
         time,
         time_elapsed,
         time_total,
@@ -5072,6 +5100,55 @@ mod tests {
             meter_indicator("[bar]\nindicator.filename = bar-indicator.png\n", "bar").as_deref(),
             Some("bar-indicator.png")
         );
+    }
+
+    #[test]
+    fn the_volume_number_takes_a_style_an_alignment_and_words_of_its_own() {
+        let speeds = ScrollSpeeds {
+            mode: "default".into(),
+            title: 0.0,
+            artist: 0.0,
+            album: 0.0,
+        };
+        let texts = |keys: &str| {
+            let text = format!("[m]\nplayinfo.center = True\nvolume.value.pos = 581,371{keys}");
+            meter_texts(&text, "m", 1280, &speeds)
+        };
+        // As a theme has written it so far: light unless said, the meter's alignment, the number alone.
+        let plain = texts(",bold\nvolume.value.fontsize = 48\nvolume.value.maxwidth = 116\n");
+        let spec = plain.volume_value.expect("a number");
+        assert_eq!(
+            (
+                spec.x,
+                spec.y,
+                spec.style,
+                spec.size,
+                spec.max_width,
+                spec.align
+            ),
+            (581, 371, TextStyle::Bold, 48, 116, TextAlign::Center)
+        );
+        assert_eq!(
+            (plain.volume_format.as_str(), plain.volume_mute.as_str()),
+            ("", "")
+        );
+        // Italic is a style too, the alignment may be its own, and the words around it.
+        let own = texts(",italic\nvolume.value.align = right\nvolume.value.format = VOL {} %\nvolume.value.mute = MUTE\n");
+        let spec = own.volume_value.expect("a number");
+        assert_eq!(
+            (spec.style, spec.align),
+            (TextStyle::Italic, TextAlign::Right)
+        );
+        assert_eq!(
+            (own.volume_format.as_str(), own.volume_mute.as_str()),
+            ("VOL {} %", "MUTE")
+        );
+        // A word that is no alignment leaves the meter's.
+        let odd = texts("\nvolume.value.align = sideways\n");
+        assert_eq!(odd.volume_value.expect("a number").align, TextAlign::Center);
+        // No position, no number, whatever else is said.
+        let none = meter_texts("[m]\nvolume.value.format = VOL {}\n", "m", 1280, &speeds);
+        assert!(none.volume_value.is_none());
     }
 
     #[test]
