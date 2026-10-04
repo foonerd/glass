@@ -2156,7 +2156,8 @@
     var place = lookPlace(v);
     if (cards) { $('look-cards').innerHTML = lookCards(scale); lookPictures(); }
     Array.prototype.forEach.call($('look-cards').children, function (card) {
-      var on = card.getAttribute('data-look') === lookUi.chosen;
+      // The picture's tile is marked while its chooser is open; a look's card while it is the one chosen.
+      var on = card.hasAttribute('data-idle-pic') ? !!lookUi.pictures : card.getAttribute('data-look') === lookUi.chosen;
       card.classList.toggle('on', on);
       card.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
