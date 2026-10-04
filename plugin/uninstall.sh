@@ -1,5 +1,28 @@
 #!/bin/bash
-# Glass uninstaller. Themes stay when the settings asked for it.
+# Glass uninstaller. Themes stay when the settings asked for it; the
+# settings backups stay always.
+
+# What Glass keeps under Internal Storage, cleared: everything, where the
+# user did not ask to keep the themes, but the settings backups. They are
+# what a player is put back from after an uninstall, and a backup removed
+# with the plugin it backs up would be none.
+clear_data() {
+  local dir=$1
+  [ -d "$dir" ] || return 0
+  if [ -f "$dir/.preserve" ]; then
+    echo "Keeping the themes and backups under $dir (user setting)"
+    return 0
+  fi
+  echo "Removing the themes under $dir; the settings backups stay"
+  find "$dir" -mindepth 1 -maxdepth 1 ! -name backups -exec rm -rf {} +
+  # A backups folder with nothing in it goes, and the folder itself once it is empty.
+  rmdir "$dir/backups" 2>/dev/null || true
+  rmdir "$dir" 2>/dev/null || true
+}
+
+# Sourced for its functions alone, by the tests.
+[ -n "${GLASS_UNINSTALL_FUNCTIONS:-}" ] && return 0
+
 echo "Uninstalling Glass"
 
 PLUGIN_DIR="/data/plugins/user_interface/glass"
@@ -26,14 +49,7 @@ fi
 rm -f "$PLUGIN_DIR/lib/libglasstap.so" /dev/shm/glasstap.*
 rm -rf "$PLUGIN_DIR/fanart-cache"
 
-if [ -d "$DATA_DIR" ]; then
-  if [ -f "$DATA_DIR/.preserve" ]; then
-    echo "Keeping the themes and backups under $DATA_DIR (user setting)"
-  else
-    echo "Removing the themes under $DATA_DIR"
-    rm -rf "$DATA_DIR"
-  fi
-fi
+clear_data "$DATA_DIR"
 
 echo "Glass uninstalled"
 echo "pluginuninstallend"
