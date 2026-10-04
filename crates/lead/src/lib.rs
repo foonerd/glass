@@ -143,6 +143,7 @@ pub mod tailor;
 
 pub mod vfs {
     use std::collections::{HashMap, HashSet};
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::sync::{Arc, Mutex, OnceLock};
 
     fn table() -> &'static Mutex<HashMap<String, Arc<[u8]>>> {
@@ -155,8 +156,61 @@ pub mod vfs {
         MISSING.get_or_init(|| Mutex::new(HashSet::new()))
     }
 
+    /// The folders that hold only so many files: a prefix and its most.
+    fn bounds() -> &'static Mutex<Vec<(String, usize)>> {
+        static BOUNDS: OnceLock<Mutex<Vec<(String, usize)>>> = OnceLock::new();
+        BOUNDS.get_or_init(|| Mutex::new(Vec::new()))
+    }
+
+    /// When each file of a bounded folder was last put or asked for, by a
+    /// count that only grows.
+    fn used() -> &'static Mutex<HashMap<String, u64>> {
+        static USED: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+        USED.get_or_init(|| Mutex::new(HashMap::new()))
+    }
+
+    static TICK: AtomicU64 = AtomicU64::new(1);
+
+    /// How many notes of missing files a bounded folder keeps for each file
+    /// it may hold, before the notes are dropped and asked for afresh.
+    const MISSING_PER_FILE: usize = 8;
+
+    /// Hold at most `most` files whose paths begin with `prefix`. What
+    /// arrives over a long run and is shown for a while, a cover per track,
+    /// a fanart set per artist, goes here: when one more is put, the files
+    /// asked for longest ago are dropped, and one that is wanted again is
+    /// brought again. A folder without a bound keeps all it is given, as a
+    /// theme's own files must be.
+    pub fn bound(prefix: &str, most: usize) {
+        if let Ok(mut bounds) = bounds().lock() {
+            bounds.retain(|(p, _)| p != prefix);
+            bounds.push((prefix.to_string(), most.max(1)));
+        }
+    }
+
+    /// The bound `path` falls under, if any.
+    fn bound_of(path: &str) -> Option<(String, usize)> {
+        bounds()
+            .lock()
+            .ok()?
+            .iter()
+            .find(|(prefix, _)| path.starts_with(prefix.as_str()))
+            .cloned()
+    }
+
+    /// Note that a file of a bounded folder was put or asked for just now.
+    fn touch(path: &str) {
+        if bound_of(path).is_none() {
+            return;
+        }
+        if let Ok(mut used) = used().lock() {
+            used.insert(path.to_string(), TICK.fetch_add(1, Ordering::Relaxed));
+        }
+    }
+
     /// Keep `bytes` as the file at `path`; a later put replaces it, and a
-    /// file put is no longer missing.
+    /// file put is no longer missing. In a bounded folder the files asked
+    /// for longest ago make room, never the one just put.
     pub fn put(path: &str, bytes: Vec<u8>) {
         if let Ok(mut table) = table().lock() {
             table.insert(path.to_string(), Arc::from(bytes));
@@ -164,12 +218,45 @@ pub mod vfs {
         if let Ok(mut missing) = missing().lock() {
             missing.remove(path);
         }
+        touch(path);
+        let Some((prefix, most)) = bound_of(path) else {
+            return;
+        };
+        let (Ok(mut table), Ok(mut used)) = (table().lock(), used().lock()) else {
+            return;
+        };
+        let mut held: Vec<(u64, String)> = table
+            .keys()
+            .filter(|key| key.starts_with(prefix.as_str()))
+            .map(|key| (used.get(key).copied().unwrap_or(0), key.clone()))
+            .collect();
+        if held.len() <= most {
+            return;
+        }
+        held.sort();
+        let over = held.len() - most;
+        for (_, key) in held.into_iter().filter(|(_, key)| key != path).take(over) {
+            table.remove(&key);
+            used.remove(&key);
+        }
     }
 
     /// The host has no file for `path`: whoever wanted it stops asking.
     pub fn mark_missing(path: &str) {
-        if let Ok(mut missing) = missing().lock() {
-            missing.insert(path.to_string());
+        let Ok(mut missing) = missing().lock() else {
+            return;
+        };
+        missing.insert(path.to_string());
+        // The notes of a bounded folder are bounded too: past their most
+        // they are dropped, and a file still wanted is asked for once more.
+        if let Some((prefix, most)) = bound_of(path) {
+            let noted = missing
+                .iter()
+                .filter(|p| p.starts_with(prefix.as_str()))
+                .count();
+            if noted > most * MISSING_PER_FILE {
+                missing.retain(|p| !p.starts_with(prefix.as_str()) || p == path);
+            }
         }
     }
 
@@ -180,12 +267,18 @@ pub mod vfs {
 
     /// The bytes put under `path`, shared with whoever else holds them.
     pub fn get(path: &str) -> Option<Arc<[u8]>> {
-        table().lock().ok()?.get(path).cloned()
+        let bytes = table().lock().ok()?.get(path).cloned()?;
+        touch(path);
+        Some(bytes)
     }
 
     /// Whether a file was put under `path`.
     pub fn has(path: &str) -> bool {
-        table().lock().is_ok_and(|table| table.contains_key(path))
+        let has = table().lock().is_ok_and(|table| table.contains_key(path));
+        if has {
+            touch(path);
+        }
+        has
     }
 
     /// The names directly under `dir` among the files put: a file's own
@@ -207,13 +300,17 @@ pub mod vfs {
         names
     }
 
-    /// Forget every file, and every file said to be missing.
+    /// Forget every file, and every file said to be missing. The bounds
+    /// stay: they are the folders' own, not the files'.
     pub fn clear() {
         if let Ok(mut table) = table().lock() {
             table.clear();
         }
         if let Ok(mut missing) = missing().lock() {
             missing.clear();
+        }
+        if let Ok(mut used) = used().lock() {
+            used.clear();
         }
     }
 }
@@ -4797,6 +4894,65 @@ pub fn frame_period(rate: u32) -> std::time::Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bounded_folder_drops_what_was_asked_for_longest_ago() {
+        // A prefix of this test's own: the table is one for the process.
+        let dir = "/bounded-test/pictures/";
+        let at = |name: &str| format!("{dir}{name}");
+        vfs::bound(dir, 3);
+        vfs::put(&at("a"), vec![1]);
+        vfs::put(&at("b"), vec![2]);
+        vfs::put(&at("c"), vec![3]);
+        vfs::put("/bounded-test/theme/face.png", vec![9]);
+        // Asked for again, the oldest put is the newest in use.
+        assert!(vfs::has(&at("a")));
+        vfs::put(&at("d"), vec![4]);
+        assert!(
+            !vfs::has(&at("b")),
+            "the one asked for longest ago made room"
+        );
+        assert!(vfs::has(&at("a")) && vfs::has(&at("c")) && vfs::has(&at("d")));
+        // Reading counts as asking.
+        assert_eq!(vfs::get(&at("c")).as_deref(), Some(&[3u8][..]));
+        vfs::put(&at("e"), vec![5]);
+        vfs::put(&at("f"), vec![6]);
+        assert!(vfs::has(&at("f")) && vfs::has(&at("e")));
+        assert_eq!(
+            [at("a"), at("c"), at("d")]
+                .iter()
+                .filter(|p| vfs::has(p))
+                .count(),
+            1,
+            "three in all, the two just put among them"
+        );
+        // A file outside every bound is kept whatever comes.
+        assert!(vfs::has("/bounded-test/theme/face.png"));
+        // The one just put stays even where the room is one.
+        vfs::bound(dir, 1);
+        vfs::put(&at("g"), vec![7]);
+        assert!(vfs::has(&at("g")));
+        assert_eq!(vfs::entries("/bounded-test/pictures"), ["g"]);
+    }
+
+    #[test]
+    fn the_notes_of_missing_files_in_a_bounded_folder_are_bounded() {
+        let dir = "/bounded-notes/pictures/";
+        vfs::bound(dir, 2);
+        for n in 0..16 {
+            vfs::mark_missing(&format!("{dir}{n}"));
+        }
+        assert!(vfs::is_missing(&format!("{dir}15")) && vfs::is_missing(&format!("{dir}0")));
+        // One more than eight for each file the folder may hold: the notes go, the last one stays.
+        vfs::mark_missing(&format!("{dir}16"));
+        assert!(vfs::is_missing(&format!("{dir}16")));
+        assert!(!vfs::is_missing(&format!("{dir}0")) && !vfs::is_missing(&format!("{dir}15")));
+        // Without a bound the notes are kept.
+        for n in 0..40 {
+            vfs::mark_missing(&format!("/unbounded-notes/{n}"));
+        }
+        assert!(vfs::is_missing("/unbounded-notes/0"));
+    }
 
     #[test]
     fn meter_record_is_left_then_right() {

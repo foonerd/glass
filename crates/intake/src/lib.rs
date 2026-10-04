@@ -1100,6 +1100,51 @@ fn fnv1a(text: &str) -> u64 {
     hash
 }
 
+/// How many pictures brought for the display are kept, on disk and in a
+/// host's table alike: a whole fanart set (thirty at most) with the covers
+/// beside it. A cover arrives with every track, and from a player that
+/// stamps its cover's address with the time, with every state it pushes;
+/// kept without end they filled the temp dir of a player up for weeks and
+/// the memory of a page open for days.
+const PICTURES_KEPT: usize = 48;
+
+/// The folders of the host's table that hold what arrives track by track,
+/// bounded once: the covers and fanart, and the track folders' pictures.
+fn keep_brought_pictures_bounded() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| {
+        for folder in ["pictures", "track"] {
+            let prefix = format!("{}/", lead::home().join(folder).to_string_lossy());
+            lead::vfs::bound(&prefix, PICTURES_KEPT);
+        }
+    });
+}
+
+/// Keep the newest `keep` pictures of the art cache and drop the rest,
+/// never `spare`, the one just fetched or taken up again. Newest is by the
+/// file's time, which a picture taken up again is given afresh, so what is
+/// on show is never among the oldest.
+#[cfg(not(target_arch = "wasm32"))]
+fn prune_art(dir: &Path, keep: usize, spare: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut pictures: Vec<(std::time::SystemTime, PathBuf)> = entries
+        .filter_map(|entry| entry.ok())
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().is_some_and(|e| e == "img"))
+        .filter_map(|path| Some((path.metadata().ok()?.modified().ok()?, path)))
+        .collect();
+    if pictures.len() <= keep {
+        return;
+    }
+    pictures.sort();
+    let over = pictures.len() - keep;
+    for (_, path) in pictures.into_iter().filter(|(_, p)| p != spare).take(over) {
+        let _ = std::fs::remove_file(path);
+    }
+}
+
 /// Fetch one picture into the art cache under the temp dir. `None` when the
 /// player does not answer, the answer is not an image, or the file cannot be
 /// written. A picture fetched earlier for the same location is reused.
@@ -1107,6 +1152,7 @@ fn fnv1a(text: &str) -> u64 {
 /// path under the home, by the location's hash, and the manager's route
 /// the host fetches it from.
 fn picture_in_table(reported: &str) -> (String, String) {
+    keep_brought_pictures_bounded();
     (
         format!("pictures/{:016x}.img", fnv1a(reported)),
         format!("/api/face/picture?at={}", bring::encode(reported)),
@@ -1150,6 +1196,10 @@ fn fetch_art(reported: &str) -> Option<PathBuf> {
     std::fs::create_dir_all(&dir).ok()?;
     let path = dir.join(format!("{:016x}.img", fnv1a(reported)));
     if path.is_file() {
+        // Taken up again: it counts as new, so it is not the next to go.
+        if let Ok(file) = std::fs::OpenOptions::new().write(true).open(&path) {
+            let _ = file.set_modified(std::time::SystemTime::now());
+        }
         return Some(path);
     }
     let agent = ureq::Agent::config_builder()
@@ -1171,6 +1221,7 @@ fn fetch_art(reported: &str) -> Option<PathBuf> {
         return None;
     }
     std::fs::write(&path, bytes).ok()?;
+    prune_art(&dir, PICTURES_KEPT, &path);
     Some(path)
 }
 
@@ -1271,6 +1322,7 @@ fn plain_name(name: &str) -> Option<&str> {
 /// for one at a time, in the theme's order, so the first the player has
 /// is the one taken.
 fn folder_files_from_table(uri: &str, groups: &[Vec<String>]) -> Option<Vec<String>> {
+    keep_brought_pictures_bounded();
     let dir = track_folder_dir(uri);
     let mut files = Vec::with_capacity(groups.len());
     for names in groups {
@@ -2856,6 +2908,38 @@ mod tests {
         assert!(fetch_art(&page).is_none());
         let bare = serve_once(answer("", b"<html>no cover</html>"));
         assert!(fetch_art(&bare).is_none());
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn the_art_cache_keeps_the_newest_pictures_and_what_is_taken_up_again() {
+        let dir = std::env::temp_dir().join(format!("glass-art-test-{}", lead::epoch_nanos()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let at = |n: u64| std::time::UNIX_EPOCH + Duration::from_secs(1_000_000 + n);
+        let picture = |name: &str, n: u64| {
+            let path = dir.join(name);
+            std::fs::write(&path, b"x").unwrap();
+            let file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+            file.set_modified(at(n)).unwrap();
+            path
+        };
+        let oldest = picture("a.img", 1);
+        let old = picture("b.img", 2);
+        let newer = picture("c.img", 3);
+        let newest = picture("d.img", 4);
+        let other = picture("notes.txt", 0);
+        // Room for three: the oldest goes, what is no picture stays.
+        prune_art(&dir, 3, &newest);
+        assert!(!oldest.exists());
+        assert!(old.exists() && newer.exists() && newest.exists() && other.exists());
+        // The one spared is kept though it is the oldest of what is left.
+        prune_art(&dir, 2, &old);
+        assert!(old.exists(), "what is on show is never dropped");
+        assert!(!newer.exists() && newest.exists());
+        // Within the room nothing goes.
+        prune_art(&dir, 8, &newest);
+        assert!(old.exists() && newest.exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
