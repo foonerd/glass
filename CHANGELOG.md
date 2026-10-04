@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.45] - 2026-10-04
+
+Found while the wiki was read against the code.
+
+- **The cutter leaves flags, shares and comments as they are.** A theme cut to another size has every position and length scaled, by what kind each key is. Three things were classed wrongly. `flip.left.x` and `flip.right.x` are switches, not positions: the cutter tried to scale "True" and warned of a value it could not read. A marker's `pos` on a volume or progress gauge (`*.marker.*.pos`) is a share of the gauge from 0 to 100, not pixels: cut to twice the size, a marker at 50 landed at 100, the gauge's end. And a line that opens with a semicolon is a comment to the display and was a key to the cutter: a commented-out position was scaled inside its comment, and anything else in a comment drew a warning. All three are left as written now.
+
 ## [0.8.44] - 2026-10-04
 
 Found while the wiki was read against the code.
