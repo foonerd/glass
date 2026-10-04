@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.38] - 2026-10-04
+
+Found while the wiki was read against the code.
+
+- **The downloads folder is cleared at the start, folders and all.** What a run leaves under `catalog/downloads/`, the zip of an interrupted install, a package kept for its Download link, the folders a cut, a package or an uploaded backup was staged in, was meant to go when the plugin starts. The clearing removed files only and stopped at the first folder it met, leaving that folder and everything listed after it: on a player where themes had been packaged or cut, the leftovers piled up for good. Each entry is removed by itself now, a folder with what it holds, and one that will not go is named in the log and does not keep the rest.
+
 ## [0.8.37] - 2026-10-04
 
 From a take that failed on a player whose graphics libraries did not work, where the kiosk's own X log had said so all along and nothing looked.
