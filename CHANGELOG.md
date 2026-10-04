@@ -2,6 +2,13 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.48] - 2026-10-04
+
+Found while a finding of the wiki's review was checked against PeppyMeter Screensaver and the collection.
+
+- **A bar is dragged the way it is drawn.** A touch on a volume or progress bar was turned into a value by the shape of the bar's box alone: left to right in a box wider than tall, whatever the bar's own direction. A fader that moves up and down in a wide box, as ninety-four meters of the collection have their volume, was drawn bottom to top and read left to right: a finger moved along the fader changed nothing, a finger moved across it did. A bar is read now as it is drawn (`controls::gauge_fraction`): bottom to top where it is vertical, by `slider.orientation` or, where that says neither way, by its box; left to right otherwise. A knob, an arc and a number are read by their box as before.
+- What a slider's orientation means is unchanged and is PeppyMeter Screensaver's rule: `vertical` or `horizontal` as written; a volume bar that says nothing is vertical and a progress bar horizontal; any other word goes by the box. No theme of the collection has a volume bar that says nothing in a wide box.
+
 ## [0.8.47] - 2026-10-04
 
 Asked by a theme maker whose `webradio.png` did not show.
