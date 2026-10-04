@@ -18,8 +18,8 @@ pub use laid::{stands_black, Black, Laid, Lay};
 /// What a face sees of the display each frame: the player's state as the
 /// source has it (the cover's file among it, once fetched), the theme's
 /// fonts, the picture's size, the display's clock, the time of day,
-/// whether the screen is the display's own, and the face's own settings
-/// as the configuration has them.
+/// whether the screen is the display's own, the face's own settings as
+/// the configuration has them, and the folder of the theme on show.
 pub struct View<'a> {
     pub input: &'a Input,
     pub fonts: &'a expose::Fonts,
@@ -36,6 +36,9 @@ pub struct View<'a> {
     /// The configuration's `face.<name>` keys by name, as written: the
     /// display reads none of them but the size; their meaning is the face's.
     pub settings: &'a BTreeMap<String, String>,
+    /// The folder of the theme on show, empty where there is none: what a
+    /// theme brings for a face lies there, beside its `meters.txt`.
+    pub theme_dir: &'a str,
 }
 
 /// What a face has to draw over a frame.

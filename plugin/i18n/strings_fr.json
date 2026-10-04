@@ -895,6 +895,7 @@
     "MANAGER_OWNER_BACK_PLUGIN_STOPPED": "Glass a été désactivé, l'écran est donc revenu au kiosque.",
     "MANAGER_LOOK_TITLE": "L'apparence de l'écran",
     "MANAGER_LOOK_LEAD": "Choisissez une apparence. Vous pouvez l'ajuster en dessous.",
+    "MANAGER_LOOK_THEME_BRINGS": "Le thème affiché, {theme}, apporte sa propre apparence. Ce qu'il fixe remplace l'apparence choisie ici ; ce que vous ajustez en dessous prime sur les deux.",
     "MANAGER_LOOK_BUILTIN": "Suit la pochette",
     "MANAGER_LOOK_BUILTIN_SAYS": "Couleurs tirées de la pochette",
     "MANAGER_LOOK_IDLE": "Quand rien ne joue",

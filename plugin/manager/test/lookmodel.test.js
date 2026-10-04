@@ -51,6 +51,34 @@ test('a save says what differs from the look and removes the rest', () => {
   assert.ok(Object.keys(look.changes(base, base)).every((key) => look.changes(base, base)[key] === null));
 });
 
+test('what the theme on show brings lies over the look and under the adjustments', () => {
+  const brought = { 'colours.tint': '#101820', 'clock.ink': '#ffcc00', 'measure.bar': '96' };
+  const stored = { theme: 'Dark Glass', 'clock.format': '%H:%M:%S', 'clock.ink': '#ffcc00', 'glass.bar': '0.5' };
+  const base = look.lay({}, DARK, brought);
+  assert.strictEqual(base['colours.tint'], '#101820', 'the theme\'s word over the look\'s');
+  assert.strictEqual(base['glass.bar'], '0.85', 'the look\'s where the theme says nothing');
+  const values = look.lay(base, stored);
+  assert.strictEqual(values['glass.bar'], '0.5', 'the user\'s over both');
+  // Saved as loaded: nothing of the theme's is written, and nothing stored is taken away.
+  const untouched = look.changes(base, values, stored);
+  assert.ok(Object.keys(untouched).every((key) => untouched[key] === null), 'nothing is set');
+  ['clock.format', 'clock.ink', 'glass.bar'].forEach((key) => assert.ok(!(key in untouched), key + ' stays as it is stored'));
+  // The user's own ink, which this theme happens to agree with, is there for a theme that does not.
+  assert.ok(look.same('clock.ink', base['clock.ink'], stored['clock.ink']));
+  // One moved: named with its value; one moved back to what stands beneath: removed.
+  const moved = look.changes(base, Object.assign({}, values, { 'measure.clock': '200', 'glass.bar': '0.85' }), stored);
+  assert.strictEqual(moved['measure.clock'], '200');
+  assert.strictEqual(moved['glass.bar'], null);
+  assert.ok(!('clock.format' in moved));
+  // Back to the look as it comes: every adjustment that says something else goes.
+  const plain = look.changes(base, look.lay(base), stored);
+  assert.strictEqual(plain['clock.format'], null);
+  assert.strictEqual(plain['glass.bar'], null);
+  assert.ok(!('clock.ink' in plain), 'what agrees with the theme is not an adjustment to take back');
+  // The other spelling of a stored key is the same key.
+  assert.ok(!('colours.tint' in look.changes(base, Object.assign({}, base, { 'colours.tint': '#ff0000' }), { 'colors.tint': '#ff0000' })));
+});
+
 test('frost is the user\'s or the look\'s word, else as suits the board', () => {
   assert.strictEqual(look.frostOn(look.lay(), true), true);
   assert.strictEqual(look.frostOn(look.lay(), false), false);

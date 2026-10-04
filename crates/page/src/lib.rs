@@ -304,6 +304,7 @@ impl Page {
                 ours: true,
                 scale: showing.skin.run.face_scale,
                 settings: &showing.skin.run.face,
+                theme_dir: &showing.skin.theme_dir,
             };
             let taken = face.pointer(event.kind, event.x, event.y, &view);
             let asked: Vec<Happened> = face.commands().into_iter().map(Happened::Command).collect();
@@ -470,6 +471,7 @@ impl Page {
             ours: true,
             scale: showing.skin.run.face_scale,
             settings: &showing.skin.run.face,
+            theme_dir: &showing.skin.theme_dir,
         };
         let drew = laid.lay(face, base, !moved, &view).drew;
         asked.extend(face.commands().into_iter().map(Happened::Command));

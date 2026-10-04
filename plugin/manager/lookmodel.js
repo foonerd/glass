@@ -49,7 +49,7 @@
   }
 
   // Layers, the later over the earlier: the built-in look, a look's keys,
-  // the user's adjustments.
+  // what the theme on show brings, the user's adjustments.
   function lay() {
     var out = {};
     KEYS.forEach(function (key) { out[key] = BUILTIN[key]; });
@@ -76,12 +76,20 @@
   }
 
   // What a save says: every key the panel sets, with its value where the
-  // user's differs from the look's and null, to be removed, where it does
-  // not. Nothing of the look itself is ever written among the settings, so
-  // a look that changes later shows as its author changed it.
-  function changes(base, values) {
+  // user's differs from what stands beneath it (`base`: the look, and what
+  // the theme on show brings over it) and null, to be removed, where it
+  // does not. Nothing of a look is ever written among the settings, so a
+  // look that changes later shows as its author changed it. A key that is
+  // `stored` with the value it has now is not named and stays as it is: an
+  // adjustment the theme on show happens to agree with is still there for
+  // a theme that does not.
+  function changes(base, values, stored) {
+    var kept = known(stored);
     var set = {};
-    KEYS.forEach(function (key) { set[key] = same(key, base[key], values[key]) ? null : values[key]; });
+    KEYS.forEach(function (key) {
+      if (kept[key] !== undefined && same(key, kept[key], values[key])) return;
+      set[key] = same(key, base[key], values[key]) ? null : values[key];
+    });
     return set;
   }
 

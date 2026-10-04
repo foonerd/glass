@@ -895,6 +895,7 @@
     "MANAGER_OWNER_BACK_PLUGIN_STOPPED": "Glass was turned off, so the screen went back to the kiosk.",
     "MANAGER_LOOK_TITLE": "How the screen looks",
     "MANAGER_LOOK_LEAD": "Choose a look. You can adjust it underneath.",
+    "MANAGER_LOOK_THEME_BRINGS": "The theme on show, {theme}, brings a look of its own. Where it sets something, that stands in place of the look chosen here; what you adjust underneath stands over both.",
     "MANAGER_LOOK_BUILTIN": "Follows the artwork",
     "MANAGER_LOOK_BUILTIN_SAYS": "Colours from the cover",
     "MANAGER_LOOK_IDLE": "When nothing plays",

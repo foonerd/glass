@@ -163,6 +163,7 @@ mod tests {
             ours: true,
             scale: 1.0,
             settings: &settings,
+            theme_dir: "",
         };
         let base = picture(4, 2, 9);
         let mut laid = Laid::default();

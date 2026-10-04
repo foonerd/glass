@@ -1150,6 +1150,7 @@ fn session(
                     ours: screen_ours || remote_face,
                     scale: skin.run.face_scale,
                     settings: &skin.run.face,
+                    theme_dir: &skin.theme_dir,
                 };
                 // A calibration's target over the picture is drawn afresh
                 // every frame, and so is the face over it.
@@ -1215,6 +1216,7 @@ fn session(
                         ours: screen_ours || remote_face,
                         scale: skin.run.face_scale,
                         settings: &skin.run.face,
+                        theme_dir: &skin.theme_dir,
                     };
                     events.retain(|event| {
                         let taken = face.pointer(kind_of(event.kind), event.x, event.y, &view);

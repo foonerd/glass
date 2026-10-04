@@ -402,6 +402,7 @@
     <div class="panel" id="look-panel" hidden>
       <h2 id="look-title" style="margin:0 0 6px"></h2>
       <div class="help" id="look-lead"></div>
+      <div class="help" id="look-theme-note" hidden></div>
       <div class="looks" id="look-cards"></div>
       <div class="look-cols">
         <div class="look-side">
@@ -1876,6 +1877,9 @@
     return Promise.all([api('GET', '/api/face'), lookPicture()]).then(function (r) { lookUi.picture = r[1]; renderLook(r[0]); }).catch(function (e) { toast(errorText(e), 'error'); });
   }
   function lookFind(name) { return ((lookUi.f && lookUi.f.looks) || []).filter(function (l) { return l.name === name; })[0]; }
+  // What stands beneath the user's adjustments: the built-in look, the
+  // look of that name over it, and over both what the theme on show brings.
+  function lookBase(name) { var f = lookUi.f; return LOOK.lay(f.builtIn, (lookFind(name) || {}).keys, (f.themeLook || {}).keys); }
   function lookDirty() { return !!lookUi.saved && (lookUi.chosen !== lookUi.saved.chosen || LOOK.differs(lookUi.saved.v, lookUi.v)); }
   function lookPlace(v) { var place = String(v['date.place']).toLowerCase(); return place === 'above' || place === 'below' ? place : 'top'; }
   // A pattern that is none of those offered is one of the user's own, and
@@ -2190,13 +2194,15 @@
     var s = f.settings || {};
     lookUi.f = f;
     lookUi.chosen = lookFind(s.theme) ? s.theme : '';
-    lookUi.base = LOOK.lay(f.builtIn, (lookFind(lookUi.chosen) || {}).keys);
+    lookUi.base = lookBase(lookUi.chosen);
     lookUi.v = LOOK.lay(lookUi.base, s);
     lookUi.saved = { chosen: lookUi.chosen, v: LOOK.lay(lookUi.v) };
     lookOwnPatterns();
     var labels = { 'look-title': 'MANAGER_LOOK_TITLE', 'look-lead': 'MANAGER_LOOK_LEAD', 'look-preview-help': 'MANAGER_LOOK_PREVIEW_HELP', 'look-adjust-title': 'MANAGER_LOOK_ADJUST', 'look-adjusted-word': 'MANAGER_LOOK_ADJUSTED',
       'btn-look-plain': 'MANAGER_LOOK_PLAIN', 'btn-look-save': 'MANAGER_SAVE', 'btn-look-reset': 'MANAGER_LOOK_RESET', 'look-save-note': 'MANAGER_LOOK_SAVE_NOTE' };
     Object.keys(labels).forEach(function (el) { $(el).textContent = t(labels[el]); });
+    $('look-theme-note').hidden = !f.themeLook;
+    $('look-theme-note').textContent = f.themeLook ? t('MANAGER_LOOK_THEME_BRINGS').replace('{theme}', f.themeLook.folder) : '';
     Array.prototype.forEach.call($('look-mode').children, function (b) { b.textContent = t(b.getAttribute('data-mode') === 'idle' ? 'MANAGER_LOOK_IDLE' : 'MANAGER_LOOK_PLAYING'); });
     $('look-sections').innerHTML = lookSections();
     paintLook(true);
@@ -2206,7 +2212,7 @@
   function lookChoose(name) {
     if (name === lookUi.chosen) return;
     lookUi.chosen = name;
-    lookUi.base = LOOK.lay(lookUi.f.builtIn, (lookFind(name) || {}).keys);
+    lookUi.base = lookBase(name);
     lookUi.v = LOOK.lay(name === lookUi.saved.chosen ? lookUi.saved.v : lookUi.base);
     lookOwnPatterns();
     paintLook();
@@ -2255,9 +2261,10 @@
   $('look-sections').oninput = function (e) { if (e.target.getAttribute('data-key')) lookInput(e.target); };
   $('btn-look-plain').onclick = function () { lookUi.v = LOOK.lay(lookUi.base); lookOwnPatterns(); paintLook(); };
   // Every key the panel sets goes with the save, removed where the look
-  // already says it, so the settings hold the user's adjustments alone.
+  // already says it, so the settings hold the user's adjustments alone;
+  // one that is stored as it stands is left as it is.
   $('btn-look-save').onclick = function () {
-    var set = LOOK.changes(lookUi.base, lookUi.v);
+    var set = LOOK.changes(lookUi.base, lookUi.v, lookUi.f.settings);
     set.theme = lookUi.chosen || null;
     api('POST', '/api/face', { set: set }).then(function (r) { renderLook(r); toast(t('MANAGER_SAVED')); }).catch(function (e) { toast(errorText(e), 'error'); });
   };

@@ -2168,10 +2168,19 @@ Glass.prototype.faceSettings = function () {
     // that does not.
     var builtIn = {};
     try { builtIn = facelook.themeKeys(fs.readFileSync(EVO_DIR + '/face.txt', 'utf8')); } catch (e) { /* not written out */ }
+    // What the theme on show brings for the face: a face.txt beside its
+    // meters.txt, which the face lays over the look chosen here; none
+    // where the theme has no such file.
+    var themeLook = null;
+    var theme = self.activeTheme();
+    if (safeFolderName(theme)) {
+        try { themeLook = { folder: theme, keys: facelook.themeKeys(fs.readFileSync(base_folder_P + theme + '/face.txt', 'utf8')) }; } catch (e) { /* the theme brings none */ }
+    }
     return {
         settings: facelook.settingsOf(meterConfig && meterConfig.current),
         builtIn: builtIn,
         looks: looks,
+        themeLook: themeLook,
         frostSuits: facelook.frostSuits(self.boardInfo().class)
     };
 };
