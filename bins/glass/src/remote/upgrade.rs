@@ -17,7 +17,11 @@
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use std::time::Duration;
+// Only where a new binary is tried before it takes the place: not on Android,
+// whose app the system installs.
+#[cfg(any(windows, all(unix, not(target_os = "android"))))]
+use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -30,6 +34,7 @@ const API: &str = "https://api.github.com";
 const MAX_ARCHIVE: u64 = 64 * 1024 * 1024;
 const MAX_UNPACKED: u64 = 256 * 1024 * 1024;
 /// How long a new binary has to say its version.
+#[cfg(any(windows, all(unix, not(target_os = "android"))))]
 const TRY_WITHIN: Duration = Duration::from_secs(10);
 /// How long a start has to live before an upgrade counts as taken, and the
 /// start at which a binary that never did is put back.
