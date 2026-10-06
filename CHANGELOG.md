@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.68] - 2026-10-06
+
+Asked by Andrew on the screen-off of 0.8.67: gradual, not abrupt.
+
+- **The screen goes black and comes back over a fade.** "Over, milliseconds" beside "Screen off after" in the look panel: how long the screen takes to go black and to come back, 500 (half a second) unless said, 0 for at once, up to 120000 (two minutes). The face's setting `face.idle.fade`, in a face theme `[idle] fade`. Drawn by glass-evo from 0.1.36.
+
 ## [0.8.67] - 2026-10-06
 
 Asked by a user with an AMOLED screen, which must not show the same picture for hours: a screen timeout for glass-evo, since it turns off the kiosk's own. Glass's half; glass-evo does it from its 0.1.35.
