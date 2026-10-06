@@ -949,6 +949,8 @@
     "MANAGER_LOOK_PICTURE_DELETE_ASK": "Dieses Bild vom Player entfernen?",
     "MANAGER_LOOK_PICTURE_BAD": "Diese Datei wurde nicht angenommen: Ein Bild ist ein JPEG, PNG oder WebP von höchstens 32 MB.",
     "MANAGER_LOOK_PICTURE_DIM": "Das Bild abdunkeln",
+    "MANAGER_LOOK_SCREEN_OFF": "Bildschirm aus nach, Minuten (0: nie)",
+    "MANAGER_LOOK_SCREEN_OFF_HINT": "Wenn nichts spielt und der Bildschirm so lange nicht berührt wird, wird er schwarz. Ein Tippen weckt ihn, Musik ebenso. Für einen Bildschirm, der nicht stundenlang dasselbe Bild zeigen darf.",
     "MANAGER_LOOK_BUILTIN": "Folgt dem Cover",
     "MANAGER_LOOK_BUILTIN_SAYS": "Farben aus dem Cover",
     "MANAGER_LOOK_IDLE": "Wenn nichts spielt",

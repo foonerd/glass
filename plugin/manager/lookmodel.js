@@ -20,10 +20,12 @@
     'date.show': 'off', 'date.place': 'top', 'date.format': '%A %-d %B', 'date.ink': 'ink', 'date.opacity': '0.86', 'date.glass': '0.55', 'date.tint': 'tint',
     'measure.bar': '72', 'measure.clock': '144', 'measure.date': '40',
     // The picture behind the clock and the date when nothing plays (none: the theme), and how far it is darkened.
-    'idle.picture': '', 'idle.dim': '0.25'
+    'idle.picture': '', 'idle.dim': '0.25',
+    // Minutes with nothing playing and no touch after which the screen goes black; 0 for never.
+    'idle.off': '0'
   };
   var KEYS = Object.keys(BUILTIN);
-  var NUMBERS = /^(glass\.(bar|sheet|hairline)|(buttons|clock|date)\.(opacity|glass)|clock\.unlit|measure\.[a-z]+|idle\.dim)$/;
+  var NUMBERS = /^(glass\.(bar|sheet|hairline)|(buttons|clock|date)\.(opacity|glass)|clock\.unlit|measure\.[a-z]+|idle\.dim|idle\.off)$/;
   // The clock's faces, set in type or drawn, and a dial's styles, as
   // glass-evo names them (from its 0.1.15).
   var CLOCK_FACES = ['type', 'seven', 'sixteen', 'flip', 'dial'];

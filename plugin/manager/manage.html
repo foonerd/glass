@@ -2052,6 +2052,7 @@
       return '<span class="range"><span>' + esc(t('MANAGER_LOOK_END_' + from)) + '</span><input type="range" data-key="' + key + '" data-kind="' + kind + '" min="' + min + '" max="' + max + '" step="' + step + '" aria-label="' + esc(t('MANAGER_LOOK_END_' + from) + ' – ' + t('MANAGER_LOOK_END_' + to)) + '"><span>' + esc(t('MANAGER_LOOK_END_' + to)) + '</span></span>';
     };
     var onoff = function (key, kind) { return '<input type="checkbox" class="look-toggle" data-key="' + key + '" data-kind="' + kind + '">'; };
+    var minutes = function (key) { return '<input type="number" min="0" max="1440" step="1" data-key="' + key + '" data-kind="minutes" style="width:90px">'; };
     var colour = function (key) { return '<input type="color" data-key="' + key + '" data-kind="colour">'; };
     // A colour that is a word (from the artwork, the same as the rest) until it is one of its own.
     var word = function (key, label) { return '<label class="switch"><input type="checkbox" data-key="' + key + '" data-kind="word"> <span>' + esc(t(label)) + '</span></label>' + colour(key); };
@@ -2079,7 +2080,8 @@
       ['backgrounds', 'MANAGER_LOOK_BACKGROUNDS', [
         field('MANAGER_LOOK_HOW_SOLID', slider('glass.bar', 'solid', 10, 100, 1, 'CLEAR', 'SOLID')),
         field('MANAGER_LOOK_BLUR', onoff('glass.frost', 'frost'), esc(t(lookUi.f.frostSuits ? 'MANAGER_LOOK_BLUR_SUITS' : 'MANAGER_LOOK_BLUR_HEAVY'))),
-        field('MANAGER_LOOK_PICTURE_DIM', slider('idle.dim', 'share', 0, 90, 1, 'NONE', 'FULL'), '', 'idlepic')]],
+        field('MANAGER_LOOK_PICTURE_DIM', slider('idle.dim', 'share', 0, 90, 1, 'NONE', 'FULL'), '', 'idlepic'),
+        field('MANAGER_LOOK_SCREEN_OFF', minutes('idle.off'), esc(t('MANAGER_LOOK_SCREEN_OFF_HINT')))]],
       ['clock', 'MANAGER_LOOK_CLOCK', [
         field('MANAGER_LOOK_SHOW_CLOCK', onoff('clock.show', 'switch')),
         field('MANAGER_LOOK_SHOWS', pattern('clock.format', LOOK.CLOCK_PATTERNS), '', 'clock'),
@@ -2186,6 +2188,7 @@
         el.value = colour || lookUi.picked[key] || lookPick(key);
       } else if (kind === 'share' || kind === 'solid') el.value = Math.round(LOOK.share(v[key], 0) * 100);
       else if (kind === 'size') { el.value = LOOK.sizeOf(key, v[key]); el.title = el.value + '%'; }
+      else if (kind === 'minutes') { if (document.activeElement !== el) el.value = parseInt(v[key], 10) || 0; }
       else if (kind === 'pattern') el.value = lookUi.own[key] ? '' : v[key];
       else if (kind === 'own') { el.hidden = !lookUi.own[key]; if (document.activeElement !== el) el.value = v[key]; }
       else if (kind === 'place') el.value = place;
@@ -2279,6 +2282,7 @@
     else if (kind === 'share') v[key] = (el.value / 100).toFixed(2);
     else if (kind === 'solid') { var moved = LOOK.backgrounds(lookUi.base, v, el.value / 100); Object.keys(moved).forEach(function (k) { v[k] = moved[k]; }); }
     else if (kind === 'size') v[key] = LOOK.unitsOf(key, el.value);
+    else if (kind === 'minutes') v[key] = String(Math.min(1440, Math.max(0, parseInt(el.value, 10) || 0)));
     else if (kind === 'pattern') { lookUi.own[key] = el.value === ''; if (el.value) v[key] = el.value; }
     else if (kind === 'own') { if (el.value.trim()) v[key] = el.value.trim(); }
     else if (kind === 'place' || kind === 'choice') v[key] = el.value;
