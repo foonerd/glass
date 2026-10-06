@@ -654,30 +654,37 @@ pub fn format_level(track_type: &str) -> Option<u8> {
 }
 
 /// The names an icon for what plays is looked for under, the most telling
-/// first: in mono where the player says so (the word in the type, or one
-/// channel reported) and at the signal level where the type carries one,
-/// as `fm_mono_3`, `fm_mono`, `fm_3`, `fm`; then the type's own name as
-/// the player reports it. A theme or the plugin brings what it has of
-/// these; the first found is drawn.
+/// first: in mono or stereo where the player says so (the word in the
+/// type, or one channel reported for mono) and at the signal level where
+/// the type carries one, as `fm_mono_3`, `fm_mono`, `fm_3`, `fm`; then the
+/// type's own name as the player reports it. A theme or the plugin brings
+/// what it has of these; the first found is drawn.
 pub fn icon_candidates(track_type: &str, channels: u8) -> Vec<String> {
     let key = format_key(track_type);
     if key.is_empty() {
         return Vec::new();
     }
-    let base = key.trim_end_matches("_mono").to_string();
-    let mono = key.ends_with("_mono") || channels == 1;
+    let (base, mode) = if let Some(base) = key.strip_suffix("_mono") {
+        (base, Some("mono"))
+    } else if let Some(base) = key.strip_suffix("_stereo") {
+        (base, Some("stereo"))
+    } else if channels == 1 {
+        (key.as_str(), Some("mono"))
+    } else {
+        (key.as_str(), None)
+    };
     let level = format_level(track_type);
     let mut out = Vec::new();
-    if mono {
+    if let Some(mode) = mode {
         if let Some(n) = level {
-            out.push(format!("{base}_mono_{n}"));
+            out.push(format!("{base}_{mode}_{n}"));
         }
-        out.push(format!("{base}_mono"));
+        out.push(format!("{base}_{mode}"));
     }
     if let Some(n) = level {
         out.push(format!("{base}_{n}"));
     }
-    out.push(base);
+    out.push(base.to_string());
     let name = format_name(track_type);
     if !out.contains(&name) {
         out.push(name);
@@ -708,8 +715,9 @@ pub fn format_key(track_type: &str) -> String {
     let alias = match key.as_str() {
         "dab_radio" | "dab_" | "dab" | "rtlsdr" | "rtlsdr_radio" => "dab",
         "fm_radio" | "fm_" | "fm" => "fm",
-        // FM received in mono: the radio plugin's word, with or without its signal dots after it.
+        // FM received in mono or stereo: the radio plugin's word, with or without its signal dots after it.
         "fm_mono" | "fm_mono_" | "fm_radio_mono" => "fm_mono",
+        "fm_stereo" | "fm_stereo_" | "fm_radio_stereo" => "fm_stereo",
         "webradio" | "web_radio" | "internet_radio" => "radio",
         "tidal_connect" => "tidal",
         "qobuz_connect" => "qobuz",
@@ -734,6 +742,8 @@ pub fn format_label(key: &str) -> String {
         "upnp" => "UPnP".into(),
         "dab" => "DAB".into(),
         "fm" => "FM".into(),
+        "fm_mono" => "FM MONO".into(),
+        "fm_stereo" => "FM STEREO".into(),
         "cd" => "CD".into(),
         other => other.to_ascii_uppercase(),
     }
@@ -6083,6 +6093,9 @@ mod tests {
         assert_eq!(format_key("FM ◦◦●●●"), "fm");
         assert_eq!(format_key("FM MONO ◦◦●●●"), "fm_mono");
         assert_eq!(format_key("FM MONO"), "fm_mono");
+        assert_eq!(format_key("FM STEREO ●●●◦◦"), "fm_stereo");
+        assert_eq!(format_label("fm_mono"), "FM MONO");
+        assert_eq!(format_label("fm_stereo"), "FM STEREO");
         assert_eq!(format_level("FM ◦◦●●●"), Some(3));
         assert_eq!(format_level("DAB ●●●●●"), Some(5));
         assert_eq!(format_level("FM ◦◦◦◦◦"), Some(0));
@@ -6098,6 +6111,15 @@ mod tests {
         assert_eq!(
             names("FM MONO ◦◦●●●", 2),
             ["fm_mono_3", "fm_mono", "fm_3", "fm", "fm_mono_"]
+        );
+        assert_eq!(
+            names("FM STEREO ●●●●◦", 2),
+            ["fm_stereo_4", "fm_stereo", "fm_4", "fm", "fm_stereo_"]
+        );
+        assert_eq!(
+            names("FM STEREO", 1),
+            ["fm_stereo", "fm"],
+            "the player's word outranks its channel count"
         );
         assert_eq!(names("DAB ●◦◦◦◦", 2), ["dab_1", "dab", "dab_"]);
         assert_eq!(names("WebRadio", 2), ["radio", "webradio"]);
