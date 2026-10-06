@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.67] - 2026-10-06
+
+Asked by a user with an AMOLED screen, which must not show the same picture for hours: a screen timeout for glass-evo, since it turns off the kiosk's own. Glass's half; glass-evo does it from its 0.1.35.
+
+- **"Screen off after, minutes" in the look panel.** In the Backgrounds section of "How the screen looks": the minutes with nothing playing and no touch after which the screen glass-evo holds goes black; 0, the default, never. A tap wakes it and is the wake alone, and music starting wakes it too. It is the face's setting `face.idle.off`, kept with the look, in a face theme `[idle] off`.
+- The screen's pixels go dark; a panel's backlight is not touched. On an OLED that is the screen off; on an LCD it is a black picture.
+- Not yet: a slideshow when idle. The picture when nothing plays (0.8.63) stands still; a show of several is a later stage.
+
 ## [0.8.66] - 2026-10-06
 
 Found while the FM/DAB radio plugin was being developed: a station received in mono had no icon.
