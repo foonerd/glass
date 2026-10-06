@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.69] - 2026-10-06
+
+Asked by Andrew, looking at the radio icons of 0.8.66 on the screen: "DAB and FM (standard) are squashed and with indicator starting below line, they look off. Few proper mockups here will help." Chosen from three mockups, then adjusted twice at his word (MONO dead centred, the bars clear of the M and the same distance from the letters in every set), and with the plugin's coming STEREO word taken on.
+
+- **The radio icons redrawn.** The FM and DAB letters at their full height, the five signal bars standing on the letters' baseline with their tops on a parabola, rounded, the unlit ones outlined; MONO dead centred under smaller FM letters. The names and the lookup are unchanged, so a theme's own icons stay as they are.
+- **FM in stereo.** The radio plugin will name a stereo station `FM STEREO ◦◦●●●`; the icon is looked for under `fm_stereo_3`, `fm_stereo`, `fm_3`, `fm`, as a mono one is under its own word, and the plugin brings `fm_stereo_0` to `fm_stereo_5` and `fm_stereo` beside the mono set.
+- The type shown as text reads `FM MONO` and `FM STEREO`, not `FM_MONO`.
+
 ## [0.8.68] - 2026-10-06
 
 Asked by Andrew on the screen-off of 0.8.67: gradual, not abrupt.
