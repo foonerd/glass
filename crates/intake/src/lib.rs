@@ -18,10 +18,10 @@ use serde_json::Value;
 
 use lead::{
     current_value, data_source_from_config, decode_meter, decode_spectrum, folder_candidates,
-    fonts_from_config, format_key, frame_rate_from_config, meter_art, meter_at, meter_background,
-    meter_fanart, meter_folder_layers, meter_indicator, meter_indicators, meter_layers,
-    meter_needle, meter_reels, meter_sections, meter_spec, meter_spectra, meter_text_at,
-    meter_texts, meter_tonearm, meter_type, meter_vinyl, random_change_title_from_config,
+    fonts_from_config, frame_rate_from_config, meter_art, meter_at, meter_background, meter_fanart,
+    meter_folder_layers, meter_indicator, meter_indicators, meter_layers, meter_needle,
+    meter_reels, meter_sections, meter_spec, meter_spectra, meter_text_at, meter_texts,
+    meter_tonearm, meter_type, meter_vinyl, random_change_title_from_config,
     random_interval_from_config, rotation_settings, run_settings, screen_from_config,
     scroll_speeds_from_config, selection_from_config, spectrum_from_theme, spectrum_settings,
     transition_settings, Bins, DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec,
@@ -2280,15 +2280,17 @@ impl Source for TapSource {
                         playing.uri, playing.title, playing.artist, playing.album
                     ),
                 );
-                let key = format_key(&playing.track_type);
-                if key != self.icon_cache.0 {
-                    let icon = resolve_icon(
-                        &key,
-                        &lead::format_name(&playing.track_type),
-                        &self.skin_icons,
-                        &self.plugin_icons,
-                    );
-                    self.icon_cache = (key, icon);
+                // The icon: the first found of the names the type is looked
+                // for under, the signal level and mono among them.
+                let names = lead::icon_candidates(&playing.track_type, playing.channels);
+                let wanted = names.join(" ");
+                if wanted != self.icon_cache.0 {
+                    let icon = names
+                        .iter()
+                        .map(|name| resolve_icon(name, name, &self.skin_icons, &self.plugin_icons))
+                        .find(|icon| !icon.is_empty())
+                        .unwrap_or_default();
+                    self.icon_cache = (wanted, icon);
                 }
                 if let Some(show) = self.fanart.as_mut() {
                     show.update(&playing.artist, &playing.uri);
@@ -2589,6 +2591,9 @@ pub struct NowPlaying {
     pub bitrate: String,
     /// Index of the playing item in the queue.
     pub position: i64,
+    /// The channels the player reports for what plays, 0 where it says none:
+    /// a radio received in mono says 1.
+    pub channels: u8,
 }
 
 impl NowPlaying {
@@ -2637,6 +2642,9 @@ impl NowPlaying {
                 }
             },
             bitrate: text("bitrate"),
+            channels: number("channels")
+                .map(|c| c.clamp(0.0, 255.0) as u8)
+                .unwrap_or(0),
             position: number("position").map(|p| p as i64).unwrap_or(0),
         }
     }

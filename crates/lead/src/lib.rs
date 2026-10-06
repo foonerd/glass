@@ -644,6 +644,47 @@ pub fn format_name(track_type: &str) -> String {
     }
 }
 
+/// The signal level a radio's type carries after its name, as the FM/DAB
+/// plugin writes it: five dots, the filled ones first (`FM ◦◦●●●` is 3 of
+/// 5). None where the type carries no such dots.
+pub fn format_level(track_type: &str) -> Option<u8> {
+    let filled = track_type.chars().filter(|c| *c == '●').count();
+    let empty = track_type.chars().filter(|c| *c == '◦').count();
+    (filled + empty == 5).then_some(filled as u8)
+}
+
+/// The names an icon for what plays is looked for under, the most telling
+/// first: in mono where the player says so (the word in the type, or one
+/// channel reported) and at the signal level where the type carries one,
+/// as `fm_mono_3`, `fm_mono`, `fm_3`, `fm`; then the type's own name as
+/// the player reports it. A theme or the plugin brings what it has of
+/// these; the first found is drawn.
+pub fn icon_candidates(track_type: &str, channels: u8) -> Vec<String> {
+    let key = format_key(track_type);
+    if key.is_empty() {
+        return Vec::new();
+    }
+    let base = key.trim_end_matches("_mono").to_string();
+    let mono = key.ends_with("_mono") || channels == 1;
+    let level = format_level(track_type);
+    let mut out = Vec::new();
+    if mono {
+        if let Some(n) = level {
+            out.push(format!("{base}_mono_{n}"));
+        }
+        out.push(format!("{base}_mono"));
+    }
+    if let Some(n) = level {
+        out.push(format!("{base}_{n}"));
+    }
+    out.push(base);
+    let name = format_name(track_type);
+    if !out.contains(&name) {
+        out.push(name);
+    }
+    out
+}
+
 /// The icon and label key for a reported track type: lower case, spaces to
 /// underscores, `dsf` is `dsd`, cut at the first character outside
 /// `[a-z0-9_]`, then the known aliases.
@@ -667,6 +708,8 @@ pub fn format_key(track_type: &str) -> String {
     let alias = match key.as_str() {
         "dab_radio" | "dab_" | "dab" | "rtlsdr" | "rtlsdr_radio" => "dab",
         "fm_radio" | "fm_" | "fm" => "fm",
+        // FM received in mono: the radio plugin's word, with or without its signal dots after it.
+        "fm_mono" | "fm_mono_" | "fm_radio_mono" => "fm_mono",
         "webradio" | "web_radio" | "internet_radio" => "radio",
         "tidal_connect" => "tidal",
         "qobuz_connect" => "qobuz",
@@ -6037,6 +6080,33 @@ mod tests {
         assert_eq!(format_key("FLAC"), "flac");
         assert_eq!(format_key("dsf"), "dsd");
         assert_eq!(format_key("dab_●◦◦◦◦"), "dab");
+        assert_eq!(format_key("FM ◦◦●●●"), "fm");
+        assert_eq!(format_key("FM MONO ◦◦●●●"), "fm_mono");
+        assert_eq!(format_key("FM MONO"), "fm_mono");
+        assert_eq!(format_level("FM ◦◦●●●"), Some(3));
+        assert_eq!(format_level("DAB ●●●●●"), Some(5));
+        assert_eq!(format_level("FM ◦◦◦◦◦"), Some(0));
+        assert_eq!(format_level("FM"), None);
+        assert_eq!(format_level("flac"), None);
+        // The names an icon is looked for under, the most telling first.
+        let names = |t: &str, ch: u8| icon_candidates(t, ch);
+        assert_eq!(names("FM ◦◦●●●", 2), ["fm_3", "fm", "fm_"]);
+        assert_eq!(
+            names("FM ◦◦●●●", 1),
+            ["fm_mono_3", "fm_mono", "fm_3", "fm", "fm_"]
+        );
+        assert_eq!(
+            names("FM MONO ◦◦●●●", 2),
+            ["fm_mono_3", "fm_mono", "fm_3", "fm", "fm_mono_"]
+        );
+        assert_eq!(names("DAB ●◦◦◦◦", 2), ["dab_1", "dab", "dab_"]);
+        assert_eq!(names("WebRadio", 2), ["radio", "webradio"]);
+        assert_eq!(
+            names("flac", 1),
+            ["flac_mono", "flac"],
+            "a mono file: the plain icon where no mono one is"
+        );
+        assert!(names("", 2).is_empty());
         assert_eq!(format_key("Tidal Connect"), "tidal");
         assert_eq!(format_key("The Main Mix - "), "the_main_mix_");
         assert_eq!(format_key("WebRadio"), "radio");

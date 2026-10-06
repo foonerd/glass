@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd">
+<svg version="1.1" xmlns="http://www.w3.org/2000/svg" x="0px" y="0px"
+	 width="400px" height="200px" viewBox="0 0 400 200" xml:space="preserve">
+<g>
+	<!-- FM -->
+	<g transform="translate(8,2) scale(0.66)">
+		<!-- F -->
+		<path fill="#FFFFFF" d="M30,30h100v30H60v30h60v30H60v50H30V30z"/>
+		<!-- M -->
+		<path fill="#FFFFFF" d="M160,30h40l35,90l35-90h40v140h-30V75l-35,95h-20l-35-95v95h-30V30z"/>
+	</g>
+	<!-- MONO -->
+	<g fill="none" stroke="#FFFFFF" stroke-width="8" stroke-linejoin="miter" stroke-linecap="butt">
+		<path d="M40,166V130l15,20l15-20v36"/>
+		<rect x="83" y="130" width="30" height="36" rx="11" ry="11"/>
+		<path d="M128,166V130l30,36V130"/>
+		<rect x="171" y="130" width="30" height="36" rx="11" ry="11"/>
+	</g>
+	<!-- the signal, 5 of 5 -->
+	<rect fill="#FFFFFF" fill-opacity="1" x="262" y="136" width="20" height="24" rx="3" ry="3"/>
+	<rect fill="#FFFFFF" fill-opacity="1" x="289" y="124" width="20" height="36" rx="3" ry="3"/>
+	<rect fill="#FFFFFF" fill-opacity="1" x="316" y="112" width="20" height="48" rx="3" ry="3"/>
+	<rect fill="#FFFFFF" fill-opacity="1" x="343" y="100" width="20" height="60" rx="3" ry="3"/>
+	<rect fill="#FFFFFF" fill-opacity="1" x="370" y="88" width="20" height="72" rx="3" ry="3"/>
+</g>
+</svg>
