@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.73] - 2026-10-07
+
+Andrew, placing the clock in a corner of the grid: "Perhaps a margin should be introduced?" and "meant user controlled margins!" The face has it from glass-evo 0.1.40.
+
+- **Margin** in the Clock section, shown while the clock is on the grid: units of a 720th of the height between the clock's glass and the sides of its cells it is aligned to; 20 as before, 0 for the corner. The likeness keeps the same margin (`clock.margin`).
+
 ## [0.8.72] - 2026-10-07
 
 The first step of the idle screen's grid, at Andrew's word: "introduce grid. We will test only clock in grid end-to-end. Move clock to grid." The face draws it from glass-evo 0.1.39; this is the Manager's part, for the clock alone.
