@@ -4296,16 +4296,23 @@ pub fn meter_texts(
                 Some((max_key, field)) => (box_for(x, number(max_key, 0)), speed_for(field), align),
                 None => (0, 0.0, TextAlign::Left),
             };
+            // A field may bring a font file and a size of its own beside
+            // its position (`playinfo.title.font`, `playinfo.title.fontsize`),
+            // as the time fields do; without them the style's.
+            let prefix = pos_key.strip_suffix(".pos").unwrap_or(pos_key);
             Some(TextSpec {
                 x,
                 y,
                 style,
-                size: size_of(style),
+                size: number(&format!("{prefix}.fontsize"), size_of(style)),
                 color: get(color_key).and_then(color_triplet).unwrap_or(font_color),
                 max_width,
                 align,
                 speed,
-                font_file: String::new(),
+                font_file: get(&format!("{prefix}.font"))
+                    .unwrap_or("")
+                    .trim()
+                    .to_string(),
                 box_as: String::new(),
             })
         };
@@ -5328,6 +5335,33 @@ mod tests {
             (total.style, total.size, total.color),
             (TextStyle::Digi, 40, [1, 2, 3])
         );
+    }
+
+    #[test]
+    fn a_text_field_takes_a_font_and_a_size_of_its_own() {
+        let text = "[m]\nplayinfo.title.pos = 10,20,bold\nplayinfo.title.font = fonts/Script.ttf\n\
+            playinfo.title.fontsize = 44\nplayinfo.artist.pos = 10,60\nplayinfo.artist.font =  fonts/Slab.otf \n\
+            playinfo.album.pos = 10,90,light\nplayinfo.next.title.pos = 10,120\nplayinfo.next.title.font = Next.ttf\n\
+            font.size.bold = 30\nfont.size.light = 18\nfont.size.regular = 22\n";
+        let texts = meter_texts(text, "m", 1280, &ScrollSpeeds::default());
+        let title = texts.title.unwrap();
+        assert_eq!(
+            (title.style, title.size, title.font_file.as_str()),
+            (TextStyle::Bold, 44, "fonts/Script.ttf")
+        );
+        let artist = texts.artist.unwrap();
+        assert_eq!(
+            (artist.size, artist.font_file.as_str()),
+            (18, "fonts/Slab.otf"),
+            "a font alone keeps the style's size"
+        );
+        let album = texts.album.unwrap();
+        assert_eq!(
+            (album.style, album.size, album.font_file.as_str()),
+            (TextStyle::Light, 18, ""),
+            "a field that names none is set in its style's font"
+        );
+        assert_eq!(texts.next_title.unwrap().font_file, "Next.ttf");
     }
 
     #[test]

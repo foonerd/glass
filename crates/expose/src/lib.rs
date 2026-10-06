@@ -7746,10 +7746,18 @@ impl MeterAssets {
     pub fn load(skin: &lead::SkinDesc) -> Self {
         let mut fonts = Fonts::load(&skin.fonts);
         for field in [
+            &skin.title,
+            &skin.artist,
+            &skin.album,
+            &skin.sample,
             &skin.time,
             &skin.time_elapsed,
             &skin.time_total,
             &skin.volume_value,
+            &skin.next_title,
+            &skin.next_artist,
+            &skin.next_album,
+            &skin.ticker.as_ref().map(|ticker| ticker.text.clone()),
         ]
         .into_iter()
         .flatten()

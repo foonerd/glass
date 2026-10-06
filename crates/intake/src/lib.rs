@@ -934,10 +934,11 @@ impl Conditioner {
     }
 }
 
-/// A time field's font file as the player finds it: an absolute path that
-/// exists, else the file inside the theme folder, else under `font.path`.
-/// Not found means the clock font, so the field is left empty.
-pub fn resolve_time_font(spec: &mut TextSpec, theme_dir: &str, font_path: &str) {
+/// A text field's own font file as the player finds it: an absolute path
+/// that exists, else the file inside the theme folder, else under
+/// `font.path`. Not found means the font of the field's style (the clock
+/// font for a time field), so the field is left empty.
+pub fn resolve_own_font(spec: &mut TextSpec, theme_dir: &str, font_path: &str) {
     if spec.font_file.is_empty() {
         return;
     }
@@ -2470,31 +2471,38 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         skin.title_at = title_at;
         skin.artist_at = artist_at;
         let speeds = scroll_speeds_from_config(&text);
-        let texts = meter_texts(&meters, &skin.name, skin.width, &speeds);
-        skin.title = texts.title;
-        skin.artist = texts.artist;
-        skin.album = texts.album;
-        skin.sample = texts.sample;
+        let mut texts = meter_texts(&meters, &skin.name, skin.width, &speeds);
         let font_path = current_value(&text, "font.path").unwrap_or_default();
-        let mut time = texts.time;
-        let mut time_elapsed = texts.time_elapsed;
-        let mut time_total = texts.time_total;
-        let mut volume_value = texts.volume_value;
+        // Every text field may name a font file of its own.
         for field in [
-            &mut time,
-            &mut time_elapsed,
-            &mut time_total,
-            &mut volume_value,
+            &mut texts.title,
+            &mut texts.artist,
+            &mut texts.album,
+            &mut texts.sample,
+            &mut texts.time,
+            &mut texts.time_elapsed,
+            &mut texts.time_total,
+            &mut texts.volume_value,
+            &mut texts.next_title,
+            &mut texts.next_artist,
+            &mut texts.next_album,
         ]
         .into_iter()
         .flatten()
         {
-            resolve_time_font(field, &skin.theme_dir, &font_path);
+            resolve_own_font(field, &skin.theme_dir, &font_path);
         }
-        skin.time = time;
-        skin.time_elapsed = time_elapsed;
-        skin.time_total = time_total;
-        skin.volume_value = volume_value;
+        if let Some(ticker) = texts.ticker.as_mut() {
+            resolve_own_font(&mut ticker.text, &skin.theme_dir, &font_path);
+        }
+        skin.title = texts.title;
+        skin.artist = texts.artist;
+        skin.album = texts.album;
+        skin.sample = texts.sample;
+        skin.time = texts.time;
+        skin.time_elapsed = texts.time_elapsed;
+        skin.time_total = texts.time_total;
+        skin.volume_value = texts.volume_value;
         skin.volume_format = texts.volume_format;
         skin.volume_mute = texts.volume_mute;
         skin.next_title = texts.next_title;
