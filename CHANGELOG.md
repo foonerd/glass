@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.66] - 2026-10-06
+
+Found while the FM/DAB radio plugin was being developed: a station received in mono had no icon.
+
+- **An icon for FM in mono, and icons by signal level for FM and DAB.** The radio plugin names what plays as `FM` or `DAB` with its signal after it, five dots of which the filled ones count (`FM ◦◦●●●` is 3 of 5), and says a mono station with one channel. The icon for what plays is now looked for under the most telling name first and the plainest last: `fm_mono_3`, `fm_mono`, `fm_3`, `fm`, and the type's own name; the first found is drawn. The plugin brings the set: `fm_0` to `fm_5` and `dab_0` to `dab_5` with the signal as bars beside the letters, `fm_mono_0` to `fm_mono_5` with MONO under the letters, and `fm_mono` without bars. A theme brings its own under the same names in its `format-icons` folder, as before, and may bring only some: a theme with `fm_mono.svg` and no levels shows it at every level.
+- A type the player reports with one channel is looked for under its `_mono` name first, whatever the source; where no such icon is there the plain one shows, so nothing changes for a mono file.
+- The display reads the state's `channels`.
+
 ## [0.8.65] - 2026-10-04
 
 Asked for after a theme maker put the volume on a meter as a number: the number as a full text of the theme's own.
