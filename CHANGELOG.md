@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.71] - 2026-10-06
+
+Reported on the forum: a theme's button with `button.nextmeter.action = meter.next` "changes the skin on the computer (FACE) but does not simultaneously change the skin on the RPi."
+
+- **A meter stepped to in the Manager's Face tab is shown on the player's screen too.** A `meter.next` or `meter.previous` button pressed on the screen already moved the Face tab and every remote that follows the player; pressed in the Face tab it moved that page alone. The page now hands the meter to the plugin (`POST /api/face/meter`), the plugin asks the player's own display for it over the channel (`{"kind":"show","meter":"..."}`), and the display's answer brings the other views along. The display shows it when the theme on show has a meter of that name, and its own next step goes on from there. With no display of the player's own running, the page keeps its meter to itself as before.
+
 ## [0.8.70] - 2026-10-06
 
 Asked on the forum: "an option to add custom fonts for: artist, title and album. In the same manner as we can do for total and elapsed time."
