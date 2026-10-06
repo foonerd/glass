@@ -24,7 +24,11 @@
     // Minutes with nothing playing and no touch after which the screen goes black; 0 for never.
     'idle.off': '0',
     // Milliseconds the screen takes to go black and to come back.
-    'idle.fade': '500'
+    'idle.fade': '500',
+    // The clock on the idle screen's grid (glass-evo 0.1.39): the cells it
+    // occupies and where it stands inside them; an empty place is the
+    // arrangement before the grid.
+    'clock.place': '', 'clock.align': 'centre middle'
   };
   var KEYS = Object.keys(BUILTIN);
   var NUMBERS = /^(glass\.(bar|sheet|hairline)|(buttons|clock|date)\.(opacity|glass)|clock\.unlit|measure\.[a-z]+|idle\.dim|idle\.off|idle\.fade)$/;
@@ -146,6 +150,41 @@
     return s === 0 ? 'NONE' : s <= 0.15 ? 'FAINT' : s < 0.5 ? 'LIGHT' : s < 0.9 ? 'FAIR' : 'SOLID';
   }
 
+  // The idle screen's grid, as the face reads it: a place names the cells
+  // an element occupies, rows then columns, each a name or a range
+  // (`middle left-centre`); null for anything else, an empty place among it.
+  var GRID_ROWS = ['top', 'middle', 'bottom'];
+  var GRID_COLUMNS = ['left', 'centre', 'right'];
+  function cells(text) {
+    var words = String(text || '').trim().split(/\s+/);
+    if (words.length !== 2) return null;
+    var range = function (word, names) {
+      var ends = word.toLowerCase().replace('center', 'centre').split('-');
+      if (ends.length > 2) return null;
+      var a = names.indexOf(ends[0]), b = names.indexOf(ends[ends.length - 1]);
+      return a === -1 || b === -1 ? null : [Math.min(a, b), Math.max(a, b)];
+    };
+    var rows = range(words[0], GRID_ROWS), columns = range(words[1], GRID_COLUMNS);
+    return rows && columns ? { r0: rows[0], r1: rows[1], c0: columns[0], c1: columns[1] } : null;
+  }
+  // The place that names a block of cells.
+  function cellsText(on) {
+    var span = function (a, b, names) { return a === b ? names[a] : names[a] + '-' + names[b]; };
+    return span(on.r0, on.r1, GRID_ROWS) + ' ' + span(on.c0, on.c1, GRID_COLUMNS);
+  }
+  // Where an element stands inside its cells: across and down, the middle unless said.
+  function align(text) {
+    var at = { across: 'centre', down: 'middle' };
+    var words = String(text || '').trim().split(/\s+/).filter(Boolean);
+    for (var i = 0; i < words.length; i++) {
+      var w = words[i].toLowerCase().replace('center', 'centre');
+      if (GRID_COLUMNS.indexOf(w) !== -1) at.across = w;
+      else if (GRID_ROWS.indexOf(w) !== -1) at.down = w;
+      else return null;
+    }
+    return at;
+  }
+
   // A piece's size as a share of the built-in look's, in percent.
   function sizeOf(key, value) {
     var units = parseFloat(value);
@@ -238,6 +277,7 @@
     CLOCK_FACES: CLOCK_FACES, DIAL_STYLES: DIAL_STYLES, clockFace: clockFace, dialStyle: dialStyle,
     known: known, lay: lay, same: same, differs: differs, changes: changes,
     isOn: isOn, colourOf: colourOf, rgb: rgb, share: share, frostOn: frostOn, backgrounds: backgrounds,
+    cells: cells, cellsText: cellsText, align: align, GRID_ROWS: GRID_ROWS, GRID_COLUMNS: GRID_COLUMNS,
     solidWord: solidWord, sizeOf: sizeOf, sizeWord: sizeWord, unitsOf: unitsOf, fitted: fitted, idleMost: idleMost, padAbout: padAbout, IDLE: IDLE,
     sample: sample, strftime: strftime
   };
