@@ -255,7 +255,15 @@
       if (act.command) {
         fetch('/api/face/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(act.command) }).catch(function () {});
       }
-      if (act.meter) { face.meter = act.meter; sized(); }
+      if (act.meter) {
+        face.meter = act.meter; sized();
+        // Until the screen has answered with this meter (or three seconds
+        // passed) its older answers are not followed: a second press must
+        // not be taken back by the answer to the first.
+        face.asked = act.meter; face.askedAt = Date.now();
+        // The player's screen shows it too; its answer brings the other views along.
+        fetch('/api/face/meter', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ meter: act.meter }) }).catch(function () {});
+      }
       if (act.dismiss && document.fullscreenElement) document.exitFullscreen();
     });
   }
@@ -377,8 +385,11 @@
       if (message.kind === 'config' && face.ready && message.theme && message.theme !== face.theme) {
         face.wanted = '';
         restart();
-      } else if (message.kind === 'showing' && face.ready && message.meter && message.meter !== face.meter && !face.wanted) {
-        try { start(message.meter); } catch (err) { say(String(err.message || err), true); }
+      } else if (message.kind === 'showing' && face.ready && message.meter) {
+        if (face.asked && (message.meter === face.asked || Date.now() - face.askedAt > 3000)) face.asked = '';
+        if (message.meter !== face.meter && !face.wanted && !face.asked) {
+          try { start(message.meter); } catch (err) { say(String(err.message || err), true); }
+        }
       }
     });
     stream.addEventListener('feed', function (e) {

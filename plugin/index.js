@@ -218,6 +218,19 @@ Channel.prototype.tell = function (conn, message) {
     try { conn.write(JSON.stringify(message) + '\n'); } catch (e) {}
 };
 
+// The player's own display is asked to show a meter of the theme on show: a
+// button pressed in a browser view reaches the screen this way, and the
+// screen's answer (`showing`) brings every view that follows it along.
+// False when no display of the player's own is connected.
+Channel.prototype.show = function (meter) {
+    var self = this;
+    var told = false;
+    self.clients.slice().forEach(function (conn) {
+        if (!conn.remote) { self.tell(conn, { kind: 'show', meter: meter }); told = true; }
+    });
+    return told;
+};
+
 // Every connected display hears this, and whoever mirrors the channel.
 Channel.prototype.push = function (message) {
     var self = this;
@@ -991,6 +1004,10 @@ Glass.prototype.launchEnv = function () {
 // `seek` takes seconds, `volume` a number from 0 to 100 or one of the
 // player's words (`+`, `-`, `mute`, `unmute`, `toggle`), `random` a
 // boolean, `repeat` one of `off`, `all`, `single`.
+Glass.prototype.showMeter = function (meter) {
+    return !!(this.channel && this.channel.show(meter));
+};
+
 Glass.prototype.runCommand = function (message) {
     var self = this;
     var router = self.commandRouter;

@@ -927,6 +927,16 @@ fn session(
                 switch_meter!(name);
             }
         }
+        // The plugin asks the player's own screen for a meter by name (a
+        // button pressed in a browser view): shown when the theme has it.
+        if remote.is_none() {
+            if let Some(meter) = source.take_show() {
+                if meter != skin.name && intake::installed_meter_names().contains(&meter) {
+                    selector.shown(&meter);
+                    switch_meter!(meter);
+                }
+            }
+        }
         let input = source.poll();
         // The face's commands go the way the theme's buttons go.
         if let Some(face) = face.as_deref_mut() {

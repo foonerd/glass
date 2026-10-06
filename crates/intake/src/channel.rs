@@ -36,6 +36,9 @@ pub enum Event {
     },
     /// The meter the player's own display shows, for remotes that follow it.
     Showing { theme: String, meter: String },
+    /// A meter the player's own display is asked to show: a button pressed
+    /// in a browser view, carried to the screen.
+    Show { meter: String },
     /// The player's queue as the plugin pushes it, on connect and on every
     /// change: the tracks in order, for the next line and the queue's length.
     Queue(Vec<QueueItem>),
@@ -436,6 +439,9 @@ pub fn decode(line: &[u8]) -> Option<Event> {
             theme: text("theme"),
             meter: text("meter"),
         }),
+        "show" => Some(Event::Show {
+            meter: text("meter"),
+        }),
         "queue" => Some(Event::Queue(
             value
                 .get("items")
@@ -676,6 +682,13 @@ mod tests {
                 theme: "1280x720_x".into(),
                 meter: "gold".into()
             }
+        );
+        assert_eq!(
+            decode(br#"{"kind":"show","meter":"gold"}"#),
+            Some(Event::Show {
+                meter: "gold".into()
+            }),
+            "a meter asked for by name"
         );
         assert_eq!(decode(br#"{"kind":"unknown"}"#), None);
     }

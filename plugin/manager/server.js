@@ -633,6 +633,14 @@ class Manager {
       res.json({ ok: true, name });
     }));
 
+    // A meter stepped to in a browser view: the player's own screen is
+    // asked to show it too. `told` says whether a screen was there to ask.
+    app.post('/api/face/meter', wrap(async function (req, res) {
+      const meter = String((req.body || {}).meter || '');
+      if (!meter || meter.length > 128 || /[\u0000-\u001f\[\]]/.test(meter)) return res.status(400).json({ error: 'bad-meter' });
+      res.json({ ok: true, meter, told: self.plugin.showMeter(meter) });
+    }));
+
     // A picture the face wants: the album art the player reports for the
     // playing track, or a fanart picture, fetched from the player itself.
     // Only the player's own albumart route and the addresses the player

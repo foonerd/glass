@@ -199,6 +199,17 @@ impl Selector {
         Some(self.remaining.remove(i))
     }
 
+    /// The meter on show was set by name, not by a step of this walk: the
+    /// walk goes on from it, so the next step of a list is the meter after
+    /// it, and a random round does not draw it again.
+    pub fn shown(&mut self, name: &str) {
+        if self.rotation.random {
+            self.remaining.retain(|n| n != name);
+        } else if let Some(at) = self.rotation.names.iter().position(|n| n == name) {
+            self.index = at + 1;
+        }
+    }
+
     /// The meter before the one on show in a list rotation; in a random
     /// rotation another meter, since the order has none.
     pub fn previous(&mut self) -> Option<String> {
@@ -1645,6 +1656,7 @@ pub struct TapSource {
     /// The configuration change the channel last announced, until taken.
     config_seen: Option<(String, String, String)>,
     showing_seen: Option<(String, String)>,
+    show_asked: Option<String>,
     /// The meter's fall, as the old scope shaped it, on the pipe scale.
     decay: tap::legacy::Meter,
     /// The theme's bars from the bank, on the old logarithmic mapping.
@@ -1786,6 +1798,11 @@ impl TapSource {
         self.showing_seen.take()
     }
 
+    /// The meter the plugin asked this display to show since the last call.
+    pub fn take_show(&mut self) -> Option<String> {
+        self.show_asked.take()
+    }
+
     /// Say which meter this display shows, and at what rate. False without a channel.
     pub fn report_showing(&mut self, theme: &str, meter: &str, rate: u32) -> bool {
         self.channel
@@ -1814,6 +1831,7 @@ impl TapSource {
             hops: Box::new(IdleHops),
             config_seen: None,
             showing_seen: None,
+            show_asked: None,
             decay: tap::legacy::Meter::new(METER_DECAY_MS, meter_max.max(1.0) as u32),
             bins_mapper: tap::legacy::Regroup::new(
                 bins,
@@ -2226,6 +2244,7 @@ impl Source for TapSource {
                     meter,
                 } => self.config_seen = Some((version, theme, meter)),
                 Event::Showing { theme, meter } => self.showing_seen = Some((theme, meter)),
+                Event::Show { meter } => self.show_asked = Some(meter),
                 Event::Queue(items) => {
                     self.queue_held = Some(items);
                     self.rederive = true;
@@ -2988,6 +3007,40 @@ mod tests {
         assert!(drawn.iter().any(|n| n == "b") && drawn.iter().any(|n| n == "c"));
         let mut none = Selector::seeded(rotation(true, Vec::new()), 7);
         assert_eq!(none.next_other("a"), None);
+    }
+
+    #[test]
+    fn a_meter_shown_by_name_is_where_the_walk_goes_on_from() {
+        let names: Vec<String> = ["a", "b", "c", "d"].map(String::from).to_vec();
+        let mut list = Selector::seeded(rotation(false, names.clone()), 1);
+        assert_eq!(list.next(), Some("a".into()));
+        list.shown("c");
+        assert_eq!(
+            list.next(),
+            Some("d".into()),
+            "the meter after the one shown"
+        );
+        assert_eq!(list.next(), Some("a".into()));
+        list.shown("d");
+        assert_eq!(list.previous(), Some("c".into()), "and the one before it");
+        list.shown("not of this theme");
+        assert_eq!(
+            list.next(),
+            Some("d".into()),
+            "an unknown name moves nothing"
+        );
+        let mut random = Selector::seeded(rotation(true, names), 5);
+        let first = random.next().unwrap();
+        let other = ["a", "b", "c", "d"]
+            .into_iter()
+            .find(|n| *n != first)
+            .unwrap();
+        random.shown(other);
+        let rest: Vec<String> = (0..2).filter_map(|_| random.next()).collect();
+        assert!(
+            rest.iter().all(|n| n != other && *n != first),
+            "a random round does not draw the shown meter again: {rest:?}"
+        );
     }
 
     #[test]
