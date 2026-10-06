@@ -1965,9 +1965,10 @@
       if (onGrid) {
         var a = LOOK.align(v['clock.align']) || LOOK.align('');
         var flexed = { left: 'flex-start', centre: 'center', right: 'flex-end', top: 'flex-start', middle: 'center', bottom: 'flex-end' };
-        var keep = function (side) { return side ? 'calc(var(--u) * ' + LOOK.IDLE.margin + ')' : '0'; };
+        var clockMargin = Math.min(200, Math.max(0, parseInt(v['clock.margin'], 10) || 0));
+        var keep = function (side) { return side ? 'calc(var(--u) * ' + clockMargin + ')' : '0'; };
         var margins = keep(a.down === 'top') + ' ' + keep(a.across === 'right') + ' ' + keep(a.down === 'bottom') + ' ' + keep(a.across === 'left');
-        html += '<div class="lp-cell"' + open('clock') + ' style="left:' + (onGrid.c0 / 3 * 100) + '%;width:' + ((onGrid.c1 - onGrid.c0 + 1) / 3 * 100) + '%;top:calc((100% - var(--barh)) * ' + (onGrid.r0 / 3) + ');height:calc((100% - var(--barh)) * ' + ((onGrid.r1 - onGrid.r0 + 1) / 3) + ');padding:' + margins + ';justify-content:' + flexed[a.across] + ';align-items:' + flexed[a.down] + '">' +
+        html += '<div class="lp-cell" data-margin="' + clockMargin + '"' + open('clock') + ' style="left:' + (onGrid.c0 / 3 * 100) + '%;width:' + ((onGrid.c1 - onGrid.c0 + 1) / 3 * 100) + '%;top:calc((100% - var(--barh)) * ' + (onGrid.r0 / 3) + ');height:calc((100% - var(--barh)) * ' + ((onGrid.r1 - onGrid.r0 + 1) / 3) + ');padding:' + margins + ';justify-content:' + flexed[a.across] + ';align-items:' + flexed[a.down] + '">' +
           '<div class="lp-plate" style="' + glass('clock.glass', v['clock.tint'], '0 0 0 1px') + '">' + clockHtml(true) + '</div></div>';
       }
     }
@@ -2074,7 +2075,7 @@
         var piece = cell.querySelector('[data-grid="clock"]');
         if (!piece) return;
         var box = cell.getBoundingClientRect();
-        var margin = LOOK.IDLE.margin * unit;
+        var margin = (parseInt(cell.getAttribute('data-margin'), 10) || 0) * unit;
         var took = set(piece, [box.width - 2 * (margin + least[0]), box.height - 2 * (margin + least[1])]);
         var cellPlate = cell.querySelector('.lp-plate');
         if (cellPlate) cellPlate.style.padding = LOOK.padAbout(box.height - 2 * margin, took[1], pad[1], least[1]) + 'px ' + LOOK.padAbout(box.width - 2 * margin, took[0], pad[0], least[0]) + 'px';
@@ -2111,6 +2112,7 @@
     };
     var cells = function (key, clear) { return nine(key, 'cells', 'data-cell') + '<button type="button" class="textlink" data-cells-clear="' + key + '">' + esc(t(clear)) + '</button>'; };
     var inside = function (key) { return nine(key, 'align', 'data-align'); };
+    var units = function (key) { return '<input type="number" min="0" max="200" step="1" data-key="' + key + '" data-kind="units" style="width:90px">'; };
     var hint = function (when) { return '<div class="help" data-when="' + when + '" style="padding:0 0 8px">' + esc(t('MANAGER_LOOK_PATTERN_HINT')) + '</div>'; };
     // A piece's own colour, strength and background, behind its More.
     var finer = function (piece, when) {
@@ -2138,7 +2140,8 @@
         field('MANAGER_LOOK_DIAL', choice('clock.dial', LOOK.DIAL_STYLES, 'MANAGER_LOOK_DIAL_'), esc(t('MANAGER_LOOK_DIAL_HINT')), 'dial'),
         field('MANAGER_LOOK_SIZE', slider('measure.clock', 'size', 50, 400, 5, 'SMALL', 'LARGE'), '', 'clock'),
         field('MANAGER_LOOK_CELLS', cells('clock.place', 'MANAGER_LOOK_CELLS_LOOK'), esc(t('MANAGER_LOOK_CELLS_HINT')), 'clock-cells'),
-        field('MANAGER_LOOK_INSIDE', inside('clock.align'), '', 'clock-grid')],
+        field('MANAGER_LOOK_INSIDE', inside('clock.align'), '', 'clock-grid'),
+        field('MANAGER_LOOK_MARGIN', units('clock.margin'), esc(t('MANAGER_LOOK_MARGIN_HINT')), 'clock-grid')],
         'MANAGER_LOOK_MORE_PIECE', finer('clock', '').concat([
           field('MANAGER_LOOK_UNLIT', slider('clock.unlit', 'share', 0, 50, 1, 'NONE', 'FAINT'), '', 'segments'),
           field('MANAGER_LOOK_HANDS', word('clock.hands', 'MANAGER_LOOK_AS_STYLE'), '', 'dial'),
@@ -2242,6 +2245,7 @@
       else if (kind === 'pattern') el.value = lookUi.own[key] ? '' : v[key];
       else if (kind === 'own') { el.hidden = !lookUi.own[key]; if (document.activeElement !== el) el.value = v[key]; }
       else if (kind === 'place') el.value = place;
+      else if (kind === 'units') { if (document.activeElement !== el) el.value = v[key]; }
       else if (kind === 'cells') {
         var on = LOOK.cells(v[key]);
         Array.prototype.forEach.call(el.querySelectorAll('[data-cell]'), function (b) {
@@ -2350,6 +2354,7 @@
     else if (kind === 'solid') { var moved = LOOK.backgrounds(lookUi.base, v, el.value / 100); Object.keys(moved).forEach(function (k) { v[k] = moved[k]; }); }
     else if (kind === 'size') v[key] = LOOK.unitsOf(key, el.value);
     else if (kind === 'minutes') v[key] = String(Math.min(1440, Math.max(0, parseInt(el.value, 10) || 0)));
+    else if (kind === 'units') v[key] = String(Math.min(200, Math.max(0, parseInt(el.value, 10) || 0)));
     else if (kind === 'millis') v[key] = String(Math.min(120000, Math.max(0, parseInt(el.value, 10) || 0)));
     else if (kind === 'pattern') { lookUi.own[key] = el.value === ''; if (el.value) v[key] = el.value; }
     else if (kind === 'own') { if (el.value.trim()) v[key] = el.value.trim(); }

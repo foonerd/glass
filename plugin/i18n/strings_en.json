@@ -957,6 +957,8 @@
     "MANAGER_LOOK_CELLS_HINT": "Nine cells above the buttons, three rows by three columns. Press one cell, then another for the block between them. A size the look comes with is fitted to the cells; a size you set is yours, and runs over them.",
     "MANAGER_LOOK_CELLS_LOOK": "As the look places it",
     "MANAGER_LOOK_INSIDE": "Inside its cells",
+    "MANAGER_LOOK_MARGIN": "Margin",
+    "MANAGER_LOOK_MARGIN_HINT": "Units of a 720th of the height between the clock’s glass and the sides of its cells it is aligned to. 0 puts it in the corner; 20 as before.",
     "MANAGER_LOOK_ROW_TOP": "top",
     "MANAGER_LOOK_ROW_MIDDLE": "middle",
     "MANAGER_LOOK_ROW_BOTTOM": "bottom",

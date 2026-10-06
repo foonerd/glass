@@ -28,7 +28,7 @@
     // The clock on the idle screen's grid (glass-evo 0.1.39): the cells it
     // occupies and where it stands inside them; an empty place is the
     // arrangement before the grid.
-    'clock.place': '', 'clock.align': 'centre middle'
+    'clock.place': '', 'clock.align': 'centre middle', 'clock.margin': '20'
   };
   var KEYS = Object.keys(BUILTIN);
   var NUMBERS = /^(glass\.(bar|sheet|hairline)|(buttons|clock|date)\.(opacity|glass)|clock\.unlit|measure\.[a-z]+|idle\.dim|idle\.off|idle\.fade)$/;
