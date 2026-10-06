@@ -2053,6 +2053,7 @@
     };
     var onoff = function (key, kind) { return '<input type="checkbox" class="look-toggle" data-key="' + key + '" data-kind="' + kind + '">'; };
     var minutes = function (key) { return '<input type="number" min="0" max="1440" step="1" data-key="' + key + '" data-kind="minutes" style="width:90px">'; };
+    var millis = function (key) { return '<input type="number" min="0" max="120000" step="100" data-key="' + key + '" data-kind="millis" style="width:110px">'; };
     var colour = function (key) { return '<input type="color" data-key="' + key + '" data-kind="colour">'; };
     // A colour that is a word (from the artwork, the same as the rest) until it is one of its own.
     var word = function (key, label) { return '<label class="switch"><input type="checkbox" data-key="' + key + '" data-kind="word"> <span>' + esc(t(label)) + '</span></label>' + colour(key); };
@@ -2081,7 +2082,8 @@
         field('MANAGER_LOOK_HOW_SOLID', slider('glass.bar', 'solid', 10, 100, 1, 'CLEAR', 'SOLID')),
         field('MANAGER_LOOK_BLUR', onoff('glass.frost', 'frost'), esc(t(lookUi.f.frostSuits ? 'MANAGER_LOOK_BLUR_SUITS' : 'MANAGER_LOOK_BLUR_HEAVY'))),
         field('MANAGER_LOOK_PICTURE_DIM', slider('idle.dim', 'share', 0, 90, 1, 'NONE', 'FULL'), '', 'idlepic'),
-        field('MANAGER_LOOK_SCREEN_OFF', minutes('idle.off'), esc(t('MANAGER_LOOK_SCREEN_OFF_HINT')))]],
+        field('MANAGER_LOOK_SCREEN_OFF', minutes('idle.off'), esc(t('MANAGER_LOOK_SCREEN_OFF_HINT'))),
+        field('MANAGER_LOOK_SCREEN_FADE', millis('idle.fade'), esc(t('MANAGER_LOOK_SCREEN_FADE_HINT')), 'screenoff')]],
       ['clock', 'MANAGER_LOOK_CLOCK', [
         field('MANAGER_LOOK_SHOW_CLOCK', onoff('clock.show', 'switch')),
         field('MANAGER_LOOK_SHOWS', pattern('clock.format', LOOK.CLOCK_PATTERNS), '', 'clock'),
@@ -2188,7 +2190,7 @@
         el.value = colour || lookUi.picked[key] || lookPick(key);
       } else if (kind === 'share' || kind === 'solid') el.value = Math.round(LOOK.share(v[key], 0) * 100);
       else if (kind === 'size') { el.value = LOOK.sizeOf(key, v[key]); el.title = el.value + '%'; }
-      else if (kind === 'minutes') { if (document.activeElement !== el) el.value = parseInt(v[key], 10) || 0; }
+      else if (kind === 'minutes' || kind === 'millis') { if (document.activeElement !== el) el.value = parseInt(v[key], 10) || 0; }
       else if (kind === 'pattern') el.value = lookUi.own[key] ? '' : v[key];
       else if (kind === 'own') { el.hidden = !lookUi.own[key]; if (document.activeElement !== el) el.value = v[key]; }
       else if (kind === 'place') el.value = place;
@@ -2196,7 +2198,7 @@
     });
     // A row shows while it has something to say: a clock's rows while the
     // clock shows, a date's own background while the date stands at the top.
-    var when = { clock: LOOK.isOn(v['clock.show']), date: LOOK.isOn(v['date.show']), buttons: true, idlepic: !!v['idle.picture'] };
+    var when = { clock: LOOK.isOn(v['clock.show']), date: LOOK.isOn(v['date.show']), buttons: true, idlepic: !!v['idle.picture'], screenoff: (parseInt(v['idle.off'], 10) || 0) > 0 };
     // The clock's faces show where the glass-evo that is here knows them
     // (its built-in look names the key), and each face's own rows with it.
     var clockFace = LOOK.clockFace(v);
@@ -2283,6 +2285,7 @@
     else if (kind === 'solid') { var moved = LOOK.backgrounds(lookUi.base, v, el.value / 100); Object.keys(moved).forEach(function (k) { v[k] = moved[k]; }); }
     else if (kind === 'size') v[key] = LOOK.unitsOf(key, el.value);
     else if (kind === 'minutes') v[key] = String(Math.min(1440, Math.max(0, parseInt(el.value, 10) || 0)));
+    else if (kind === 'millis') v[key] = String(Math.min(120000, Math.max(0, parseInt(el.value, 10) || 0)));
     else if (kind === 'pattern') { lookUi.own[key] = el.value === ''; if (el.value) v[key] = el.value; }
     else if (kind === 'own') { if (el.value.trim()) v[key] = el.value.trim(); }
     else if (kind === 'place' || kind === 'choice') v[key] = el.value;
