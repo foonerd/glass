@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.70] - 2026-10-06
+
+Asked on the forum: "an option to add custom fonts for: artist, title and album. In the same manner as we can do for total and elapsed time."
+
+- **A text field takes a font of its own.** `playinfo.title.font = fonts/MyTitle.ttf` sets the title in that file, found as a time field's font is: an absolute path, a file in the theme folder, or a file under `font.path`; not found, the font of the field's style as before. `playinfo.title.fontsize` gives it a size of its own, the style's size without it. The same two keys for `playinfo.artist`, `playinfo.album`, `playinfo.samplerate`, `playinfo.ticker` and `playinfo.next.title`, `.artist`, `.album`. A theme that names none of them draws as it did.
+
 ## [0.8.69] - 2026-10-06
 
 Asked by Andrew, looking at the radio icons of 0.8.66 on the screen: "DAB and FM (standard) are squashed and with indicator starting below line, they look off. Few proper mockups here will help." Chosen from three mockups, then adjusted twice at his word (MONO dead centred, the bars clear of the M and the same distance from the letters in every set), and with the plugin's coming STEREO word taken on.
