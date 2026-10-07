@@ -1931,27 +1931,30 @@
     };
     var words = function (piece) { return 'rgba(' + LOOK.rgb(LOOK.colourOf(v[piece + '.ink']) || ink) + ',' + LOOK.share(v[piece + '.opacity'], 1) + ')'; };
     var open = function (section) { return opts.pick ? ' data-open="' + section + '" role="button" tabindex="0" title="' + esc(t('MANAGER_LOOK_PICK')) + '"' : ''; };
-    var now = new Date();
     var html = '';
     var from = '0px';
     if (opts.mode === 'idle') {
-      var drawnFace = LOOK.clockFace(v) !== 'type' && lookModule();
+      // Every piece of the idle screen is drawn by glass-evo's own module,
+      // as the face draws it on the screen: a drawn clock face by
+      // clock_preview, the date and a clock in type by line_preview in the
+      // look's own font. Nothing stands in for the module.
+      lookModule();
+      var drawnFace = LOOK.clockFace(v) !== 'type';
+      var keys = esc(JSON.stringify(v));
       // The clock: off the grid in the middle plate as before, or on the
       // grid (glass-evo 0.1.39) in the cells it occupies.
       var clockHtml = function (grid) {
         var fit = (grid ? 'data-grid="clock"' : 'data-fit="clock"') + (opts.own && opts.own.clock ? ' data-own="1"' : '');
         return drawnFace
-          ? '<canvas ' + fit + ' data-clock="' + esc(JSON.stringify(v)) + '" data-units="' + units('measure.clock') + '" style="opacity:' + LOOK.share(v['clock.opacity'], 1) + '"></canvas>'
-          : '<div ' + fit + ' style="font-size:calc(var(--u) * ' + units('measure.clock') + ');color:' + words('clock') + '">' + esc(LOOK.strftime(v['clock.format'], now)) + '</div>';
+          ? '<canvas ' + fit + ' data-clock="' + keys + '" data-units="' + units('measure.clock') + '" style="opacity:' + LOOK.share(v['clock.opacity'], 1) + '"></canvas>'
+          : '<canvas ' + fit + ' data-line="clock" data-keys="' + keys + '" data-units="' + units('measure.clock') + '" style="opacity:' + LOOK.share(v['clock.opacity'], 1) + '"></canvas>';
       };
       var onGrid = LOOK.isOn(v['clock.show']) ? LOOK.cells(v['clock.place']) : null;
       var dateOnGrid = LOOK.isOn(v['date.show']) ? LOOK.cells(v['date.place']) : null;
       var clock = !LOOK.isOn(v['clock.show']) || onGrid ? '' : clockHtml(false);
       var place = lookPlace(v);
-      var dateWords = 'font-size:calc(var(--u) * ' + units('measure.date') + ');color:' + words('date') + ';';
-      var dateText = esc(LOOK.strftime(v['date.format'], now));
       var dateHtml = function (grid) {
-        return '<div ' + (grid ? 'data-grid="date"' : 'data-fit="date"') + (opts.own && opts.own.date ? ' data-own="1"' : '') + (grid || place === 'top' ? '' : open('date')) + ' style="' + dateWords + '">' + dateText + '</div>';
+        return '<canvas ' + (grid ? 'data-grid="date"' : 'data-fit="date"') + (opts.own && opts.own.date ? ' data-own="1"' : '') + (grid || place === 'top' ? '' : open('date')) + ' data-line="date" data-keys="' + keys + '" data-units="' + units('measure.date') + '" style="opacity:' + LOOK.share(v['date.opacity'], 1) + '"></canvas>';
       };
       var beside = '';
       if (LOOK.isOn(v['date.show']) && !dateOnGrid) {
@@ -2008,9 +2011,60 @@
       var ex = made.instance.exports;
       if (typeof ex.clock_preview !== 'function') return;
       lookUi.module = ex;
+      lookModuleFont();
       if (lookUi.f) paintLook(true);
-    }).catch(function () { /* no module: the time in type */ });
+    }).catch(function () { /* no module: nothing is drawn in its place */ });
     return null;
+  }
+  // The look's bold font, brought from the player and handed to the module,
+  // so that it sets the date and a clock in type as the face does on the
+  // screen, pixel for pixel. The likeness draws no type until it is here.
+  function lookModuleFont() {
+    var ex = lookUi.module;
+    if (!ex || lookUi.moduleFont !== undefined) return;
+    lookUi.moduleFont = false;
+    api('GET', '/api/fonts').then(function (fonts) {
+      var bold = (fonts.styles || {}).bold || { kind: 'builtin' };
+      var url = bold.kind === 'custom' ? '/api/remote/asset/custom/' + encodeURIComponent(bold.value)
+        : bold.kind === 'player' ? '/api/remote/asset/webfont/' + encodeURIComponent(bold.value)
+        : '/api/remote/asset/font/PeppyFont-Bold.ttf';
+      return fetch(url).then(function (res) { if (!res.ok) throw new Error('font: ' + res.status); return res.arrayBuffer(); });
+    }).then(function (bytes) {
+      // A file into the module's table, under its home as every file the
+      // page puts there: its name and its bytes, each in room the module
+      // gives, written after both are in place since the second allocation
+      // may move the module's memory.
+      var name = new TextEncoder().encode('fonts/bold.ttf');
+      var data = new Uint8Array(bytes);
+      var p = ex.alloc(name.length), d = ex.alloc(data.byteLength);
+      new Uint8Array(ex.memory.buffer, p, name.length).set(name);
+      new Uint8Array(ex.memory.buffer, d, data.byteLength).set(data);
+      ex.put_file(p, name.length, d, data.byteLength);
+      ex.free(p, name.length); ex.free(d, data.byteLength);
+      lookUi.moduleFont = true;
+      if (lookUi.f) paintLook(true);
+    }).catch(function (err) { toast(errorText(err), 'error'); });
+  }
+  // A line of type in a likeness, set by glass-evo itself: the date, or the
+  // clock in type, as a look's keys say, `size` CSS pixels high, in the
+  // room its widest shape takes with the words in the middle of it; its
+  // width and height in CSS pixels, or nothing where the module draws none.
+  function lookDrawLine(canvas, size) {
+    var ex = lookUi.module;
+    if (!ex || !lookUi.moduleFont || typeof ex.line_preview !== 'function') return null;
+    var ratio = window.devicePixelRatio || 1;
+    var bytes = new TextEncoder().encode(canvas.dataset.keys);
+    var ptr = ex.alloc(bytes.length);
+    new Uint8Array(ex.memory.buffer, ptr, bytes.length).set(bytes);
+    var at = ex.line_preview(ptr, bytes.length, canvas.dataset.line === 'clock' ? 1 : 0, Math.max(8, Math.round(size * ratio)), BigInt(Date.now()), -new Date().getTimezoneOffset());
+    ex.free(ptr, bytes.length);
+    var w = ex.line_preview_width(), h = ex.line_preview_height();
+    if (!at || !w || !h) return null;
+    canvas.width = w; canvas.height = h;
+    canvas.style.width = (w / ratio) + 'px'; canvas.style.height = (h / ratio) + 'px';
+    var image = new window.ImageData(new Uint8ClampedArray(ex.memory.buffer.slice(at, at + w * h * 4)), w, h);
+    canvas.getContext('2d').putImageData(image, 0, 0);
+    return [w / ratio, h / ratio];
   }
   // The clock a look's keys draw, `size` CSS pixels high, onto a canvas;
   // its width and height in CSS pixels, or nothing where the module draws none.
@@ -2053,11 +2107,12 @@
       var set = function (el, most) {
         // A drawn clock: at the size wanted, and again smaller where a size
         // the look comes with does not fit.
-        if (el.dataset.clock !== undefined) {
+        if (el.dataset.clock !== undefined || el.dataset.line !== undefined) {
+          var draw = el.dataset.line !== undefined ? lookDrawLine : lookDrawClock;
           var asked = parseFloat(el.dataset.units) * unit;
-          var drawn = lookDrawClock(el, asked) || [0, 0];
+          var drawn = draw(el, asked) || [0, 0];
           var fitted = LOOK.fitted(asked, drawn, el.dataset.own ? any : most);
-          return fitted < asked ? (lookDrawClock(el, fitted) || drawn) : drawn;
+          return fitted < asked ? (draw(el, fitted) || drawn) : drawn;
         }
         if (el.dataset.wanted === undefined) el.dataset.wanted = el.style.fontSize;
         el.style.fontSize = el.dataset.wanted;
