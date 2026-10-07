@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.85] - 2026-10-07
+
+Andrew's step 3 of the weather: "Forecast - add Heatmap toggle/slider - perhaps color picker for start and end? with some logical defaults? This is for numbers only. Also, second toggle - apply to days, still forecast. Apply to date - override date with heatmap - first override exception." With glass-evo 0.1.50.
+
+- **The forecast's heatmap.** In the Forecast section, "Heatmap" sets every temperature the forecast shows in the colour of its degree, numbers only: from "Cold" at −10 °C, through the forecast's own colour at 12 °C, to "Warm" at 30 °C, each a colour of your own (blue and red unless said). "Also the week's days" colours the week's lows and highs too; "Also the date" sets the date in the colour of the temperature now, with the date's own colour in the middle of the scale, the one link between pieces, by your switch. Every switch is off unless the look says. Keys `weather.heat`, `weather.cold`, `weather.warm`, `weather.heat.days`, `weather.heat.date`.
+- **The likeness draws it through the module**, which now takes the player's reading for the date's line as well as the forecast's.
+- **Glass names glass-evo 0.1.50 as the least it works with.**
+
 ## [0.8.84] - 2026-10-07
 
 Andrew: "Global is background, not date - should not be linked at all." With glass-evo 0.1.47.
