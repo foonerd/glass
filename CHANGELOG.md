@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.77] - 2026-10-07
+
+Andrew, on the accepted clock: "Now - wire date exactly the same way in grid. We are moving the face to grid and only." With glass-evo 0.1.42.
+
+- **The date on the grid, as the clock is.** The Date section has the same nine cells ("On the grid", with "As the look places it" to leave them), "Inside its cells" and "Margin" as the Clock section; `date.place` takes cells beside its three words, `date.align` and `date.margin` are the date's own. The Where words show only while the date is off the grid, and the section's summary says "On the grid" while it is on it.
+- **The likeness as the screen.** The date on the grid stands in its cells as the face sets it: a size the look comes with fitted to the cells, a size the user set kept, the margin from every side, and a date larger than its cells running over the side it is aligned to. The clock and the date on the same cells with the same alignment stand one under the other on one glass, the clock first, each against the side the block is aligned to; the date is set first and the clock takes what it leaves of the cells' height. A date off the grid stands as before, and the clock with it.
+- **Glass names glass-evo 0.1.42 as the least it works with**, so the two halves move together.
+
 ## [0.8.76] - 2026-10-07
 
 Andrew, aligning a clock larger than its row on the grid: "Up is down, down is up." With glass-evo 0.1.41.
