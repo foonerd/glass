@@ -1983,6 +1983,15 @@
       };
       if (onGrid) put('clock', onGrid, 'clock.align', 'clock.margin', clockHtml(true));
       if (dateOnGrid) put('date', dateOnGrid, 'date.align', 'date.margin', dateHtml(true));
+      // The forecast: on the grid and only, drawn by the module from the
+      // player's own reading once a place is chosen; nothing before.
+      var reading = lookUi.weather && lookUi.weather.place && lookUi.weather.reading
+        ? Object.assign({ place: lookUi.weather.place.name, unit: lookUi.weather.unit }, lookUi.weather.reading) : null;
+      var weatherOnGrid = reading && LOOK.isOn(v['weather.show']) ? LOOK.cells(v['weather.place']) : null;
+      if (weatherOnGrid) {
+        put('weather', weatherOnGrid, 'weather.align', 'weather.margin',
+          '<canvas data-grid="weather"' + (opts.own && opts.own.weather ? ' data-own="1"' : '') + ' data-line="weather" data-keys="' + keys + '" data-reading="' + esc(JSON.stringify(reading)) + '" data-units="' + units('measure.weather') + '" style="opacity:' + LOOK.share(v['weather.opacity'] === undefined || v['weather.opacity'] === '' ? v['date.opacity'] : v['weather.opacity'], 1) + '"></canvas>');
+      }
       blocks.forEach(function (b) {
         html += '<div class="lp-cell" data-margin="' + b.margin + '" data-stands="' + b.a.across + ',' + b.a.down + '"' + open(b.first) + ' style="left:' + (b.on.c0 / 3 * 100) + '%;width:' + ((b.on.c1 - b.on.c0 + 1) / 3 * 100) + '%;top:calc((100% - var(--barh)) * ' + (b.on.r0 / 3) + ');height:calc((100% - var(--barh)) * ' + ((b.on.r1 - b.on.r0 + 1) / 3) + ');padding:calc(var(--u) * ' + b.margin + ');justify-content:' + LOOK.flexed(b.a.across) + ';align-items:' + LOOK.flexed(b.a.down) + '">' +
           '<div class="lp-plate" style="' + (b.first === 'clock' ? glass('clock.glass', v['clock.tint'], '0 0 0 1px') : glass('date.glass', v['date.tint'], '0 0 0 1px')) + 'align-items:' + LOOK.flexed(b.a.across) + '">' + b.html + '</div></div>';
@@ -2056,9 +2065,21 @@
     var bytes = new TextEncoder().encode(canvas.dataset.keys);
     var ptr = ex.alloc(bytes.length);
     new Uint8Array(ex.memory.buffer, ptr, bytes.length).set(bytes);
-    var at = ex.line_preview(ptr, bytes.length, canvas.dataset.line === 'clock' ? 1 : 0, Math.max(8, Math.round(size * ratio)), BigInt(Date.now()), -new Date().getTimezoneOffset());
+    var at, w, h;
+    if (canvas.dataset.line === 'weather') {
+      // The forecast: the look's keys and the player's reading, as the face has them.
+      if (typeof ex.forecast_preview !== 'function') { ex.free(ptr, bytes.length); return null; }
+      var read = new TextEncoder().encode(canvas.dataset.reading || '');
+      var rp = ex.alloc(read.length);
+      new Uint8Array(ex.memory.buffer, rp, read.length).set(read);
+      at = ex.forecast_preview(ptr, bytes.length, rp, read.length, Math.max(8, Math.round(size * ratio)), BigInt(Date.now()), -new Date().getTimezoneOffset());
+      ex.free(rp, read.length);
+      w = ex.forecast_preview_width(); h = ex.forecast_preview_height();
+    } else {
+      at = ex.line_preview(ptr, bytes.length, canvas.dataset.line === 'clock' ? 1 : 0, Math.max(8, Math.round(size * ratio)), BigInt(Date.now()), -new Date().getTimezoneOffset());
+      w = ex.line_preview_width(); h = ex.line_preview_height();
+    }
     ex.free(ptr, bytes.length);
-    var w = ex.line_preview_width(), h = ex.line_preview_height();
     if (!at || !w || !h) return null;
     canvas.width = w; canvas.height = h;
     canvas.style.width = (w / ratio) + 'px'; canvas.style.height = (h / ratio) + 'px';
@@ -2140,14 +2161,19 @@
       // a size the user set (data-own) kept; the glass keeping the room
       // designed about it and giving way as the clock takes more.
       Array.prototype.forEach.call(cells, function (cell) {
-        var gridClock = cell.querySelector('[data-grid="clock"]'), gridDate = cell.querySelector('[data-grid="date"]');
-        if (!gridClock && !gridDate) return;
+        var gridClock = cell.querySelector('[data-grid="clock"]'), gridDate = cell.querySelector('[data-grid="date"]'), gridWeather = cell.querySelector('[data-grid="weather"]');
+        if (!gridClock && !gridDate && !gridWeather) return;
         var box = cell.getBoundingClientRect();
         var margin = (parseInt(cell.getAttribute('data-margin'), 10) || 0) * unit;
         var room = [box.width - 2 * (margin + least[0]), box.height - 2 * (margin + least[1])];
+        var gap = LOOK.IDLE.gap * unit;
+        // The date and the forecast first, each in the room the other leaves, the clock in what both leave.
         var dated = gridDate ? set(gridDate, room) : [0, 0];
-        var clocked = gridClock ? set(gridClock, [room[0], room[1] - (gridDate ? dated[1] + LOOK.IDLE.gap * unit : 0)]) : [0, 0];
-        var took = [Math.max(dated[0], clocked[0]), dated[1] + clocked[1] + (gridDate && gridClock ? LOOK.IDLE.gap * unit : 0)];
+        var weathered = gridWeather ? set(gridWeather, [room[0], room[1] - (gridDate ? dated[1] + gap : 0)]) : [0, 0];
+        var others = (gridDate ? dated[1] + gap : 0) + (gridWeather ? weathered[1] + gap : 0);
+        var clocked = gridClock ? set(gridClock, [room[0], room[1] - others]) : [0, 0];
+        var count = [gridClock, gridDate, gridWeather].filter(Boolean).length;
+        var took = [Math.max(dated[0], clocked[0], weathered[0]), dated[1] + clocked[1] + weathered[1] + gap * (count - 1)];
         var cellPlate = cell.querySelector('.lp-plate');
         if (!cellPlate) return;
         cellPlate.style.padding = LOOK.padAbout(box.height - 2 * margin, took[1], pad[1], least[1]) + 'px ' + LOOK.padAbout(box.width - 2 * margin, took[0], pad[0], least[0]) + 'px';
@@ -2239,6 +2265,14 @@
         field('MANAGER_LOOK_INSIDE', inside('date.align'), '', 'date-grid'),
         field('MANAGER_LOOK_MARGIN', units('date.margin'), esc(t('MANAGER_LOOK_MARGIN_HINT')), 'date-grid')],
         'MANAGER_LOOK_MORE_PIECE', finer('date', 'date-top')],
+      ['weather', 'MANAGER_LOOK_WEATHER', [
+        field('MANAGER_LOOK_SHOW_WEATHER', onoff('weather.show', 'switch'), esc(t('MANAGER_LOOK_WEATHER_HINT'))),
+        '<div class="lf"><span class="name">' + esc(t('MANAGER_LOOK_WEATHER_PLACE')) + '</span><div id="look-weather"></div></div>',
+        field('MANAGER_LOOK_SIZE', slider('measure.weather', 'size', 50, 400, 5, 'SMALL', 'LARGE'), '', 'weather'),
+        field('MANAGER_LOOK_CELLS', cells('weather.place', 'MANAGER_LOOK_CELLS_LOOK'), esc(t('MANAGER_LOOK_CELLS_HINT')), 'weather-grid'),
+        field('MANAGER_LOOK_INSIDE', inside('weather.align'), '', 'weather-grid'),
+        field('MANAGER_LOOK_MARGIN', units('weather.margin'), esc(t('MANAGER_LOOK_MARGIN_HINT')), 'weather-grid')],
+        'MANAGER_LOOK_MORE_PIECE', finer('weather', 'weather-grid')],
       ['buttons', 'MANAGER_LOOK_BUTTONS', [
         field('MANAGER_LOOK_SIZE', slider('measure.bar', 'size', 50, 250, 5, 'SMALL', 'LARGE'))],
         'MANAGER_LOOK_MORE_BUTTONS', finer('buttons', '')]
@@ -2285,6 +2319,43 @@
   }
   // The panel as the model stands: the cards too where the looks, the
   // picture or the face size may have changed.
+  // The forecast's place: the one chosen with today's reading, a search by
+  // name with what it found, the unit, and the credit its source asks for.
+  // Painted when its state changes, not with every stroke of the panel, so a
+  // name being typed is left alone. The place is the player's, not a look's:
+  // each choice is kept at once.
+  function paintWeather() {
+    var box = $('look-weather');
+    if (!box) return;
+    var w = lookUi.weather || { place: null, unit: 'C', reading: null, error: '', source: { name: 'Open-Meteo', url: 'https://open-meteo.com/' } };
+    var deg = function (n) { return Math.round(n) + '°'; };
+    var r = w.reading;
+    var today = r ? (typeof r.now === 'number' ? deg(r.now) + ' · ' : '') + deg(r.low) + ' / ' + deg(r.high) : '';
+    var found = lookUi.weatherFound;
+    box.innerHTML = '<div style="margin-bottom:8px">' + (w.place
+        ? '<b>' + esc(w.place.name) + '</b>' + (today ? ' <span class="help" style="display:inline">' + esc(today) + '</span>' : '') + ' <button class="textlink" data-weather-off="1">' + esc(t('MANAGER_LOOK_WEATHER_OFF')) + '</button>'
+        : '<span class="help" style="display:inline">' + esc(t('MANAGER_LOOK_WEATHER_NONE')) + '</span>') + '</div>' +
+      '<div><input type="text" id="look-weather-name" maxlength="80" size="22" spellcheck="false" placeholder="' + esc(t('MANAGER_LOOK_WEATHER_ASK')) + '" value="' + esc(lookUi.weatherAsked || '') + '"> ' +
+      '<button class="textlink" data-weather-search="1">' + esc(t('MANAGER_LOOK_WEATHER_SEARCH')) + '</button> ' +
+      '<select data-weather-unit="1" aria-label="' + esc(t('MANAGER_LOOK_WEATHER_UNIT')) + '"><option value="C"' + (w.unit === 'F' ? '' : ' selected') + '>°C</option><option value="F"' + (w.unit === 'F' ? ' selected' : '') + '>°F</option></select></div>' +
+      (found ? '<div style="margin-top:8px">' + (found.length
+        ? found.map(function (p, i) { return '<button class="textlink" style="display:block;margin:4px 0" data-weather-place="' + i + '">' + esc(p.name) + '</button>'; }).join('')
+        : '<span class="help">' + esc(t('MANAGER_LOOK_WEATHER_NOT_FOUND')) + '</span>') + '</div>' : '') +
+      (w.place && w.error ? '<div class="help" style="color:var(--danger)">' + esc(t('MANAGER_LOOK_WEATHER_FAILED')) + '</div>' : '') +
+      '<div class="help" style="margin-top:8px">' + esc(t('MANAGER_LOOK_WEATHER_CREDIT')) + ' <a href="' + esc(w.source.url) + '" target="_blank" rel="noopener">' + esc(w.source.name) + '</a></div>';
+  }
+  function weatherTook(state) { lookUi.weather = state; lookUi.weatherFound = null; lookUi.weatherAsked = ''; paintWeather(); paintLook(); }
+  function weatherSearch() {
+    var name = ($('look-weather-name') || {}).value || '';
+    lookUi.weatherAsked = name;
+    if (name.trim().length < 2) return;
+    api('GET', '/api/weather/search?name=' + encodeURIComponent(name.trim()) + '&language=' + encodeURIComponent((document.documentElement.lang || 'en').slice(0, 2)))
+      .then(function (r) { lookUi.weatherFound = r.places || []; paintWeather(); })
+      .catch(function () { toast(t('MANAGER_LOOK_WEATHER_FAILED'), 'error'); });
+  }
+  function weatherSet(body) {
+    api('POST', '/api/weather', body).then(weatherTook).catch(function (err) { toast(errorText(err), 'error'); });
+  }
   function paintLook(cards) {
     var f = lookUi.f;
     var v = lookUi.v;
@@ -2300,7 +2371,7 @@
       card.setAttribute('aria-pressed', on ? 'true' : 'false');
     });
     // A size is the user's own where it is not the one the look comes with.
-    var own = { clock: !!lookUi.base && v['measure.clock'] !== lookUi.base['measure.clock'], date: !!lookUi.base && v['measure.date'] !== lookUi.base['measure.date'] };
+    var own = { clock: !!lookUi.base && v['measure.clock'] !== lookUi.base['measure.clock'], date: !!lookUi.base && v['measure.date'] !== lookUi.base['measure.date'], weather: !!lookUi.base && v['measure.weather'] !== lookUi.base['measure.weather'] };
     // When nothing plays, a picture of the user's own stands in the theme's place.
     var idlePic = lookUi.mode === 'idle' && v['idle.picture'];
     $('look-preview').innerHTML = lookLikeness(v, { mode: lookUi.mode, scale: scale, suits: suits, picture: idlePic ? lookPicUrl(v['idle.picture']) : lookUi.picture, dim: idlePic ? LOOK.share(v['idle.dim'], 0.25) : 0, pick: true, own: own });
@@ -2365,6 +2436,11 @@
     when['date-grid'] = when['date-cells'] && !!LOOK.cells(v['date.place']);
     when['date-words'] = when.date && !LOOK.cells(v['date.place']);
     when['date-top'] = when['date-top'] && !LOOK.cells(v['date.place']);
+    // The forecast shows where the glass-evo that is here knows it; its
+    // grid, like the others', once it is on.
+    var knowsWeather = !!(f.builtIn && f.builtIn['weather.show'] !== undefined);
+    var weatherPlace = lookUi.weather && lookUi.weather.place;
+    when['weather-grid'] = when.weather && !!(f.builtIn && f.builtIn['weather.align'] !== undefined);
     Array.prototype.forEach.call($('look-sections').querySelectorAll('[data-when]'), function (el) { el.hidden = !when[el.getAttribute('data-when')]; });
     var fixed = [LOOK.colourOf(v['colours.tint']), LOOK.colourOf(v['colours.accent'])].filter(Boolean).length;
     var sums = {
@@ -2372,15 +2448,17 @@
       backgrounds: t('MANAGER_LOOK_SOLID_' + LOOK.solidWord(v['glass.bar'])) + (LOOK.frostOn(v, suits) ? ', ' + t('MANAGER_LOOK_SUM_BLURRED') : ''),
       clock: when.clock ? LOOK.strftime(v['clock.format'], LOOK.sample()) + (when.faces && clockFace !== 'type' ? ' · ' + t('MANAGER_LOOK_FACE_' + clockFace.toUpperCase()) : '') + ' · ' + t('MANAGER_LOOK_SIZE_' + LOOK.sizeWord('measure.clock', v['measure.clock'])) : t('MANAGER_LOOK_SUM_OFF'),
       date: when.date ? LOOK.strftime(v['date.format'], LOOK.sample()) + ' · ' + (LOOK.cells(v['date.place']) ? t('MANAGER_LOOK_DATE_GRID') : t('MANAGER_LOOK_DATE_' + place.toUpperCase())) : t('MANAGER_LOOK_SUM_OFF'),
-      buttons: t('MANAGER_LOOK_SIZE_' + LOOK.sizeWord('measure.bar', v['measure.bar']))
+      buttons: t('MANAGER_LOOK_SIZE_' + LOOK.sizeWord('measure.bar', v['measure.bar'])),
+      weather: weatherPlace && LOOK.isOn(v['weather.show']) ? weatherPlace.name : t('MANAGER_LOOK_SUM_OFF')
     };
     Array.prototype.forEach.call($('look-sections').querySelectorAll('[data-section]'), function (head) {
       var name = head.getAttribute('data-section');
       var open = lookUi.open === name;
+      head.hidden = name === 'weather' && !knowsWeather;
       head.setAttribute('aria-expanded', open ? 'true' : 'false');
       head.querySelector('.mark').textContent = open ? '▾' : '▸';
       head.querySelector('.sum').textContent = sums[name];
-      $('look-sections').querySelector('[data-body="' + name + '"]').hidden = !open;
+      $('look-sections').querySelector('[data-body="' + name + '"]').hidden = !open || head.hidden;
     });
     Array.prototype.forEach.call($('look-sections').querySelectorAll('[data-more]'), function (b) {
       var name = b.getAttribute('data-more');
@@ -2393,6 +2471,7 @@
   function renderLook(f) {
     var s = f.settings || {};
     lookUi.f = f;
+    api('GET', '/api/weather').then(function (w) { lookUi.weather = w; paintWeather(); paintLook(); }).catch(function () { /* an older plugin behind this page */ });
     lookUi.chosen = lookFind(s.theme) ? s.theme : '';
     lookUi.base = lookBase(lookUi.chosen);
     lookUi.v = LOOK.lay(lookUi.base, s);
@@ -2521,9 +2600,15 @@
       paintLook();
       return;
     }
+    var place = e.target.closest('[data-weather-place]');
     if (head) lookOpen(head.getAttribute('data-section'));
     else if (more) { lookUi.more[more.getAttribute('data-more')] = !lookUi.more[more.getAttribute('data-more')]; paintLook(); }
+    else if (e.target.closest('[data-weather-search]')) weatherSearch();
+    else if (e.target.closest('[data-weather-off]')) weatherSet({ place: null });
+    else if (place && lookUi.weatherFound) weatherSet({ place: lookUi.weatherFound[parseInt(place.getAttribute('data-weather-place'), 10)] });
   };
+  $('look-sections').onchange = function (e) { if (e.target.hasAttribute('data-weather-unit')) weatherSet({ unit: e.target.value }); };
+  $('look-sections').onkeydown = function (e) { if (e.key === 'Enter' && e.target.id === 'look-weather-name') { e.preventDefault(); weatherSearch(); } };
   $('look-sections').oninput = function (e) { if (e.target.getAttribute('data-key')) lookInput(e.target); };
   $('btn-look-plain').onclick = function () { lookUi.v = LOOK.lay(lookUi.base); lookOwnPatterns(); paintLook(); };
   // Every key the panel sets goes with the save, removed where the look

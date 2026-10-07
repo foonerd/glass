@@ -1657,6 +1657,7 @@ pub struct TapSource {
     config_seen: Option<(String, String, String)>,
     showing_seen: Option<(String, String)>,
     show_asked: Option<String>,
+    weather_held: Option<lead::Weather>,
     /// The meter's fall, as the old scope shaped it, on the pipe scale.
     decay: tap::legacy::Meter,
     /// The theme's bars from the bank, on the old logarithmic mapping.
@@ -1832,6 +1833,7 @@ impl TapSource {
             config_seen: None,
             showing_seen: None,
             show_asked: None,
+            weather_held: None,
             decay: tap::legacy::Meter::new(METER_DECAY_MS, meter_max.max(1.0) as u32),
             bins_mapper: tap::legacy::Regroup::new(
                 bins,
@@ -2245,6 +2247,7 @@ impl Source for TapSource {
                 } => self.config_seen = Some((version, theme, meter)),
                 Event::Showing { theme, meter } => self.showing_seen = Some((theme, meter)),
                 Event::Show { meter } => self.show_asked = Some(meter),
+                Event::Weather(weather) => self.weather_held = weather,
                 Event::Queue(items) => {
                     self.queue_held = Some(items);
                     self.rederive = true;
@@ -2410,6 +2413,7 @@ impl Source for TapSource {
                 onsets: self.onsets_held,
             },
             metadata,
+            weather: self.weather_held.clone(),
         }
     }
 }
@@ -2729,6 +2733,7 @@ pub fn input_from_records(
             ..Bins::default()
         },
         metadata: lead::Metadata::default(),
+        weather: None,
     }
 }
 

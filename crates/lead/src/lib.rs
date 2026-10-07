@@ -3442,12 +3442,78 @@ pub struct MeterTexts {
     pub volume_mute: String,
 }
 
+/// The forecast for the place the user chose, as the plugin hands it on:
+/// now and today. A face draws it; the meters do not.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Weather {
+    /// The place's name, as chosen.
+    #[serde(default)]
+    pub place: String,
+    /// `C` or `F`: what the temperatures are in.
+    #[serde(default)]
+    pub unit: String,
+    /// The temperature now, where the source gives one.
+    #[serde(default)]
+    pub now: Option<f32>,
+    /// The weather now, as a WMO code (see [`sky_of`]).
+    #[serde(default)]
+    pub code: u8,
+    /// Whether it is day at the place.
+    #[serde(default)]
+    pub day: bool,
+    /// Today's weather as a WMO code, with the day's lowest and highest
+    /// temperature.
+    pub today: u8,
+    pub low: f32,
+    pub high: f32,
+    /// Today's chance of rain or snow in percent, where the source gives one.
+    #[serde(default)]
+    pub rain: Option<u8>,
+    /// When it was read, in seconds since 1970.
+    #[serde(default)]
+    pub at: i64,
+}
+
+/// What a WMO weather code looks like, for a face that draws it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sky {
+    Clear,
+    Partly,
+    Cloudy,
+    Fog,
+    Drizzle,
+    Rain,
+    Snow,
+    Thunder,
+}
+
+/// The look of a WMO weather code: 0 and 1 clear, 2 partly cloudy, 3
+/// overcast, 45 and 48 fog, the fifties drizzle, the sixties and 80 to 82
+/// rain, the seventies and 85, 86 snow, 95 and above thunder. A code the
+/// table does not know is drawn as cloud.
+pub fn sky_of(code: u8) -> Sky {
+    match code {
+        0 | 1 => Sky::Clear,
+        2 => Sky::Partly,
+        3 => Sky::Cloudy,
+        45 | 48 => Sky::Fog,
+        51..=57 => Sky::Drizzle,
+        61..=67 | 80..=82 => Sky::Rain,
+        71..=77 | 85 | 86 => Sky::Snow,
+        95..=99 => Sky::Thunder,
+        _ => Sky::Cloudy,
+    }
+}
+
 /// One snapshot of the outside world. `plot` turns it into a scene.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Input {
     pub levels: Levels,
     pub bins: Bins,
     pub metadata: Metadata,
+    /// The forecast, where the user has chosen a place and one is held.
+    #[serde(default)]
+    pub weather: Option<Weather>,
 }
 
 /// Geometry the scene is plotted into. Pixels stay in `expose`.

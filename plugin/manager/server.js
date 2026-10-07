@@ -641,6 +641,26 @@ class Manager {
       res.json({ ok: true, meter, told: self.plugin.showMeter(meter) });
     }));
 
+    // The forecast for the face: the place chosen and the unit, the reading
+    // held and the source to credit; places of a name to choose from; a
+    // place set, the unit changed, or the forecast turned off.
+    app.get('/api/weather', function (req, res) {
+      res.json(self.plugin.weatherState());
+    });
+    app.get('/api/weather/search', wrap(async function (req, res) {
+      const name = String(req.query.name || '').slice(0, 80);
+      try {
+        res.json({ places: await self.plugin.weatherSearch(name, String(req.query.language || '').slice(0, 2)) });
+      } catch (e) {
+        res.status(502).json({ error: 'no-answer', detail: String((e && (e.code || e.message)) || e).slice(0, 120) });
+      }
+    }));
+    app.post('/api/weather', wrap(async function (req, res) {
+      const state = await self.plugin.weatherSet(req.body || {});
+      if (!state) return res.status(400).json({ error: 'bad-place' });
+      res.json(state);
+    }));
+
     // A picture the face wants: the album art the player reports for the
     // playing track, or a fanart picture, fetched from the player itself.
     // Only the player's own albumart route and the addresses the player

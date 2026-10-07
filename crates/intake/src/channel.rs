@@ -39,6 +39,9 @@ pub enum Event {
     /// A meter the player's own display is asked to show: a button pressed
     /// in a browser view, carried to the screen.
     Show { meter: String },
+    /// The forecast for the place the user chose, or that there is none to
+    /// show: for a face to draw.
+    Weather(Option<lead::Weather>),
     /// The player's queue as the plugin pushes it, on connect and on every
     /// change: the tracks in order, for the next line and the queue's length.
     Queue(Vec<QueueItem>),
@@ -442,6 +445,14 @@ pub fn decode(line: &[u8]) -> Option<Event> {
         "show" => Some(Event::Show {
             meter: text("meter"),
         }),
+        // A line that says `off`, or is no forecast, clears the one held.
+        "weather" => Some(Event::Weather(
+            if value.get("off").and_then(Value::as_bool).unwrap_or(false) {
+                None
+            } else {
+                serde_json::from_value(value.clone()).ok()
+            },
+        )),
         "queue" => Some(Event::Queue(
             value
                 .get("items")
@@ -691,6 +702,48 @@ mod tests {
             "a meter asked for by name"
         );
         assert_eq!(decode(br#"{"kind":"unknown"}"#), None);
+    }
+
+    #[test]
+    fn the_forecast_is_parsed_and_off_or_a_broken_line_clears_it() {
+        let line = br#"{"kind":"weather","place":"Krakow","unit":"C","now":13.6,"code":3,"day":true,"today":61,"low":8.9,"high":17.2,"rain":64,"at":1760000000}"#;
+        let Some(Event::Weather(Some(weather))) = decode(line) else {
+            panic!("a forecast line");
+        };
+        assert_eq!(
+            (
+                weather.place.as_str(),
+                weather.unit.as_str(),
+                weather.now,
+                weather.code,
+                weather.day
+            ),
+            ("Krakow", "C", Some(13.6), 3, true)
+        );
+        assert_eq!(
+            (
+                weather.today,
+                weather.low,
+                weather.high,
+                weather.rain,
+                weather.at
+            ),
+            (61, 8.9, 17.2, Some(64), 1_760_000_000)
+        );
+        let bare = br#"{"kind":"weather","place":"x","unit":"F","now":null,"code":0,"day":false,"today":0,"low":-4,"high":1,"rain":null,"at":1}"#;
+        let Some(Event::Weather(Some(weather))) = decode(bare) else {
+            panic!("a forecast with no current values");
+        };
+        assert_eq!((weather.now, weather.rain, weather.low), (None, None, -4.0));
+        assert_eq!(
+            decode(br#"{"kind":"weather","off":true}"#),
+            Some(Event::Weather(None))
+        );
+        assert_eq!(
+            decode(br#"{"kind":"weather","high":"warm"}"#),
+            Some(Event::Weather(None)),
+            "no forecast in the line: none is shown"
+        );
     }
 
     #[test]

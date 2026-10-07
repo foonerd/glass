@@ -30,7 +30,7 @@ class FaceFeed {
     this.upstreamLive = false;
     this.retry = null;
     this.backoff = RETRY_MIN_MS;
-    this.last = { config: null, state: null, showing: null, infinity: null, queue: null, persist: null, views: null };
+    this.last = { config: null, state: null, showing: null, infinity: null, queue: null, persist: null, views: null, weather: null };
     this.hops = 0;
   }
 
@@ -55,9 +55,10 @@ class FaceFeed {
       infinity: self.last.infinity || (now.infinity !== undefined && now.infinity !== null ? JSON.stringify({ kind: 'infinity', on: !!now.infinity }) : null),
       queue: self.last.queue || (Array.isArray(now.queue) ? JSON.stringify({ kind: 'queue', items: now.queue }) : null),
       persist: self.last.persist || (now.persist ? JSON.stringify(now.persist) : null),
-      views: self.last.views
+      views: self.last.views,
+      weather: self.last.weather || (now.weather ? JSON.stringify(now.weather) : null)
     };
-    ['config', 'state', 'showing', 'infinity', 'queue', 'persist', 'views'].forEach(function (kind) {
+    ['config', 'state', 'showing', 'infinity', 'queue', 'persist', 'views', 'weather'].forEach(function (kind) {
       if (opening[kind]) self.write(res, 'plugin', opening[kind]);
     });
     self.write(res, 'feed', JSON.stringify({ frames: self.upstreamLive }));

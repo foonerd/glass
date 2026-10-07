@@ -87,6 +87,8 @@ function Channel(logger, onAttach, onCommand) {
     this.stateAt = null;
     this.infinity = null;
     this.queue = null;
+    // The forecast's line as last pushed, for a display that connects later.
+    this.weather = null;
 }
 
 Channel.prototype.listen = function (path) {
@@ -113,6 +115,7 @@ Channel.prototype.attach = function (conn) {
     if (self.queue) { self.tell(conn, { kind: 'queue', items: self.queue }); }
     if (self.showing) { self.tell(conn, { kind: 'showing', theme: self.showing.theme, meter: self.showing.meter }); }
     if (self.infinity !== null) { self.tell(conn, { kind: 'infinity', on: self.infinity }); }
+    if (self.weather) { self.tell(conn, self.weather); }
     conn.on('data', function (chunk) {
         pending += chunk;
         if (pending.length > CHANNEL_LINE_MAX) {
@@ -1075,9 +1078,19 @@ Glass.prototype.onStart = function () {
     // The feed behind the manager's Face tab: the frames from the daemon's
     // pages socket, and every line the displays hear, for browser pages.
     self.face = new FaceFeed({ socketPath: faceSocketPath, logger: self.logger, current: function () {
-        return self.channel ? { state: advanced(self.channel.state, self.channel.stateAt, Date.now()), infinity: self.channel.infinity, showing: self.channel.showing, queue: self.channel.queue, persist: self.channel.persist } : {};
+        return self.channel ? { state: advanced(self.channel.state, self.channel.stateAt, Date.now()), infinity: self.channel.infinity, showing: self.channel.showing, queue: self.channel.queue, persist: self.channel.persist, weather: self.channel.weather } : {};
     } });
     self.channel.onPush = function (message) { self.face.push(message); };
+    // The forecast for the face, once the user has chosen a place: every
+    // display and browser view hears it over the channel. Nothing is asked
+    // of anyone before a place is set.
+    self.forecast = new weather.Forecast({
+        file: WEATHER_FILE,
+        get: require('./manager/catalog').get,
+        logger: { info: function (m) { self.logger.info(id + m); }, warn: function (m) { self.logger.warn(id + m); } },
+        push: function (message) { if (self.channel) { self.channel.weather = message; self.channel.push(message); } }
+    });
+    self.forecast.start();
     // The pointer, resolved from the screen's choice and what the player has now.
     try { self.refreshPointerShown(); } catch (e) { self.logger.warn(id + 'screen: pointer not resolved: ' + (e && e.message ? e.message : e)); }
     // The screen by fact, watched from now on; a driver key from the old choice goes back to Auto.
@@ -1364,6 +1377,7 @@ Glass.prototype.onStop = function () {
         self.commandRouter.removePluginRestEndpoint({ endpoint: 'glass_artistfanart' });
         socket.off('pushState');
         socket.off('pushInfinityPlayback');
+        if (self.forecast) { self.forecast.stop(); self.forecast = null; }
         if (self.channel) {
             self.channel.close();
             self.channel = null;
@@ -2167,6 +2181,28 @@ const FACES_DIR = DATA_DIR + '/faces';
 // The user's own pictures for the screen when nothing plays.
 const BACKGROUNDS_DIR = DATA_DIR + '/backgrounds';
 const backgrounds = require('./manager/backgrounds');
+const weather = require('./manager/weather');
+const WEATHER_FILE = DATA_DIR + '/weather.json';
+
+// The forecast for the face: the place chosen, the unit, the reading held
+// while it is fresh, the last failure in words and the source to credit.
+Glass.prototype.weatherState = function () {
+    return this.forecast ? this.forecast.state() : { place: null, unit: 'C', reading: null, error: '', source: weather.SOURCE };
+};
+
+// A place chosen (`place`: name, latitude, longitude), the unit changed
+// (`unit`: C or F) or the forecast turned off (`place`: null). Resolves the
+// state after it, or null for a body that is none of these.
+Glass.prototype.weatherSet = function (body) {
+    if (!this.forecast) { return Promise.resolve(null); }
+    var answer = this.forecast.set(body);
+    return answer === null ? Promise.resolve(null) : answer;
+};
+
+Glass.prototype.weatherSearch = function (name, language) {
+    if (!this.forecast) { return Promise.resolve([]); }
+    return this.forecast.search(name, language);
+};
 const EVO_LOOKS_DIR = EVO_DIR + '/themes';
 // The unit of the X server brought up for the face, shipped with the plugin and enabled by this path on a take.
 const OWN_X_UNIT_FILE = PluginPath + '/' + screenowner.OWN_X_UNIT + '.service';

@@ -108,7 +108,7 @@ pub mod face {
     /// A text file and whether one is there, read where the display reads
     /// its own: the file system on a player, the page's file table in a browser.
     pub use lead::{is_file, read_to_string};
-    pub use lead::{FontFiles, Input, Metadata, TextStyle};
+    pub use lead::{sky_of, FontFiles, Input, Metadata, Sky, TextStyle, Weather};
 }
 
 /// The time of day where the player is, broken down: what a clock and a

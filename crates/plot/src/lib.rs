@@ -869,6 +869,7 @@ mod tests {
                 ..Bins::default()
             },
             metadata: Metadata::default(),
+            weather: None,
         };
         let scene = step(&skin, &input);
         assert_eq!(scene.left, 0.5);
@@ -1194,6 +1195,7 @@ mod analyser_tests {
                 onsets: 0b0010,
             },
             metadata: Metadata::default(),
+            weather: None,
         };
         let scene = step(&skin, &input);
         let a = scene.analysers.into_iter().next().expect("an analyser");
@@ -1257,6 +1259,7 @@ mod analyser_tests {
                 onsets: 0,
             },
             metadata: Metadata::default(),
+            weather: None,
         };
         let scene = step(&skin, &input);
         assert_eq!(scene.analysers.len(), 2);
@@ -1307,6 +1310,7 @@ mod analyser_tests {
                     onsets: 0,
                 },
                 metadata: Metadata::default(),
+                weather: None,
             };
             step(skin, &input)
                 .analysers
@@ -1379,6 +1383,7 @@ mod analyser_tests {
                 onsets: 0,
             },
             metadata: Metadata::default(),
+            weather: None,
         };
         let a = step(&skin, &input)
             .analysers
