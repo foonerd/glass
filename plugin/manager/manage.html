@@ -2260,7 +2260,8 @@
         field('MANAGER_LOOK_BLUR', onoff('glass.frost', 'frost'), esc(t(lookUi.f.frostSuits ? 'MANAGER_LOOK_BLUR_SUITS' : 'MANAGER_LOOK_BLUR_HEAVY'))),
         field('MANAGER_LOOK_PICTURE_DIM', slider('idle.dim', 'share', 0, 90, 1, 'NONE', 'FULL'), '', 'idlepic'),
         field('MANAGER_LOOK_SCREEN_OFF', minutes('idle.off'), esc(t('MANAGER_LOOK_SCREEN_OFF_HINT'))),
-        field('MANAGER_LOOK_SCREEN_FADE', millis('idle.fade'), esc(t('MANAGER_LOOK_SCREEN_FADE_HINT')), 'screenoff')]],
+        field('MANAGER_LOOK_SCREEN_FADE', millis('idle.fade'), esc(t('MANAGER_LOOK_SCREEN_FADE_HINT')), 'screenoff'),
+        field('MANAGER_LOOK_IDLE_WAIT', choice('idle.wait', ['none', 'persist'], 'MANAGER_LOOK_IDLE_WAIT_'), esc(t('MANAGER_LOOK_IDLE_WAIT_HINT')), 'idlewait')]],
       ['clock', 'MANAGER_LOOK_CLOCK', [
         field('MANAGER_LOOK_SHOW_CLOCK', onoff('clock.show', 'switch')),
         field('MANAGER_LOOK_SHOWS', pattern('clock.format', LOOK.CLOCK_PATTERNS), '', 'clock'),
@@ -2451,7 +2452,7 @@
     });
     // A row shows while it has something to say: a clock's rows while the
     // clock shows, a date's own background while the date stands at the top.
-    var when = { clock: LOOK.isOn(v['clock.show']), date: LOOK.isOn(v['date.show']), weather: LOOK.isOn(v['weather.show']), buttons: true, idlepic: !!v['idle.picture'], screenoff: (parseInt(v['idle.off'], 10) || 0) > 0 };
+    var when = { clock: LOOK.isOn(v['clock.show']), date: LOOK.isOn(v['date.show']), weather: LOOK.isOn(v['weather.show']), buttons: true, idlepic: !!v['idle.picture'], screenoff: (parseInt(v['idle.off'], 10) || 0) > 0, idlewait: !!(f.builtIn && f.builtIn['idle.wait'] !== undefined) };
     // The clock's faces show where the glass-evo that is here knows them
     // (its built-in look names the key), and each face's own rows with it.
     var clockFace = LOOK.clockFace(v);

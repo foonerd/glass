@@ -25,6 +25,8 @@
     'idle.off': '0',
     // Milliseconds the screen takes to go black and to come back.
     'idle.fade': '500',
+    // When the player stops (glass-evo 0.1.53): the idle screen at once, or after the plugin's persist period.
+    'idle.wait': 'none',
     // The clock on the idle screen's grid (glass-evo 0.1.39): the cells it
     // occupies and where it stands inside them; an empty place is the
     // arrangement before the grid.

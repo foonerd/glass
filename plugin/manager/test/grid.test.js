@@ -57,4 +57,5 @@ test('the forecast\'s span is one of six words, today unless said', function () 
   assert.strictEqual(LOOK.colourOf(LOOK.BUILTIN['weather.cold']), '#3b8bff');
   // The skies move unless said; thunder's flashes only when said.
   assert.deepStrictEqual([LOOK.BUILTIN['weather.motion'], LOOK.BUILTIN['weather.thunder'], LOOK.BUILTIN['weather.colour']], ['on', 'off', 'on']);
+  assert.strictEqual(LOOK.BUILTIN['idle.wait'], 'none');
 });
