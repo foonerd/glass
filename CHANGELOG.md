@@ -2,6 +2,13 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.4] - 2026-10-07
+
+For a face theme's own skies (glass-evo 0.2.4): the likeness draws a look's skies when the look is chosen, not only when it is saved.
+
+- **The chosen look's name goes to the module with the keys.** The look panel handed the module the look's name only for the saved look; a look chosen on its card went without it, so the likeness could not find the look's skies the page had put. It names the chosen look now, as the saved one, and the built-in look none.
+- **Glass names glass-evo 0.2.4 as the least it works with.**
+
 ## [0.9.3] - 2026-10-07
 
 For a face theme's own skies (glass-evo 0.2.3): they reach the browser views, the remote displays and the look panel's likeness.
