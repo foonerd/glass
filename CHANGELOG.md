@@ -2,6 +2,23 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-10-07
+
+Glass 0.9.0 gathers the 0.8 series, 0.8.0 to 0.8.90, 1 to 8 October 2026, into one release with glass-evo 0.2.0. Every change below has its own entry under its number.
+
+- **The Glass interface on the player's own screen, glass-evo, from a preview to the pair this release names.** Got, updated and removed on the System tab, chosen on the Screen tab, the screen handed over and back by itself where the face cannot hold it (0.8.0 to 0.8.1, 0.8.16 to 0.8.18, 0.8.27 to 0.8.30, 0.8.37, 0.8.40, 0.8.46, 0.8.49). Glass names glass-evo 0.2.0 as the least it works with.
+- **The idle screen on a grid.** The clock, the date and the forecast each on nine cells above the bar, aligned inside them with a margin of the user's own, a piece larger than its cells running over on the side it is aligned to; sizes drawn as set, up to four times the look's, over the edges (0.8.8, 0.8.72 to 0.8.77).
+- **The weather.** Today's forecast for a place of the user's choosing, from Open-Meteo, in the Forecast section and on the grid; the span, today as a line or the next 24 hours or the week as columns; the heatmap, every temperature in the colour of its degree, the week's days and the date by their switches; the skies in colour, moving at their own pace, thunder flashing by its switch (0.8.79 to 0.8.86).
+- **The look panel drawn by glass-evo itself.** Every piece of the likeness, the clock in its faces, the date and a clock in type in the look's own font, the forecast, drawn by the component's module as the screen draws them, the module fetched by the installed version (0.8.12, 0.8.78, 0.8.89). Each piece's own colour, strength, background and background colour from the look's Colours and Backgrounds, the buttons' included; How solid moving every background at its distance (0.8.84, 0.8.90).
+- **A picture of your own when nothing plays**, chosen on the Screen tab from the player's `glass/backgrounds` or uploaded, darkened as you say, on the player's screen and, from 0.8.87, on the Face tab, Anymote and the remote displays; the screen off after minutes with nothing playing, over a fade (0.8.63 to 0.8.64, 0.8.67 to 0.8.68, 0.8.87).
+- **When the player stops**, the idle screen at once or after the plugin's persist period, chosen in the Backgrounds section (0.8.88).
+- **The browser views carry the face.** The Face tab and Anymote show glass-evo's clock, date and controls over the theme, drawn by its module, and its buttons act on the player; the Screen tab says what the views show; they tell the truth when the player stands still (0.8.5 to 0.8.7, 0.8.9 to 0.8.10, 0.8.19, 0.8.36, 0.8.51).
+- **Remote displays with the face, bringing themselves up to date.** A remote built with glass-evo shows the face and brings the look and the picture; a Linux, Windows or Android remote upgrades itself from its settings page, the archive checked, the one before kept; the Remotes tab says which are behind (0.8.20 to 0.8.24, 0.8.53 to 0.8.54, 0.8.58 to 0.8.59, 0.8.61).
+- **The System tab.** Test releases, offered to this player as soon as they are published; Back to the stable release, part by part, with a backup first, and from a shell with `get-glass.sh --stable`; downloads that break tried again (0.8.5, 0.8.13, 0.8.52, 0.8.55, 0.8.62).
+- **Themes.** Text fields with a font and size of their own, radio and format icons by the most telling name, a theme's own stand-in for a folder layer, rotation quality pacing the turning as before, cue tracks, the sample rate aligned as the theme says, a negative position, fanart carrying on across meters (0.8.11, 0.8.26, 0.8.33, 0.8.47, 0.8.56 to 0.8.57, 0.8.60, 0.8.65 to 0.8.66, 0.8.69 to 0.8.71).
+- **The player.** Covers from a Lyrion server through Squeezelite, recognised by content and held across address changes; the caches of covers and fanart bounded; a two-sided spectrum kept through a mono recording; a volume fader dragged as drawn; the display doing less where nothing changes (0.8.2 to 0.8.3, 0.8.15, 0.8.31 to 0.8.32, 0.8.34, 0.8.48).
+- **Finding what is wrong.** The reasons a display cannot start, named from the libraries' own words; the Graphics row and the kiosk left stopped, not failed; settings backups of your own never removed; the downloads folder cleared at start (0.8.28, 0.8.35, 0.8.38 to 0.8.39, 0.8.41 to 0.8.45).
+
 ## [0.8.90] - 2026-10-07
 
 Andrew, 2026-10-08: "FIX - never reported: Screen -> Buttons - does not have custom background override like all other element have." With glass-evo 0.1.54.
