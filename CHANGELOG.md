@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.90] - 2026-10-07
+
+Andrew, 2026-10-08: "FIX - never reported: Screen -> Buttons - does not have custom background override like all other element have." With glass-evo 0.1.54.
+
+- **The buttons' own background, behind More in the Buttons section.** Background (how solid the bar's glass is; as the Backgrounds section's How solid unless moved) and Background colour (the bar's and the More sheet's; the look's unless said), as the clock, the date and the forecast have theirs; the likeness draws the bar with them. Keys `buttons.glass`, `buttons.tint`.
+- **How solid moves the forecast's background too.** It had moved the sheet's, the clock's and the date's, each at its distance, and left the forecast's where it was; it moves the forecast's and a buttons' own background the same way now.
+- **Glass names glass-evo 0.1.54 as the least it works with.**
+
 ## [0.8.89] - 2026-10-07
 
 Andrew, 2026-10-08, after a likeness that did not agree with the screen until the player was rebooted: "YOU SHOULD TRACK SUCH SHIT".
