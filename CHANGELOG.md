@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.86] - 2026-10-07
+
+Andrew's step 4 of the weather: "Now - Dramatise icons. Snow, thunderstorm, rain, drizzle, heat, etc. I am sure we can add some light frame animations here." With glass-evo 0.1.51.
+
+- **The skies move, in the likeness as on the screen.** In the Forecast section, "Skies move" (on unless the look says) lets each sky keep its shape and gain one small motion at its own pace; the likeness draws the forecast again eight times a second while the panel is on show, so it moves with the screen. "Thunder flashes" (off unless the look says) lights the bolt and the cloud for a tenth of a second every eight to twenty seconds. Off, every sky stands still and nothing about the screen's refresh changes. Keys `weather.motion`, `weather.thunder`.
+- **Skies in colour** (on unless the look says): a yellow sun, red when scorching, a pale moon, clouds and fog in greys, drizzle and rain in blues, white snow, the storm dark with a yellow bolt, heavy weather murkier with more falling. Off, every sky is in the forecast's colour as before. Key `weather.colour`.
+- **Glass names glass-evo 0.1.51 as the least it works with.**
+
 ## [0.8.85] - 2026-10-07
 
 Andrew's step 3 of the weather: "Forecast - add Heatmap toggle/slider - perhaps color picker for start and end? with some logical defaults? This is for numbers only. Also, second toggle - apply to days, still forecast. Apply to date - override date with heatmap - first override exception." With glass-evo 0.1.50.
