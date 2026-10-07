@@ -2,6 +2,13 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.2] - 2026-10-07
+
+For a face theme's own skies (glass-evo 0.2.2, from Gelo5's question "where are the weather icons located?"): groundwork on the display's side, nothing to see on its own.
+
+- **A picture file as the frames of a sky.** `expose::read_frames(path, side)`, for a face as `overlay::face::read_frames`: an animated GIF's frames each with the milliseconds it stands (its own delays), or one frame for a still picture, each fitted inside a transparent square of the side, centred.
+- **Glass names glass-evo 0.2.2 as the least it works with**, which brings the browser-view font fix of 0.2.1 to every player with it.
+
 ## [0.9.1] - 2026-10-07
 
 Andrew, 2026-10-07, on a theme whose time fields name `fonts/font.ttf` beside its `meters.txt`: "Apparently, this theme fonts does not work". With glass-evo 0.2.1.
