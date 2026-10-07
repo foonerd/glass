@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.81] - 2026-10-07
+
+Andrew's step 2 of the weather, from his question of 2026-10-06: "What if user wants a day (24h) forecast, or day every 2 or 4 forecast? Or week forecast?" With glass-evo 0.1.45.
+
+- **The forecast's span.** The Forecast section's "What it shows" is today as a line, the next 24 hours every 2, 3, 4 or 6 hours, or the week; the face and the likeness draw the hours and the week as columns in the forecast's cells, each its time, its sky and its temperature (the week each day's low and high). The key is `weather.span`, `today` unless said.
+- **The reading carries the hours and the week.** The plugin asks Open-Meteo for the hourly forecast beside the daily one, seven days in one request every half hour as before, and the `weather` line carries `hours` (24 from the next whole hour at the place: `hour`, `temp`, `code`, `day`) and `days` (7 from today: `weekday`, `code`, `low`, `high`) beside what it carried. The overlay crate names `Hour` and `Day`. A display that does not know the fields ignores them.
+- **Glass names glass-evo 0.1.45 as the least it works with.**
+
 ## [0.8.80] - 2026-10-07
 
 Found on the player's page before it was handed over, with glass-evo 0.1.44.
