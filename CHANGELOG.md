@@ -2,6 +2,15 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.3] - 2026-10-07
+
+For a face theme's own skies (glass-evo 0.2.3): they reach the browser views, the remote displays and the look panel's likeness.
+
+- **A face theme's files, listed and served.** `GET /api/face/theme-files?name=` lists a face theme's own files, its skies under `skies/`, each with its path, its route and its checksum; `GET /api/face/theme-file?name=&file=` serves one. The module route's `theme` carries the list beside the theme's text.
+- **The Face tab and Anymote** put the chosen look's skies into the module's table beside its `face.txt` before the first frame; **the look panel** puts the look's skies into its likeness module's table when the look is chosen, and paints the likeness again, so it draws the look's skies as the screen does.
+- **A remote display** that carries the face brings the look's skies beside its `face.txt`, each checked against its checksum, from the files the player's configuration lists.
+- **Glass names glass-evo 0.2.3 as the least it works with.**
+
 ## [0.9.2] - 2026-10-07
 
 For a face theme's own skies (glass-evo 0.2.2, from Gelo5's question "where are the weather icons located?"): groundwork on the display's side, nothing to see on its own.
