@@ -2,6 +2,13 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.82] - 2026-10-07
+
+Andrew, on step 2 of the weather: "What it shows dropdown is always empty - it should show what is selected." With glass-evo 0.1.46, which draws today's line and the span's columns as he chose from the mockups.
+
+- **"What it shows" shows what is chosen.** The page painted a choice only for the clock's face and dial; the forecast's span is painted as one of its six words now, today unless said (`lookmodel.span`, tested).
+- **Glass names glass-evo 0.1.46 as the least it works with.**
+
 ## [0.8.81] - 2026-10-07
 
 Andrew's step 2 of the weather, from his question of 2026-10-06: "What if user wants a day (24h) forecast, or day every 2 or 4 forecast? Or week forecast?" With glass-evo 0.1.45.
