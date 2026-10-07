@@ -1926,7 +1926,7 @@
     var blur = LOOK.frostOn(v, opts.suits) ? 'backdrop-filter:blur(calc(var(--u) * 14));-webkit-backdrop-filter:blur(calc(var(--u) * 14));' : '';
     var edge = LOOK.share(v['glass.hairline'], 0);
     var glass = function (key, colour, line) {
-      var solid = LOOK.share(v[key], 0);
+      var solid = LOOK.share(key === 'buttons.glass' ? LOOK.buttonsGlass(v) : v[key], 0);
       return solid ? 'background:rgba(' + LOOK.rgb(LOOK.colourOf(colour) || tint) + ',' + solid + ');box-shadow:inset ' + line + ' rgba(255,255,255,' + edge + ');' + blur : '';
     };
     var words = function (piece) { return 'rgba(' + LOOK.rgb(LOOK.colourOf(v[piece + '.ink']) || ink) + ',' + LOOK.share(v[piece + '.opacity'], 1) + ')'; };
@@ -2000,7 +2000,7 @@
       });
     }
     var fill = words('buttons');
-    html += '<div class="lp-bar"' + open('buttons') + ' style="' + glass('glass.bar', v['colours.tint'], '0 1px') + '">' + ['previous', opts.mode === 'idle' ? 'play' : 'pause', 'next', 'minus', 'plus', 'more'].map(function (name) {
+    html += '<div class="lp-bar"' + open('buttons') + ' style="' + glass('buttons.glass', v['buttons.tint'], '0 1px') + '">' + ['previous', opts.mode === 'idle' ? 'play' : 'pause', 'next', 'minus', 'plus', 'more'].map(function (name) {
       return '<svg viewBox="0 0 24 24" style="fill:' + fill + '">' + LOOK_ICONS[name] + '</svg>';
     }).join('') + '</div>';
     var dimmed = opts.dim ? 'linear-gradient(rgba(0,0,0,' + opts.dim + '),rgba(0,0,0,' + opts.dim + ')),' : '';
@@ -2253,9 +2253,9 @@
     // A piece's own colour, strength and background, behind its More.
     var finer = function (piece, when) {
       return [field('MANAGER_LOOK_COLOUR', word(piece + '.ink', 'MANAGER_LOOK_SAME')),
-        field('MANAGER_LOOK_STRENGTH', slider(piece + '.opacity', 'share', 10, 100, 1, 'FAINT', 'FULL'))].concat(piece === 'buttons' ? [] : [
+        field('MANAGER_LOOK_STRENGTH', slider(piece + '.opacity', 'share', 10, 100, 1, 'FAINT', 'FULL')),
         field('MANAGER_LOOK_BACKGROUND', slider(piece + '.glass', 'share', 0, 100, 1, 'NONE', 'SOLID'), '', when),
-        field('MANAGER_LOOK_BACKGROUND_COLOUR', word(piece + '.tint', 'MANAGER_LOOK_SAME'), '', when)]);
+        field('MANAGER_LOOK_BACKGROUND_COLOUR', word(piece + '.tint', 'MANAGER_LOOK_SAME'), '', when)];
     };
     var sections = [
       ['colours', 'MANAGER_LOOK_COLOURS', [
@@ -2434,7 +2434,7 @@
         // Beside a word the picker shows only for a colour of the part's own.
         el.hidden = !colour && !!el.parentNode.querySelector('[data-kind="word"]');
         el.value = colour || lookUi.picked[key] || lookPick(key);
-      } else if (kind === 'share' || kind === 'solid') el.value = Math.round(LOOK.share(v[key], 0) * 100);
+      } else if (kind === 'share' || kind === 'solid') el.value = Math.round(LOOK.share(key === 'buttons.glass' ? LOOK.buttonsGlass(v) : v[key], 0) * 100);
       else if (kind === 'size') { el.value = LOOK.sizeOf(key, v[key]); el.title = el.value + '%'; }
       else if (kind === 'minutes' || kind === 'millis') { if (document.activeElement !== el) el.value = parseInt(v[key], 10) || 0; }
       else if (kind === 'pattern') el.value = lookUi.own[key] ? '' : v[key];

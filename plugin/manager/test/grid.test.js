@@ -58,4 +58,7 @@ test('the forecast\'s span is one of six words, today unless said', function () 
   // The skies move unless said; thunder's flashes only when said.
   assert.deepStrictEqual([LOOK.BUILTIN['weather.motion'], LOOK.BUILTIN['weather.thunder'], LOOK.BUILTIN['weather.colour']], ['on', 'off', 'on']);
   assert.strictEqual(LOOK.BUILTIN['idle.wait'], 'none');
+  assert.deepStrictEqual([LOOK.BUILTIN['buttons.glass'], LOOK.BUILTIN['buttons.tint']], ['bar', 'tint']);
+  assert.strictEqual(LOOK.buttonsGlass({ 'buttons.glass': 'bar', 'glass.bar': '0.6' }), 0.6, 'the buttons\' background follows How solid unless said');
+  assert.strictEqual(LOOK.buttonsGlass({ 'buttons.glass': '0.3', 'glass.bar': '0.6' }), 0.3);
 });

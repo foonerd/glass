@@ -15,6 +15,8 @@
     'colours.tint': 'artwork', 'colours.accent': 'artwork', 'colours.ink': '#f2f2f5',
     'glass.bar': '0.75', 'glass.sheet': '0.78', 'glass.hairline': '0.12', 'glass.frost': 'auto',
     'buttons.ink': 'ink', 'buttons.opacity': '1.0',
+    // The buttons' own background (glass-evo 0.1.54): as solid as How solid, in the look's tint, unless said.
+    'buttons.glass': 'bar', 'buttons.tint': 'tint',
     'clock.show': 'on', 'clock.format': '%H:%M', 'clock.ink': 'ink', 'clock.opacity': '0.86', 'clock.glass': '0.55', 'clock.tint': 'tint',
     'clock.face': 'type', 'clock.dial': 'station', 'clock.unlit': '0.08', 'clock.hands': 'ink', 'clock.marks': 'ink', 'clock.second': 'accent', 'clock.disc': 'style', 'clock.card': '#17171a',
     'date.show': 'off', 'date.place': 'top', 'date.format': '%A %-d %B', 'date.ink': 'ink', 'date.opacity': '0.86', 'date.glass': '0.55', 'date.tint': 'tint',
@@ -147,12 +149,18 @@
     var from = share(base['glass.bar'], 0.75);
     var to = Math.min(1, Math.max(0.1, bar));
     var out = { 'glass.bar': to.toFixed(2) };
-    ['glass.sheet', 'clock.glass', 'date.glass'].forEach(function (key) {
+    ['glass.sheet', 'clock.glass', 'date.glass', 'weather.glass', 'buttons.glass'].forEach(function (key) {
       if (share(values[key], 0) === 0) return;
       var step = share(base[key], from) - from;
       out[key] = Math.min(1, Math.max(0.1, to + step)).toFixed(2);
     });
     return out;
+  }
+
+  // How solid the buttons' background is: their own number, else the look's How solid.
+  function buttonsGlass(values) {
+    var own = parseFloat(values['buttons.glass']);
+    return isNaN(own) ? share(values['glass.bar'], 0.75) : Math.min(1, Math.max(0, own));
   }
 
   // How solid a background is, and how large a piece, as the word to say.
@@ -303,7 +311,7 @@
   return {
     BUILTIN: BUILTIN, KEYS: KEYS, CLOCK_PATTERNS: CLOCK_PATTERNS, DATE_PATTERNS: DATE_PATTERNS,
     CLOCK_FACES: CLOCK_FACES, DIAL_STYLES: DIAL_STYLES, clockFace: clockFace, dialStyle: dialStyle,
-    known: known, lay: lay, same: same, differs: differs, changes: changes,
+    known: known, lay: lay, same: same, differs: differs, changes: changes, buttonsGlass: buttonsGlass,
     isOn: isOn, colourOf: colourOf, rgb: rgb, share: share, frostOn: frostOn, backgrounds: backgrounds,
     cells: cells, cellsText: cellsText, align: align, flexed: flexed, turned: turned, SPANS: SPANS, span: span, GRID_ROWS: GRID_ROWS, GRID_COLUMNS: GRID_COLUMNS,
     solidWord: solidWord, sizeOf: sizeOf, sizeWord: sizeWord, unitsOf: unitsOf, fitted: fitted, idleMost: idleMost, padAbout: padAbout, IDLE: IDLE,

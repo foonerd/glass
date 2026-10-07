@@ -88,16 +88,16 @@ test('frost is the user\'s or the look\'s word, else as suits the board', () => 
 
 test('one slider moves every background, each at its distance, and one that is off stays off', () => {
   const base = look.lay();
-  assert.deepStrictEqual(look.backgrounds(base, base, 0.6), { 'glass.bar': '0.60', 'glass.sheet': '0.63', 'clock.glass': '0.40', 'date.glass': '0.40' });
-  assert.deepStrictEqual(look.backgrounds(base, base, 1), { 'glass.bar': '1.00', 'glass.sheet': '1.00', 'clock.glass': '0.80', 'date.glass': '0.80' });
-  assert.deepStrictEqual(look.backgrounds(base, base, 0.02), { 'glass.bar': '0.10', 'glass.sheet': '0.13', 'clock.glass': '0.10', 'date.glass': '0.10' }, 'never less than the face draws');
+  assert.deepStrictEqual(look.backgrounds(base, base, 0.6), { 'glass.bar': '0.60', 'glass.sheet': '0.63', 'clock.glass': '0.40', 'date.glass': '0.40', 'weather.glass': '0.40' });
+  assert.deepStrictEqual(look.backgrounds(base, base, 1), { 'glass.bar': '1.00', 'glass.sheet': '1.00', 'clock.glass': '0.80', 'date.glass': '0.80', 'weather.glass': '0.80' });
+  assert.deepStrictEqual(look.backgrounds(base, base, 0.02), { 'glass.bar': '0.10', 'glass.sheet': '0.13', 'clock.glass': '0.10', 'date.glass': '0.10', 'weather.glass': '0.10' }, 'never less than the face draws');
   const dark = look.lay({}, DARK);
   assert.strictEqual(look.backgrounds(dark, dark, 0.5)['clock.glass'], '0.45', 'the look\'s own distance');
   const clear = look.lay({}, CLEAR);
-  assert.deepStrictEqual(look.backgrounds(clear, clear, 0.5), { 'glass.bar': '0.50', 'glass.sheet': '1.00' }, 'no background is not made one');
+  assert.deepStrictEqual(look.backgrounds(clear, clear, 0.5), { 'glass.bar': '0.50', 'glass.sheet': '1.00', 'weather.glass': '0.95' }, 'no background is not made one; the forecast keeps its distance');
   // The clock's background turned off by the user stays off; the date's follows.
   const mine = look.lay({}, {}, { 'clock.glass': '0' });
-  assert.deepStrictEqual(Object.keys(look.backgrounds(base, mine, 0.6)), ['glass.bar', 'glass.sheet', 'date.glass']);
+  assert.deepStrictEqual(Object.keys(look.backgrounds(base, mine, 0.6)), ['glass.bar', 'glass.sheet', 'date.glass', 'weather.glass']);
 });
 
 test('the words for how solid and how large', () => {
