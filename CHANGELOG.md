@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.74] - 2026-10-07
+
+The clock on the idle screen's grid, the first step of the grid at Andrew's word ("introduce grid. We will test only clock in grid end-to-end. Move clock to grid."), with his margin ("meant user controlled margins!"). The face draws it from glass-evo 0.1.40; this is the Manager's part, for the clock alone, as 0.8.72 and 0.8.73 carried it before the night's rollback.
+
+- **The clock on the grid, in the look panel.** With glass-evo 0.1.40 the Clock section gets "On the grid": nine cells to press, one for a cell and then another for the block between them, with "As the look places it" to take the clock off the grid again; "Inside its cells", nine squares for where the clock stands inside what it occupies; and "Margin", units of a 720th of the height between the clock's glass and the sides of its cells it is aligned to, 20 as before and 0 for the corner. The likeness draws the clock in its cells by the face's rules: the margin kept from the side it is aligned to, the glass giving way as the clock takes more, a size the look comes with fitted to the cells and a size the user set kept.
+- Keys for a look or a face theme: `clock.place`, `clock.align`, `clock.margin`. Shown only where the glass-evo installed knows them. Nothing else changes.
+- **The Windows signing asks a second time-stamp service** when Microsoft's does not answer (DigiCert's), with more retries; 0.8.73's release failed three times for want of a timestamp. A failed verification now says what it saw.
+
 ## [0.8.73] - 2026-10-07
 
 Andrew, placing the clock in a corner of the grid: "Perhaps a margin should be introduced?" and "meant user controlled margins!" The face has it from glass-evo 0.1.40.
