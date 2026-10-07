@@ -2,6 +2,13 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.84] - 2026-10-07
+
+Andrew: "Global is background, not date - should not be linked at all." With glass-evo 0.1.47.
+
+- **The forecast's colour, strength, background and background colour are its own.** 0.8.83 had them follow the date's where the look left them so; nothing links one piece to another now. "Same as the rest" means the look's own ink and tint, as it does for the clock and the date, and the likeness draws the forecast's glass from its own settings alone.
+- **Glass names glass-evo 0.1.47 as the least it works with.**
+
 ## [0.8.83] - 2026-10-07
 
 Andrew, on the forecast's finer settings: "Forecast Background does not show in preview, shows on glass when saved. DATE is missing background, and Color changes both, date and forecast!" With glass-evo 0.1.46.
