@@ -33,7 +33,9 @@
     // The forecast (glass-evo 0.1.44): on the grid and only, across the
     // bottom row unless the look says, drawn once a place is chosen.
     'weather.show': 'on', 'weather.span': 'today', 'weather.place': 'bottom left-right', 'weather.align': 'centre middle', 'weather.margin': '20',
-    'measure.weather': '40', 'weather.ink': 'ink', 'weather.opacity': '0.86', 'weather.glass': '0.55', 'weather.tint': 'tint'
+    'measure.weather': '40', 'weather.ink': 'ink', 'weather.opacity': '0.86', 'weather.glass': '0.55', 'weather.tint': 'tint',
+    // The heatmap (glass-evo 0.1.50): the temperatures in the colour of their degree, numbers only; off unless said.
+    'weather.heat': 'off', 'weather.cold': '#3b8bff', 'weather.warm': '#ff4b2b', 'weather.heat.days': 'off', 'weather.heat.date': 'off'
   };
   var KEYS = Object.keys(BUILTIN);
   var NUMBERS = /^(glass\.(bar|sheet|hairline)|(buttons|clock|date)\.(opacity|glass)|clock\.unlit|measure\.[a-z]+|idle\.dim|idle\.off|idle\.fade)$/;

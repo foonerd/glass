@@ -52,4 +52,7 @@ test('the forecast\'s span is one of six words, today unless said', function () 
   assert.strictEqual(LOOK.BUILTIN['weather.span'], 'today');
   // The forecast's own colour, opacity, glass and tint, the theme's unless said, linked to no other piece.
   assert.deepStrictEqual([LOOK.BUILTIN['weather.ink'], LOOK.BUILTIN['weather.opacity'], LOOK.BUILTIN['weather.glass'], LOOK.BUILTIN['weather.tint']], ['ink', '0.86', '0.55', 'tint']);
+  // The heatmap: off, blue to red, the days and the date off.
+  assert.deepStrictEqual([LOOK.BUILTIN['weather.heat'], LOOK.BUILTIN['weather.cold'], LOOK.BUILTIN['weather.warm'], LOOK.BUILTIN['weather.heat.days'], LOOK.BUILTIN['weather.heat.date']], ['off', '#3b8bff', '#ff4b2b', 'off', 'off']);
+  assert.strictEqual(LOOK.colourOf(LOOK.BUILTIN['weather.cold']), '#3b8bff');
 });
