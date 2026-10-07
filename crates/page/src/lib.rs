@@ -1136,6 +1136,54 @@ mod tests {
         std::fs::read(repo_theme("480x320").join("bar-indicator.png")).expect("a picture")
     }
 
+    #[test]
+    fn the_picture_when_nothing_plays_is_wanted_from_the_page_and_read_once_put() {
+        let _serial = serial();
+        let mut face = Page::new();
+        let wanted = |face: &Page, name: &str| {
+            face.wants().into_iter().any(
+                |w| matches!(w, intake::wants::Want::File { path, .. } if path == format!("backgrounds/{name}")),
+            )
+        };
+        // Asked before it is in: none yet, and the page is asked for it by the manager's route.
+        assert_eq!(intake::host_picture("Mine (1).jpg"), None);
+        let want = face.wants().into_iter().find_map(|w| match w {
+            intake::wants::Want::File { path, url } if path.starts_with("backgrounds/") => {
+                Some((path, url))
+            }
+            _ => None,
+        });
+        assert_eq!(
+            want,
+            Some((
+                "backgrounds/Mine (1).jpg".to_string(),
+                "/api/backgrounds/Mine%20%281%29.jpg/file".to_string()
+            ))
+        );
+        face.put_file("backgrounds/Mine (1).jpg", a_picture());
+        let path = intake::host_picture("Mine (1).jpg").expect("the picture once it is put");
+        assert_eq!(path, "/glass/backgrounds/Mine (1).jpg");
+        let frame = expose::read_covering(std::path::Path::new(&path), 8, 6)
+            .expect("read to cover the screen");
+        assert_eq!((frame.width, frame.height), (8, 6));
+        assert!(
+            !wanted(&face, "Mine (1).jpg"),
+            "a picture in the table is not wanted"
+        );
+        // One the manager has none for: asked once, said missing, never asked again.
+        assert_eq!(intake::host_picture("Gone.jpg"), None);
+        assert!(wanted(&face, "Gone.jpg"));
+        face.missing("backgrounds/Gone.jpg");
+        assert_eq!(intake::host_picture("Gone.jpg"), None);
+        assert!(
+            !wanted(&face, "Gone.jpg"),
+            "not asked again once the manager said it has none"
+        );
+        // A name that is more than a file's name is never asked for.
+        assert_eq!(intake::host_picture("../out.jpg"), None);
+        assert!(face.wants().is_empty());
+    }
+
     /// The first file wanted under `pictures/`, with its URL.
     fn picture_wanted(face: &Page) -> Option<(String, String)> {
         face.wants().into_iter().find_map(|w| match w {

@@ -492,6 +492,32 @@ impl Sync {
             }
         }
         self.ledger.face_owner = face.owner.trim().to_string();
+        self.bring_picture(face.picture.as_ref())
+    }
+
+    /// The picture when nothing plays, where the look names one: brought to
+    /// `backgrounds/<name>` under the home, where a face reads it as on the
+    /// player, and nothing else there. None named leaves the folder empty.
+    fn bring_picture(
+        &mut self,
+        picture: Option<&crate::bring::RemotePicture>,
+    ) -> Result<(), String> {
+        let folder = self.home.join("backgrounds");
+        if folder.exists() {
+            std::fs::remove_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+        }
+        let Some(picture) = picture else {
+            return Ok(());
+        };
+        let name = picture.name.trim();
+        if !crate::bring::picture_name_ok(name) || picture.url.trim().is_empty() {
+            return Ok(());
+        }
+        let url = format!("{}{}", self.manager, picture.url.trim());
+        let bytes = self.get_bytes(&url)?;
+        std::fs::create_dir_all(&folder).map_err(|e| format!("{}: {e}", folder.display()))?;
+        let path = folder.join(name);
+        std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
         Ok(())
     }
 
@@ -691,6 +717,43 @@ mod tests {
         );
     }
 
+    /// A manager on a local port that answers one GET with `body` and
+    /// hands back the request line it was asked.
+    fn stand_in_manager(body: Vec<u8>) -> (u16, thread::JoinHandle<String>) {
+        use std::io::{Read, Write};
+        let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        let served = thread::spawn(move || {
+            let (mut stream, _) = listener.accept().unwrap();
+            let mut request = Vec::new();
+            let mut byte = [0u8; 1];
+            while stream.read(&mut byte).unwrap() == 1 {
+                request.push(byte[0]);
+                if request.ends_with(b"\r\n\r\n") {
+                    break;
+                }
+            }
+            let line = String::from_utf8_lossy(&request)
+                .lines()
+                .next()
+                .unwrap_or_default()
+                .trim_end_matches(" HTTP/1.1")
+                .to_string();
+            stream
+                .write_all(
+                    format!(
+                        "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                        body.len()
+                    )
+                    .as_bytes(),
+                )
+                .unwrap();
+            stream.write_all(&body).unwrap();
+            line
+        });
+        (port, served)
+    }
+
     #[test]
     fn a_remote_keeps_the_players_look_where_a_face_reads_it() {
         let home = std::env::temp_dir().join(format!("glass-sync-face-{}", std::process::id()));
@@ -722,6 +785,37 @@ mod tests {
         assert_eq!(sync.face_owner(), "kiosk");
         assert!(!home.join("faces/Dark Glass").exists());
         assert!(!home.parent().unwrap().join("out").exists());
+        // The picture when nothing plays, where the look names one: brought
+        // beside the faces from the manager, and gone when none is named.
+        let (port, served) = stand_in_manager(b"\x89PNG picture bytes".to_vec());
+        let mut sync = Sync::new(
+            &home,
+            &format!("http://127.0.0.1:{port}"),
+            "http://127.0.0.1:1",
+        );
+        let with: RemoteConfig = serde_json::from_str(
+            r#"{"face":{"owner":"glass-evo","theme":null,"picture":{"name":"Mine (1).jpg","url":"/api/backgrounds/Mine%20%281%29.jpg/file"}}}"#,
+        )
+        .unwrap();
+        sync.bring_face(&with.face).unwrap();
+        assert_eq!(
+            std::fs::read(home.join("backgrounds/Mine (1).jpg")).unwrap(),
+            b"\x89PNG picture bytes"
+        );
+        assert_eq!(
+            served.join().unwrap(),
+            "GET /api/backgrounds/Mine%20%281%29.jpg/file",
+            "fetched from the manager's route as named"
+        );
+        let odd_picture: RemoteConfig = serde_json::from_str(
+            r#"{"face":{"owner":"glass-evo","picture":{"name":"../out.jpg","url":"/api/backgrounds/x/file"}}}"#,
+        )
+        .unwrap();
+        sync.bring_face(&odd_picture.face).unwrap();
+        assert!(
+            !home.join("backgrounds").exists(),
+            "a name that is more than a file's name brings nothing, and the folder is emptied"
+        );
         // A player older than 0.8.20 says nothing: no look, no owner.
         let older: RemoteConfig =
             serde_json::from_str(r#"{"version":"v","theme":"t","files":{"meter":""}}"#).unwrap();

@@ -871,6 +871,8 @@ pub fn remote_main(
         // A face reads its themes where the launcher says: on a remote, the
         // look the sync brought from the player.
         std::env::set_var("GLASS_FACES", home.join("faces"));
+        // And its picture when nothing plays, brought beside them.
+        std::env::set_var("GLASS_BACKGROUNDS", home.join("backgrounds"));
         intake::set_player(&beacon.address(), beacon.player_port);
         intake::set_manager(&beacon.manager_url());
         intake::set_overrides(Overrides {

@@ -1135,6 +1135,9 @@ fn keep_brought_pictures_bounded() {
             let prefix = format!("{}/", lead::home().join(folder).to_string_lossy());
             lead::vfs::bound(&prefix, PICTURES_KEPT);
         }
+        // The picture when nothing plays: the one on show and the next chosen.
+        let backgrounds = format!("{}/", lead::home().join("backgrounds").to_string_lossy());
+        lead::vfs::bound(&backgrounds, 2);
     });
 }
 
@@ -1174,6 +1177,23 @@ fn picture_in_table(reported: &str) -> (String, String) {
     (
         format!("pictures/{:016x}.img", fnv1a(reported)),
         format!("/api/face/picture?at={}", bring::encode(reported)),
+    )
+}
+
+/// The picture of the user's own for when nothing plays, brought by the
+/// host as the album art is: its path in the table once it is in, `None`
+/// with the file wanted from the manager while it is not, and `None` for
+/// good once the manager said there is none. On a machine always `None`:
+/// there a face reads the folder its launcher names.
+pub fn host_picture(name: &str) -> Option<String> {
+    let name = name.trim();
+    if !wants::host_pictures() || !bring::picture_name_ok(name) {
+        return None;
+    }
+    keep_brought_pictures_bounded();
+    table_file(
+        &format!("backgrounds/{name}"),
+        &format!("/api/backgrounds/{}/file", bring::encode(name)),
     )
 }
 

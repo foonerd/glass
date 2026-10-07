@@ -1564,7 +1564,15 @@ Glass.prototype.remoteFace = function () {
     try { owner = self.screenOwnerState().owner || 'kiosk'; } catch (e) { /* as the kiosk's */ }
     var theme = null;
     try { theme = self.faceThemeText(); } catch (e) { /* the built-in look */ }
-    return { owner: owner, theme: theme };
+    // The picture when nothing plays, where the look names one the player has.
+    var picture = null;
+    try {
+        var name = String((meterConfig && meterConfig.current && meterConfig.current['face.idle.picture']) || '').trim();
+        if (name && self.backgroundsList().some(function (b) { return b.name === name; })) {
+            picture = { name: name, url: '/api/backgrounds/' + encodeURIComponent(name) + '/file' };
+        }
+    } catch (e) { /* none */ }
+    return { owner: owner, theme: theme, picture: picture };
 };
 
 // The remotes hear when the screen changes hands: the configuration's

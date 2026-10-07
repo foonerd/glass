@@ -47,6 +47,26 @@ pub struct RemoteFace {
     pub owner: String,
     #[serde(default)]
     pub theme: Option<FaceTheme>,
+    /// The picture when nothing plays, where the look names one the player
+    /// has: its file's name, and the manager's route to fetch it from.
+    #[serde(default)]
+    pub picture: Option<RemotePicture>,
+}
+
+/// A picture of the user's own by its file's name and where it is fetched.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct RemotePicture {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub url: String,
+}
+
+/// Whether a picture's name is one file's name and nothing more: not
+/// empty, no path in it, not hidden.
+pub fn picture_name_ok(name: &str) -> bool {
+    let name = name.trim();
+    !name.is_empty() && !name.starts_with('.') && !name.contains(['/', '\\'])
 }
 
 /// A face theme by its name and its `face.txt`.

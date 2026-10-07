@@ -104,7 +104,7 @@ pub struct Origin {
 pub mod face {
     pub use controls::PointerKind;
     pub use expose::{blur, fit_art, read_art, read_covering, render_text, ui, Fonts, Frame};
-    pub use intake::Command;
+    pub use intake::{host_picture, Command};
     /// A text file and whether one is there, read where the display reads
     /// its own: the file system on a player, the page's file table in a browser.
     pub use lead::{is_file, read_to_string};
