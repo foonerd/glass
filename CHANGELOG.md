@@ -2,6 +2,13 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.88] - 2026-10-07
+
+Andrew, 2026-10-08: "I selected to wait 15 second - NO LONGER RESPECTED! THIS SHOULD BE A SWITCH IN SCREEN - IMMEDIATE - RESPECT TIMEOUT". With glass-evo 0.1.53.
+
+- **When the player stops, in the Backgrounds section of the look panel.** "The clock at once" (as before, unless the look says) or "After the persist period": with the second, the screen glass-evo holds keeps the theme, with its countdown where the plugin's Keep Display Active After Pause/Stop says so, and shows the clock, the date, the forecast and the picture when that period ends. Kept with the look as every setting is; key `idle.wait`.
+- **Glass names glass-evo 0.1.53 as the least it works with.**
+
 ## [0.8.87] - 2026-10-07
 
 Andrew, 2026-10-08: "REMOTE AND FACE AND ANYMOTE - ALL LOST CUSTOM BACKGROUND", on the picture when nothing plays (0.8.63), which had been built for the player's own screen alone. With glass-evo 0.1.52.
