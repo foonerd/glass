@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.83] - 2026-10-07
+
+Andrew, on the forecast's finer settings: "Forecast Background does not show in preview, shows on glass when saved. DATE is missing background, and Color changes both, date and forecast!" With glass-evo 0.1.46.
+
+- **The forecast's own background shows in the likeness.** The likeness drew a forecast's glass as the date's whatever the look said; it draws the forecast's own strength and colour now, the date's where the look leaves them so (`lookmodel.weatherGlassKey`, `weatherTint`, tested), as the screen does.
+- **The date's Background and Background colour show on the grid.** They were shown only with the date at the top of the screen, where it first had a glass of its own; a date on the grid has one too.
+- **The forecast's own colour, strength and background say "As the date's".** They are the date's unless given their own, which "Same as the rest" did not say: changing the date's colour changes a forecast that has none of its own, and a forecast given its own keeps it whatever the date's.
+
 ## [0.8.82] - 2026-10-07
 
 Andrew, on step 2 of the weather: "What it shows dropdown is always empty - it should show what is selected." With glass-evo 0.1.46, which draws today's line and the span's columns as he chose from the mockups.
