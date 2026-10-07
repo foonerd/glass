@@ -1994,7 +1994,7 @@
       }
       blocks.forEach(function (b) {
         html += '<div class="lp-cell" data-margin="' + b.margin + '" data-stands="' + b.a.across + ',' + b.a.down + '"' + open(b.first) + ' style="left:' + (b.on.c0 / 3 * 100) + '%;width:' + ((b.on.c1 - b.on.c0 + 1) / 3 * 100) + '%;top:calc((100% - var(--barh)) * ' + (b.on.r0 / 3) + ');height:calc((100% - var(--barh)) * ' + ((b.on.r1 - b.on.r0 + 1) / 3) + ');padding:calc(var(--u) * ' + b.margin + ');justify-content:' + LOOK.flexed(b.a.across) + ';align-items:' + LOOK.flexed(b.a.down) + '">' +
-          '<div class="lp-plate" style="' + (b.first === 'clock' ? glass('clock.glass', v['clock.tint'], '0 0 0 1px') : glass('date.glass', v['date.tint'], '0 0 0 1px')) + 'align-items:' + LOOK.flexed(b.a.across) + '">' + b.html + '</div></div>';
+          '<div class="lp-plate" style="' + (b.first === 'clock' ? glass('clock.glass', v['clock.tint'], '0 0 0 1px') : b.first === 'date' ? glass('date.glass', v['date.tint'], '0 0 0 1px') : glass(LOOK.weatherGlassKey(v), LOOK.weatherTint(v), '0 0 0 1px')) + 'align-items:' + LOOK.flexed(b.a.across) + '">' + b.html + '</div></div>';
       });
     }
     var fill = words('buttons');
@@ -2222,10 +2222,12 @@
     var hint = function (when) { return '<div class="help" data-when="' + when + '" style="padding:0 0 8px">' + esc(t('MANAGER_LOOK_PATTERN_HINT')) + '</div>'; };
     // A piece's own colour, strength and background, behind its More.
     var finer = function (piece, when) {
-      return [field('MANAGER_LOOK_COLOUR', word(piece + '.ink', 'MANAGER_LOOK_SAME')),
+      // The forecast's own are the date's unless said; the others' the theme's.
+      var same = piece === 'weather' ? 'MANAGER_LOOK_AS_DATE' : 'MANAGER_LOOK_SAME';
+      return [field('MANAGER_LOOK_COLOUR', word(piece + '.ink', same)),
         field('MANAGER_LOOK_STRENGTH', slider(piece + '.opacity', 'share', 10, 100, 1, 'FAINT', 'FULL'))].concat(piece === 'buttons' ? [] : [
         field('MANAGER_LOOK_BACKGROUND', slider(piece + '.glass', 'share', 0, 100, 1, 'NONE', 'SOLID'), '', when),
-        field('MANAGER_LOOK_BACKGROUND_COLOUR', word(piece + '.tint', 'MANAGER_LOOK_SAME'), '', when)]);
+        field('MANAGER_LOOK_BACKGROUND_COLOUR', word(piece + '.tint', same), '', when)]);
     };
     var sections = [
       ['colours', 'MANAGER_LOOK_COLOURS', [
@@ -2264,7 +2266,7 @@
         field('MANAGER_LOOK_CELLS', cells('date.place', 'MANAGER_LOOK_CELLS_LOOK'), esc(t('MANAGER_LOOK_CELLS_HINT')), 'date-cells'),
         field('MANAGER_LOOK_INSIDE', inside('date.align'), '', 'date-grid'),
         field('MANAGER_LOOK_MARGIN', units('date.margin'), esc(t('MANAGER_LOOK_MARGIN_HINT')), 'date-grid')],
-        'MANAGER_LOOK_MORE_PIECE', finer('date', 'date-top')],
+        'MANAGER_LOOK_MORE_PIECE', finer('date', 'date-glass')],
       ['weather', 'MANAGER_LOOK_WEATHER', [
         field('MANAGER_LOOK_SHOW_WEATHER', onoff('weather.show', 'switch'), esc(t('MANAGER_LOOK_WEATHER_HINT'))),
         '<div class="lf"><span class="name">' + esc(t('MANAGER_LOOK_WEATHER_PLACE')) + '</span><div id="look-weather"></div></div>',
@@ -2436,6 +2438,7 @@
     when['date-cells'] = when.date && !!(f.builtIn && f.builtIn['date.align'] !== undefined);
     when['date-grid'] = when['date-cells'] && !!LOOK.cells(v['date.place']);
     when['date-words'] = when.date && !LOOK.cells(v['date.place']);
+    when['date-glass'] = when.date && (place === 'top' || !!LOOK.cells(v['date.place']));
     when['date-top'] = when['date-top'] && !LOOK.cells(v['date.place']);
     // The forecast shows where the glass-evo that is here knows it; its
     // grid, like the others', once it is on.

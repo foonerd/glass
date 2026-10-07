@@ -984,6 +984,7 @@
     "MANAGER_LOOK_SPAN_HOURS6": "The next 24 hours, every 6 hours",
     "MANAGER_LOOK_SPAN_WEEK": "The week",
     "MANAGER_LOOK_SPAN_HINT": "Today is one line: the weather now and the day’s lowest and highest. The hours and the week stand as columns in the forecast’s cells, each its time, its sky and its temperature.",
+    "MANAGER_LOOK_AS_DATE": "As the date’s",
     "MANAGER_LOOK_WEATHER_CREDIT": "Weather data by",
     "MANAGER_LOOK_BUILTIN": "Follows the artwork",
     "MANAGER_LOOK_BUILTIN_SAYS": "Colours from the cover",

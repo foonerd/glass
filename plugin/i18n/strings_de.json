@@ -984,6 +984,7 @@
     "MANAGER_LOOK_SPAN_HOURS6": "Die nächsten 24 Stunden, alle 6 Stunden",
     "MANAGER_LOOK_SPAN_WEEK": "Die Woche",
     "MANAGER_LOOK_SPAN_HINT": "Heute ist eine Zeile: das Wetter jetzt und der Tiefst- und Höchstwert des Tages. Die Stunden und die Woche stehen als Spalten in den Zellen der Vorhersage, jede mit ihrer Zeit, ihrem Himmel und ihrer Temperatur.",
+    "MANAGER_LOOK_AS_DATE": "Wie das Datum",
     "MANAGER_LOOK_WEATHER_CREDIT": "Wetterdaten von",
     "MANAGER_LOOK_BUILTIN": "Folgt dem Cover",
     "MANAGER_LOOK_BUILTIN_SAYS": "Farben aus dem Cover",

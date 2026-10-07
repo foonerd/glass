@@ -51,3 +51,11 @@ test('the forecast\'s span is one of six words, today unless said', function () 
   assert.strictEqual(LOOK.span({}), 'today');
   assert.strictEqual(LOOK.BUILTIN['weather.span'], 'today');
 });
+
+test('the forecast\'s glass and tint are the date\'s unless the look says', function () {
+  assert.strictEqual(LOOK.weatherGlassKey({ 'weather.glass': 'date', 'date.glass': '0.55' }), 'date.glass');
+  assert.strictEqual(LOOK.weatherGlassKey({ 'weather.glass': '0.3' }), 'weather.glass');
+  assert.strictEqual(LOOK.weatherGlassKey({}), 'date.glass');
+  assert.strictEqual(LOOK.weatherTint({ 'weather.tint': 'tint', 'date.tint': '#102030' }), '#102030');
+  assert.strictEqual(LOOK.weatherTint({ 'weather.tint': '#ff0000', 'date.tint': '#102030' }), '#ff0000');
+});

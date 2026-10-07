@@ -207,6 +207,17 @@
     return SPANS.indexOf(word) === -1 ? 'today' : word;
   }
 
+  // The forecast's glass and tint are the date's unless the look says:
+  // the key its strength is read from, and the colour of that glass.
+  function weatherGlassKey(v) {
+    var own = String(v['weather.glass'] || '').trim().toLowerCase();
+    return own && own !== 'date' && isFinite(parseFloat(own)) ? 'weather.glass' : 'date.glass';
+  }
+  function weatherTint(v) {
+    var own = String(v['weather.tint'] || '').trim().toLowerCase();
+    return own && own !== 'tint' && own !== 'date' ? v['weather.tint'] : v['date.tint'];
+  }
+
   // A piece's size as a share of the built-in look's, in percent.
   function sizeOf(key, value) {
     var units = parseFloat(value);
@@ -299,7 +310,7 @@
     CLOCK_FACES: CLOCK_FACES, DIAL_STYLES: DIAL_STYLES, clockFace: clockFace, dialStyle: dialStyle,
     known: known, lay: lay, same: same, differs: differs, changes: changes,
     isOn: isOn, colourOf: colourOf, rgb: rgb, share: share, frostOn: frostOn, backgrounds: backgrounds,
-    cells: cells, cellsText: cellsText, align: align, flexed: flexed, turned: turned, SPANS: SPANS, span: span, GRID_ROWS: GRID_ROWS, GRID_COLUMNS: GRID_COLUMNS,
+    cells: cells, cellsText: cellsText, align: align, flexed: flexed, turned: turned, SPANS: SPANS, span: span, weatherGlassKey: weatherGlassKey, weatherTint: weatherTint, GRID_ROWS: GRID_ROWS, GRID_COLUMNS: GRID_COLUMNS,
     solidWord: solidWord, sizeOf: sizeOf, sizeWord: sizeWord, unitsOf: unitsOf, fitted: fitted, idleMost: idleMost, padAbout: padAbout, IDLE: IDLE,
     sample: sample, strftime: strftime
   };
