@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.75] - 2026-10-07
+
+0.8.74's release failed at the signing's own check, as 0.8.73's had: the runner's `osslsigncode`, installed fresh from Ubuntu at every run, is 2.8 now and reports a timestamp as "Timestamp time" where the version before listed the timestamp authority's certificates. The binary was signed and timestamped all along.
+
+- **The signing's check recognises both outputs.** The time-stamp request is as it was for every release before; the second time-stamp service added in 0.8.74 is taken out again, since it was not the cause.
+
 ## [0.8.74] - 2026-10-07
 
 The clock on the idle screen's grid, the first step of the grid at Andrew's word ("introduce grid. We will test only clock in grid end-to-end. Move clock to grid."), with his margin ("meant user controlled margins!"). The face draws it from glass-evo 0.1.40; this is the Manager's part, for the clock alone, as 0.8.72 and 0.8.73 carried it before the night's rollback.
