@@ -2,6 +2,15 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.79] - 2026-10-07
+
+Andrew: "Now - weather. Exact same principle - grid, the same way as clock and date." With glass-evo 0.1.44.
+
+- **Today's forecast, for a place the user chooses.** The Forecast section on the Screen tab: on or off, a place found by name (a town or a city; the first eight matches to pick from), the degrees in °C or °F, and the reading as the player holds it. The plugin asks Open-Meteo once a place is set, every half hour, keeps the reading across restarts and drops one older than three hours; "Weather data by Open-Meteo" stands in the section, as its licence asks. The display hears a `weather` line on the channel (`place`, `unit`, `now`, `code`, `day`, `today`, `low`, `high`, `rain`, `at`; `off` when there is nothing), and `GET /api/weather`, `GET /api/weather/search?name=` and `POST /api/weather` serve the section.
+- **On the grid and only, as the clock and the date are.** The section has "On the grid" (the bottom row across the three columns unless the look says), "Inside its cells", "Margin" and a size of its own, and behind More its own colour, strength and background, each the date's unless said. The forecast on the same cells as the clock or the date, aligned the same, shares their glass in the order clock, date, forecast.
+- **The likeness, drawn by the module.** glass-evo's module draws the forecast line from the player's own reading, in the look's font, as it draws the date and the clock: a sky, the temperature now, a sky, today's low and high. Nothing shows until a place is chosen, on the likeness as on the screen.
+- **The overlay crate names `Weather`, `Sky` and `sky_of`**, and `Input` carries the reading, so a face can draw it; Glass names glass-evo 0.1.44 as the least it works with.
+
 ## [0.8.78] - 2026-10-07
 
 Andrew, on the date on the grid, set in the browser's type in the likeness and in the face's own on the glass: "Rejected. I requested date to be wired exactly as the clock is. Preview vs glass." With glass-evo 0.1.43.
