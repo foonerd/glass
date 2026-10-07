@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.80] - 2026-10-07
+
+Found on the player's page before it was handed over, with glass-evo 0.1.44.
+
+- **The Forecast section's size, grid and More controls show.** 0.8.79 never set the section's own visibility flag, as the Clock and Date sections have theirs, so "On the grid", "Inside its cells", "Margin", the size and the finer settings stayed hidden; they show now while the forecast is on, as the other sections' do.
+
 ## [0.8.79] - 2026-10-07
 
 Andrew: "Now - weather. Exact same principle - grid, the same way as clock and date." With glass-evo 0.1.44.
