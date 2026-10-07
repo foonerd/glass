@@ -2418,7 +2418,7 @@
     });
     // A row shows while it has something to say: a clock's rows while the
     // clock shows, a date's own background while the date stands at the top.
-    var when = { clock: LOOK.isOn(v['clock.show']), date: LOOK.isOn(v['date.show']), buttons: true, idlepic: !!v['idle.picture'], screenoff: (parseInt(v['idle.off'], 10) || 0) > 0 };
+    var when = { clock: LOOK.isOn(v['clock.show']), date: LOOK.isOn(v['date.show']), weather: LOOK.isOn(v['weather.show']), buttons: true, idlepic: !!v['idle.picture'], screenoff: (parseInt(v['idle.off'], 10) || 0) > 0 };
     // The clock's faces show where the glass-evo that is here knows them
     // (its built-in look names the key), and each face's own rows with it.
     var clockFace = LOOK.clockFace(v);
