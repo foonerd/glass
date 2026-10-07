@@ -3472,6 +3472,41 @@ pub struct Weather {
     /// When it was read, in seconds since 1970.
     #[serde(default)]
     pub at: i64,
+    /// The next 24 hours from the next whole hour at the place, where the
+    /// plugin gives them (from Glass 0.8.81).
+    #[serde(default)]
+    pub hours: Vec<Hour>,
+    /// The week from today, where the plugin gives it (from Glass 0.8.81).
+    #[serde(default)]
+    pub days: Vec<Day>,
+}
+
+/// One hour of the forecast: the hour of the day, the temperature, the
+/// weather's code and whether it is day.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Hour {
+    #[serde(default)]
+    pub hour: u8,
+    #[serde(default)]
+    pub temp: f32,
+    #[serde(default)]
+    pub code: u8,
+    #[serde(default)]
+    pub day: bool,
+}
+
+/// One day of the forecast: the weekday (0 Sunday to 6 Saturday), the
+/// day's code, its lowest and its highest.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Day {
+    #[serde(default)]
+    pub weekday: u8,
+    #[serde(default)]
+    pub code: u8,
+    #[serde(default)]
+    pub low: f32,
+    #[serde(default)]
+    pub high: f32,
 }
 
 /// What a WMO weather code looks like, for a face that draws it.

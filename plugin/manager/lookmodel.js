@@ -32,7 +32,7 @@
     'date.align': 'centre middle', 'date.margin': '20',
     // The forecast (glass-evo 0.1.44): on the grid and only, across the
     // bottom row unless the look says, drawn once a place is chosen.
-    'weather.show': 'on', 'weather.place': 'bottom left-right', 'weather.align': 'centre middle', 'weather.margin': '20',
+    'weather.show': 'on', 'weather.span': 'today', 'weather.place': 'bottom left-right', 'weather.align': 'centre middle', 'weather.margin': '20',
     'measure.weather': '40', 'weather.ink': 'ink', 'weather.opacity': '0.86', 'weather.glass': '0.55', 'weather.tint': 'tint'
   };
   var KEYS = Object.keys(BUILTIN);

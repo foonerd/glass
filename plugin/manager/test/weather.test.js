@@ -7,9 +7,12 @@ const path = require('path');
 const weather = require('../weather');
 
 const KRAKOW = { name: 'Kraków, Lesser Poland, Poland', latitude: 50.0614, longitude: 19.9366 };
+// Read at 1760000000999, 08:53:21 UTC on a Thursday, two hours ahead at the place.
 const ANSWER = JSON.stringify({
+  utc_offset_seconds: 7200,
   current: { temperature_2m: 13.6, weather_code: 3, is_day: 1 },
-  daily: { weather_code: [61], temperature_2m_max: [17.2], temperature_2m_min: [8.9], precipitation_probability_max: [64] }
+  daily: { time: ['2025-10-09', '2025-10-10'], weather_code: [61, 2], temperature_2m_max: [17.2, 15.0], temperature_2m_min: [8.9, 7.1], precipitation_probability_max: [64, 10] },
+  hourly: { time: ['2025-10-09T10:00', '2025-10-09T11:00', '2025-10-09T12:00'], temperature_2m: [12.1, 13.0, 14.2], weather_code: [3, 61, 2], is_day: [1, 1, 0] }
 });
 
 function scratch() {
@@ -49,7 +52,7 @@ test('a place is a name and where it is, and nothing else', function () {
 test('the addresses asked name the place, the day and the unit', function () {
   const url = weather.forecastUrl(KRAKOW, 'F');
   assert.ok(url.startsWith('https://api.open-meteo.com/v1/forecast?latitude=50.0614&longitude=19.9366&'));
-  assert.ok(url.includes('forecast_days=1') && url.includes('temperature_unit=fahrenheit') && url.includes('timezone=auto'));
+  assert.ok(url.includes('forecast_days=7') && url.includes('hourly=temperature_2m,weather_code,is_day') && url.includes('temperature_unit=fahrenheit') && url.includes('timezone=auto'));
   assert.ok(weather.forecastUrl(KRAKOW, 'C').includes('temperature_unit=celsius'));
   assert.strictEqual(weather.searchUrl(' Kraków & co ', 'pl'), 'https://geocoding-api.open-meteo.com/v1/search?name=Krak%C3%B3w%20%26%20co&count=8&format=json&language=pl');
   assert.ok(weather.searchUrl('x', 'not a language').endsWith('language=en'));
@@ -69,11 +72,15 @@ test('a search answer becomes places that tell apart', function () {
 
 test('a forecast answer becomes now and today', function () {
   assert.deepStrictEqual(weather.reading(ANSWER, KRAKOW, 'C', 1760000000999), {
-    place: KRAKOW.name, unit: 'C', now: 13.6, code: 3, day: true, today: 61, low: 8.9, high: 17.2, rain: 64, at: 1760000000
+    place: KRAKOW.name, unit: 'C', now: 13.6, code: 3, day: true, today: 61, low: 8.9, high: 17.2, rain: 64, at: 1760000000,
+    // The hours from the next whole hour at the place (10:53 there: 11 and 12), the days from today, a Thursday.
+    hours: [{ hour: 11, temp: 13.0, code: 61, day: true }, { hour: 12, temp: 14.2, code: 2, day: false }],
+    days: [{ weekday: 4, code: 61, low: 8.9, high: 17.2 }, { weekday: 5, code: 2, low: 7.1, high: 15.0 }]
   });
   const bare = JSON.stringify({ current: { is_day: 0 }, daily: { weather_code: [0], temperature_2m_max: [1], temperature_2m_min: [-4] } });
   const read = weather.reading(bare, KRAKOW, 'C', 0);
   assert.deepStrictEqual([read.now, read.code, read.day, read.rain], [null, 0, false, null], 'no current values: the day\'s code stands in, night as said');
+  assert.deepStrictEqual([read.hours, read.days], [[], []], 'no hourly answer and no dated days: none to show');
   assert.strictEqual(weather.reading('{"daily":{}}', KRAKOW, 'C', 0), null);
   assert.strictEqual(weather.reading('<html>', KRAKOW, 'C', 0), null);
   assert.deepStrictEqual(weather.message(null), { kind: 'weather', off: true });

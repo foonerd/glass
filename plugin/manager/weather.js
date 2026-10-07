@@ -49,7 +49,8 @@ function forecastUrl(where, degrees) {
   return FORECAST_URL + '?latitude=' + where.latitude + '&longitude=' + where.longitude +
     '&current=temperature_2m,weather_code,is_day' +
     '&daily=weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max' +
-    '&forecast_days=1&timezone=auto&temperature_unit=' + (degrees === 'F' ? 'fahrenheit' : 'celsius');
+    '&hourly=temperature_2m,weather_code,is_day' +
+    '&forecast_days=7&timezone=auto&temperature_unit=' + (degrees === 'F' ? 'fahrenheit' : 'celsius');
 }
 
 function searchUrl(name, language) {
@@ -70,14 +71,38 @@ function found(body) {
 }
 
 // What a forecast answer becomes: now (the temperature, the weather's
-// code, day or night) and today (the day's code, its low and its high, the
-// chance of rain in percent where the source gives one). The codes are the
-// WMO's, as the source hands them on. Null where the answer is no forecast.
+// code, day or night), today (the day's code, its low and its high, the
+// chance of rain in percent where the source gives one), the next 24 hours
+// from the next whole hour at the place (each its hour, temperature, code
+// and day or night) and the week (each day its weekday, code, low and
+// high). The codes are the WMO's, as the source hands them on. Null where
+// the answer is no forecast.
 function reading(body, where, degrees, nowMs) {
   let json;
   try { json = JSON.parse(String(body)); } catch (e) { return null; }
   const daily = (json && json.daily) || {};
+  const hourly = (json && json.hourly) || {};
   const current = (json && json.current) || {};
+  const at = function (list, i) { return Array.isArray(list) ? list[i] : undefined; };
+  // The source's times are the place's own; its offset from UTC puts now in them.
+  const localNow = nowMs + (number(json && json.utc_offset_seconds, -50400, 50400) || 0) * 1000;
+  const hours = [];
+  for (let i = 0; Array.isArray(hourly.time) && i < hourly.time.length && hours.length < 24; i++) {
+    const when = Date.parse(String(hourly.time[i]) + ':00Z');
+    const temp = number(at(hourly.temperature_2m, i), -150, 150);
+    const code = number(at(hourly.weather_code, i), 0, 99);
+    if (!Number.isFinite(when) || when < localNow || temp === null || code === null) continue;
+    hours.push({ hour: parseInt(String(hourly.time[i]).slice(11, 13), 10) || 0, temp: temp, code: code, day: Number(at(hourly.is_day, i)) !== 0 });
+  }
+  const days = [];
+  for (let i = 0; Array.isArray(daily.time) && i < daily.time.length && days.length < 7; i++) {
+    const when = Date.parse(String(daily.time[i]) + 'T00:00:00Z');
+    const low = number(at(daily.temperature_2m_min, i), -150, 150);
+    const high = number(at(daily.temperature_2m_max, i), -150, 150);
+    const code = number(at(daily.weather_code, i), 0, 99);
+    if (!Number.isFinite(when) || low === null || high === null || code === null) continue;
+    days.push({ weekday: new Date(when).getUTCDay(), code: code, low: low, high: high });
+  }
   const first = function (list) { return Array.isArray(list) ? list[0] : undefined; };
   const high = number(first(daily.temperature_2m_max), -150, 150);
   const low = number(first(daily.temperature_2m_min), -150, 150);
@@ -95,7 +120,9 @@ function reading(body, where, degrees, nowMs) {
     low: low,
     high: high,
     rain: rain === null ? null : Math.round(rain),
-    at: Math.floor(nowMs / 1000)
+    at: Math.floor(nowMs / 1000),
+    hours: hours,
+    days: days
   };
 }
 
