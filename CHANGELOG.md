@@ -2,6 +2,13 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.87] - 2026-10-07
+
+Andrew, 2026-10-08: "REMOTE AND FACE AND ANYMOTE - ALL LOST CUSTOM BACKGROUND", on the picture when nothing plays (0.8.63), which had been built for the player's own screen alone. With glass-evo 0.1.52.
+
+- **The picture when nothing plays reaches the browser views.** A face in the Face tab or on Anymote asks the page for the picture the look names as it asks for the album art: wanted under the home at `backgrounds/<name>`, fetched by the page from `/api/backgrounds/<name>/file` and put into its table, marked missing when the player has none. The theme shows until it is in, as on the player. `intake::host_picture`, for a face as `overlay::face::host_picture`; the table keeps two such pictures at most.
+- **And the remote displays.** `/api/remote/config` carries, in its `face` part, `picture: { name, url }` when the look names a picture the player has; a remote's sync brings it to `backgrounds/<name>` under its home beside the faces, the folder emptied first, and the remote names the folder in `GLASS_BACKGROUNDS`. The configuration's version already covers the face part, so a change of picture reaches the remotes at once.
+
 ## [0.8.86] - 2026-10-07
 
 Andrew's step 4 of the weather: "Now - Dramatise icons. Snow, thunderstorm, rain, drizzle, heat, etc. I am sure we can add some light frame animations here." With glass-evo 0.1.51.
