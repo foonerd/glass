@@ -2012,10 +2012,17 @@
   // (`clock_preview`, from glass-evo 0.1.15). Brought once, when a drawn
   // face is first to be shown; until it is here, and where there is none,
   // the likeness sets the time in type.
-  function lookModule() {
-    if (lookUi.module !== undefined) return lookUi.module;
-    lookUi.module = null;
-    fetch('/face/glass-evo-face.wasm').then(function (res) {
+  // The module is fetched by the installed component's version, so a browser
+  // never keeps an older one, and brought again when the component changes.
+  function lookModule(again) {
+    if (lookUi.module !== undefined && !again) return lookUi.module;
+    if (!again) lookUi.module = null;
+    fetch('/api/evo').then(function (res) { return res.ok ? res.json() : {}; }).then(function (evo) {
+      var version = String((evo.installed && evo.installed.version) || '');
+      if (again && version && version === lookUi.moduleVersion) throw new Error('same');
+      lookUi.moduleVersion = version;
+      return fetch('/face/glass-evo-face.wasm?v=' + encodeURIComponent(version));
+    }).then(function (res) {
       if (!res.ok) throw new Error('none');
       return res.arrayBuffer();
     }).then(function (bytes) { return WebAssembly.instantiate(bytes, {}); }).then(function (made) {
@@ -2024,8 +2031,8 @@
       lookUi.module = ex;
       lookModuleFont();
       if (lookUi.f) paintLook(true);
-    }).catch(function () { /* no module: nothing is drawn in its place */ });
-    return null;
+    }).catch(function () { /* no module, or the same one: nothing changes */ });
+    return again ? lookUi.module || null : null;
   }
   // The look's bold font, brought from the player and handed to the module,
   // so that it sets the date and a clock in type as the face does on the
@@ -3046,7 +3053,7 @@
     var tick = function () {
       api('GET', '/api/jobs/' + job.id).then(function (data) {
         var j = data.job;
-        if (j.state === 'done') { $('jobs-evo').innerHTML = ''; buttons.forEach(function (b) { $(b).disabled = false; }); toast(t('MANAGER_EVO_DONE') + ' ' + j.name.replace(/^glass-evo /, '')); loadEvo(false); return; }
+        if (j.state === 'done') { $('jobs-evo').innerHTML = ''; buttons.forEach(function (b) { $(b).disabled = false; }); toast(t('MANAGER_EVO_DONE') + ' ' + j.name.replace(/^glass-evo /, '')); loadEvo(false); lookModule(true); return; }
         draw(j);
         if (j.state === 'failed') { buttons.forEach(function (b) { $(b).disabled = false; }); loadEvo(false); return; }
         setTimeout(tick, 700);
