@@ -55,4 +55,6 @@ test('the forecast\'s span is one of six words, today unless said', function () 
   // The heatmap: off, blue to red, the days and the date off.
   assert.deepStrictEqual([LOOK.BUILTIN['weather.heat'], LOOK.BUILTIN['weather.cold'], LOOK.BUILTIN['weather.warm'], LOOK.BUILTIN['weather.heat.days'], LOOK.BUILTIN['weather.heat.date']], ['off', '#3b8bff', '#ff4b2b', 'off', 'off']);
   assert.strictEqual(LOOK.colourOf(LOOK.BUILTIN['weather.cold']), '#3b8bff');
+  // The skies move unless said; thunder's flashes only when said.
+  assert.deepStrictEqual([LOOK.BUILTIN['weather.motion'], LOOK.BUILTIN['weather.thunder'], LOOK.BUILTIN['weather.colour']], ['on', 'off', 'on']);
 });

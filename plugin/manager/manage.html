@@ -2060,7 +2060,26 @@
   // clock in type, as a look's keys say, `size` CSS pixels high, in the
   // room its widest shape takes with the words in the middle of it; its
   // width and height in CSS pixels, or nothing where the module draws none.
+  // The forecast's skies move on the screen; the likeness moves with them:
+  // every forecast canvas drawn again eight times a second while the look's
+  // skies move and the panel is on show, each at the size it was last set at.
+  var lookTicker = null;
+  function lookMotion() {
+    var on = !!(lookUi.v && LOOK.isOn(lookUi.v['weather.motion']) && lookUi.f && lookUi.f.builtIn && lookUi.f.builtIn['weather.motion'] !== undefined);
+    if (on && !lookTicker) {
+      lookTicker = setInterval(function () {
+        if (document.hidden || $('look-panel').hidden) return;
+        Array.prototype.forEach.call(document.querySelectorAll('canvas[data-line="weather"][data-px]'), function (canvas) {
+          if (canvas.getBoundingClientRect().width) lookDrawLine(canvas, parseFloat(canvas.dataset.px));
+        });
+      }, 125);
+    } else if (!on && lookTicker) {
+      clearInterval(lookTicker);
+      lookTicker = null;
+    }
+  }
   function lookDrawLine(canvas, size) {
+    canvas.dataset.px = String(size);
     var ex = lookUi.module;
     if (!ex || !lookUi.moduleFont || typeof ex.line_preview !== 'function') return null;
     var ratio = window.devicePixelRatio || 1;
@@ -2278,6 +2297,9 @@
         field('MANAGER_LOOK_HEAT_WARM', colour('weather.warm'), '', 'weather-heat'),
         field('MANAGER_LOOK_HEAT_DAYS', onoff('weather.heat.days', 'switch'), '', 'weather-heat'),
         field('MANAGER_LOOK_HEAT_DATE', onoff('weather.heat.date', 'switch'), esc(t('MANAGER_LOOK_HEAT_DATE_HINT')), 'weather-heat'),
+        field('MANAGER_LOOK_SKY_COLOUR', onoff('weather.colour', 'switch'), esc(t('MANAGER_LOOK_SKY_COLOUR_HINT')), 'weather-motion'),
+        field('MANAGER_LOOK_MOTION', onoff('weather.motion', 'switch'), esc(t('MANAGER_LOOK_MOTION_HINT')), 'weather-motion'),
+        field('MANAGER_LOOK_THUNDER', onoff('weather.thunder', 'switch'), esc(t('MANAGER_LOOK_THUNDER_HINT')), 'weather-motion'),
         field('MANAGER_LOOK_SIZE', slider('measure.weather', 'size', 50, 400, 5, 'SMALL', 'LARGE'), '', 'weather'),
         field('MANAGER_LOOK_CELLS', cells('weather.place', 'MANAGER_LOOK_CELLS_LOOK'), esc(t('MANAGER_LOOK_CELLS_HINT')), 'weather-grid'),
         field('MANAGER_LOOK_INSIDE', inside('weather.align'), '', 'weather-grid'),
@@ -2386,6 +2408,7 @@
     var idlePic = lookUi.mode === 'idle' && v['idle.picture'];
     $('look-preview').innerHTML = lookLikeness(v, { mode: lookUi.mode, scale: scale, suits: suits, picture: idlePic ? lookPicUrl(v['idle.picture']) : lookUi.picture, dim: idlePic ? LOOK.share(v['idle.dim'], 0.25) : 0, pick: true, own: own });
     lookFit($('look-panel'));
+    lookMotion();
     // The fit is of a size: made again when the panel's changes (the window's, a tab shown).
     if (!lookUi.watch && window.ResizeObserver) {
       lookUi.watch = new window.ResizeObserver(function () { lookFit($('look-panel')); });
@@ -2453,6 +2476,7 @@
     var weatherPlace = lookUi.weather && lookUi.weather.place;
     when['weather-grid'] = when.weather && !!(f.builtIn && f.builtIn['weather.align'] !== undefined);
     when['weather-heat'] = when.weather && LOOK.isOn(v['weather.heat']) && !!(f.builtIn && f.builtIn['weather.heat'] !== undefined);
+    when['weather-motion'] = when.weather && !!(f.builtIn && f.builtIn['weather.motion'] !== undefined);
     Array.prototype.forEach.call($('look-sections').querySelectorAll('[data-when]'), function (el) { el.hidden = !when[el.getAttribute('data-when')]; });
     var fixed = [LOOK.colourOf(v['colours.tint']), LOOK.colourOf(v['colours.accent'])].filter(Boolean).length;
     var sums = {
