@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.76] - 2026-10-07
+
+Andrew, aligning a clock larger than its row on the grid: "Up is down, down is up." With glass-evo 0.1.41.
+
+- **A clock larger than its cells runs over on the side it is aligned to, in the likeness as on the screen.** Before, the likeness kept the margin only on the sides the clock was aligned to and set the clock's edge there, so a clock larger than its cells hung off the far side and "top" moved it down. Now the margin is kept from every side of the cells, as the face keeps it, and a clock whose glass is larger than the cells less the margin stands the margin from the far side instead, its excess over the side named: "top" always moves it up and "left" always left. A clock that fits its cells stands exactly as before. `lookmodel.turned` and `lookmodel.flexed` name the rule, tested.
+
 ## [0.8.75] - 2026-10-07
 
 0.8.74's release failed at the signing's own check, as 0.8.73's had: the runner's `osslsigncode`, installed fresh from Ubuntu at every run, is 2.8 now and reports a timestamp as "Timestamp time" where the version before listed the timestamp authority's certificates. The binary was signed and timestamped all along.
