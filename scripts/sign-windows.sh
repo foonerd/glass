@@ -39,20 +39,21 @@ for file in bin/windows-x64/glass.exe remote/windows/install.ps1 remote/windows/
     --keystore "${TRUSTED_SIGNING_ENDPOINT#https://}" \
     --storepass "$token" \
     --alias "$TRUSTED_SIGNING_ACCOUNT/$TRUSTED_SIGNING_PROFILE" \
-    --tsaurl http://timestamp.acs.microsoft.com,http://timestamp.digicert.com --tsmode RFC3161 \
-    --tsretries 5 --tsretrywait 15 \
+    --tsaurl http://timestamp.acs.microsoft.com --tsmode RFC3161 \
     --name "Glass Remote" --url https://github.com/foonerd/glass \
     "$file"
 done
 # The runner has no Microsoft root certificates, so osslsigncode cannot
 # walk the chain and calls the verification failed; Windows walks it.
 # What is checked here is what the runner can see: a signature issued by
-# Microsoft's public code signing CA, and a timestamp.
+# Microsoft's public code signing CA, and a timestamp. osslsigncode before
+# 2.8 listed the timestamp authority's certificates ("Timestamping CA");
+# 2.8, which the runner installs fresh each time, says "Timestamp time".
 echo "sign-windows: verify"
 report=$(osslsigncode verify bin/windows-x64/glass.exe 2>&1 || true)
 echo "$report" | grep -E "Subject:|verification" | sed 's/^/sign-windows:   /'
 echo "$report" | grep -q "Microsoft ID Verified Code Signing PCA" \
   || { echo "sign-windows: glass.exe carries no signature under Microsoft's public code signing CA" >&2; exit 1; }
-echo "$report" | grep -q "Timestamping CA" \
+echo "$report" | grep -qE "Timestamping CA|Timestamp time:" \
   || { echo "sign-windows: glass.exe carries no timestamp" >&2; echo "$report" | sed 's/^/sign-windows:   /' >&2; exit 1; }
 echo "sign-windows: signed and timestamped"
