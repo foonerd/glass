@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-10-07
+
+Andrew, 2026-10-07, on a theme whose time fields name `fonts/font.ttf` beside its `meters.txt`: "Apparently, this theme fonts does not work". With glass-evo 0.2.1.
+
+- **A field's own font reaches the Face tab and Anymote.** A text or time field's `.font` is looked for as an absolute path, in the theme folder and under `font.path`, and the display found it on a player and on a remote but never in a browser view, where the theme's files live in the page's table and not on any disk: the view set such a field in its style's font. The candidates are now tried where the display reads its files, the table included, so the Face tab and Anymote draw the field in the font the theme names, as the player's screen does. The player's screen and the remotes were right before.
+
 ## [0.9.0] - 2026-10-07
 
 Glass 0.9.0 gathers the 0.8 series, 0.8.0 to 0.8.90, 1 to 8 October 2026, into one release with glass-evo 0.2.0. Every change below has its own entry under its number.
