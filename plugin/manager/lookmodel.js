@@ -200,6 +200,13 @@
   var FAR = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' };
   function turned(side, over) { return over && FAR[side] ? FAR[side] : side; }
 
+  // What the forecast shows, as one of its six words; today unless said.
+  var SPANS = ['today', 'hours2', 'hours3', 'hours4', 'hours6', 'week'];
+  function span(v) {
+    var word = String(v['weather.span'] || '').trim().toLowerCase();
+    return SPANS.indexOf(word) === -1 ? 'today' : word;
+  }
+
   // A piece's size as a share of the built-in look's, in percent.
   function sizeOf(key, value) {
     var units = parseFloat(value);
@@ -292,7 +299,7 @@
     CLOCK_FACES: CLOCK_FACES, DIAL_STYLES: DIAL_STYLES, clockFace: clockFace, dialStyle: dialStyle,
     known: known, lay: lay, same: same, differs: differs, changes: changes,
     isOn: isOn, colourOf: colourOf, rgb: rgb, share: share, frostOn: frostOn, backgrounds: backgrounds,
-    cells: cells, cellsText: cellsText, align: align, flexed: flexed, turned: turned, GRID_ROWS: GRID_ROWS, GRID_COLUMNS: GRID_COLUMNS,
+    cells: cells, cellsText: cellsText, align: align, flexed: flexed, turned: turned, SPANS: SPANS, span: span, GRID_ROWS: GRID_ROWS, GRID_COLUMNS: GRID_COLUMNS,
     solidWord: solidWord, sizeOf: sizeOf, sizeWord: sizeWord, unitsOf: unitsOf, fitted: fitted, idleMost: idleMost, padAbout: padAbout, IDLE: IDLE,
     sample: sample, strftime: strftime
   };

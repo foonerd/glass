@@ -2268,7 +2268,7 @@
       ['weather', 'MANAGER_LOOK_WEATHER', [
         field('MANAGER_LOOK_SHOW_WEATHER', onoff('weather.show', 'switch'), esc(t('MANAGER_LOOK_WEATHER_HINT'))),
         '<div class="lf"><span class="name">' + esc(t('MANAGER_LOOK_WEATHER_PLACE')) + '</span><div id="look-weather"></div></div>',
-        field('MANAGER_LOOK_SHOWS', choice('weather.span', ['today', 'hours2', 'hours3', 'hours4', 'hours6', 'week'], 'MANAGER_LOOK_SPAN_'), esc(t('MANAGER_LOOK_SPAN_HINT')), 'weather'),
+        field('MANAGER_LOOK_SHOWS', choice('weather.span', LOOK.SPANS, 'MANAGER_LOOK_SPAN_'), esc(t('MANAGER_LOOK_SPAN_HINT')), 'weather'),
         field('MANAGER_LOOK_SIZE', slider('measure.weather', 'size', 50, 400, 5, 'SMALL', 'LARGE'), '', 'weather'),
         field('MANAGER_LOOK_CELLS', cells('weather.place', 'MANAGER_LOOK_CELLS_LOOK'), esc(t('MANAGER_LOOK_CELLS_HINT')), 'weather-grid'),
         field('MANAGER_LOOK_INSIDE', inside('weather.align'), '', 'weather-grid'),
@@ -2415,7 +2415,7 @@
           b.classList.toggle('on', LOOK.GRID_ROWS[rc[0]] === at.down && LOOK.GRID_COLUMNS[rc[1]] === at.across);
         });
       }
-      else if (kind === 'choice') el.value = key === 'clock.face' ? LOOK.clockFace(v) : LOOK.dialStyle(v);
+      else if (kind === 'choice') el.value = key === 'clock.face' ? LOOK.clockFace(v) : key === 'clock.dial' ? LOOK.dialStyle(v) : key === 'weather.span' ? LOOK.span(v) : (v[key] || '');
     });
     // A row shows while it has something to say: a clock's rows while the
     // clock shows, a date's own background while the date stands at the top.

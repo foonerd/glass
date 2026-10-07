@@ -42,3 +42,12 @@ test('the built-in look knows the clock\'s grid keys, with the clock off the gri
   assert.strictEqual(LOOK.BUILTIN['date.align'], 'centre middle');
   assert.strictEqual(LOOK.BUILTIN['date.margin'], '20');
 });
+
+test('the forecast\'s span is one of six words, today unless said', function () {
+  assert.deepStrictEqual(LOOK.SPANS, ['today', 'hours2', 'hours3', 'hours4', 'hours6', 'week']);
+  assert.strictEqual(LOOK.span({ 'weather.span': 'Week' }), 'week');
+  assert.strictEqual(LOOK.span({ 'weather.span': 'hours3' }), 'hours3');
+  assert.strictEqual(LOOK.span({ 'weather.span': 'hourly' }), 'today', 'a word it does not know is today');
+  assert.strictEqual(LOOK.span({}), 'today');
+  assert.strictEqual(LOOK.BUILTIN['weather.span'], 'today');
+});
