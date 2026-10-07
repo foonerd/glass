@@ -1945,30 +1945,45 @@
           : '<div ' + fit + ' style="font-size:calc(var(--u) * ' + units('measure.clock') + ');color:' + words('clock') + '">' + esc(LOOK.strftime(v['clock.format'], now)) + '</div>';
       };
       var onGrid = LOOK.isOn(v['clock.show']) ? LOOK.cells(v['clock.place']) : null;
+      var dateOnGrid = LOOK.isOn(v['date.show']) ? LOOK.cells(v['date.place']) : null;
       var clock = !LOOK.isOn(v['clock.show']) || onGrid ? '' : clockHtml(false);
       var place = lookPlace(v);
       var dateWords = 'font-size:calc(var(--u) * ' + units('measure.date') + ');color:' + words('date') + ';';
       var dateText = esc(LOOK.strftime(v['date.format'], now));
+      var dateHtml = function (grid) {
+        return '<div ' + (grid ? 'data-grid="date"' : 'data-fit="date"') + (opts.own && opts.own.date ? ' data-own="1"' : '') + (grid || place === 'top' ? '' : open('date')) + ' style="' + dateWords + '">' + dateText + '</div>';
+      };
       var beside = '';
-      if (LOOK.isOn(v['date.show'])) {
+      if (LOOK.isOn(v['date.show']) && !dateOnGrid) {
         if (place === 'top') {
-          html += '<div class="lp-top"' + open('date') + ' style="' + glass('date.glass', v['date.tint'], '0 0 0 1px') + '"><div data-fit="date"' + (opts.own && opts.own.date ? ' data-own="1"' : '') + ' style="' + dateWords + '">' + dateText + '</div></div>';
+          html += '<div class="lp-top"' + open('date') + ' style="' + glass('date.glass', v['date.tint'], '0 0 0 1px') + '">' + dateHtml(false) + '</div>';
           from = 'calc(var(--u) * ' + (64 + units('measure.date')) + ')';
         } else {
-          beside = '<div data-fit="date"' + (opts.own && opts.own.date ? ' data-own="1"' : '') + open('date') + ' style="' + dateWords + '">' + dateText + '</div>';
+          beside = dateHtml(false);
         }
       }
       if (clock || beside) html += '<div class="lp-mid"><div class="lp-plate"' + open(clock ? 'clock' : 'date') + ' style="' + glass('clock.glass', v['clock.tint'], '0 0 0 1px') + '">' + (place === 'above' ? beside + clock : clock + beside) + '</div></div>';
       // On the grid: the cells in equal thirds above the bar, the margin kept
-      // from every side of the cells, the clock against the side it is
-      // aligned to, as the face lays it out; the glass about it, and the
-      // turn-about of a clock larger than its cells, are set in lookFit.
-      if (onGrid) {
-        var a = LOOK.align(v['clock.align']) || LOOK.align('');
-        var clockMargin = Math.min(200, Math.max(0, parseInt(v['clock.margin'], 10) || 0));
-        html += '<div class="lp-cell" data-margin="' + clockMargin + '" data-stands="' + a.across + ',' + a.down + '"' + open('clock') + ' style="left:' + (onGrid.c0 / 3 * 100) + '%;width:' + ((onGrid.c1 - onGrid.c0 + 1) / 3 * 100) + '%;top:calc((100% - var(--barh)) * ' + (onGrid.r0 / 3) + ');height:calc((100% - var(--barh)) * ' + ((onGrid.r1 - onGrid.r0 + 1) / 3) + ');padding:calc(var(--u) * ' + clockMargin + ');justify-content:' + LOOK.flexed(a.across) + ';align-items:' + LOOK.flexed(a.down) + '">' +
-          '<div class="lp-plate" style="' + glass('clock.glass', v['clock.tint'], '0 0 0 1px') + '">' + clockHtml(true) + '</div></div>';
-      }
+      // from every side of the cells, a block against the side it is
+      // aligned to, as the face lays it out; the clock and the date on the
+      // same cells with the same alignment one under the other on one
+      // glass, the clock first, each against the side the block is aligned
+      // to; the glass about a block, and the turn-about of a block larger
+      // than its cells, are set in lookFit.
+      var blocks = [];
+      var put = function (kind, on, alignKey, marginKey, piece) {
+        var a = LOOK.align(v[alignKey]) || LOOK.align('');
+        var id = [on.r0, on.r1, on.c0, on.c1, a.across, a.down].join();
+        var block = blocks.filter(function (b) { return b.id === id; })[0];
+        if (!block) { block = { id: id, on: on, a: a, first: kind, margin: Math.min(200, Math.max(0, parseInt(v[marginKey], 10) || 0)), html: '' }; blocks.push(block); }
+        block.html += piece;
+      };
+      if (onGrid) put('clock', onGrid, 'clock.align', 'clock.margin', clockHtml(true));
+      if (dateOnGrid) put('date', dateOnGrid, 'date.align', 'date.margin', dateHtml(true));
+      blocks.forEach(function (b) {
+        html += '<div class="lp-cell" data-margin="' + b.margin + '" data-stands="' + b.a.across + ',' + b.a.down + '"' + open(b.first) + ' style="left:' + (b.on.c0 / 3 * 100) + '%;width:' + ((b.on.c1 - b.on.c0 + 1) / 3 * 100) + '%;top:calc((100% - var(--barh)) * ' + (b.on.r0 / 3) + ');height:calc((100% - var(--barh)) * ' + ((b.on.r1 - b.on.r0 + 1) / 3) + ');padding:calc(var(--u) * ' + b.margin + ');justify-content:' + LOOK.flexed(b.a.across) + ';align-items:' + LOOK.flexed(b.a.down) + '">' +
+          '<div class="lp-plate" style="' + (b.first === 'clock' ? glass('clock.glass', v['clock.tint'], '0 0 0 1px') : glass('date.glass', v['date.tint'], '0 0 0 1px')) + 'align-items:' + LOOK.flexed(b.a.across) + '">' + b.html + '</div></div>';
+      });
     }
     var fill = words('buttons');
     html += '<div class="lp-bar"' + open('buttons') + ' style="' + glass('glass.bar', v['colours.tint'], '0 1px') + '">' + ['previous', opts.mode === 'idle' ? 'play' : 'pause', 'next', 'minus', 'plus', 'more'].map(function (name) {
@@ -2070,11 +2085,14 @@
       // a size the user set (data-own) kept; the glass keeping the room
       // designed about it and giving way as the clock takes more.
       Array.prototype.forEach.call(cells, function (cell) {
-        var piece = cell.querySelector('[data-grid="clock"]');
-        if (!piece) return;
+        var gridClock = cell.querySelector('[data-grid="clock"]'), gridDate = cell.querySelector('[data-grid="date"]');
+        if (!gridClock && !gridDate) return;
         var box = cell.getBoundingClientRect();
         var margin = (parseInt(cell.getAttribute('data-margin'), 10) || 0) * unit;
-        var took = set(piece, [box.width - 2 * (margin + least[0]), box.height - 2 * (margin + least[1])]);
+        var room = [box.width - 2 * (margin + least[0]), box.height - 2 * (margin + least[1])];
+        var dated = gridDate ? set(gridDate, room) : [0, 0];
+        var clocked = gridClock ? set(gridClock, [room[0], room[1] - (gridDate ? dated[1] + LOOK.IDLE.gap * unit : 0)]) : [0, 0];
+        var took = [Math.max(dated[0], clocked[0]), dated[1] + clocked[1] + (gridDate && gridClock ? LOOK.IDLE.gap * unit : 0)];
         var cellPlate = cell.querySelector('.lp-plate');
         if (!cellPlate) return;
         cellPlate.style.padding = LOOK.padAbout(box.height - 2 * margin, took[1], pad[1], least[1]) + 'px ' + LOOK.padAbout(box.width - 2 * margin, took[0], pad[0], least[0]) + 'px';
@@ -2160,8 +2178,11 @@
         field('MANAGER_LOOK_SHOW_DATE', onoff('date.show', 'switch')),
         field('MANAGER_LOOK_SHOWS', pattern('date.format', LOOK.DATE_PATTERNS), '', 'date'),
         hint('own:date.format'),
-        field('MANAGER_LOOK_WHERE', places, '', 'date'),
-        field('MANAGER_LOOK_SIZE', slider('measure.date', 'size', 50, 400, 5, 'SMALL', 'LARGE'), '', 'date')],
+        field('MANAGER_LOOK_WHERE', places, '', 'date-words'),
+        field('MANAGER_LOOK_SIZE', slider('measure.date', 'size', 50, 400, 5, 'SMALL', 'LARGE'), '', 'date'),
+        field('MANAGER_LOOK_CELLS', cells('date.place', 'MANAGER_LOOK_CELLS_LOOK'), esc(t('MANAGER_LOOK_CELLS_HINT')), 'date-cells'),
+        field('MANAGER_LOOK_INSIDE', inside('date.align'), '', 'date-grid'),
+        field('MANAGER_LOOK_MARGIN', units('date.margin'), esc(t('MANAGER_LOOK_MARGIN_HINT')), 'date-grid')],
         'MANAGER_LOOK_MORE_PIECE', finer('date', 'date-top')],
       ['buttons', 'MANAGER_LOOK_BUTTONS', [
         field('MANAGER_LOOK_SIZE', slider('measure.bar', 'size', 50, 250, 5, 'SMALL', 'LARGE'))],
@@ -2285,13 +2306,17 @@
     // The grid shows where the glass-evo that is here lays the clock out on it.
     when['clock-cells'] = when.clock && !!(f.builtIn && f.builtIn['clock.place'] !== undefined);
     when['clock-grid'] = when['clock-cells'] && !!LOOK.cells(v['clock.place']);
+    when['date-cells'] = when.date && !!(f.builtIn && f.builtIn['date.align'] !== undefined);
+    when['date-grid'] = when['date-cells'] && !!LOOK.cells(v['date.place']);
+    when['date-words'] = when.date && !LOOK.cells(v['date.place']);
+    when['date-top'] = when['date-top'] && !LOOK.cells(v['date.place']);
     Array.prototype.forEach.call($('look-sections').querySelectorAll('[data-when]'), function (el) { el.hidden = !when[el.getAttribute('data-when')]; });
     var fixed = [LOOK.colourOf(v['colours.tint']), LOOK.colourOf(v['colours.accent'])].filter(Boolean).length;
     var sums = {
       colours: t(['MANAGER_LOOK_SUM_ARTWORK', 'MANAGER_LOOK_SUM_MIXED', 'MANAGER_LOOK_SUM_OWN'][fixed]),
       backgrounds: t('MANAGER_LOOK_SOLID_' + LOOK.solidWord(v['glass.bar'])) + (LOOK.frostOn(v, suits) ? ', ' + t('MANAGER_LOOK_SUM_BLURRED') : ''),
       clock: when.clock ? LOOK.strftime(v['clock.format'], LOOK.sample()) + (when.faces && clockFace !== 'type' ? ' · ' + t('MANAGER_LOOK_FACE_' + clockFace.toUpperCase()) : '') + ' · ' + t('MANAGER_LOOK_SIZE_' + LOOK.sizeWord('measure.clock', v['measure.clock'])) : t('MANAGER_LOOK_SUM_OFF'),
-      date: when.date ? LOOK.strftime(v['date.format'], LOOK.sample()) + ' · ' + t('MANAGER_LOOK_DATE_' + place.toUpperCase()) : t('MANAGER_LOOK_SUM_OFF'),
+      date: when.date ? LOOK.strftime(v['date.format'], LOOK.sample()) + ' · ' + (LOOK.cells(v['date.place']) ? t('MANAGER_LOOK_DATE_GRID') : t('MANAGER_LOOK_DATE_' + place.toUpperCase())) : t('MANAGER_LOOK_SUM_OFF'),
       buttons: t('MANAGER_LOOK_SIZE_' + LOOK.sizeWord('measure.bar', v['measure.bar']))
     };
     Array.prototype.forEach.call($('look-sections').querySelectorAll('[data-section]'), function (head) {
@@ -2435,7 +2460,8 @@
       return;
     }
     if (clear) {
-      lookUi.v[clear.getAttribute('data-cells-clear')] = '';
+      // Off the grid, as the look places it: the clock in the middle, the date at the look's own word.
+      lookUi.v[clear.getAttribute('data-cells-clear')] = clear.getAttribute('data-cells-clear') === 'date.place' ? lookPlace(lookBase(lookUi.chosen)) : '';
       lookUi.anchor[clear.getAttribute('data-cells-clear')] = '';
       paintLook();
       return;

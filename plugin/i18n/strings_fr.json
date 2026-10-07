@@ -957,6 +957,7 @@
     "MANAGER_LOOK_CELLS_HINT": "Neuf cases au-dessus des boutons, trois lignes sur trois colonnes. Appuyez sur une case, puis sur une autre pour le bloc entre les deux. Une taille venue du look est ajustée aux cases ; une taille que vous avez choisie reste la vôtre et les déborde.",
     "MANAGER_LOOK_CELLS_LOOK": "Comme le look le place",
     "MANAGER_LOOK_INSIDE": "Dans ses cases",
+    "MANAGER_LOOK_DATE_GRID": "Sur la grille",
     "MANAGER_LOOK_MARGIN": "Marge",
     "MANAGER_LOOK_MARGIN_HINT": "Unités d’un 720e de la hauteur entre le verre de l’horloge et les côtés de ses cases où elle est alignée. 0 la met dans le coin ; 20 comme avant.",
     "MANAGER_LOOK_ROW_TOP": "haut",

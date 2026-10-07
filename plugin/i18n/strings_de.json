@@ -957,6 +957,7 @@
     "MANAGER_LOOK_CELLS_HINT": "Neun Felder über den Tasten, drei Zeilen zu drei Spalten. Ein Feld drücken, dann ein zweites für den Block dazwischen. Eine Größe aus dem Look wird in die Felder eingepasst; eine selbst gesetzte bleibt und läuft darüber hinaus.",
     "MANAGER_LOOK_CELLS_LOOK": "Wie der Look es setzt",
     "MANAGER_LOOK_INSIDE": "In seinen Feldern",
+    "MANAGER_LOOK_DATE_GRID": "Im Raster",
     "MANAGER_LOOK_MARGIN": "Rand",
     "MANAGER_LOOK_MARGIN_HINT": "Einheiten eines 720stels der Höhe zwischen dem Glas der Uhr und den Seiten ihrer Felder, an denen sie ausgerichtet ist. 0 setzt sie in die Ecke; 20 wie bisher.",
     "MANAGER_LOOK_ROW_TOP": "oben",

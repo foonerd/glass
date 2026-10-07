@@ -39,4 +39,6 @@ test('an element larger than its cells is set against the far side, so that "top
 test('the built-in look knows the clock\'s grid keys, with the clock off the grid', function () {
   assert.strictEqual(LOOK.BUILTIN['clock.place'], '');
   assert.strictEqual(LOOK.BUILTIN['clock.align'], 'centre middle');
+  assert.strictEqual(LOOK.BUILTIN['date.align'], 'centre middle');
+  assert.strictEqual(LOOK.BUILTIN['date.margin'], '20');
 });
