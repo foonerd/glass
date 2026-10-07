@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.78] - 2026-10-07
+
+Andrew, on the date on the grid, set in the browser's type in the likeness and in the face's own on the glass: "Rejected. I requested date to be wired exactly as the clock is. Preview vs glass." With glass-evo 0.1.43.
+
+- **The module draws every piece of the likeness.** The date, and a clock in type, are set by glass-evo's own module in the look's bold font, brought from the player, as the face sets them on the screen: the same shapes, the same room, pixel for pixel at the likeness's scale. A drawn clock face was already the module's. Nothing stands in for the module: until it and the font are here, the likeness shows no type.
+- **For the face's types,** the overlay crate names `FontFiles` beside `Input`, `Metadata` and `TextStyle`, so a page's module can load fonts the way the display does.
+- **Glass names glass-evo 0.1.43 as the least it works with**, so a player takes the module that draws the lines before this page.
+
 ## [0.8.77] - 2026-10-07
 
 Andrew, on the accepted clock: "Now - wire date exactly the same way in grid. We are moving the face to grid and only." With glass-evo 0.1.42.
