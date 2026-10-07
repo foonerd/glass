@@ -2560,6 +2560,9 @@
     lookUi.chosen = name;
     lookUi.base = lookBase(name);
     lookUi.v = LOOK.lay(name === lookUi.saved.chosen ? lookUi.saved.v : lookUi.base);
+    // The look's name goes to the module with the keys, as the saved look's
+    // does, so the likeness finds the look's own skies.
+    if (name) lookUi.v.theme = name; else delete lookUi.v.theme;
     lookOwnPatterns();
     paintLook();
   }
