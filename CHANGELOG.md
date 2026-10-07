@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.8.89] - 2026-10-07
+
+Andrew, 2026-10-08, after a likeness that did not agree with the screen until the player was rebooted: "YOU SHOULD TRACK SUCH SHIT".
+
+- **The likeness's module is the installed component's, always.** The look panel fetched glass-evo's module once, by a bare address a browser may keep from before an update. It now asks the Manager which component is installed and fetches the module by that version, and brings the module again when a component job finishes, so the likeness is drawn by the module the screen runs.
+
 ## [0.8.88] - 2026-10-07
 
 Andrew, 2026-10-08: "I selected to wait 15 second - NO LONGER RESPECTED! THIS SHOULD BE A SWITCH IN SCREEN - IMMEDIATE - RESPECT TIMEOUT". With glass-evo 0.1.53.
