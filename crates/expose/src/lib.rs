@@ -413,6 +413,73 @@ pub fn fit_art(frame: &Frame, w: u32, h: u32) -> Frame {
     }
 }
 
+/// A picture file as the frames of a sky: an animated GIF's frames, each
+/// with the milliseconds it stands (the GIF's own delays, a tenth of a
+/// second where a frame names none), or one frame standing for good for a
+/// still picture; each fitted inside a transparent square of `side`,
+/// centred, its shape kept. None where the file is no picture.
+pub fn read_frames(path: &Path, side: u32) -> Option<Vec<(Frame, u32)>> {
+    let side = side.max(1);
+    let bytes = read_file(path)?;
+    let mut frames = Vec::new();
+    if bytes.starts_with(b"GIF8") {
+        use image::AnimationDecoder;
+        let decoder = image::codecs::gif::GifDecoder::new(std::io::Cursor::new(&bytes)).ok()?;
+        for frame in decoder.into_frames() {
+            let frame = frame.ok()?;
+            let (numer, denom) = frame.delay().numer_denom_ms();
+            let ms = numer.checked_div(denom).unwrap_or(0);
+            frames.push((
+                fit_square(frame.into_buffer(), side),
+                if ms == 0 { 100 } else { ms },
+            ));
+        }
+    } else {
+        let image = image::ImageReader::new(std::io::Cursor::new(&bytes))
+            .with_guessed_format()
+            .ok()?
+            .decode()
+            .ok()?
+            .into_rgba8();
+        frames.push((fit_square(image, side), 0));
+    }
+    (!frames.is_empty()).then_some(frames)
+}
+
+/// A picture fitted inside a transparent square of `side`, centred.
+fn fit_square(image: image::RgbaImage, side: u32) -> Frame {
+    let (w, h) = (image.width().max(1), image.height().max(1));
+    let (fw, fh) = if w >= h {
+        (
+            side,
+            ((u64::from(h) * u64::from(side) / u64::from(w)) as u32).max(1),
+        )
+    } else {
+        (
+            ((u64::from(w) * u64::from(side) / u64::from(h)) as u32).max(1),
+            side,
+        )
+    };
+    let scaled = if (fw, fh) == (w, h) {
+        image
+    } else {
+        image::imageops::resize(&image, fw, fh, image::imageops::FilterType::Lanczos3)
+    };
+    let mut canvas = image::RgbaImage::new(side, side);
+    image::imageops::overlay(
+        &mut canvas,
+        &scaled,
+        i64::from((side - fw) / 2),
+        i64::from((side - fh) / 2),
+    );
+    Frame {
+        blend: Blend::Normal,
+        width: side,
+        height: side,
+        rgba: canvas.into_raw(),
+    }
+}
+
 /// A picture file's size, from its header.
 pub fn picture_size(path: &Path) -> Option<(u32, u32)> {
     image::ImageReader::new(std::io::Cursor::new(read_file(path)?))
@@ -10289,6 +10356,60 @@ mod analyser_tests {
         std::fs::write(dir.join("not.png"), b"not a picture").unwrap();
         assert!(read_covering(&dir.join("not.png"), 4, 4).is_none());
         assert!(read_covering(&dir.join("absent.png"), 4, 4).is_none());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_skys_frames_come_from_a_gif_with_its_delays_or_from_one_still_picture() {
+        let dir = std::env::temp_dir().join(format!("glass-frames-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Two frames, 8 by 4, a quarter of a second each.
+        let gif = dir.join("rain.gif");
+        {
+            use image::codecs::gif::GifEncoder;
+            let mut out = std::fs::File::create(&gif).unwrap();
+            let mut encoder = GifEncoder::new(&mut out);
+            let frames = [[255u8, 0, 0, 255], [0, 0, 255, 255]]
+                .into_iter()
+                .map(|px| {
+                    let buffer = image::RgbaImage::from_fn(8, 4, |_, _| image::Rgba(px));
+                    image::Frame::from_parts(
+                        buffer,
+                        0,
+                        0,
+                        image::Delay::from_numer_denom_ms(250, 1),
+                    )
+                });
+            encoder.encode_frames(frames).unwrap();
+        }
+        let frames = read_frames(&gif, 16).expect("a gif's frames");
+        assert_eq!(frames.len(), 2);
+        assert!(frames
+            .iter()
+            .all(|(f, ms)| (f.width, f.height, *ms) == (16, 16, 250)));
+        let at = |f: &Frame, x: u32, y: u32| {
+            let i = ((y * f.width + x) * 4) as usize;
+            [f.rgba[i], f.rgba[i + 1], f.rgba[i + 2], f.rgba[i + 3]]
+        };
+        // Fitted to the side and centred: the band across the middle, clear above and below.
+        assert_eq!(at(&frames[0].0, 8, 8)[3], 255, "inside the picture");
+        assert_eq!(at(&frames[0].0, 8, 1)[3], 0, "above it, clear");
+        assert!(
+            at(&frames[0].0, 8, 8)[0] > 200 && at(&frames[1].0, 8, 8)[2] > 200,
+            "each frame its own"
+        );
+        // A still picture: one frame standing for good.
+        let png = dir.join("snow.png");
+        image::RgbaImage::from_fn(4, 4, |_, _| image::Rgba([0, 255, 0, 255]))
+            .save(&png)
+            .unwrap();
+        let still = read_frames(&png, 10).expect("a still picture");
+        assert_eq!(still.len(), 1);
+        assert_eq!(
+            (still[0].0.width, still[0].0.height, still[0].1),
+            (10, 10, 0)
+        );
+        assert_eq!(read_frames(&dir.join("none.png"), 10), None);
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
