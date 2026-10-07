@@ -964,9 +964,11 @@ pub fn resolve_own_font(spec: &mut TextSpec, theme_dir: &str, font_path: &str) {
                 .push(Path::new(base.trim_end_matches('/')).join(value.trim_start_matches('/')));
         }
     }
+    // Found where the display reads its files: on a player the file system,
+    // in a browser the page's table, which `Path::is_file` never sees.
     spec.font_file = candidates
         .into_iter()
-        .find(|p| p.is_file())
+        .find(|p| lead::is_file(p))
         .map(|p| p.to_string_lossy().into_owned())
         .unwrap_or_default();
 }
@@ -3283,6 +3285,43 @@ mod tests {
             "a clock behind the start counts nothing"
         );
         assert_eq!(persist_left(0, 1_000_000, 1_000_000), 0);
+    }
+
+    #[test]
+    fn a_fields_own_font_is_found_in_the_pages_table_as_in_a_theme_folder() {
+        // In a browser the theme's files are in the table and nowhere on disk.
+        let dir = "/glass-font-test/templates/My Theme";
+        lead::vfs::put(&format!("{dir}/fonts/Mine.ttf"), vec![0, 1, 0, 0]);
+        let field = |file: &str| TextSpec {
+            x: 0,
+            y: 0,
+            style: lead::TextStyle::Digi,
+            size: 32,
+            color: [255, 255, 255],
+            max_width: 0,
+            align: lead::TextAlign::default(),
+            speed: 0.0,
+            font_file: file.to_string(),
+            box_as: String::new(),
+        };
+        let mut spec = field("fonts/Mine.ttf");
+        resolve_own_font(&mut spec, dir, "");
+        assert_eq!(spec.font_file, format!("{dir}/fonts/Mine.ttf"));
+        // On disk, in the theme folder, as before.
+        let home = std::env::temp_dir().join(format!("glass-own-font-{}", std::process::id()));
+        std::fs::create_dir_all(home.join("fonts")).unwrap();
+        std::fs::write(home.join("fonts/Disk.ttf"), b"x").unwrap();
+        let mut spec = field("fonts/Disk.ttf");
+        resolve_own_font(&mut spec, &home.to_string_lossy(), "");
+        assert_eq!(
+            spec.font_file,
+            home.join("fonts/Disk.ttf").to_string_lossy()
+        );
+        // Not found anywhere: the field keeps its style's font.
+        let mut spec = field("fonts/None.ttf");
+        resolve_own_font(&mut spec, &home.to_string_lossy(), "");
+        assert_eq!(spec.font_file, "");
+        let _ = std::fs::remove_dir_all(&home);
     }
 
     #[test]
