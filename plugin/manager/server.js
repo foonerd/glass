@@ -597,6 +597,18 @@ class Manager {
     // glass-evo's with the text of the face theme the settings name. The
     // user's choice of what the views show decides (`mode`: follow the
     // screen, the face wherever the component is here, or the theme alone).
+    // A face theme's own files, the skies, for a page's table and the look
+    // panel's likeness: the list for a theme by its name, and one file.
+    app.get('/api/face/theme-files', function (req, res) {
+      const found = self.plugin.faceThemeFilesOf(String((req.query || {}).name || ''));
+      if (!found) return res.status(404).json({ error: 'not-found' });
+      res.json(found);
+    });
+    app.get('/api/face/theme-file', function (req, res) {
+      const file = self.plugin.faceThemePath(String((req.query || {}).name || ''), String((req.query || {}).file || ''));
+      if (!file) return res.status(404).json({ error: 'not-found' });
+      res.sendFile(file, { maxAge: 0 });
+    });
     app.get('/api/face/module', function (req, res) {
       const m = self.plugin.faceModule();
       res.json({

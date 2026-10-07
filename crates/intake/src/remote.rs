@@ -489,6 +489,29 @@ impl Sync {
                 std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
                 std::fs::write(dir.join("face.txt"), &theme.text)
                     .map_err(|e| format!("{}: {e}", dir.display()))?;
+                // The theme's own skies beside it, each checked against its checksum.
+                for file in &theme.files {
+                    if !crate::bring::face_theme_file_ok(&file.path) || file.url.trim().is_empty() {
+                        continue;
+                    }
+                    let url = format!("{}{}", self.manager, file.url.trim());
+                    let bytes = self.get_bytes(&url)?;
+                    if !file.sha256.is_empty() {
+                        let digest = format!("{:x}", Sha256::digest(&bytes));
+                        if digest != file.sha256 {
+                            return Err(format!(
+                                "{}: checksum {digest} is not {}",
+                                file.path, file.sha256
+                            ));
+                        }
+                    }
+                    let path = dir.join(&file.path);
+                    if let Some(parent) = path.parent() {
+                        std::fs::create_dir_all(parent)
+                            .map_err(|e| format!("{}: {e}", parent.display()))?;
+                    }
+                    std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
+                }
             }
         }
         self.ledger.face_owner = face.owner.trim().to_string();
@@ -720,26 +743,38 @@ mod tests {
     /// A manager on a local port that answers one GET with `body` and
     /// hands back the request line it was asked.
     fn stand_in_manager(body: Vec<u8>) -> (u16, thread::JoinHandle<String>) {
+        let (port, served) = stand_in_manager_n(body, 1);
+        (
+            port,
+            thread::spawn(move || served.join().unwrap().remove(0)),
+        )
+    }
+
+    /// The same, answering `count` requests in turn, every one with `body`,
+    /// and handing back their request lines.
+    fn stand_in_manager_n(body: Vec<u8>, count: usize) -> (u16, thread::JoinHandle<Vec<String>>) {
         use std::io::{Read, Write};
         let listener = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
         let port = listener.local_addr().unwrap().port();
         let served = thread::spawn(move || {
-            let (mut stream, _) = listener.accept().unwrap();
-            let mut request = Vec::new();
-            let mut byte = [0u8; 1];
-            while stream.read(&mut byte).unwrap() == 1 {
-                request.push(byte[0]);
-                if request.ends_with(b"\r\n\r\n") {
-                    break;
+            let mut lines = Vec::new();
+            for _ in 0..count {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                let mut byte = [0u8; 1];
+                while stream.read(&mut byte).unwrap() == 1 {
+                    request.push(byte[0]);
+                    if request.ends_with(b"\r\n\r\n") {
+                        break;
+                    }
                 }
-            }
-            let line = String::from_utf8_lossy(&request)
-                .lines()
-                .next()
-                .unwrap_or_default()
-                .trim_end_matches(" HTTP/1.1")
-                .to_string();
-            stream
+                let line = String::from_utf8_lossy(&request)
+                    .lines()
+                    .next()
+                    .unwrap_or_default()
+                    .trim_end_matches(" HTTP/1.1")
+                    .to_string();
+                stream
                 .write_all(
                     format!(
                         "HTTP/1.1 200 OK\r\nContent-Type: image/png\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
@@ -748,8 +783,10 @@ mod tests {
                     .as_bytes(),
                 )
                 .unwrap();
-            stream.write_all(&body).unwrap();
-            line
+                stream.write_all(&body).unwrap();
+                lines.push(line);
+            }
+            lines
         });
         (port, served)
     }
@@ -815,6 +852,30 @@ mod tests {
         assert!(
             !home.join("backgrounds").exists(),
             "a name that is more than a file's name brings nothing, and the folder is emptied"
+        );
+        // A look's own skies come beside its face.txt, each by its checksum;
+        // a path that is not a sky's is left alone.
+        let sky = b"GIF89a sky".to_vec();
+        let digest = format!("{:x}", Sha256::digest(&sky));
+        let (port, served) = stand_in_manager_n(sky.clone(), 1);
+        let mut sync = Sync::new(
+            &home,
+            &format!("http://127.0.0.1:{port}"),
+            "http://127.0.0.1:1",
+        );
+        let skies: RemoteConfig = serde_json::from_str(&format!(
+            r#"{{"face":{{"owner":"glass-evo","theme":{{"name":"Mine","text":"[theme]\n","files":[{{"path":"skies/rain.gif","url":"/api/face/theme-file?name=Mine&file=skies%2Frain.gif","sha256":"{digest}"}},{{"path":"../out.gif","url":"/x"}}]}}}}}}"#
+        ))
+        .unwrap();
+        sync.bring_face(&skies.face).unwrap();
+        assert_eq!(
+            std::fs::read(home.join("faces/Mine/skies/rain.gif")).unwrap(),
+            sky
+        );
+        assert!(!home.parent().unwrap().join("out.gif").exists());
+        assert_eq!(
+            served.join().unwrap(),
+            vec!["GET /api/face/theme-file?name=Mine&file=skies%2Frain.gif".to_string()]
         );
         // A player older than 0.8.20 says nothing: no look, no owner.
         let older: RemoteConfig =

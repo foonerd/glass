@@ -76,6 +76,37 @@ pub struct FaceTheme {
     pub name: String,
     #[serde(default)]
     pub text: String,
+    /// The theme's own files beside its `face.txt`, its skies: each by its
+    /// path in the theme, the manager's route and its checksum.
+    #[serde(default)]
+    pub files: Vec<RemoteFile>,
+}
+
+/// One file of a face theme as a remote brings it.
+#[derive(Clone, Debug, Default, Deserialize, PartialEq)]
+pub struct RemoteFile {
+    #[serde(default)]
+    pub path: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub sha256: String,
+}
+
+/// Whether a face theme's file path is one a theme may hand out: a picture
+/// directly under `skies/`, nothing hidden, no folder above.
+pub fn face_theme_file_ok(path: &str) -> bool {
+    let Some(name) = path.strip_prefix("skies/") else {
+        return false;
+    };
+    let ending_ok = ["gif", "png", "webp", "jpg", "jpeg"]
+        .iter()
+        .any(|e| name.to_ascii_lowercase().ends_with(&format!(".{e}")));
+    !name.is_empty()
+        && !name.starts_with('.')
+        && !name.contains(['/', '\\'])
+        && name.len() <= 128
+        && ending_ok
 }
 
 /// Whether a face theme's name is one folder's name and nothing else.

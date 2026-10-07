@@ -1549,10 +1549,65 @@ Glass.prototype.faceThemeText = function () {
     var theme = null;
     if (name) {
         [FACES_DIR, EVO_LOOKS_DIR].some(function (dir) {
-            try { theme = { name: name, text: fs.readFileSync(dir + '/' + name + '/face.txt', 'utf8') }; return true; } catch (e) { return false; }
+            try { theme = { name: name, text: fs.readFileSync(dir + '/' + name + '/face.txt', 'utf8'), files: self.faceThemeFiles(name, dir) }; return true; } catch (e) { return false; }
         });
     }
     return theme;
+};
+
+// A file's name inside a face theme that a page or a remote may be handed:
+// one of the theme's own skies, a picture under `skies/`.
+var FACE_THEME_FILE = /^skies\/[A-Za-z0-9 ._()-]+\.(gif|png|webp|jpe?g)$/i;
+
+// The files a face theme brings beside its face.txt, for a page's table and
+// a remote's sync: each with its path in the theme, the route it is fetched
+// from and its checksum. Today the skies alone.
+Glass.prototype.faceThemeFiles = function (name, dir) {
+    var files = [];
+    var folder = dir + '/' + name + '/skies';
+    var names = [];
+    try { names = fs.readdirSync(folder).sort(); } catch (e) { return files; }
+    names.forEach(function (file) {
+        var rel = 'skies/' + file;
+        if (!FACE_THEME_FILE.test(rel)) { return; }
+        var full = folder + '/' + file;
+        try {
+            if (!fs.statSync(full).isFile()) { return; }
+            var sha = crypto.createHash('sha256').update(fs.readFileSync(full)).digest('hex');
+            files.push({ path: rel, url: '/api/face/theme-file?name=' + encodeURIComponent(name) + '&file=' + encodeURIComponent(rel), sha256: sha });
+        } catch (e) { /* a file that cannot be read is not offered */ }
+    });
+    return files;
+};
+
+// The files of a face theme by its name, found in the user's folder or the
+// ones that ship; null for a name that is no theme.
+Glass.prototype.faceThemeFilesOf = function (rawName) {
+    var self = this;
+    var name = views.themeName(rawName);
+    if (!name) { return null; }
+    var found = null;
+    [FACES_DIR, EVO_LOOKS_DIR].some(function (dir) {
+        if (!fs.existsSync(dir + '/' + name + '/face.txt')) { return false; }
+        found = { name: name, files: self.faceThemeFiles(name, dir) };
+        return true;
+    });
+    return found;
+};
+
+// The path of one of a face theme's files, or null where the name is no
+// theme, the file is not one a theme may hand out, or it is not there.
+Glass.prototype.faceThemePath = function (rawName, rawFile) {
+    var name = views.themeName(rawName);
+    var file = String(rawFile || '');
+    if (!name || !FACE_THEME_FILE.test(file)) { return null; }
+    var found = null;
+    [FACES_DIR, EVO_LOOKS_DIR].some(function (dir) {
+        var full = dir + '/' + name + '/' + file;
+        try { if (fs.statSync(full).isFile()) { found = full; return true; } } catch (e) { /* not here */ }
+        return false;
+    });
+    return found;
 };
 
 // What a remote display that carries a face needs of the player's: whose

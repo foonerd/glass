@@ -2063,6 +2063,28 @@
       if (lookUi.f) paintLook(true);
     }).catch(function (err) { toast(errorText(err), 'error'); });
   }
+  // The chosen look's own skies into the module's table, under the look's
+  // folder as the page keeps a look, so the likeness draws them as the
+  // screen does; brought once per look, and the likeness painted again.
+  function lookModuleSkies(name) {
+    var ex = lookUi.module;
+    if (!ex || !name || lookUi.skiesFor === name) return;
+    lookUi.skiesFor = name;
+    api('GET', '/api/face/theme-files?name=' + encodeURIComponent(name)).then(function (found) {
+      var put = function (path, bytes) {
+        var key = new TextEncoder().encode('faces/' + name + '/' + path);
+        var data = new Uint8Array(bytes);
+        var p = ex.alloc(key.length), d = ex.alloc(data.byteLength);
+        new Uint8Array(ex.memory.buffer, p, key.length).set(key);
+        new Uint8Array(ex.memory.buffer, d, data.byteLength).set(data);
+        ex.put_file(p, key.length, d, data.byteLength);
+        ex.free(p, key.length); ex.free(d, data.byteLength);
+      };
+      return Promise.all((found.files || []).map(function (file) {
+        return fetch(file.url).then(function (res) { if (!res.ok) throw new Error(file.path); return res.arrayBuffer(); }).then(function (bytes) { put(file.path, bytes); }).catch(function () { /* drawn instead */ });
+      })).then(function () { if (found.files && found.files.length && lookUi.f) paintLook(true); });
+    }).catch(function () { /* no such look here: the drawn skies */ });
+  }
   // A line of type in a likeness, set by glass-evo itself: the date, or the
   // clock in type, as a look's keys say, `size` CSS pixels high, in the
   // room its widest shape takes with the words in the middle of it; its
@@ -2417,6 +2439,7 @@
     $('look-preview').innerHTML = lookLikeness(v, { mode: lookUi.mode, scale: scale, suits: suits, picture: idlePic ? lookPicUrl(v['idle.picture']) : lookUi.picture, dim: idlePic ? LOOK.share(v['idle.dim'], 0.25) : 0, pick: true, own: own });
     lookFit($('look-panel'));
     lookMotion();
+    lookModuleSkies(lookUi.chosen);
     // The fit is of a size: made again when the panel's changes (the window's, a tab shown).
     if (!lookUi.watch && window.ResizeObserver) {
       lookUi.watch = new window.ResizeObserver(function () { lookFit($('look-panel')); });

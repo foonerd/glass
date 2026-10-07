@@ -422,6 +422,20 @@
           withBytes(bytes, function (dp, dl) { face.ex.put_file(pp, pl, dp, dl); });
         });
       });
+      // And the theme's own files, its skies, beside it, before the first frame.
+      return Promise.all((info.theme.files || []).map(function (file) {
+        return fetch(file.url).then(function (res) {
+          if (!res.ok) throw new Error(file.path + ': ' + res.status);
+          return res.arrayBuffer();
+        }).then(function (buffer) {
+          var data = new Uint8Array(buffer);
+          guarded(function () {
+            withString('faces/' + info.theme.name + '/' + file.path, function (pp, pl) {
+              withBytes(data, function (dp, dl) { face.ex.put_file(pp, pl, dp, dl); });
+            });
+          });
+        }).catch(function () { /* a sky that did not come is drawn */ });
+      }));
     });
   }
   // The other module is called for (the screen changed hands, or the user
