@@ -184,6 +184,16 @@
     }
     return at;
   }
+  // A side of an alignment as a flex container's word for it.
+  var FLEXED = { left: 'flex-start', centre: 'center', right: 'flex-end', top: 'flex-start', middle: 'center', bottom: 'flex-end' };
+  function flexed(side) { return FLEXED[side] || 'center'; }
+  // The side an element is set against: the one named, or, where the
+  // element is larger than its cells less the margin (`over`), the far
+  // one, so that its excess runs over the side named and "top" always
+  // moves it up and "left" always left, as the face sets it. The middle
+  // stays the middle.
+  var FAR = { left: 'right', right: 'left', top: 'bottom', bottom: 'top' };
+  function turned(side, over) { return over && FAR[side] ? FAR[side] : side; }
 
   // A piece's size as a share of the built-in look's, in percent.
   function sizeOf(key, value) {
@@ -277,7 +287,7 @@
     CLOCK_FACES: CLOCK_FACES, DIAL_STYLES: DIAL_STYLES, clockFace: clockFace, dialStyle: dialStyle,
     known: known, lay: lay, same: same, differs: differs, changes: changes,
     isOn: isOn, colourOf: colourOf, rgb: rgb, share: share, frostOn: frostOn, backgrounds: backgrounds,
-    cells: cells, cellsText: cellsText, align: align, GRID_ROWS: GRID_ROWS, GRID_COLUMNS: GRID_COLUMNS,
+    cells: cells, cellsText: cellsText, align: align, flexed: flexed, turned: turned, GRID_ROWS: GRID_ROWS, GRID_COLUMNS: GRID_COLUMNS,
     solidWord: solidWord, sizeOf: sizeOf, sizeWord: sizeWord, unitsOf: unitsOf, fitted: fitted, idleMost: idleMost, padAbout: padAbout, IDLE: IDLE,
     sample: sample, strftime: strftime
   };
