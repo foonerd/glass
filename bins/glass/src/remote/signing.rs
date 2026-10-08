@@ -6,6 +6,7 @@
 //! and takes a release without one as it did before signing.
 
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
+use sha2::Digest;
 
 const PUBLIC_KEY_PEM: &str = include_str!("../../../../keys/release-signing.pub");
 
@@ -88,6 +89,84 @@ pub fn held_to_signature(
         )),
         Some(_) => Ok("signed"),
     }
+}
+
+pub const MANIFEST_NAME: &str = "MANIFEST";
+pub const MANIFEST_SIG_NAME: &str = "MANIFEST.sig";
+
+/// An archive held to the signature it carries inside: `MANIFEST`, every
+/// file's digest, and `MANIFEST.sig`, signed with `key`. Every file in the
+/// archive must be in the manifest with its digest, and every file the
+/// manifest names must be in the archive. The files as unpacked, by path
+/// from the archive's root. Answers how many files were held; an error
+/// where the archive carries no signature (a release before signing), half
+/// a signature, or one that does not hold.
+pub fn verify_manifest(entries: &[(String, Vec<u8>)], key: &VerifyingKey) -> Result<usize, String> {
+    let find = |name: &str| {
+        entries
+            .iter()
+            .find(|(n, _)| n == name)
+            .map(|(_, d)| d.as_slice())
+    };
+    let (manifest, sig) = match (find(MANIFEST_NAME), find(MANIFEST_SIG_NAME)) {
+        (Some(m), Some(s)) => (m, s),
+        (None, None) => {
+            return Err(
+                "the archive carries no signature inside; a release published before signing cannot be installed from a file"
+                    .to_string(),
+            )
+        }
+        _ => return Err("the archive carries half a signature; it is not the release as published".to_string()),
+    };
+    if !verify_with(key, manifest, sig) {
+        return Err(
+            "the archive's signature does not verify; it is not the release as published"
+                .to_string(),
+        );
+    }
+    let text = String::from_utf8_lossy(manifest);
+    let mut listed: Vec<(String, String)> = Vec::new();
+    for line in text.lines() {
+        let Some((hex, rest)) = line.trim().split_once(' ') else {
+            continue;
+        };
+        let file = rest.trim_start().trim_start_matches('*').trim_end();
+        if hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()) && !file.is_empty() {
+            listed.push((file.to_string(), hex.to_ascii_lowercase()));
+        }
+    }
+    if listed.is_empty() {
+        return Err("the archive's manifest names no file".to_string());
+    }
+    let mut held = 0usize;
+    for (name, data) in entries {
+        if name == MANIFEST_NAME || name == MANIFEST_SIG_NAME {
+            continue;
+        }
+        let Some((_, stated)) = listed.iter().find(|(n, _)| n == name) else {
+            return Err(format!(
+                "the archive holds {name}, which its signed manifest does not name"
+            ));
+        };
+        let digest = sha2::Sha256::digest(data)
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect::<String>();
+        if &digest != stated {
+            return Err(format!(
+                "{name} does not match the archive's signed manifest"
+            ));
+        }
+        held += 1;
+    }
+    for (name, _) in &listed {
+        if !entries.iter().any(|(n, _)| n == name) {
+            return Err(format!(
+                "the archive lacks {name}, which its signed manifest names"
+            ));
+        }
+    }
+    Ok(held)
 }
 
 /// Standard base64, padding passed over.

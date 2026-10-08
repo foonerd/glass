@@ -33,7 +33,7 @@ use sha2::{Digest, Sha256};
 /// another address for a trial against a stand-in; unset in use.
 const API: &str = "https://api.github.com";
 /// The most an archive may weigh, packed and unpacked.
-const MAX_ARCHIVE: u64 = 64 * 1024 * 1024;
+pub const MAX_ARCHIVE: u64 = 64 * 1024 * 1024;
 const MAX_UNPACKED: u64 = 256 * 1024 * 1024;
 /// How long a new binary has to say its version.
 #[cfg(any(windows, all(unix, not(target_os = "android"))))]
@@ -462,9 +462,9 @@ fn field(bytes: &[u8]) -> String {
     String::from_utf8_lossy(&bytes[..end]).into_owned()
 }
 
-/// The first regular file of a gzipped tar whose path ends in one of
-/// `ends`, the earlier of them before the later.
-pub fn file_from_tar_gz(archive: &[u8], ends: &[String]) -> Result<Vec<u8>, String> {
+/// Every regular file of a gzipped tar, by its path as the tar names it,
+/// in the tar's order. Capped at what an archive may unpack to.
+pub fn tar_gz_entries(archive: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
     let mut tar = Vec::new();
     flate2::read::GzDecoder::new(archive)
         .take(MAX_UNPACKED + 1)
@@ -473,7 +473,7 @@ pub fn file_from_tar_gz(archive: &[u8], ends: &[String]) -> Result<Vec<u8>, Stri
     if tar.len() as u64 > MAX_UNPACKED {
         return Err("the archive unpacks to more than allowed".to_string());
     }
-    let mut found: Vec<Option<(usize, usize)>> = vec![None; ends.len()];
+    let mut out = Vec::new();
     let mut at = 0usize;
     let mut long_name: Option<String> = None;
     while at + 512 <= tar.len() {
@@ -507,20 +507,26 @@ pub fn file_from_tar_gz(archive: &[u8], ends: &[String]) -> Result<Vec<u8>, Stri
                 }
             });
             if kind == b'0' || kind == 0 {
-                for (slot, end) in found.iter_mut().zip(ends) {
-                    if slot.is_none() && (name == *end || name.ends_with(&format!("/{end}"))) {
-                        *slot = Some((data, size));
-                    }
-                }
+                let name = name.trim_start_matches("./").to_string();
+                out.push((name, tar[data..data + size].to_vec()));
             }
         }
         at = next;
     }
-    found
-        .into_iter()
-        .flatten()
-        .next()
-        .map(|(data, size)| tar[data..data + size].to_vec())
+    Ok(out)
+}
+
+/// The first regular file of a gzipped tar whose path ends in one of
+/// `ends`, the earlier of them before the later.
+pub fn file_from_tar_gz(archive: &[u8], ends: &[String]) -> Result<Vec<u8>, String> {
+    let entries = tar_gz_entries(archive)?;
+    ends.iter()
+        .find_map(|end| {
+            entries
+                .iter()
+                .find(|(name, _)| name == end || name.ends_with(&format!("/{end}")))
+                .map(|(_, data)| data.clone())
+        })
         .ok_or_else(|| format!("the archive holds no {}", ends.join(" or ")))
 }
 
@@ -547,10 +553,17 @@ fn le(bytes: &[u8], at: usize, len: usize) -> Option<usize> {
     )
 }
 
-/// The first regular file of a zip whose path ends in one of `ends`, the
-/// earlier of them before the later: stored or deflated, read from the
-/// zip's own table at its end.
-pub fn file_from_zip(archive: &[u8], ends: &[String]) -> Result<Vec<u8>, String> {
+/// One file of a zip's table.
+struct ZipEntry {
+    name: String,
+    method: usize,
+    packed: usize,
+    size: usize,
+    local: usize,
+}
+
+/// A zip's table, read from its end record: the files, directories left out.
+fn zip_table(archive: &[u8]) -> Result<Vec<ZipEntry>, String> {
     let broken = || "the archive's table is not readable".to_string();
     // The end record: its signature, searched from the back past a comment.
     let end = (0..=archive.len().saturating_sub(22))
@@ -560,7 +573,7 @@ pub fn file_from_zip(archive: &[u8], ends: &[String]) -> Result<Vec<u8>, String>
         .ok_or_else(broken)?;
     let count = le(archive, end + 10, 2).ok_or_else(broken)?;
     let mut at = le(archive, end + 16, 4).ok_or_else(broken)?;
-    let mut found: Vec<Option<(usize, usize, usize, usize)>> = vec![None; ends.len()];
+    let mut table = Vec::with_capacity(count);
     for _ in 0..count {
         if !archive
             .get(at..)
@@ -580,44 +593,47 @@ pub fn file_from_zip(archive: &[u8], ends: &[String]) -> Result<Vec<u8>, String>
             .map(|n| String::from_utf8_lossy(n).replace('\\', "/"))
             .ok_or_else(broken)?;
         if !name.ends_with('/') {
-            for (slot, end) in found.iter_mut().zip(ends) {
-                if slot.is_none() && (name == *end || name.ends_with(&format!("/{end}"))) {
-                    *slot = Some((method, packed, size, local));
-                }
-            }
+            table.push(ZipEntry {
+                name,
+                method,
+                packed,
+                size,
+                local,
+            });
         }
         at += 46 + name_len + extra_len + comment_len;
     }
-    let (method, packed, size, local) = found
-        .into_iter()
-        .flatten()
-        .next()
-        .ok_or_else(|| format!("the archive holds no {}", ends.join(" or ")))?;
-    if size as u64 > MAX_UNPACKED {
+    Ok(table)
+}
+
+/// One file of a zip, stored or deflated.
+fn zip_read(archive: &[u8], entry: &ZipEntry) -> Result<Vec<u8>, String> {
+    let broken = || "the archive's table is not readable".to_string();
+    if entry.size as u64 > MAX_UNPACKED {
         return Err("the archive unpacks to more than allowed".to_string());
     }
     if !archive
-        .get(local..)
+        .get(entry.local..)
         .is_some_and(|rest| rest.starts_with(b"PK\x03\x04"))
     {
         return Err(broken());
     }
-    let data = local
+    let data = entry.local
         + 30
-        + le(archive, local + 26, 2).ok_or_else(broken)?
-        + le(archive, local + 28, 2).ok_or_else(broken)?;
+        + le(archive, entry.local + 26, 2).ok_or_else(broken)?
+        + le(archive, entry.local + 28, 2).ok_or_else(broken)?;
     let bytes = archive
-        .get(data..data + packed)
+        .get(data..data + entry.packed)
         .ok_or("the archive is cut short")?;
-    match method {
+    match entry.method {
         0 => Ok(bytes.to_vec()),
         8 => {
-            let mut out = Vec::with_capacity(size);
+            let mut out = Vec::with_capacity(entry.size);
             flate2::read::DeflateDecoder::new(bytes)
                 .take(MAX_UNPACKED + 1)
                 .read_to_end(&mut out)
                 .map_err(|e| format!("the archive could not be unpacked: {e}"))?;
-            if out.len() != size {
+            if out.len() != entry.size {
                 return Err("the archive could not be unpacked: a file is not its size".to_string());
             }
             Ok(out)
@@ -625,6 +641,47 @@ pub fn file_from_zip(archive: &[u8], ends: &[String]) -> Result<Vec<u8>, String>
         other => Err(format!(
             "the archive packs a file in a way not read here ({other})"
         )),
+    }
+}
+
+/// Every file of a zip, by its path as the zip names it.
+pub fn zip_entries(archive: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
+    let table = zip_table(archive)?;
+    let mut total = 0u64;
+    let mut out = Vec::with_capacity(table.len());
+    for entry in &table {
+        total += entry.size as u64;
+        if total > MAX_UNPACKED {
+            return Err("the archive unpacks to more than allowed".to_string());
+        }
+        out.push((entry.name.clone(), zip_read(archive, entry)?));
+    }
+    Ok(out)
+}
+
+/// The first regular file of a zip whose path ends in one of `ends`, the
+/// earlier of them before the later: stored or deflated, read from the
+/// zip's own table at its end.
+pub fn file_from_zip(archive: &[u8], ends: &[String]) -> Result<Vec<u8>, String> {
+    let table = zip_table(archive)?;
+    let entry = ends
+        .iter()
+        .find_map(|end| {
+            table
+                .iter()
+                .find(|e| e.name == *end || e.name.ends_with(&format!("/{end}")))
+        })
+        .ok_or_else(|| format!("the archive holds no {}", ends.join(" or ")))?;
+    zip_read(archive, entry)
+}
+
+/// Every file of a release's archive, a zip or a gzipped tar by what it
+/// begins with.
+pub fn entries_of(archive: &[u8]) -> Result<Vec<(String, Vec<u8>)>, String> {
+    if archive.starts_with(b"PK") {
+        zip_entries(archive)
+    } else {
+        tar_gz_entries(archive)
     }
 }
 
@@ -636,6 +693,85 @@ pub fn binary_from(archive: &[u8], paths: &[String]) -> Result<Vec<u8>, String> 
     } else {
         file_from_tar_gz(archive, paths)
     }
+}
+
+/// An archive brought by hand, examined: held to the signature it carries
+/// inside, the product it is of (by the binary it holds for this machine),
+/// its version (from the folder the binary lies under), and the binary.
+#[derive(Clone, Debug)]
+pub struct Examined {
+    /// `Glass` or `glass-evo`, as the page names them.
+    pub product: String,
+    pub version: String,
+    pub files: usize,
+    pub binary: Vec<u8>,
+}
+
+/// The two products' descriptors, for an archive of either kind.
+fn kinds() -> [(&'static str, &'static str, &'static str); 2] {
+    [
+        ("Glass", "glass-", "glass"),
+        ("glass-evo", "glass-evo-", "glass-evo"),
+    ]
+}
+
+/// An archive examined for this machine: verified by its own manifest with
+/// `key`, the binary found under one of the folders this machine takes,
+/// the product told by the binary's name and the version by its folder.
+pub fn examine_archive(
+    archive: &[u8],
+    key: &ed25519_dalek::VerifyingKey,
+    folders: &[&str],
+) -> Result<Examined, String> {
+    let entries = entries_of(archive)?;
+    let files = super::signing::verify_manifest(&entries, key)?;
+    for (name, asset, binary) in kinds() {
+        for path in binary_paths(binary, folders) {
+            let Some((entry_name, data)) = entries
+                .iter()
+                .find(|(n, _)| *n == path || n.ends_with(&format!("/{path}")))
+            else {
+                continue;
+            };
+            // The folder the binary lies under: `<asset><version>-<arch>`.
+            let top = entry_name.split('/').next().unwrap_or("");
+            let version = top
+                .strip_prefix(asset)
+                .and_then(|rest| rest.split('-').next())
+                .filter(|v| numbers(v).is_some())
+                .ok_or_else(|| format!("the archive's folder {top:?} names no version"))?;
+            return Ok(Examined {
+                product: name.to_string(),
+                version: version.to_string(),
+                files,
+                binary: data.clone(),
+            });
+        }
+    }
+    Err("the archive holds no binary for this machine".to_string())
+}
+
+/// An examined archive's binary in the running one's place, as an upgrade
+/// from GitHub goes in: tried, swapped, the one before kept, a note for the
+/// starts that follow. `running` is what runs now, of either product.
+pub fn install_examined(
+    examined: &Examined,
+    exe: &Path,
+    cache: &Path,
+    running: &Product,
+) -> Result<(), String> {
+    let release = Release {
+        version: examined.version.clone(),
+        url: String::new(),
+        bytes: examined.binary.len() as u64,
+        sha256: String::new(),
+        page: String::new(),
+        test: false,
+        asset: String::new(),
+        sums_url: None,
+        sig_url: None,
+    };
+    install(&examined.binary, exe, cache, running, &release)
 }
 
 fn beside(exe: &Path, suffix: &str) -> PathBuf {
@@ -1450,5 +1586,111 @@ mod tests {
             "and the note is gone"
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_archive_brought_by_hand_is_examined_by_its_own_manifest_for_either_product() {
+        use ed25519_dalek::{Signer, SigningKey};
+        let mine = SigningKey::from_bytes(&[9u8; 32]);
+        let key = mine.verifying_key();
+        let sha = |data: &[u8]| {
+            Sha256::digest(data)
+                .iter()
+                .map(|b| format!("{b:02x}"))
+                .collect::<String>()
+        };
+        // A Glass archive for x64 as the workflow signs it: the manifest at the root naming every file.
+        let files: Vec<(&str, &[u8])> = vec![
+            ("glass-0.9.24-x64/README.md", b"read me"),
+            (
+                "glass-0.9.24-x64/bin/x64/glass",
+                b"#!/bin/sh\necho glass 0.9.24\n",
+            ),
+        ];
+        let manifest = files
+            .iter()
+            .map(|(name, data)| format!("{}  {}\n", sha(data), name))
+            .collect::<String>();
+        let sig = mine.sign(manifest.as_bytes()).to_bytes();
+        let mut signed = files.clone();
+        signed.push(("MANIFEST", manifest.as_bytes()));
+        signed.push(("MANIFEST.sig", &sig));
+        let archive = tar_gz(&signed);
+        let examined = examine_archive(&archive, &key, &["x64"]).unwrap();
+        assert_eq!(
+            (
+                examined.product.as_str(),
+                examined.version.as_str(),
+                examined.files
+            ),
+            ("Glass", "0.9.24", 2)
+        );
+        assert_eq!(examined.binary, b"#!/bin/sh\necho glass 0.9.24\n");
+        // Another machine: no binary for it.
+        assert!(examine_archive(&archive, &key, &["armv7"])
+            .unwrap_err()
+            .contains("no binary"));
+        // Unsigned: refused; tampered: refused; another key: refused.
+        assert!(examine_archive(&tar_gz(&files), &key, &["x64"])
+            .unwrap_err()
+            .contains("no signature"));
+        let mut tampered = signed.clone();
+        tampered[1] = (
+            "glass-0.9.24-x64/bin/x64/glass",
+            b"#!/bin/sh\necho trojan\n",
+        );
+        assert!(examine_archive(&tar_gz(&tampered), &key, &["x64"])
+            .unwrap_err()
+            .contains("does not match"));
+        let other = SigningKey::from_bytes(&[10u8; 32]).verifying_key();
+        assert!(examine_archive(&archive, &other, &["x64"])
+            .unwrap_err()
+            .contains("does not verify"));
+        // The bundle's Windows zip: the other product, told by its binary, the version by its folder.
+        let evo: Vec<(&str, &[u8], bool)> = vec![
+            (
+                "glass-evo-0.2.21-windows-x64/bin/glass-evo.exe",
+                b"MZ the bundle",
+                true,
+            ),
+            (
+                "glass-evo-0.2.21-windows-x64/remote/README.md",
+                b"read me",
+                false,
+            ),
+        ];
+        let manifest = evo
+            .iter()
+            .map(|(name, data, _)| format!("{}  {}\n", sha(data), name))
+            .collect::<String>();
+        let sig = mine.sign(manifest.as_bytes()).to_bytes();
+        let mut signed = evo.clone();
+        signed.push(("MANIFEST", manifest.as_bytes(), false));
+        signed.push(("MANIFEST.sig", &sig, false));
+        let examined = examine_archive(&zip_of(&signed), &key, &["windows-x64"]).unwrap();
+        assert_eq!(
+            (
+                examined.product.as_str(),
+                examined.version.as_str(),
+                examined.files
+            ),
+            ("glass-evo", "0.2.21", 2)
+        );
+        assert_eq!(examined.binary, b"MZ the bundle");
+        // Every entry of each kind of archive is read, in order.
+        let names: Vec<String> = entries_of(&archive)
+            .unwrap()
+            .into_iter()
+            .map(|(n, _)| n)
+            .collect();
+        assert_eq!(
+            names,
+            vec![
+                "glass-0.9.24-x64/README.md",
+                "glass-0.9.24-x64/bin/x64/glass",
+                "MANIFEST",
+                "MANIFEST.sig"
+            ]
+        );
     }
 }

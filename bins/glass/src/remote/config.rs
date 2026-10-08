@@ -294,6 +294,10 @@ pub struct RemoteConfig {
     /// releases, a pre-release among them; off, the latest release only.
     #[serde(default)]
     pub test_releases: bool,
+    /// Install from a file: an extra for a remote that cannot reach GitHub,
+    /// off unless turned on. Off, the page refuses such uploads.
+    #[serde(default)]
+    pub upload_install: bool,
     /// The UDP port this remote hears the player's frames on, one number a
     /// firewall rule can name; 0 lets the system choose one, as before
     /// 0.9.10. A port in use falls back to one the system chooses.
@@ -349,6 +353,7 @@ impl Default for RemoteConfig {
             spectrum_decay: 0.0,
             face: FaceShown::default(),
             test_releases: false,
+            upload_install: false,
             frames_port: intake::remote::DEFAULT_REMOTE_FRAMES_PORT,
         }
     }

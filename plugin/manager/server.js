@@ -1603,7 +1603,25 @@ class Manager {
         const staged = await self.updater.stageFile(job, file);
         job.name = 'Glass ' + staged.version;
         job.target = staged.version;
-        const paired = await pair(self.component, staged, job, { file: held ? held.file : null, byHand: true });
+        // A glass-evo zip given with the Glass zip goes in first, held to
+        // the Glass about to go in, whatever the one here; the version here
+        // already is left as it is. Then the pair rule, which the held one
+        // now satisfies, or says what is still needed.
+        let paired = false;
+        if (held) {
+          if (staged.least && compareVersions(held.version, staged.least) < 0) {
+            throw new UpdateError('needs-evo', 'Glass ' + staged.version + ' needs glass-evo ' + staged.least + ' or later; the glass-evo zip given is ' + held.version);
+          }
+          try {
+            await self.component.installFile(job, held.file, { glass: staged.version, least: staged.least || self.component.least });
+            paired = true;
+            self.logger.info('glass: manager upgrade: glass-evo ' + held.version + ' installed from a file with Glass ' + staged.version);
+          } catch (e) {
+            if (e.code !== 'same-version') throw e;
+            self.logger.info('glass: manager upgrade: glass-evo ' + held.version + ' is what is installed; left as it is');
+          }
+        }
+        paired = (await pair(self.component, staged, job, { byHand: true })) || paired;
         let result;
         try {
           result = await self.updater.apply(job, staged);

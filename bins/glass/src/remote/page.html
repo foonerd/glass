@@ -179,6 +179,14 @@
     <div class="form" style="margin-top:10px">
       <div class="full"><label><input type="checkbox" id="test-releases"> Offer test releases</label></div>
       <div class="full help">A release is first published as a test release, tried on the project's own players, and then made the latest. With this on, as on the player's System tab, this remote is offered the newest of the repository's last ten releases, a test release among them, as soon as it is published; off, it is offered the latest release only. Applied with the other settings.</div>
+      <div class="full"><label><input type="checkbox" id="upload-install"> Install from a file</label></div>
+      <div class="full help">An extra for a remote that cannot reach GitHub: a release archive downloaded on another machine is installed from here, checked by the signature it carries inside, with no network. The archive is this machine's one from the release: on Linux glass-&lt;version&gt;-&lt;arch&gt;.tar.gz, on Windows the windows-x64 zip, glass-evo's for the bundle. Off, the remote refuses such uploads. Applied with the other settings.</div>
+      <div class="full hidden" id="upload-box">
+        <input type="file" id="upload-file" accept=".zip,.gz,.tgz,application/zip,application/gzip" class="hidden">
+        <button class="small" id="btn-upload-pick">Choose the release archive</button> <span class="muted" id="upload-name">no file chosen</span>
+        <div style="margin-top:8px"><button class="small primary" id="btn-upload-install">Install the file</button></div>
+        <div class="help" style="margin-top:6px">An archive of the other kind, Glass's for a bundle remote or glass-evo's for a Glass one, replaces this remote with that kind, with its settings kept, when you say so. The archive must carry the signature every release has from Glass 0.9.23 and glass-evo 0.2.20 on.</div>
+      </div>
     </div>
   </div>
 
@@ -254,6 +262,34 @@
   };
   $('btn-upgrade-install').onclick = function () {
     api('POST', '/api/upgrade/install').then(function () { return load(); }).catch(function (e) { toast(e.message, 'error'); });
+  };
+  // Install from a file: the archive chosen through the page's own button,
+  // sent as it is; an archive of the other kind is sent again with the
+  // switch said, once the user has said so.
+  $('btn-upload-pick').onclick = function () { $('upload-file').click(); };
+  $('upload-file').onchange = function () {
+    var f = $('upload-file').files[0];
+    $('upload-name').textContent = f ? f.name + ' (' + Math.round(f.size / 1024) + ' KB)' : 'no file chosen';
+  };
+  function sendArchive(file, switchKind) {
+    return fetch('/api/upgrade/upload' + (switchKind ? '?switch=1' : ''), { method: 'POST', headers: { 'Content-Type': 'application/octet-stream' }, body: file })
+      .then(function (res) { return res.json().catch(function () { return {}; }).then(function (data) { if (!res.ok) { var e = new Error(data.message || data.error || ('HTTP ' + res.status)); e.code = data.error; throw e; } return data; }); });
+  }
+  $('btn-upload-install').onclick = function () {
+    var file = $('upload-file').files[0];
+    if (!file) { toast('Choose the release archive first.', 'error'); return; }
+    if (state.dirty) { toast('Apply the settings first: the switch is applied with them.', 'error'); return; }
+    $('btn-upload-install').disabled = true;
+    toast('Sending ' + file.name + ' to the remote.');
+    sendArchive(file, false).catch(function (e) {
+      if (e.code !== 'other-product') throw e;
+      if (!window.confirm(e.message + '?')) throw new Error('Left as it is.');
+      return sendArchive(file, true);
+    }).then(function (d) {
+      toast((d.product || 'The release') + ' ' + (d.version || '') + ' verified by the signature it carries (' + (d.files || 0) + ' files); putting it in place.');
+      $('upload-file').value = ''; $('upload-name').textContent = 'no file chosen';
+      return load();
+    }).catch(function (e) { toast(e.message, 'error'); }).then(function () { $('btn-upload-install').disabled = false; });
   };
 
   // ---- state ----
@@ -639,6 +675,8 @@
     $('gain').value = c.gain_db; $('decay').value = c.spectrum_decay ? c.spectrum_decay : ''; $('r-name').value = c.name; $('r-port').value = c.page_port; $('r-log').value = c.log_level || '';
     $('face-shown').value = c.face || 'follow';
     $('test-releases').checked = !!c.test_releases;
+    $('upload-install').checked = !!c.upload_install;
+    $('upload-box').classList.toggle('hidden', !c.upload_install);
     renderNames();
   }
   function gather() {
@@ -661,9 +699,10 @@
     c.gain_db = parseFloat($('gain').value) || 0; c.spectrum_decay = parseFloat($('decay').value) || 0; c.name = $('r-name').value.trim(); c.page_port = parseInt($('r-port').value, 10) || 5583; c.log_level = $('r-log').value || null;
     c.face = $('face-shown').value || 'follow';
     c.test_releases = $('test-releases').checked;
+    c.upload_install = $('upload-install').checked;
     return c;
   }
-  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'gain', 'decay', 'r-name', 'r-port', 'r-log', 'face-shown', 'test-releases'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
+  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'gain', 'decay', 'r-name', 'r-port', 'r-log', 'face-shown', 'test-releases', 'upload-install'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
   // The Assets switch: this browser's own choice, off unless turned on.
   try { $('assets-all').checked = window.localStorage.getItem('glass.remote.assets.all') === 'on'; } catch (e) { $('assets-all').checked = false; }
   $('assets-all').onchange = function () {

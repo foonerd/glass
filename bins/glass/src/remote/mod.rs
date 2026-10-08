@@ -574,6 +574,41 @@ impl RemoteApp {
         });
     }
 
+    /// An archive brought by hand, examined already, in place of what runs:
+    /// tried and put in place as an upgrade from GitHub is; the frame loop
+    /// is then asked to become it. The upgrade's turn is taken by the caller.
+    pub fn install_from_file(&self, examined: upgrade::Examined, running: upgrade::Product) {
+        let done = (|| {
+            let exe =
+                std::env::current_exe().map_err(|e| format!("this binary's own path: {e}"))?;
+            upgrade::install_examined(&examined, &exe, &self.cache, &running)
+        })();
+        match done {
+            Ok(()) => {
+                logline::say!(
+                    Info,
+                    "remotes",
+                    "upgrade: {} {} from a file is in place of {} {}, verified by the signature it carries ({} files); starting again as it",
+                    examined.product,
+                    examined.version,
+                    running.name,
+                    running.version,
+                    examined.files
+                );
+                self.set_upgrade(|state| state.phase = "restarting".to_string());
+                self.restart.store(true, Ordering::Release);
+                self.generation.fetch_add(1, Ordering::AcqRel);
+            }
+            Err(why) => {
+                logline::say!(Info, "remotes", "upgrade from a file: not done: {why}");
+                self.set_upgrade(|state| {
+                    state.phase = "idle".to_string();
+                    state.error = why;
+                });
+            }
+        }
+    }
+
     /// Bring the display up to the latest release known: fetched, checked,
     /// tried and put in place; the frame loop is then asked to become it.
     /// What fails is said in the state, and the display runs on as it is.
@@ -904,6 +939,94 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
                 }
             });
             respond_json(request, 202, json!({ "ok": true }));
+        }
+        // A release archive brought by hand, for a remote that cannot reach
+        // GitHub: held to the signature it carries inside, with no network;
+        // of this remote's kind, or of the other kind when `switch=1` says
+        // so, which replaces this remote with that kind. Refused while the
+        // switch "Install from a file" is off.
+        (Method::Post, "/api/upgrade/upload") => {
+            if !app.config().upload_install {
+                return respond_error(
+                    request,
+                    403,
+                    "switch-off",
+                    "install from a file is off on this remote",
+                );
+            }
+            let Some(running) = app.product() else {
+                return respond_error(
+                    request,
+                    400,
+                    "no-upgrade",
+                    "this display is offered no upgrade",
+                );
+            };
+            if !upgrade::in_place() {
+                return respond_error(
+                    request,
+                    400,
+                    "by-hand",
+                    "on this system the release is installed by the system's installer: open the release's package",
+                );
+            }
+            if app.upgrade().phase != "idle" {
+                return respond_error(request, 409, "busy", "an upgrade is under way");
+            }
+            let switch = query(&url, "switch").as_deref() == Some("1");
+            let mut archive = Vec::new();
+            let reader: &mut dyn Read = request.as_reader();
+            if let Err(e) = Read::take(reader, upgrade::MAX_ARCHIVE + 1).read_to_end(&mut archive) {
+                return respond_error(request, 400, "upload", format!("the upload broke: {e}"));
+            }
+            if archive.len() as u64 > upgrade::MAX_ARCHIVE {
+                return respond_error(
+                    request,
+                    413,
+                    "too-large",
+                    "the file is larger than a release archive",
+                );
+            }
+            if archive.is_empty() {
+                return respond_error(request, 400, "empty", "the upload is empty");
+            }
+            let key = match signing::public_key() {
+                Ok(key) => key,
+                Err(why) => return respond_error(request, 500, "key", &why),
+            };
+            let examined = match upgrade::examine_archive(&archive, &key, upgrade::arch_folders()) {
+                Ok(examined) => examined,
+                Err(why) => return respond_error(request, 400, "signature", &why),
+            };
+            if examined.product != running.name && !switch {
+                return respond_error(
+                    request,
+                    409,
+                    "other-product",
+                    format!(
+                        "the archive is {} {}; this remote is {} {}. Say so to replace it",
+                        examined.product, examined.version, running.name, running.version
+                    ),
+                );
+            }
+            if examined.version == running.version && examined.product == running.name {
+                return respond_error(
+                    request,
+                    400,
+                    "same-version",
+                    format!(
+                        "{} {} is what runs; nothing to install",
+                        running.name, running.version
+                    ),
+                );
+            }
+            if !app.begin_upgrade("installing") {
+                return respond_error(request, 409, "busy", "an upgrade is under way");
+            }
+            let answer = json!({ "ok": true, "product": examined.product, "version": examined.version, "files": examined.files });
+            let worker = app.clone();
+            std::thread::spawn(move || worker.install_from_file(examined, running));
+            respond_json(request, 202, answer);
         }
         // The window, live: full screen, or a window so the desktop behind
         // it can be used (Escape and F on the keyboard do the same).
