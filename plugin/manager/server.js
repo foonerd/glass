@@ -20,7 +20,7 @@ const { trackFileFor } = require('./trackfile');
 const logging = require('./logging');
 const { Catalog, CatalogError } = require('./catalog');
 const { Previews } = require('./previews');
-const { Updater, UpdateError, compareVersions, MAX_ZIP_BYTES } = require('./update');
+const { Updater, UpdateError, compareVersions, examineGlassZip, MAX_ZIP_BYTES } = require('./update');
 const stable = require('./stable');
 const remotebehind = require('./remotebehind');
 const sheetfacts = require('./sheetfacts');
@@ -1600,27 +1600,40 @@ class Manager {
       const held = self.heldEvo;
       self.heldEvo = null;
       try {
-        const staged = await self.updater.stageFile(job, file);
-        job.name = 'Glass ' + staged.version;
-        job.target = staged.version;
-        // A glass-evo zip given with the Glass zip goes in first, held to
-        // the Glass about to go in, whatever the one here; the version here
-        // already is left as it is. Then the pair rule, which the held one
-        // now satisfies, or says what is still needed.
+        // What the Glass zip says it is, first: a Glass that is what runs
+        // already leaves Glass as it is, and the glass-evo zip given with
+        // it still goes in.
+        const found = await examineGlassZip(file);
+        const sameGlass = found.version === self.updater.version;
+        const glassToRun = sameGlass ? self.updater.version : found.version;
+        // The glass-evo zip given goes in first, held to the Glass that
+        // will run; the version here already is left as it is.
         let paired = false;
         if (held) {
-          if (staged.least && compareVersions(held.version, staged.least) < 0) {
-            throw new UpdateError('needs-evo', 'Glass ' + staged.version + ' needs glass-evo ' + staged.least + ' or later; the glass-evo zip given is ' + held.version);
+          if (found.least && compareVersions(held.version, found.least) < 0) {
+            throw new UpdateError('needs-evo', 'Glass ' + found.version + ' needs glass-evo ' + found.least + ' or later; the glass-evo zip given is ' + held.version);
           }
           try {
-            await self.component.installFile(job, held.file, { glass: staged.version, least: staged.least || self.component.least });
+            await self.component.installFile(job, held.file, { glass: glassToRun, least: found.least || self.component.least });
             paired = true;
-            self.logger.info('glass: manager upgrade: glass-evo ' + held.version + ' installed from a file with Glass ' + staged.version);
+            self.logger.info('glass: manager upgrade: glass-evo ' + held.version + ' installed from a file' + (sameGlass ? '' : ' with Glass ' + found.version));
           } catch (e) {
             if (e.code !== 'same-version') throw e;
             self.logger.info('glass: manager upgrade: glass-evo ' + held.version + ' is what is installed; left as it is');
           }
+          if (paired) self.plugin.componentChanged();
         }
+        if (sameGlass) {
+          await fsp.rm(file, { force: true });
+          if (!held) throw new UpdateError('same-version', 'Glass ' + found.version + ' is what runs; nothing to install');
+          job.name = 'glass-evo ' + held.version + (paired ? '' : ' (installed already)') + ' · Glass ' + found.version + ' is what runs';
+          self.finish(job, null);
+          return;
+        }
+        const staged = await self.updater.stageFile(job, file);
+        job.name = 'Glass ' + staged.version;
+        job.target = staged.version;
+        // The pair rule, which the glass-evo given now satisfies, or says what is still needed.
         paired = (await pair(self.component, staged, job, { byHand: true })) || paired;
         let result;
         try {

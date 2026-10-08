@@ -3366,6 +3366,8 @@
         api('GET', '/api/jobs/' + job.id).then(function (data) {
           draw(data.job);
           if (data.job.state === 'failed') { $('btn-upd-install').disabled = false; $('btn-upd-rollback').disabled = false; loadUpdate(false); if (opts.failed) opts.failed(); return; }
+          // Done without a restart: the glass-evo zip went in and Glass stayed as it is.
+          if (data.job.state === 'done') { draw(data.job); $('btn-upd-install').disabled = false; $('btn-upd-rollback').disabled = false; loadUpdate(false); loadEvo(false); toast(t('MANAGER_EVO_DONE') + ' ' + data.job.name); return; }
           if (data.job.state === 'restarting') { restarting = true; started = Date.now(); if (data.job.target) target = data.job.target; }
           setTimeout(tick, 1000);
         }).catch(function () {
