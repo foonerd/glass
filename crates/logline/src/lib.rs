@@ -115,11 +115,45 @@ pub fn on(level: Level, target: &str) -> bool {
     true
 }
 
+/// How many of the last lines written are kept for a report.
+const RECENT_LINES: usize = 200;
+static RECENT: std::sync::Mutex<std::collections::VecDeque<(u64, String)>> =
+    std::sync::Mutex::new(std::collections::VecDeque::new());
+
+/// The last lines written, oldest first, each with its time in seconds
+/// since 1970: what a remote's support bundle carries of its own log.
+pub fn recent() -> Vec<(u64, String)> {
+    RECENT
+        .lock()
+        .map(|r| r.iter().cloned().collect())
+        .unwrap_or_else(|e| e.into_inner().iter().cloned().collect())
+}
+
+fn keep(level: Level, target: &str, text: &str) {
+    let at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let word = match level {
+        Level::Error => "error",
+        Level::Warn => "warn",
+        Level::Info => "info",
+        Level::Verbose => "verbose",
+        Level::Trace => "trace",
+    };
+    let mut recent = RECENT.lock().unwrap_or_else(|e| e.into_inner());
+    if recent.len() >= RECENT_LINES {
+        recent.pop_front();
+    }
+    recent.push_back((at, format!("{word} {target}: {text}")));
+}
+
 /// Write one line, when the level and target allow it.
 pub fn say(level: Level, target: &str, args: Arguments) {
     if !on(level, target) {
         return;
     }
+    keep(level, target, &format!("{args}"));
     let prefix = settings().prefix;
     #[cfg(target_os = "android")]
     {
@@ -183,6 +217,33 @@ mod tests {
             Level::Trace > Level::Verbose
                 && Level::Verbose > Level::Info
                 && Level::Info > Level::Warn
+        );
+    }
+
+    /// The last lines are kept, oldest first, with their time; only what
+    /// the gate lets through is kept.
+    #[test]
+    fn the_last_lines_are_kept_for_a_report() {
+        say(Level::Warn, "test-keep", format_args!("one {}", 1));
+        say(Level::Error, "test-keep", format_args!("two"));
+        let lines: Vec<String> = recent()
+            .into_iter()
+            .filter(|(_, l)| l.contains("test-keep"))
+            .map(|(at, l)| {
+                assert!(at > 1_700_000_000, "a time since 1970");
+                l
+            })
+            .collect();
+        assert_eq!(lines, vec!["warn test-keep: one 1", "error test-keep: two"]);
+        let before = recent().len();
+        say(
+            Level::Trace,
+            "test-keep",
+            format_args!("not within the level"),
+        );
+        assert_eq!(
+            recent().len(),
+            before + usize::from(on(Level::Trace, "test-keep"))
         );
     }
 

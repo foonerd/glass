@@ -39,6 +39,11 @@
   .badge { display: inline-block; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: #444; color: #ddd; text-transform: uppercase; }
   .badge.green { background: var(--accent); color: #fff; }
   .badge.orange { background: var(--warn); color: #222; }
+  .badge.red { background: var(--danger); color: #fff; }
+  .badge.gray { background: #3a3a3a; color: #bbb; }
+  h2 .badge { margin-left: 8px; vertical-align: middle; }
+  table.kv td .badge { margin-right: 8px; }
+  pre.report { background: #0d0d0d; border: 1px solid #333; border-radius: 6px; padding: 10px; max-height: 380px; overflow: auto; font-size: 12px; line-height: 1.4; white-space: pre-wrap; word-break: break-word; margin: 0; }
   table.kv { width: 100%; border-collapse: collapse; }
   table.kv td { padding: 6px 8px; border-bottom: 1px solid #333; vertical-align: top; }
   table.kv td:first-child { color: var(--muted); width: 36%; }
@@ -68,7 +73,7 @@
   </div>
 
   <div class="panel" id="connection-panel">
-    <h2>Connection</h2>
+    <h2>Connection <span class="badge gray" id="connection-badge">not tested</span></h2>
     <table class="kv" id="connection"></table>
     <div style="margin-top:10px"><button class="small" id="btn-connection-check">Check now</button> <span class="help" id="connection-when"></span></div>
     <div class="help" style="margin-top:8px">Each path to the player is tried from here. The frames path is judged from both ends: the player is asked, over the channel, to send three probe datagrams to this remote's frames port, and the verdict says whether they arrived. Where something is blocked the row names the side and the fix.</div>
@@ -87,6 +92,17 @@
     <h2>Prerequisites</h2>
     <table class="kv" id="prereq"></table>
     <div class="help" style="margin-top:8px">What this machine has for the display to run: the program and how it was started, what draws the frames and whether in software, the screens, the fonts brought, and the folders the remote keeps things in.</div>
+  </div>
+
+  <div class="panel" id="report-panel">
+    <h2>Report</h2>
+    <div class="help" style="margin-bottom:8px">A report holds this remote's side whole, the Status, Connection, Assets and Prerequisites above with its last log lines, and the player's side as far as this remote can read it. Say in a line what you did and what you saw, then make it; it is copied for the forum, opened as a GitHub issue, or saved as a file. Addresses stay hidden unless revealed.</div>
+    <textarea id="report-said" rows="2" style="width:100%" placeholder="What you did, and what you saw"></textarea>
+    <div style="margin-top:8px"><button class="primary" id="btn-report-make">Make a report</button></div>
+    <div id="report-body" class="hidden" style="margin-top:10px">
+      <pre class="report" id="report-text"></pre>
+      <div style="margin-top:8px"><button class="primary" id="btn-report-forum">Copy for the forum</button> <button class="small" id="btn-report-issue">Open a GitHub issue</button> <button class="small" id="btn-report-download">Download the report</button> <button class="small" id="btn-report-reveal">Reveal addresses</button></div>
+    </div>
   </div>
 
   <div class="panel">
@@ -186,6 +202,7 @@
   </div>
 </div>
 <div class="toasts" id="toasts"></div>
+<script src="/report.js"></script>
 <script>
 (function () {
   'use strict';
@@ -254,6 +271,7 @@
       renderConnection(s);
       renderAssets(s);
       renderPrerequisites(s);
+      state.lastState = s;
       if (!state.dirty) fill(s.config);
       renderPlayers(s.config);
     });
@@ -261,6 +279,9 @@
 
   // ---- the theme's assets, and what this machine has ----
   function renderAssets(s) {
+    $('assets').innerHTML = assetsRows(s).map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
+  }
+  function assetsRows(s) {
     var a = s.assets;
     var rows = [];
     if (!a) {
@@ -276,57 +297,164 @@
         if (!a.required.some(function (r) { return r.state === 'failed' && ('templates/' + a.theme + '/' + r.file) === f[0]; })) rows.push(['not brought', f[0] + ' · ' + f[1]]);
       });
     }
-    $('assets').innerHTML = rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
+    return rows;
   }
   function fmtBytes(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(1) + ' GB' : n >= 1048576 ? Math.round(n / 1048576) + ' MB' : Math.round(n / 1024) + ' kB'; }
   function renderPrerequisites(s) {
+    $('prereq').innerHTML = prereqRows(s).map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
+  }
+  function prereqRows(s) {
     var p = s.prerequisites || {}; var st = s.status || {};
     var screens = (st.monitors || []).map(function (m) { return (m.index + 1) + ': ' + m.name + ' ' + m.width + 'x' + m.height; }).join(' · ');
-    var rows = [
+    return [
       ['program', (p.face ? p.face + ' on Glass ' : 'Glass ') + p.version + ' · ' + p.os + ' ' + p.arch + ' · ' + p.exe + (p.under_service ? ' · started by the user service' : ' · started by hand') + (p.previous_kept ? ' · the version before is kept beside it' : '') + (p.on_trial ? ' · an upgrade on trial' : '')],
       ['draws with', st.driver ? st.renderer + ' on ' + st.driver + (st.software ? ' · SOFTWARE: no graphics acceleration here; frames cost the processor' : ' · hardware') : 'no window yet (headless, or not opened)'],
       ['screens', screens || 'none seen (headless, or no window yet)'],
       ['fonts', (p.fonts ? p.fonts[0] + ' of the plugin\'s · ' + p.fonts[1] + ' of the player\'s web fonts · ' + p.fonts[2] + ' uploaded' : '-') + ' · a theme\'s own fonts are in Assets'],
       ['folders', 'configuration ' + p.config_path + ' · cache ' + p.cache_path + (p.cache_writable ? ' (writable' : ' (NOT WRITABLE') + (p.cache_free ? ', ' + fmtBytes(p.cache_free) + ' free)' : ')') + (p.home_path ? ' · this player\'s files under ' + p.home_path : '')]
     ];
-    $('prereq').innerHTML = rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
   }
+
+  // ---- the report: this remote's side whole, and the player's as far as it can be read ----
+  // The forms (the forum cut, the issue body, the file name) are GlassReport's,
+  // the script the Manager's page shares. Addresses are hidden unless revealed.
+  var report = { bundle: null, revealed: false, text: '', head: [], rest: '' };
+  function hideAddresses(text) {
+    if (report.revealed) return text;
+    var b = report.bundle || {}; var names = [];
+    if (b.player) { if (b.player.host) names.push(b.player.host); if (b.player.address) names.push(b.player.address); }
+    if (b.config && b.config.players) Object.keys(b.config.players).forEach(function (id) { if (b.config.players[id].host) names.push(b.config.players[id].host); });
+    var out = text.replace(/\b\d{1,3}(\.\d{1,3}){3}(:\d+)?\b/g, '(address hidden)').replace(/\[[0-9a-f:]{3,}\](:\d+)?/gi, '(address hidden)');
+    names.filter(Boolean).sort(function (a, c) { return c.length - a.length; }).forEach(function (n) { out = out.split(n).join('(host hidden)'); });
+    return out;
+  }
+  function rowsText(rows) { return rows.map(function (r) { return '  ' + r[0] + ': ' + (r[2] && r[2][1] ? '[' + String(r[2][1]).toUpperCase() + '] ' : '') + String(r[1]).replace(/\n/g, '\n    '); }).join('\n'); }
+  function playerRows(b) {
+    var p = b.player || {}; var s = p.status;
+    if (!s) return [['player', (p.name || p.host || 'none') + (p.error ? ' · its Manager did not answer: ' + p.error : '')]];
+    var e = s.evo || {}; var r = s.remotes || {}; var house = (s.sheet || {}).housekeeping || {};
+    return [
+      ['player', (s.hostname || p.name || '') + ' · Glass ' + (s.version || '?') + ' (' + (s.arch || '?') + ')' + (e.component ? ' · glass-evo ' + e.component.version : ' · no glass-evo')],
+      ['screen', e.owner ? (e.owner === 'glass-evo' ? 'glass-evo owns the screen' : 'the kiosk owns the screen') + (e.holdMode ? ' · held on ' + e.holdMode : '') : (s.running ? 'the display is up' : 'the display is not up')],
+      ['theme on show', (s.activeTheme || '?') + (s.themeSize ? ' · ' + s.themeSize : '') + (s.showing && s.showing.meter ? ' · now ' + s.showing.meter : '')],
+      ['remote displays', !r.enabled ? 'not served' : (r.serving ? 'served' : 'NOT RUNNING') + ' · frames ' + (r.ports || {}).frames + ' · channel ' + (r.ports || {}).channel + ' · beacon ' + (r.ports || {}).beacon + ' · ' + r.connected + ' connected, ' + r.receiving + ' receiving frames' + (r.problem ? ' · problem: ' + r.problem : '')],
+      ['player state', ((s.channel || {}).status || '-') + ((s.channel || {}).service ? ' · ' + s.channel.service : '') + (s.measured ? ' · measured' : '')],
+      ['player\'s recent problems', house.problems && house.problems.length ? house.problems.join('\n') : 'none']
+    ];
+  }
+  function composeReport() {
+    var b = report.bundle; var s = state.lastState || {};
+    var product = (b.remote && b.remote.product) || {};
+    var when = new Date((b.at || 0) * 1000);
+    report.head = [
+      'Glass remote report: ' + (b.remote.name || 'this remote') + ' · ' + (product.name ? product.name + ' ' + product.version : 'Glass ' + b.remote.release) + (b.remote.face ? ' (' + b.remote.face + ')' : '') + ' · protocol ' + b.remote.protocol,
+      'What I did and what I saw: ' + ($('report-said').value.trim() || '-'),
+      'Made ' + when.toLocaleString()
+    ];
+    var view = { status: b.status, connection: b.connection, assets: b.assets, prerequisites: b.prerequisites, config: b.config, exe: b.prerequisites && b.prerequisites.exe };
+    var c = connectionRows(view);
+    var sections = [
+      ['Status', rowsText(statusRows(b.status || {}))],
+      ['Connection: ' + c.badge[1].toUpperCase() + (c.when ? ' (' + c.when + ')' : ''), rowsText(c.rows)],
+      ['Firewall rules for this remote', rowsText(c.rules)],
+      ['Assets', rowsText(assetsRows(view))],
+      ['Prerequisites', rowsText(prereqRows(view))],
+      ['Version', rowsText([['upgrade', (b.upgrade && b.upgrade.latest) ? 'offered ' + b.upgrade.latest.version + (b.upgrade.latest.test ? ' (a test release)' : '') : 'not looked at'], ['test releases', b.config && b.config.test_releases ? 'offered' : 'not offered']])],
+      ['Player', rowsText(playerRows(b))],
+      ['This remote\'s last log lines', (b.log || []).slice(-80).map(function (l) { return '  ' + new Date(l[0] * 1000).toLocaleTimeString() + ' ' + l[1]; }).join('\n')]
+    ];
+    report.rest = sections.map(function (sec) { return sec[0] + '\n' + sec[1] + '\n'; }).join('\n');
+    var made = window.GlassReport.compose(report.head, '', report.rest);
+    report.text = hideAddresses(made.text);
+    $('report-text').textContent = report.text;
+    $('report-body').classList.remove('hidden');
+    $('btn-report-reveal').textContent = report.revealed ? 'Hide addresses' : 'Reveal addresses';
+  }
+  function copyText(text) {
+    if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text).then(function () { toast('Copied.'); }).catch(function () { toast('The clipboard refused; select the text and copy it.', 'error'); });
+    var area = document.createElement('textarea'); area.value = text; document.body.appendChild(area); area.select();
+    try { document.execCommand('copy'); toast('Copied.'); } catch (e) { toast('The clipboard refused; select the text and copy it.', 'error'); }
+    area.remove();
+    return Promise.resolve();
+  }
+  $('btn-report-make').onclick = function () {
+    $('btn-report-make').disabled = true;
+    api('GET', '/api/support').then(function (b) { report.bundle = b; composeReport(); }).catch(function (e) { toast(e.message, 'error'); }).then(function () { $('btn-report-make').disabled = false; });
+  };
+  $('btn-report-reveal').onclick = function () { if (!report.bundle) return; report.revealed = !report.revealed; composeReport(); };
+  $('btn-report-forum').onclick = function () {
+    var post = window.GlassReport.forForum(report.text, '[The rest is left out for the forum post\'s size: the downloaded report has the whole.]');
+    copyText(post.text);
+  };
+  $('btn-report-issue').onclick = function () {
+    var product = (report.bundle && report.bundle.remote && report.bundle.remote.product) || {};
+    var repository = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(product.repository || '') ? product.repository : 'foonerd/glass';
+    var title = 'Remote: ' + ($('report-said').value.trim() || 'a problem on a remote display').replace(/\s+/g, ' ').slice(0, 70);
+    var body = window.GlassReport.issueBody(report.head.map(hideAddresses), hideAddresses(report.rest), 'The full report is on your clipboard: paste it here.');
+    copyText(report.text).then(function () { window.open('https://github.com/' + repository + '/issues/new?title=' + encodeURIComponent(title) + '&body=' + encodeURIComponent(body), '_blank', 'noopener'); });
+  };
+  // The file: the report, and under it the player's sheet whole as its Manager answered it.
+  $('btn-report-download').onclick = function () {
+    var b = report.bundle || {};
+    var raw = b.player && b.player.status ? JSON.stringify(b.player.status, null, 1) : '';
+    if (raw && !report.revealed) { try { var copy = JSON.parse(raw); if (copy.sheet) delete copy.sheet.addresses; raw = hideAddresses(JSON.stringify(copy, null, 1)); } catch (e) { raw = hideAddresses(raw); } }
+    var text = report.text + (raw ? '\n\nThe player\'s sheet as its Manager answered it (JSON):\n' + raw + '\n' : '');
+    var a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+    a.download = window.GlassReport.fileName('remote-' + ((b.remote && b.remote.name) || 'display'), Date.now());
+    document.body.appendChild(a); a.click();
+    setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  };
 
   // ---- the connection: each path to the player, and the firewall rules ----
   // The states come from the remote; the words are set here, each with the
   // side that is at fault and the fix, so nothing is left to guess.
+  // Each row carries a sticker: green for a part that works, orange for a
+  // part that fails, grey for one not tested or only informative; the
+  // panel's own sticker is red when there is no connection at all.
   function tcpWords(row, st) {
     var what = { manager: 'the player\'s Manager', channel: 'the player\'s channel', web: 'the player\'s own web (album art)' }[row.name] || row.name;
     var where = row.host + ':' + row.port + ' (TCP)';
-    if (row.state === 'open') return [what, where + ' · open, answered in ' + row.ms + ' ms'];
-    if (row.state === 'refused') return [what, where + ' · REFUSED: the player is not listening there. The player: check that remote displays are served and the ports on its Remotes tab are these.'];
-    if (row.state === 'timeout') return [what, where + ' · TIMED OUT: dropped on the way. The player or the network between: a firewall on the player, or a router between networks, drops TCP ' + row.port + '. (' + row.detail + ')'];
-    if (row.state === 'unreachable') return [what, where + ' · UNREACHABLE: no route, or the name does not resolve. The network: check the player\'s name or address on this page. (' + row.detail + ')'];
-    return [what, where + ' · ' + (row.state || 'not tried') + (row.detail ? ': ' + row.detail : '')];
+    if (row.state === 'open') return [what, where + ' · open, answered in ' + row.ms + ' ms', ['green', 'open']];
+    if (row.state === 'refused') return [what, where + ' · REFUSED: the player is not listening there. The player: check that remote displays are served and the ports on its Remotes tab are these.', ['orange', 'refused']];
+    if (row.state === 'timeout') return [what, where + ' · TIMED OUT: dropped on the way. The player or the network between: a firewall on the player, or a router between networks, drops TCP ' + row.port + '. (' + row.detail + ')', ['orange', 'timed out']];
+    if (row.state === 'unreachable') return [what, where + ' · UNREACHABLE: no route, or the name does not resolve. The network: check the player\'s name or address on this page. (' + row.detail + ')', ['orange', 'unreachable']];
+    return [what, where + ' · ' + (row.state || 'not tried') + (row.detail ? ': ' + row.detail : ''), ['gray', row.state || 'not tried']];
   }
   function probeWords(c, st) {
     var p = c.probe || {};
     var port = c.frames_port ? 'UDP ' + c.frames_port : 'UDP (no port yet)';
     var per = st && st.frames_per_s ? ', frames received ' + st.frames_per_s.toFixed(0) + ' a second' : '';
     switch (p.state) {
-      case 'arrived': return port + ' · OPEN: the player sent ' + p.sent + ' probe datagrams to ' + p.to + ' and ' + p.arrived + ' arrived' + per + '.';
-      case 'blocked': return port + ' · BLOCKED: the player sent ' + p.sent + ' probe datagrams to ' + p.to + ' and none arrived. This machine: a firewall here drops UDP in on port ' + c.frames_port + '; allow the program below, or that port, inbound. (A router between networks drops it the same way.)';
-      case 'not-sent': return port + ' · NOT TESTED: the player could not send a probe (its Glass is older than 0.9.10, or it does not know this remote\'s port). Upgrade the player; meanwhile, frames arriving while it plays' + (per ? ' (' + per.slice(2) + ')' : '') + ' say the path is open.';
-      case 'no-answer': return port + ' · NO ANSWER: the channel took the request and the player said nothing within the wait. Check again; if it stays so, the player\'s Glass is older than 0.9.10.';
-      case 'no-channel': return port + ' · NOT TESTED: the channel to the player is down, so nothing could be asked. See the channel row.';
-      case 'running': return port + ' · testing…';
-      default: return port + ' · not tested yet' + (per ? ' (frames received' + per.slice(16) + ')' : '') + '. Press Check now.';
+      case 'arrived': return [port + ' · OPEN: the player sent ' + p.sent + ' probe datagrams to ' + p.to + ' and ' + p.arrived + ' arrived' + per + '.', ['green', 'open']];
+      case 'blocked': return [port + ' · BLOCKED: the player sent ' + p.sent + ' probe datagrams to ' + p.to + ' and none arrived. This machine: a firewall here drops UDP in on port ' + c.frames_port + '; allow the program below, or that port, inbound. (A router between networks drops it the same way.)', ['orange', 'blocked']];
+      case 'not-sent': return [port + ' · NOT TESTED: the player could not send a probe (its Glass is older than 0.9.10, or it does not know this remote\'s port). Upgrade the player; meanwhile, frames arriving while it plays' + (per ? ' (' + per.slice(2) + ')' : '') + ' say the path is open.', [per ? 'green' : 'gray', per ? 'frames flow' : 'not tested']];
+      case 'no-answer': return [port + ' · NO ANSWER: the channel took the request and the player said nothing within the wait. Check again; if it stays so, the player\'s Glass is older than 0.9.10.', ['orange', 'no answer']];
+      case 'no-channel': return [port + ' · NOT TESTED: the channel to the player is down, so nothing could be asked. See the channel row.', ['orange', 'not tested']];
+      case 'running': return [port + ' · testing…', ['gray', 'testing']];
+      default: return [port + ' · not tested yet' + (per ? ' (frames received' + per.slice(16) + ')' : '') + '. Press Check now.', [per ? 'green' : 'gray', per ? 'frames flow' : 'not tested']];
     }
   }
-  function renderConnection(s) {
+  // The panel's own sticker from its rows: no connection at all when the
+  // channel is down and no path answered; a problem when any part fails;
+  // connected when the paths that were tried are open.
+  function connectionBadge(rows, st) {
+    var stickers = rows.map(function (r) { return r[2] || ['gray', '']; });
+    var tried = stickers.some(function (s) { return s[0] === 'green' || s[0] === 'orange'; });
+    var failing = stickers.some(function (s) { return s[0] === 'orange'; });
+    if (!st.connected && !stickers.some(function (s) { return s[0] === 'green'; }) && tried) return ['red', 'no connection'];
+    if (failing) return ['orange', 'problem'];
+    if (tried || st.connected) return ['green', 'connected'];
+    return ['gray', 'not tested'];
+  }
+  function connectionRows(s) {
     var c = s.connection || {}; var st = s.status || {}; var pl = c.player || {};
     var rows = (c.tcp || []).map(function (row) { return tcpWords(row, st); });
-    rows.push(['the player\'s frames', probeWords(c, st)]);
-    rows.push(['the player\'s beacon', 'UDP ' + (pl.beacon || 5579) + ' · used only to find players on the network; a player added by name needs it not. Broadcasts do not cross a router.']);
-    rows.push(['this page', 'TCP ' + (s.config ? s.config.page_port : '') + ' · reached from another device only where a firewall here allows it in; the same machine needs no rule.']);
-    if (!c.tcp || !c.tcp.length) rows.unshift(['the player', pl.host ? pl.host + ' · not tried yet. Press Check now.' : 'none: add a player first.']);
-    $('connection').innerHTML = rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
-    $('connection-when').textContent = c.checked_at ? 'Checked ' + new Date(c.checked_at * 1000).toLocaleTimeString() : '';
+    var probe = probeWords(c, st);
+    rows.push(['the player\'s frames', probe[0], probe[1]]);
+    rows.push(['the player\'s beacon', 'UDP ' + (pl.beacon || 5579) + ' · used only to find players on the network; a player added by name needs it not. Broadcasts do not cross a router.', ['gray', 'info']]);
+    rows.push(['this page', 'TCP ' + (s.config ? s.config.page_port : '') + ' · reached from another device only where a firewall here allows it in; the same machine needs no rule.', ['gray', 'info']]);
+    if (!c.tcp || !c.tcp.length) rows.unshift(['the player', pl.host ? pl.host + ' · not tried yet. Press Check now.' : 'none: add a player first.', [st.connected ? 'green' : 'gray', st.connected ? 'channel up' : 'not tested']]);
     var program = s.exe || 'the glass program';
     var rules = [
       ['in, UDP ' + (c.frames_port || '(the frames port)'), 'the frames the player sends · program ' + program],
@@ -334,7 +462,15 @@
       ['in, TCP ' + (s.config ? s.config.page_port : ''), 'this settings page from other devices (optional) · the same program'],
       ['out, TCP ' + [pl.manager, pl.channel, pl.web].filter(Boolean).join(', ') + (pl.host ? ' to ' + pl.host : ''), 'the Manager, the channel, album art · the same program']
     ];
-    $('firewall').innerHTML = rules.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
+    return { rows: rows, rules: rules, when: c.checked_at ? 'Checked ' + new Date(c.checked_at * 1000).toLocaleTimeString() : '', badge: connectionBadge(rows, st) };
+  }
+  function renderConnection(s) {
+    var c = connectionRows(s);
+    $('connection').innerHTML = c.rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + (r[2] ? '<span class="badge ' + esc(r[2][0]) + '">' + esc(r[2][1]) + '</span>' : '') + esc(r[1]) + '</td></tr>'; }).join('');
+    $('connection-badge').className = 'badge ' + c.badge[0];
+    $('connection-badge').textContent = c.badge[1];
+    $('connection-when').textContent = c.when;
+    $('firewall').innerHTML = c.rules.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
   }
   $('btn-connection-check').onclick = function () {
     $('btn-connection-check').disabled = true;
@@ -345,8 +481,8 @@
       setTimeout(again, 800);
     }).catch(function (e) { toast(e.message, 'error'); $('btn-connection-check').disabled = false; });
   };
-  function renderStatus(st) {
-    var rows = [
+  function statusRows(st) {
+    return [
       ['Showing', st.phase || ''],
       ['Player', st.player ? st.player + ' (' + st.host + (st.player_release ? ', Glass ' + st.player_release : '') + ')' : 'none'],
       ['Channel', st.connected ? 'connected' : 'not connected'],
@@ -356,6 +492,9 @@
       ['Synced', st.synced || '']].concat(state.face ? [['Glass interface', st.face_shown ? 'shown' : 'not shown']] : []).concat([
       ['This page', st.page || '']
     ]);
+  }
+  function renderStatus(st) {
+    var rows = statusRows(st);
     var c = state.config; var p = c && c.active ? c.players[c.active] : null;
     var manager = p ? 'http://' + p.host + ':' + p.manager_port + '/' : '';
     $('status').innerHTML = rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('') +

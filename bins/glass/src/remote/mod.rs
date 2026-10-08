@@ -22,6 +22,9 @@ use config::{Player, RemoteConfig, ThemeChoice};
 use intake::remote::{Beacon, DEFAULT_BEACON_PORT};
 
 const PAGE: &str = include_str!("page.html");
+/// The report's forms, one script with the Manager's page: compose, the
+/// forum cut, the issue body, the file name.
+const REPORT_JS: &str = include_str!("../../../../plugin/manager/report.js");
 
 /// What the page shows about the display right now.
 #[derive(Clone, Debug, Default, Serialize)]
@@ -393,6 +396,67 @@ impl RemoteApp {
         if let Some(ports) = ports {
             self.set_connection(|c| c.player = ports);
         }
+    }
+
+    pub fn beacon(&self) -> Option<Beacon> {
+        self.beacon
+            .lock()
+            .map(|b| b.clone())
+            .unwrap_or_else(|e| e.into_inner().clone())
+    }
+
+    /// The support bundle: everything this remote knows of itself and of
+    /// its player, for the page's report. The player's own sheet is asked
+    /// of its Manager now, with a short limit; null where it does not
+    /// answer, with the reason.
+    pub fn support(&self) -> Value {
+        let beacon = self.beacon();
+        let (player_status, player_error) = match &beacon {
+            Some(b) => {
+                let url = format!("{}/api/status", b.manager_url());
+                let agent = ureq::Agent::config_builder()
+                    .timeout_global(Some(Duration::from_secs(5)))
+                    .build()
+                    .new_agent();
+                match agent.get(&url).call() {
+                    Ok(mut r) => match r.body_mut().read_to_string() {
+                        Ok(text) => match serde_json::from_str::<Value>(&text) {
+                            Ok(v) => (v, String::new()),
+                            Err(e) => (Value::Null, format!("{url}: not JSON: {e}")),
+                        },
+                        Err(e) => (Value::Null, format!("{url}: {e}")),
+                    },
+                    Err(e) => (Value::Null, format!("{url}: {e}")),
+                }
+            }
+            None => (Value::Null, "no player".to_string()),
+        };
+        json!({
+            "at": now_secs(),
+            "remote": {
+                "name": self.config().name,
+                "release": env!("CARGO_PKG_VERSION"),
+                "protocol": tap::wire::PROTOCOL,
+                "face": self.face(),
+                "product": self.product(),
+                "page": self.status().page,
+            },
+            "player": {
+                "name": beacon.as_ref().map(|b| b.name.clone()),
+                "host": beacon.as_ref().map(|b| b.host.clone()),
+                "address": beacon.as_ref().map(|b| b.address()),
+                "release": beacon.as_ref().map(|b| b.release.clone()),
+                "status": player_status,
+                "error": player_error,
+            },
+            "config": self.config(),
+            "status": self.status(),
+            "connection": self.connection(),
+            "assets": self.assets(),
+            "prerequisites": self.prerequisites(),
+            "upgrade": self.upgrade(),
+            "log": logline::recent(),
+        })
     }
 
     pub fn connection(&self) -> Connection {
@@ -773,6 +837,19 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
                     "prerequisites": app.prerequisites(),
                 }),
             );
+        }
+        // The support bundle for the page's report, and the report's forms.
+        (Method::Get, "/api/support") => {
+            respond_json(request, 200, app.support());
+        }
+        (Method::Get, "/report.js") => {
+            let response = Response::from_string(REPORT_JS)
+                .with_header(header(
+                    "Content-Type",
+                    "application/javascript; charset=utf-8",
+                ))
+                .with_header(header("Cache-Control", "no-cache"));
+            let _ = request.respond(response);
         }
         // Check now on the Connection panel: the TCP paths tried on a thread
         // of their own, and the frames path probed by the session through
