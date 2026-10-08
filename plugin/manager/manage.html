@@ -105,7 +105,9 @@
   /* Beside the adjustments the likeness stays in view while they scroll. */
   @media (min-width: 820px) { .look-side { position: sticky; top: 84px; } }
   .look-adjust { flex: 1 1 340px; min-width: 0; }
-  .lp { position: relative; container-type: size; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 8px; border: 1px solid var(--line); background: #111 center / cover no-repeat; --u: calc(var(--s, 1) * 100cqh / 720); font-weight: 700; line-height: 1; white-space: nowrap; }
+  /* The screen box: the player's screen, letterbox black, its edge a green hairline; the frame (.lp) placed in it as the display places it, its own edge a green hairline, cropped where it runs past the screen. */
+  .lp-screen { position: relative; overflow: hidden; border-radius: 8px; border: 1px solid var(--line); background: #000; box-shadow: inset 0 0 0 1px #2ecc71; }
+  .lp { position: absolute; container-type: size; overflow: hidden; background: #111 center / cover no-repeat; outline: 1px solid #2ecc71; outline-offset: -1px; --u: calc(var(--s, 1) * 100cqh / 720); font-weight: 700; line-height: 1; white-space: nowrap; }
   .lp-bar { position: absolute; left: 0; right: 0; bottom: 0; height: var(--barh); display: flex; align-items: center; justify-content: space-around; }
   .lp-bar svg { height: 50%; }
   .lp-top { position: absolute; top: calc(var(--u) * 20); left: 50%; transform: translateX(-50%); }
@@ -1026,7 +1028,11 @@
   function activateTheme(folder) {
     return api('POST', '/api/themes/' + encodeURIComponent(folder) + '/activate').then(function () {
       toast(t('MANAGER_ACTIVATED') + ' ' + folder);
-      return loadThemes().then(function () { if (state.currentTheme === folder) openTheme(folder); });
+      // The theme's frame is the likeness's: the sheet read again, the likeness painted again.
+      return loadStatus().catch(function () {}).then(function () {
+        if (lookUi.f) paintLook(true);
+        return loadThemes().then(function () { if (state.currentTheme === folder) openTheme(folder); });
+      });
     }).catch(function (e) { toast(errorText(e), 'error'); });
   }
 
@@ -2035,7 +2041,8 @@
     }).join('') + '</div>';
     var dimmed = opts.dim ? 'linear-gradient(rgba(0,0,0,' + opts.dim + '),rgba(0,0,0,' + opts.dim + ')),' : '';
     var picture = opts.picture ? ';background-image:' + dimmed + 'url(&quot;' + esc(opts.picture.replace(/["\\()\s]/g, function (c) { return '%' + c.charCodeAt(0).toString(16); })) + '&quot;)' : '';
-    return '<div class="lp" style="--s:' + opts.scale + ';--from:' + from + ';--barh:clamp(5.56cqh, calc(var(--u) * ' + units('measure.bar') + '), 33.3cqh)' + picture + '">' + html + '</div>';
+    var box = lookScreenBox();
+    return '<div class="lp-screen" style="' + box.screen + '"><div class="lp" style="' + box.frame + ';--s:' + opts.scale + ';--from:' + from + ';--barh:clamp(5.56cqh, calc(var(--u) * ' + units('measure.bar') + '), 33.3cqh)' + picture + '">' + html + '</div></div>';
   }
   // A drawn clock in a likeness is drawn by glass-evo itself: the module its
   // component carries for a browser has the clock alone as an export
@@ -2447,6 +2454,35 @@
   }
   function weatherSet(body) {
     api('POST', '/api/weather', body).then(weatherTook).catch(function (err) { toast(errorText(err), 'error'); });
+  }
+  // The likeness is the player's screen with the theme's frame placed on it
+  // as the display places it: the frame is the theme on show's size, the
+  // one every view lays the face out on (a piece that spills past it there
+  // spills here); fitted to the screen with its shape kept, or pixel for
+  // pixel, centred or at the set position, cropped where it runs past the
+  // screen. The screen's edge and the frame's edge are green hairlines:
+  // what lies between is what the screen shows. Without a screen size the
+  // box is the frame itself; without a theme size, 16:9.
+  function lookFrame() {
+    var m = /^(\d+)x(\d+)$/.exec((state.status && state.status.themeSize) || '');
+    return m && +m[1] > 0 && +m[2] > 0 ? [+m[1], +m[2]] : [1280, 720];
+  }
+  function lookScreenBox() {
+    var frame = lookFrame();
+    var f = lookUi.f || {};
+    var screen = f.screen && f.screen.width > 0 && f.screen.height > 0 ? [f.screen.width, f.screen.height] : frame.slice();
+    var p = f.placement || { fit: false, position: 'center', x: 0, y: 0 };
+    var w, h, x, y;
+    if (p.fit) {
+      var scale = Math.min(screen[0] / frame[0], screen[1] / frame[1]);
+      w = Math.round(frame[0] * scale); h = Math.round(frame[1] * scale);
+    } else { w = frame[0]; h = frame[1]; }
+    if (p.position === 'manual') { x = p.x || 0; y = p.y || 0; } else { x = Math.floor((screen[0] - w) / 2); y = Math.floor((screen[1] - h) / 2); }
+    var pc = function (n, of) { return (n / of * 100).toFixed(3) + '%'; };
+    return {
+      screen: 'aspect-ratio:' + screen[0] + ' / ' + screen[1],
+      frame: 'left:' + pc(x, screen[0]) + ';top:' + pc(y, screen[1]) + ';width:' + pc(w, screen[0]) + ';height:' + pc(h, screen[1])
+    };
   }
   function paintLook(cards) {
     var f = lookUi.f;

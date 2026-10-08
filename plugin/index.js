@@ -2405,13 +2405,21 @@ Glass.prototype.faceSettings = function () {
     if (safeFolderName(theme)) {
         try { themeLook = { folder: theme, keys: facelook.themeKeys(fs.readFileSync(base_folder_P + theme + '/face.txt', 'utf8')) }; } catch (e) { /* the theme brings none */ }
     }
+    // Where the theme's frame goes on the screen, and the screen's size, so
+    // the look panel's likeness shows the frame as the screen shows it.
+    var placement = null;
+    var screen = null;
+    try { placement = self.displayPlacement(); } catch (e) { placement = null; }
+    try { screen = self.screenFrame(); } catch (e) { screen = null; }
     return {
         settings: facelook.settingsOf(meterConfig && meterConfig.current),
         builtIn: builtIn,
         looks: looks,
         themeLook: themeLook,
         backgrounds: self.backgroundsList().map(function (b) { return b.name; }),
-        frostSuits: facelook.frostSuits(self.boardInfo().class)
+        frostSuits: facelook.frostSuits(self.boardInfo().class),
+        placement: placement,
+        screen: screen
     };
 };
 
@@ -2472,6 +2480,27 @@ Glass.prototype.displayFacts = function () {
         since: running ? (this.displayStartedAt || null) : null,
         componentInstalledAt: installedAt
     };
+};
+
+// The screen the display draws on, by its size in the picture's own
+// orientation: the X server's size where the display draws on X, else the
+// connected panel's native size turned by the rotation. Null where neither
+// is known. For the look panel, which places the theme's frame on it as
+// the display does.
+Glass.prototype.screenFrame = function () {
+    var self = this;
+    var onX = !self.displayRenderer || self.displayRenderer.driver !== 'kmsdrm';
+    if (onX) {
+        var m = /^(\d+)x(\d+)$/.exec(String(self.screenSize() || ''));
+        if (m) { return { width: parseInt(m[1], 10), height: parseInt(m[2], 10), source: 'x' }; }
+    }
+    var probe = null;
+    try { probe = self.screenProbe(false); } catch (e) { probe = null; }
+    var panel = ((probe && probe.connectors) || []).find(function (c) { return c.status === 'connected' && c.native && c.native.width > 0 && c.native.height > 0; });
+    if (!panel) { return null; }
+    var rotation = parseInt((meterConfig && meterConfig.current && meterConfig.current['screen.rotation']) || 0, 10) || 0;
+    var turned = rotation === 90 || rotation === 270;
+    return { width: turned ? panel.native.height : panel.native.width, height: turned ? panel.native.width : panel.native.height, source: 'panel' };
 };
 
 // The persist period as the settings page has it: how long the meters stand
