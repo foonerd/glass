@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.23] - 2026-10-08
+
+- **The signature travels inside the archive.** Every archive of a release, the plugin zip, the remotes' archives and the Windows zip, now carries `MANIFEST`, every file's digest, and `MANIFEST.sig`, the manifest's signature made with the project's key. A file brought by hand is verified with no network at all: the Manager checks the manifest's signature with the public key it carries, then every file in the zip against the manifest, both ways, and only then installs; an archive published before signing is looked up on GitHub as before, and refused where that is out of reach. A user behind a firewall downloads the same two files as anyone, `glass-<version>.zip` and `glass-evo-<version>.zip`, and nothing beside them. The sums beside the assets stay for the online path and for a check by hand.
+
 ## [0.9.22] - 2026-10-08
 
 The release of 0.9.21's signing, whose workflow file GitHub rejected before any build (a secret read in a step's condition): the signing step now reads the secret in its shell and publishes unsigned when there is none. Nothing else is new. Every release from here carries `SHA256SUMS` and `SHA256SUMS.sig`.
