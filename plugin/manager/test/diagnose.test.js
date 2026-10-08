@@ -35,7 +35,7 @@ function healthy() {
     status: {
       version: '0.7.93', arch: 'arm', binary: true, legacy: false, headless: false, running: true, timeout: 5,
       interactive: 'on', measured: true, diskFree: 900 * 1073741824, themeSize: '1280x720',
-      activeTheme: '1280x720_theme', themeFonts: [], evo: healthyEvo(),
+      activeTheme: '1280x720_theme', themeFiles: [], evo: healthyEvo(),
       channel: { clients: 1, status: 'play', service: 'mpd' },
       showing: { rate: 30 },
       artwork: { enabled: true },

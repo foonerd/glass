@@ -113,27 +113,88 @@ function remoteRows(remotes, latest, standing) {
   });
 }
 
-// A theme's own font files: every `<field>.font` its meters.txt names,
-// resolved as the display resolves them (an absolute path, the theme
-// folder, then `font.path`), and whether the file is there.
-function themeFonts(metersText, themeDir, fontPath, exists) {
+// The keys of a theme's text that name a picture, as the display's own
+// reader (lead's tailor) has them: a `*` is one segment, a `**` one or more.
+const PICTURE_KEYS = ['bgr.filename', 'fgr.filename', 'indicator.filename', 'bar.filename', 'reflection.filename', 'albumart.mask', 'vinyl.filename', 'reel.*.filename', 'tonearm.filename', 'button.*.image', '*.head.image', '*.knob.image', '*.slider.tip', '*.slider.track', '*.icon', '*.marker.*.image', 'screen.bgr'];
+// A record's, a reel's or the tonearm's picture may be a list whose earlier
+// names are looked for in the track's own folder; only the last is the theme's.
+const LAST_OF_LIST = ['vinyl.filename', 'tonearm.filename', 'reel.*.filename'];
+
+function keyMatches(pattern, key) {
+  const go = function (p, k) {
+    if (!p.length && !k.length) return true;
+    if (!p.length || !k.length) return false;
+    if (p[0] === '**') { for (let n = 1; n <= k.length; n++) { if (go(p.slice(1), k.slice(n))) return true; } return false; }
+    if (p[0] === '*' || p[0] === k[0]) return go(p.slice(1), k.slice(1));
+    return false;
+  };
+  return go(pattern.split('.'), key.split('.'));
+}
+
+// Whether a file the theme names may be absent without harm: the display
+// has a fallback it documents. A field's own font falls back to the
+// style's font; a knob whose picture is not there is drawn as the arc.
+function fileIsOptional(key) {
+  const k = String(key).trim().toLowerCase();
+  return OWN_FONT.test(k) || keyMatches('*.knob.image', k);
+}
+
+// Every file a theme's text names, each with the key that names it,
+// resolved as the display resolves it (an absolute path as it is; a
+// relative one in the theme folder, a font also under `font.path`) and
+// whether it is there: `found`, `missing` (named and not there: the theme
+// has a hole), `optional` (missing, and the display does without it),
+// `elsewhere` (a path outside the theme that is there).
+function themeFiles(metersText, themeDir, fontPath, exists) {
   const out = [];
   const seen = new Set();
   String(metersText || '').split(/\r?\n/).forEach(function (line) {
-    const m = /^\s*([a-z.]+\.font)\s*=\s*(.+?)\s*$/.exec(line);
-    if (!m || !OWN_FONT.test(m[1])) return;
-    const value = m[2].replace(/^\/+/, '');
-    const key = m[1] + '=' + value;
-    if (seen.has(key)) return;
-    seen.add(key);
-    const candidates = [];
-    if (m[2].startsWith('/')) candidates.push(m[2]);
-    if (themeDir) candidates.push(themeDir.replace(/\/$/, '') + '/' + value);
-    if (fontPath) candidates.push(fontPath.replace(/\/$/, '') + '/' + value);
-    const found = candidates.find(function (p) { return exists(p); }) || null;
-    out.push({ key: m[1], file: m[2], found: found });
+    const trimmed = line.trim();
+    if (!trimmed || trimmed[0] === '#' || trimmed[0] === ';' || trimmed[0] === '[') return;
+    const at = trimmed.indexOf('=');
+    if (at === -1) return;
+    const key = trimmed.slice(0, at).trim().toLowerCase();
+    const value = trimmed.slice(at + 1).trim();
+    const font = OWN_FONT.test(key);
+    const picture = !font && PICTURE_KEYS.some(function (p) { return keyMatches(p, key); });
+    if (!font && !picture) return;
+    let files = font ? [value] : value.split(',');
+    if (picture && LAST_OF_LIST.some(function (p) { return keyMatches(p, key); })) files = files.slice(-1);
+    files.forEach(function (raw) {
+      const file = raw.trim();
+      if (!file || file.toLowerCase() === 'none') return;
+      const id = key + '=' + file;
+      if (seen.has(id)) return;
+      seen.add(id);
+      // As the display looks: a font at its absolute path, else inside the
+      // theme folder, else under font.path (intake's resolve_own_font); a
+      // picture inside the theme folder, or at its absolute path.
+      const absolute = file.startsWith('/');
+      const candidates = [];
+      if (absolute) candidates.push(file);
+      if (font) {
+        if (themeDir) candidates.push(themeDir.replace(/\/$/, '') + '/' + file.replace(/^\/+/, ''));
+        if (fontPath) candidates.push(fontPath.replace(/\/$/, '') + '/' + file.replace(/^\/+/, ''));
+      } else if (!absolute && themeDir) {
+        candidates.push(themeDir.replace(/\/$/, '') + '/' + file.replace(/^\.\//, ''));
+      }
+      const found = candidates.find(function (p) { return exists(p); }) || null;
+      const state = found ? (found === file ? 'elsewhere' : 'found') : fileIsOptional(key) ? 'optional' : 'missing';
+      out.push({ key: key, file: file, found: found, state: state });
+    });
   });
   return out;
 }
 
-module.exports = { evo, remoteRows, themeFonts, older, unknownSkies, SKY_NAMES };
+// The counts a card or a sheet row shows.
+function themeFilesSummary(files) {
+  const count = function (s) { return files.filter(function (f) { return f.state === s; }).length; };
+  return { named: files.length, found: count('found') + count('elsewhere'), missing: count('missing'), optional: count('optional') };
+}
+
+// The fonts alone, as the status sheet of 0.9.6 listed them.
+function themeFonts(metersText, themeDir, fontPath, exists) {
+  return themeFiles(metersText, themeDir, fontPath, exists).filter(function (f) { return OWN_FONT.test(f.key); }).map(function (f) { return { key: f.key, file: f.file, found: f.found }; });
+}
+
+module.exports = { evo, remoteRows, themeFonts, themeFiles, themeFilesSummary, fileIsOptional, keyMatches, older, unknownSkies, SKY_NAMES };

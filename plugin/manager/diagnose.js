@@ -366,12 +366,20 @@ const CHECKS = [
     }
   },
   {
-    id: 'theme-fonts', symptoms: ['screen', 'remotes', 'other'],
+    // The theme on show names files that are not there: a cause where the
+    // display cannot do without them, a note where it does (a field's
+    // font, a knob's picture).
+    id: 'theme-files', symptoms: ['no-meters', 'screen', 'remotes', 'other'],
     run(f) {
-      const fonts = f.status.themeFonts;
-      if (!Array.isArray(fonts)) return null;
-      const missing = fonts.filter((x) => !x.found);
-      return missing.length ? note('theme-fonts', 'DIAG_THEME_FONT_MISSING', { theme: f.status.activeTheme || '?', files: missing.map((x) => x.key + ' = ' + x.file).join(', ') }) : null;
+      const files = f.status.themeFiles;
+      if (!Array.isArray(files)) return null;
+      // A sheet from 0.9.6 to 0.9.13 listed the fonts alone, found or not, without a state.
+      const stateOf = (x) => x.state || (x.found ? 'found' : /\.font$/.test(x.key) ? 'optional' : 'missing');
+      const list = (state) => files.filter((x) => stateOf(x) === state).map((x) => x.key + ' = ' + x.file).join(', ');
+      const theme = f.status.activeTheme || '?';
+      if (list('missing')) return cause('theme-files', 'DIAG_THEME_FILE_MISSING', { theme, files: list('missing') }, 'themes');
+      if (list('optional')) return note('theme-files', 'DIAG_THEME_FILE_OPTIONAL', { theme, files: list('optional') }, 'themes');
+      return null;
     }
   },
   {

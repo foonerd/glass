@@ -26,7 +26,7 @@ function facts(evoOver, over) {
   const evo = evoOver === null ? null : Object.assign(evoFacts(), evoOver || {});
   return Object.assign({
     now: NOW, update: null, log: [], page: { module: '0.2.4' },
-    status: Object.assign({ version: '0.9.7', arch: 'arm', binary: true, running: true, channel: { status: 'play' }, activeTheme: '1280x720_theme', themeFonts: [], evo: evo, sheet: { housekeeping: { problems: [] } } }, over || {})
+    status: Object.assign({ version: '0.9.7', arch: 'arm', binary: true, running: true, channel: { status: 'play' }, activeTheme: '1280x720_theme', themeFiles: [], evo: evo, sheet: { housekeeping: { problems: [] } } }, over || {})
   });
 }
 
@@ -135,10 +135,20 @@ test('the wait after a stop, the skies moving on a small board, a theme\'s own f
   assert.strictEqual(small.kind, 'note');
   assert.strictEqual(one(diagnose('slow', facts({ motion: false, smallBoard: true })), 'skies-motion'), undefined, 'motion off costs nothing');
   assert.strictEqual(one(diagnose('slow', facts({ motion: true, smallBoard: false })), 'skies-motion'), undefined);
-  const fonts = [{ key: 'time.total.font', file: 'fonts/Another.ttf', found: null }, { key: 'playinfo.title.font', file: 'fonts/Mine.ttf', found: '/t/fonts/Mine.ttf' }];
-  const font = one(diagnose('other', facts({}, { themeFonts: fonts })), 'theme-fonts');
-  assert.strictEqual(font.key, 'DIAG_THEME_FONT_MISSING');
-  assert.deepStrictEqual(font.with, { theme: '1280x720_theme', files: 'time.total.font = fonts/Another.ttf' });
-  assert.strictEqual(one(diagnose('screen', facts({}, { themeFonts: [fonts[1]] })), 'theme-fonts'), undefined, 'every font found, nothing to say');
-  assert.strictEqual(one(diagnose('screen', facts({}, { themeFonts: null })), 'theme-fonts'), undefined, 'no theme read, nothing to say');
+  const files = [
+    { key: 'time.total.font', file: 'fonts/Another.ttf', found: null, state: 'optional' },
+    { key: 'playinfo.title.font', file: 'fonts/Mine.ttf', found: '/t/fonts/Mine.ttf', state: 'found' },
+    { key: 'bgr.filename', file: 'gold-bgr.png', found: null, state: 'missing' }
+  ];
+  const missing = one(diagnose('other', facts({}, { themeFiles: files })), 'theme-files');
+  assert.strictEqual(missing.key, 'DIAG_THEME_FILE_MISSING');
+  assert.strictEqual(missing.kind, 'cause');
+  assert.deepStrictEqual(missing.with, { theme: '1280x720_theme', files: 'bgr.filename = gold-bgr.png' });
+  const optional = one(diagnose('screen', facts({}, { themeFiles: files.slice(0, 2) })), 'theme-files');
+  assert.strictEqual(optional.key, 'DIAG_THEME_FILE_OPTIONAL');
+  assert.strictEqual(optional.kind, 'note', 'a font the display falls back from is worth knowing, not a cause');
+  assert.strictEqual(one(diagnose('no-meters', facts({}, { themeFiles: [files[1]] })), 'theme-files'), undefined, 'every file found, nothing to say');
+  assert.strictEqual(one(diagnose('screen', facts({}, { themeFiles: null })), 'theme-files'), undefined, 'no theme read, nothing to say');
+  // A sheet from 0.9.6 to 0.9.13 said found or not, without a state: a font not found is optional there too.
+  assert.strictEqual(one(diagnose('other', facts({}, { themeFiles: [{ key: 'time.total.font', file: 'x.ttf', found: null }] })), 'theme-files').key, 'DIAG_THEME_FILE_OPTIONAL');
 });

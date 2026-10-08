@@ -15,8 +15,10 @@ pub struct RequiredFile {
     /// `brought` (here, as the player offered it), `failed` (offered, and
     /// the fetch failed: the reason says why), `missing` (the theme names
     /// it and the player does not have it: the player's own screen lacks it
-    /// too), `elsewhere` (a path on the player, not a theme file: the
-    /// display looks for it where it runs).
+    /// too), `optional` (missing the same way, and the display has a
+    /// documented fallback: a field's font, a knob's picture), `elsewhere`
+    /// (a path on the player, not a theme file: the display looks for it
+    /// where it runs).
     pub state: String,
     pub reason: String,
 }
@@ -30,6 +32,7 @@ pub struct AssetsReport {
     pub brought: usize,
     pub failed: usize,
     pub missing: usize,
+    pub optional: usize,
     /// Files the player offered that the fetch failed, the theme's and the
     /// rest (fonts, icons, the look's), each with the reason.
     pub fetch_failed: Vec<(String, String)>,
@@ -65,6 +68,8 @@ pub fn assets_report(
             } else if offered.iter().any(|p| p == &relative) {
                 state = "failed";
                 reason = "offered by the player and not here".to_string();
+            } else if lead::tailor::file_is_optional(&key) {
+                state = "optional";
             } else {
                 state = "missing";
             }
@@ -82,6 +87,7 @@ pub fn assets_report(
         brought: count("brought"),
         failed: count("failed"),
         missing: count("missing"),
+        optional: count("optional"),
         required,
         fetch_failed: fetch_failed.to_vec(),
         offered: offered.len(),
@@ -126,7 +132,7 @@ mod tests {
                 ("fgr.filename", "gold-fgr.png", "failed"),
                 ("button.play.image", "play.png", "failed"),
                 ("button.play.image", "play-lit.png", "missing"),
-                ("time.total.font", "fonts/Another.ttf", "missing"),
+                ("time.total.font", "fonts/Another.ttf", "optional"),
                 (
                     "playinfo.title.font",
                     "/usr/share/fonts/Other.ttf",
@@ -139,7 +145,16 @@ mod tests {
             report.required[2].reason,
             "offered by the player and not here"
         );
-        assert_eq!((report.brought, report.failed, report.missing), (1, 2, 2));
+        assert_eq!(
+            (
+                report.brought,
+                report.failed,
+                report.missing,
+                report.optional
+            ),
+            (1, 2, 1, 1),
+            "a font the display falls back from is optional; a button's picture is not"
+        );
         assert_eq!((report.offered, report.here), (5, 3));
         assert_eq!(report.theme, "t");
     }
@@ -148,6 +163,14 @@ mod tests {
     fn a_theme_that_names_nothing_has_an_empty_report() {
         let report = assets_report("t", "[gold]\nmeter.type = circular\n", &[], &[], |_| false);
         assert!(report.required.is_empty());
-        assert_eq!((report.brought, report.failed, report.missing), (0, 0, 0));
+        assert_eq!(
+            (
+                report.brought,
+                report.failed,
+                report.missing,
+                report.optional
+            ),
+            (0, 0, 0, 0)
+        );
     }
 }

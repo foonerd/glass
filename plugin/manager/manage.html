@@ -46,11 +46,14 @@
   .thumb img { width: 100%; height: 100%; object-fit: contain; display: block; }
   .thumb .placeholder { color: var(--muted); font-size: 13px; text-align: center; padding: 10px; }
   .thumb .badge { position: absolute; top: 8px; left: 8px; }
-  .badge { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .3px; padding: 2px 8px; border-radius: 10px; background: #444; color: #ddd; text-transform: uppercase; }
+  .badge { display: inline-block; font-size: 11px; font-weight: 600; letter-spacing: .3px; padding: 2px 8px; border-radius: 10px; background: #444; color: #ddd; text-transform: uppercase; white-space: nowrap; }
   .badge.green { background: var(--accent); color: #fff; }
   .badge.blue { background: var(--info); color: #fff; }
   .badge.orange { background: var(--warn); color: #222; }
   .badge.gray { background: #3a3a3a; color: #bbb; }
+  .badge.red { background: var(--danger); color: #fff; }
+  table.kv td .badge { margin-right: 8px; }
+  .missing-word { color: var(--danger); font-weight: 600; }
   .card .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
   .card .title { font-weight: 600; color: #fff; word-break: break-word; }
   .card .meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px 12px; }
@@ -596,6 +599,9 @@
     </div>
     <h3 id="tm-previews-title"></h3>
     <div id="tm-previews" class="meters"></div>
+    <h3 id="tm-files-title"></h3>
+    <div class="help" id="tm-files-help" style="margin-bottom:8px"></div>
+    <table class="kv" id="tm-files"></table>
     <div id="tm-rotation" class="hidden">
       <h3 id="tm-rotation-title"></h3>
       <div class="help" id="tm-rotation-help" style="margin-bottom:10px"></div>
@@ -982,6 +988,8 @@
       }
       var badges = '';
       if (th.active) badges += '<span class="badge green">' + esc(t('THEME_GALLERY_ACTIVE')) + '</span> ';
+      // A theme that names files it does not have: the count in red, so a maker sees it at a glance.
+      if (th.named && th.named.missing) badges += '<span class="badge red">' + esc(th.named.missing + ' ' + t('MANAGER_ST_MISSING')) + '</span> ';
       card.innerHTML =
         '<div class="thumb">' + thumbHtml + (badges ? '<div class="badge-wrap" style="position:absolute;top:8px;left:8px">' + badges + '</div>' : '') + '</div>' +
         '<div class="body">' +
@@ -1110,10 +1118,36 @@
   };
 
   // Theme details.
+  // Every file the theme names, found or missing where the display looks:
+  // a maker sees what the theme calls for that is not there, missing in
+  // red, optional where the display does without it.
+  function loadThemeFiles(folder) {
+    $('tm-files-title').textContent = t('MANAGER_THEME_FILES');
+    $('tm-files-help').textContent = t('MANAGER_THEME_FILES_HELP');
+    $('tm-files').innerHTML = '<tr><td colspan="2" class="muted">…</td></tr>';
+    api('GET', '/api/themes/' + encodeURIComponent(folder) + '/named').then(function (named) {
+      if (state.currentTheme !== folder) return;
+      var files = named.files || [];
+      var sum = named.summary || { named: files.length, found: 0, missing: 0, optional: 0 };
+      var head = '<tr><td>' + esc(t('MANAGER_THEME_FILES_COUNT')) + '</td><td>' + esc(sum.named + ' ' + t('MANAGER_FILES_NAMED') + ' · ' + sum.found + ' ' + t('MANAGER_ST_FOUND')) +
+        (sum.missing ? ' · <span class="missing-word">' + esc(sum.missing + ' ' + t('MANAGER_ST_MISSING')) + '</span>' : '') + (sum.optional ? ' · ' + esc(sum.optional + ' ' + t('MANAGER_FILE_OPTIONAL')) : '') + '</td></tr>';
+      // Missing first, then optional, then what is there; a file found in
+      // the theme's own folder needs no path, one found elsewhere shows it.
+      var order = { missing: 0, optional: 1, found: 2, elsewhere: 3 };
+      var inTheme = (named.dir || '').replace(/\/$/, '') + '/';
+      files = files.slice().sort(function (a, b) { return (order[a.state] || 0) - (order[b.state] || 0); });
+      $('tm-files').innerHTML = head + (files.length ? files.map(function (f) {
+        var badge = f.state === 'missing' ? '<span class="badge red">' + esc(t('MANAGER_ST_MISSING')) + '</span>' : f.state === 'optional' ? '<span class="badge gray">' + esc(t('MANAGER_FILE_OPTIONAL')) + '</span>' : f.state === 'elsewhere' ? '<span class="badge gray">' + esc(t('MANAGER_FILE_ELSEWHERE')) + '</span>' : '<span class="badge green">' + esc(t('MANAGER_ST_FOUND')) + '</span>';
+        var word = f.state === 'missing' ? t('MANAGER_FILE_MISSING_WORD') : f.state === 'optional' ? t('MANAGER_FILE_OPTIONAL_WORD') : (f.found && named.dir && f.found.indexOf(inTheme) === 0) ? '' : (f.found || '');
+        return '<tr><td>' + esc(f.key) + '</td><td>' + badge + esc(f.file) + (word ? ' · ' + esc(word) : '') + '</td></tr>';
+      }).join('') : '<tr><td colspan="2" class="muted">' + esc(t('MANAGER_THEME_FILES_NONE')) + '</td></tr>');
+    }).catch(function (e) { $('tm-files').innerHTML = '<tr><td colspan="2">' + esc(errorText(e)) + '</td></tr>'; });
+  }
   function openTheme(folder) {
     state.currentTheme = folder;
     $('theme-modal').classList.add('open');
     renderThemeModal();
+    loadThemeFiles(folder);
     var th = (state.themes || []).find(function (x) { return x.folder === folder; });
     if (th && th.active) loadMeterSelection();
     if (th && !th.empty && (!state.previews[folder] || state.previews[folder].state !== 'fresh')) {
@@ -1689,9 +1723,13 @@
           ['MANAGER_CD_TITLE', !s.cardash || !s.cardash.enabled ? t('MANAGER_ST_OFF') : ((s.cardash.period === 'day' ? t('MANAGER_CD_NOW_DAY') : t('MANAGER_CD_NOW_NIGHT')) + ' ' + (s.cardash.period === 'day' ? s.cardash.dayTheme : s.cardash.nightTheme) + (s.cardash.next ? ' · ' + t('MANAGER_CD_NEXT') + ' ' + new Date(s.cardash.next.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') + (s.cardash.mode === 'sun' ? ' · ' + t('MANAGER_CD_MODE_SUN').toLowerCase() : ''))],
           ['MANAGER_ARTWORK_TITLE', !s.artwork ? '-' : (s.artwork.enabled ? t('MANAGER_ST_ON') : t('MANAGER_ST_OFF')) + (s.artwork.enabled ? ' · ' + (s.artwork.keyMode === 'project' ? t('FANART_KEY_MODE_PROJECT') : t('FANART_KEY_MODE_PERSONAL')) + ' · ' + (s.artwork.interval > 0 ? t('MANAGER_ST_EVERY') + ' ' + s.artwork.interval + ' s' : t('MANAGER_ST_ON_TITLE_CHANGE')) : '') + ' · ' + s.artwork.cachedArtists + ' ' + t('MANAGER_ST_ARTISTS_CACHED')],
           ['MANAGER_ST_CATALOG', s.catalog.count + ' ' + t('MANAGER_CATALOG_ENTRIES') + (s.catalog.updated ? ' · ' + t('MANAGER_CATALOG_UPDATED') + ' ' + fmtDate(s.catalog.updated) : '') + ' · ' + s.catalog.installed + ' ' + t('MANAGER_ST_INSTALLED_FROM')],
-          ['MANAGER_ST_THEME_FONTS', !s.themeFonts ? '-' : !s.themeFonts.length ? t('MANAGER_ST_THEME_FONTS_NONE') : s.themeFonts.map(function (f) {
-            return f.key + ' = ' + f.file + ' · ' + t(f.found ? 'MANAGER_ST_FOUND' : 'MANAGER_ST_MISSING');
-          }).join('\n')]
+          ['MANAGER_ST_THEME_FILES', !s.themeFiles ? '-' : !s.themeFiles.length ? t('MANAGER_ST_THEME_FILES_NONE') : (function () {
+            // The counts, then the files that are not there, missing before optional.
+            var sum = { found: 0, missing: [], optional: [] };
+            s.themeFiles.forEach(function (f) { var st = f.state || (f.found ? 'found' : 'optional'); if (st === 'missing') sum.missing.push(f); else if (st === 'optional') sum.optional.push(f); else sum.found++; });
+            var line = s.themeFiles.length + ' ' + t('MANAGER_FILES_NAMED') + ' · ' + sum.found + ' ' + t('MANAGER_ST_FOUND') + (sum.missing.length ? ' · ' + sum.missing.length + ' ' + t('MANAGER_ST_MISSING') : '') + (sum.optional.length ? ' · ' + sum.optional.length + ' ' + t('MANAGER_FILE_OPTIONAL') : '');
+            return [line].concat(sum.missing.map(function (f) { return f.key + ' = ' + f.file + ' · ' + t('MANAGER_ST_MISSING').toUpperCase(); }), sum.optional.map(function (f) { return f.key + ' = ' + f.file + ' · ' + t('MANAGER_FILE_OPTIONAL'); })).join('\n');
+          })()]
         ]],
         ['MANAGER_ST_SECTION_NETWORK', [
           ['MANAGER_ST_REMOTES', !s.remotes || !s.remotes.enabled ? t('MANAGER_RM_OFF') :

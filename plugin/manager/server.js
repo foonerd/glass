@@ -922,6 +922,15 @@ class Manager {
       res.json(files);
     });
 
+    // Every file the theme's text names, found or missing where the
+    // display looks: the detail view's Files section.
+    app.get('/api/themes/:folder/named', function (req, res) {
+      const folder = self.folderParam(req);
+      const named = self.themeFiles(folder);
+      if (!named) return res.status(404).json({ error: 'not-found' });
+      res.json(named);
+    });
+
     app.get('/api/themes/:folder/file', function (req, res) {
       const folder = self.folderParam(req);
       const file = self.plugin.themeFilePath(folder, String(req.query.tree || 'templates'), String(req.query.path || ''));
@@ -1157,18 +1166,18 @@ class Manager {
     // each left out where it cannot be read, the sheet stands without it.
     let evo = null;
     let remoteList = null;
-    let themeFonts = null;
+    let themeFiles = null;
     try { evo = sheetfacts.evo(this.evoFacts(info)); } catch (e) { /* not all there */ }
     try {
       remoteList = sheetfacts.remoteRows(plugin.remoteInfo().remotes, { Glass: this.updater.latest, 'glass-evo': this.component.latest }, remotebehind.standing);
     } catch (e) { /* no channel */ }
-    try { themeFonts = this.themeFonts(info.activeTheme); } catch (e) { /* no theme */ }
+    try { const named = this.themeFiles(info.activeTheme); themeFiles = named ? named.files : null; } catch (e) { /* no theme */ }
     return Object.assign(info, {
       measured: playing && rings.some(function (r) { return r.live; }),
       remotes: remotes,
       remoteList: remoteList,
       evo: evo,
-      themeFonts: themeFonts,
+      themeFiles: themeFiles,
       manager: { port: this.port, url: this.url(), uptimeS: Math.round(process.uptime()) },
       catalog: {
         fetchedAt: this.catalog.fetchedAt,
@@ -1219,16 +1228,19 @@ class Manager {
     return f;
   }
 
-  // The theme on show's own fonts, each named by its meters.txt and found
-  // or not where the display looks; null where the theme is not read.
-  themeFonts(theme) {
+  // Every file a theme names, each found or missing where the display
+  // looks (optional where the display does without it); null where the
+  // theme is not read. For the sheet, the diagnosis and the Themes tab.
+  themeFiles(theme) {
     const name = String(theme || '');
     if (!name || name.indexOf('/') !== -1 || name.indexOf('..') !== -1) return null;
     const dir = path.join(this.paths.meterBase, name);
-    const text = fs.readFileSync(path.join(dir, 'meters.txt'), 'utf8');
-    return sheetfacts.themeFonts(text, dir, this.plugin.fontPathDir() || '', function (p) {
+    let text;
+    try { text = fs.readFileSync(path.join(dir, 'meters.txt'), 'utf8'); } catch (e) { return null; }
+    const files = sheetfacts.themeFiles(text, dir, this.plugin.fontPathDir() || '', function (p) {
       try { return fs.statSync(p).isFile(); } catch (e) { return false; }
     });
+    return { folder: name, dir: dir, files: files, summary: sheetfacts.themeFilesSummary(files) };
   }
 
   async themes() {
@@ -1244,6 +1256,8 @@ class Manager {
       const metersFile = path.join(self.paths.meterBase, theme.folder, 'meters.txt');
       theme.previews = theme.meters.length ? await self.previews.status(theme.folder, metersFile) : 'none';
       theme.catalog = byFolder[theme.folder] || null;
+      // What the theme names and does not have, for the card's red count.
+      try { const named = self.themeFiles(theme.folder); theme.named = named ? named.summary : null; } catch (e) { theme.named = null; }
       const size = SIZE_PREFIX.exec(theme.folder);
       theme.width = size ? parseInt(size[1], 10) : theme.width || null;
       theme.height = size ? parseInt(size[2], 10) : theme.height || null;

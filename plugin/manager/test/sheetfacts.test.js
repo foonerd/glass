@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { evo, remoteRows, themeFonts, older, unknownSkies } = require('../sheetfacts');
+const { evo, remoteRows, themeFonts, themeFiles, themeFilesSummary, fileIsOptional, keyMatches, older, unknownSkies } = require('../sheetfacts');
 
 const NOW = Date.parse('2026-10-08T12:00:00Z');
 
@@ -133,6 +133,41 @@ test('a file under skies that is no sky is named, from the look and from the the
   assert.deepStrictEqual(unknownSkies([]), []);
   const s = evo(facts({ look: Object.assign(facts().look, { files: [{ path: 'skies/rainy.gif' }] }), themeSkies: ['snow.gif', 'notes.txt'] }));
   assert.deepStrictEqual(s.look.unknownSkies, ['rainy.gif', 'notes.txt']);
+});
+
+test('every file a theme names is found, missing, optional or elsewhere, as the display reads it', () => {
+  const here = new Set(['/t/gold/gold-bgr.png', '/t/gold/play.png', '/t/gold/fonts/Mine.ttf', '/t/gold/vinyl_disc.png', '/usr/share/fonts/Other.ttf', '/abs/Abs.otf']);
+  const exists = function (p) { return here.has(p); };
+  const text = [
+    '[gold]', 'meter.type = circular', '# a comment',
+    'bgr.filename = gold-bgr.png', 'fgr.filename = gold-fgr.png',
+    'button.play.image = play.png, play-lit.png',
+    'vinyl.filename = disc.png,vinyl_disc.png',
+    'volume.knob.image = knob.png',
+    'time.total.font = fonts/Mine.ttf', 'playinfo.title.font = /Other.ttf', 'playinfo.album.font = fonts/Gone.ttf', 'volume.value.font = /abs/Abs.otf',
+    'font.light = Light.ttf', 'albumart.mask = none', 'reel.left.filename = tape.png,reel-left.png'
+  ].join('\n');
+  const files = themeFiles(text, '/t/gold/', '/usr/share/fonts', exists);
+  assert.deepStrictEqual(files.map(function (f) { return [f.key, f.file, f.state]; }), [
+    ['bgr.filename', 'gold-bgr.png', 'found'],
+    ['fgr.filename', 'gold-fgr.png', 'missing'],
+    ['button.play.image', 'play.png', 'found'],
+    ['button.play.image', 'play-lit.png', 'missing'],
+    ['vinyl.filename', 'vinyl_disc.png', 'found'],
+    ['volume.knob.image', 'knob.png', 'optional'],
+    ['time.total.font', 'fonts/Mine.ttf', 'found'],
+    // The old form with a leading slash: found under font.path, as the display finds it.
+    ['playinfo.title.font', '/Other.ttf', 'found'],
+    ['playinfo.album.font', 'fonts/Gone.ttf', 'optional'],
+    ['volume.value.font', '/abs/Abs.otf', 'elsewhere'],
+    ['reel.left.filename', 'reel-left.png', 'missing']
+  ]);
+  assert.strictEqual(files[6].found, '/t/gold/fonts/Mine.ttf');
+  assert.strictEqual(files[7].found, '/usr/share/fonts/Other.ttf');
+  assert.deepStrictEqual(themeFilesSummary(files), { named: 11, found: 6, missing: 3, optional: 2 });
+  assert.ok(fileIsOptional('time.elapsed.font') && fileIsOptional('progress.knob.image') && !fileIsOptional('bgr.filename') && !fileIsOptional('font.light'));
+  assert.ok(keyMatches('*.marker.*.image', 'volume.marker.3.image') && keyMatches('reel.*.filename', 'reel.right.filename') && !keyMatches('*.icon', 'a.b.icon'));
+  assert.deepStrictEqual(themeFiles('', '/t', '', exists), []);
 });
 
 test('versions compare by their three numbers', () => {

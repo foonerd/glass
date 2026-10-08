@@ -279,7 +279,7 @@
 
   // ---- the theme's assets, and what this machine has ----
   function renderAssets(s) {
-    $('assets').innerHTML = assetsRows(s).map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
+    $('assets').innerHTML = assetsRows(s).map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + (r[2] ? '<span class="badge ' + esc(r[2][0]) + '">' + esc(r[2][1]) + '</span>' : '') + esc(r[1]) + '</td></tr>'; }).join('');
   }
   function assetsRows(s) {
     var a = s.assets;
@@ -287,11 +287,14 @@
     if (!a) {
       rows.push(['theme', (s.status && s.status.synced) ? 'not read: ' + s.status.synced : 'no sync yet']);
     } else {
-      rows.push(['theme', a.theme + ' · ' + a.required.length + ' files named · ' + a.brought + ' brought' + (a.failed ? ' · ' + a.failed + ' FAILED' : '') + (a.missing ? ' · ' + a.missing + ' MISSING on the player' : '')]);
+      rows.push(['theme', a.theme + ' · ' + a.required.length + ' files named · ' + a.brought + ' brought' + (a.failed ? ' · ' + a.failed + ' FAILED' : '') + (a.missing ? ' · ' + a.missing + ' MISSING on the player' : '') + (a.optional ? ' · ' + a.optional + ' optional' : ''), [a.missing ? 'red' : a.failed ? 'orange' : 'green', a.missing ? 'missing' : a.failed ? 'failed' : 'complete']]);
       rows.push(['offered by the player', a.offered + ' files · ' + a.here + ' here' + (a.fetch_failed.length ? ' · ' + a.fetch_failed.length + ' failed to fetch' : '')]);
-      a.required.forEach(function (r) {
-        var word = { brought: 'brought', failed: 'FAILED: ' + (r.reason || ''), missing: 'MISSING: the player does not have it; its own screen does without it too', elsewhere: 'a path on the player, not a theme file; the display looks for it where it runs' }[r.state] || r.state;
-        rows.push([r.key, r.file + ' · ' + word]);
+      // Missing first, then failed, then optional, then what is here.
+      var order = { missing: 0, failed: 1, optional: 2, elsewhere: 3, brought: 4 };
+      a.required.slice().sort(function (x, y) { return (order[x.state] || 0) - (order[y.state] || 0); }).forEach(function (r) {
+        var word = { brought: 'brought', failed: 'FAILED: ' + (r.reason || ''), missing: 'MISSING: the player does not have it; its own screen does without it too', optional: 'optional: the player does not have it, and the display does without it (a field\'s font falls back to its style\'s, a knob to the arc)', elsewhere: 'a path on the player, not a theme file; the display looks for it where it runs' }[r.state] || r.state;
+        var badge = { brought: ['green', 'brought'], failed: ['orange', 'failed'], missing: ['red', 'missing'], optional: ['gray', 'optional'], elsewhere: ['gray', 'elsewhere'] }[r.state] || ['gray', r.state];
+        rows.push([r.key, r.file + ' · ' + word, badge]);
       });
       a.fetch_failed.forEach(function (f) {
         if (!a.required.some(function (r) { return r.state === 'failed' && ('templates/' + a.theme + '/' + r.file) === f[0]; })) rows.push(['not brought', f[0] + ' · ' + f[1]]);
@@ -432,7 +435,7 @@
       case 'no-answer': return [port + ' · NO ANSWER: the channel took the request and the player said nothing within the wait. Check again; if it stays so, the player\'s Glass is older than 0.9.10.', ['orange', 'no answer']];
       case 'no-channel': return [port + ' · NOT TESTED: the channel to the player is down, so nothing could be asked. See the channel row.', ['orange', 'not tested']];
       case 'running': return [port + ' · testing…', ['gray', 'testing']];
-      default: return [port + ' · not tested yet' + (per ? ' (frames received' + per.slice(16) + ')' : '') + '. Press Check now.', [per ? 'green' : 'gray', per ? 'frames flow' : 'not tested']];
+      default: return [port + ' · not tested yet' + (per ? ' (' + per.slice(2) + ')' : '') + '. Press Check now.', [per ? 'green' : 'gray', per ? 'frames flow' : 'not tested']];
     }
   }
   // The panel's own sticker from its rows: no connection at all when the

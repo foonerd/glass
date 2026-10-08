@@ -476,8 +476,17 @@ pub fn files_named(text: &str) -> Vec<(String, String)> {
         if !picture && !font {
             continue;
         }
+        // A record's, a reel's or the tonearm's picture may be a list whose
+        // earlier names are looked for in the track's own folder; only the
+        // last is the theme's file.
         let files: Vec<&str> = if font {
             vec![value]
+        } else if matches!(kind_of(&key), Some(Kind::Picture))
+            && (key == "vinyl.filename"
+                || key == "tonearm.filename"
+                || matches("reel.*.filename", &key))
+        {
+            value.rsplit(',').take(1).collect()
         } else {
             value.split(',').collect()
         };
@@ -495,6 +504,15 @@ pub fn files_named(text: &str) -> Vec<(String, String)> {
         }
     }
     out
+}
+
+/// Whether a file the theme names may be absent without harm: the display
+/// has a fallback it documents. A field's own font falls back to the
+/// style's font; a knob whose picture is not there is drawn as the arc.
+/// Every other picture named and absent is a theme with a hole in it.
+pub fn file_is_optional(key: &str) -> bool {
+    let key = key.trim().to_ascii_lowercase();
+    (key.ends_with(".font") && !key.starts_with("font.")) || matches("*.knob.image", &key)
 }
 
 /// A tailored text: the new text, the pictures it names, and what could
@@ -694,6 +712,38 @@ pub fn tailored_name(name: &str, to: (u32, u32)) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_files_a_theme_names_are_read_as_the_display_reads_them() {
+        let text = "[gold]\nmeter.type = circular\n# bgr.filename = old.png\nbgr.filename = gold-bgr.png\nbutton.play.image = play.png, play-lit.png\nvinyl.filename = disc.png,vinyl_disc.png\nreel.left.filename = tape.png, reel-left.png\ntonearm.filename = arm.png\nvolume.knob.image = knob.png\ntime.total.font = fonts/Mine.ttf\nfont.light = Light.ttf\nalbumart.mask = none\nscreen.bgr = sky.png\nbgr.filename = gold-bgr.png\n";
+        let named = files_named(text);
+        let pairs: Vec<(&str, &str)> = named
+            .iter()
+            .map(|(k, f)| (k.as_str(), f.as_str()))
+            .collect();
+        assert_eq!(
+            pairs,
+            vec![
+                ("bgr.filename", "gold-bgr.png"),
+                ("button.play.image", "play.png"),
+                ("button.play.image", "play-lit.png"),
+                // A record's or a reel's list names the track's own pictures first.
+                ("vinyl.filename", "vinyl_disc.png"),
+                ("reel.left.filename", "reel-left.png"),
+                ("tonearm.filename", "arm.png"),
+                ("volume.knob.image", "knob.png"),
+                ("time.total.font", "fonts/Mine.ttf"),
+                ("screen.bgr", "sky.png"),
+            ]
+        );
+        // A field's font and a knob's picture have a fallback; the rest do not.
+        assert!(file_is_optional("time.total.font"));
+        assert!(file_is_optional("Volume.Knob.Image"));
+        assert!(!file_is_optional("font.light"));
+        assert!(!file_is_optional("bgr.filename"));
+        assert!(!file_is_optional("button.play.image"));
+        assert!(!file_is_optional("screen.bgr"));
+    }
 
     /// The parser's own source, held to the table: every key it reads by
     /// a helper, a match arm or a comparison, and every dotted literal,
