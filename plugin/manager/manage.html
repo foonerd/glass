@@ -658,6 +658,7 @@
 
 <script src="/face/face-page.js"></script>
 <script src="/look/lookmodel.js"></script>
+<script src="/diag/report.js"></script>
 <script>
 (function () {
   'use strict';
@@ -1832,30 +1833,44 @@
       api('POST', '/api/diagnose/capture/finish', { text: said }).then(showReport).catch(function (e) { toast(errorText(e), 'error'); openDiagnosis(); });
     };
   }
-  // The report: the user's words, when it was reproduced, the system log's
-  // link, what the checks found, and the sheet as it stands now.
+  // The report: the user's words, when it was reproduced and at what log
+  // level, the system log's link, what the checks found, and the sheet as
+  // it stands now, the addresses and the forecast's place hidden unless
+  // revealed. Its forms are GlassReport's (report.js, shared with the tests).
   function showReport(r) {
     loadStatus().catch(function () {}).then(function () {
+      var levels = r.levels || {};
       var head = [t('MANAGER_DIAG_R_TITLE') + ': ' + symptomTitle(r.symptom),
         t('MANAGER_DIAG_R_SAID') + ': ' + r.text,
-        t('MANAGER_DIAG_R_WINDOW').replace('{from}', r.from).replace('{to}', r.to),
-        t('MANAGER_DIAG_R_LOG') + ': ' + (r.log.link || t('MANAGER_DIAG_R_NOT_SENT').replace('{said}', r.log.said || r.log.error))].join('\n');
-      var rest = (r.diagnosis ? diagnosisText(r.diagnosis) + '\n' : '') + (state.statusText || '');
-      var text = head + '\n\n' + rest;
+        t('MANAGER_DIAG_R_WINDOW').replace('{from}', r.from).replace('{to}', r.to).replace('{raised}', levels.raised || 'verbose').replace('{previous}', levels.previous || '?'),
+        t('MANAGER_DIAG_R_LOG') + ': ' + (r.log.link || t('MANAGER_DIAG_R_NOT_SENT').replace('{said}', r.log.said || r.log.error))];
+      var made = window.GlassReport.compose(head, r.diagnosis ? diagnosisText(r.diagnosis) : '', state.statusText || '');
+      var text = made.text;
       diagShow(r.log.link ? t('MANAGER_DIAG_REPORT_READY') : t('MANAGER_DIAG_REPORT_NO_LINK').replace('{said}', r.log.said || r.log.error),
         '<pre class="report">' + esc(text) + '</pre><div class="row" style="margin-top:10px"><button class="primary" id="btn-diag-forum">' + esc(t('MANAGER_DIAG_COPY_FORUM')) + '</button>' +
         '<button id="btn-diag-issue">' + esc(t('MANAGER_DIAG_OPEN_ISSUE')) + '</button>' +
+        '<button id="btn-diag-download" type="button">' + esc(t('MANAGER_DIAG_DOWNLOAD_REPORT')) + '</button>' +
         (r.log.kept ? '<a href="/api/diagnose/log" download><button type="button">' + esc(t('MANAGER_DIAG_DOWNLOAD_LOG')) + '</button></a>' : '') + '</div>', false);
       $('btn-diag-back').hidden = false;
-      $('btn-diag-forum').onclick = function () { copyFrom($('btn-diag-forum'), 'MANAGER_DIAG_COPY_FORUM', text); };
+      // The forum copy is the whole report where a post takes it, else cut
+      // with a word on the file that holds the whole.
+      $('btn-diag-forum').onclick = function () { copyFrom($('btn-diag-forum'), 'MANAGER_DIAG_COPY_FORUM', window.GlassReport.forForum(text, t('MANAGER_DIAG_FORUM_TRIMMED')).text); };
       // An issue opens with the report in it where a link can carry it; the
       // whole report is on the clipboard either way.
       $('btn-diag-issue').onclick = function () {
         var title = symptomTitle(r.symptom) + ': ' + r.text.replace(/\s+/g, ' ').slice(0, 70);
-        var body = head + '\n\n```\n' + rest + '```\n';
-        if (encodeURIComponent(body).length > 6000) body = head + '\n\n' + t('MANAGER_DIAG_ISSUE_PASTE');
+        var body = window.GlassReport.issueBody(head, made.rest, t('MANAGER_DIAG_ISSUE_PASTE'));
         copyText(text, function () {});
         window.open(ISSUES + '?title=' + encodeURIComponent(title) + '&body=' + encodeURIComponent(body), '_blank', 'noopener');
+      };
+      // The whole report as a file, for an attachment or a mail.
+      $('btn-diag-download').onclick = function () {
+        var a = document.createElement('a');
+        a.href = URL.createObjectURL(new Blob([text], { type: 'text/plain;charset=utf-8' }));
+        a.download = window.GlassReport.fileName(state.status && state.status.hostname, Date.now());
+        document.body.appendChild(a);
+        a.click();
+        setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 1000);
       };
     });
   }

@@ -634,6 +634,10 @@ class Manager {
       res.sendFile(path.join(__dirname, 'face-page.js'), { maxAge: 0 });
     });
     // The look panel's model, which the page shares with its tests.
+    // The report's forms (a post, an issue, a file), one script for the page and its tests.
+    app.get('/diag/report.js', function (req, res) {
+      res.sendFile(path.join(__dirname, 'report.js'), { maxAge: 0 });
+    });
     app.get('/look/lookmodel.js', function (req, res) {
       res.sendFile(path.join(__dirname, 'lookmodel.js'), { maxAge: 0 });
     });

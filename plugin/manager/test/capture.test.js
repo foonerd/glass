@@ -48,6 +48,7 @@ test('a capture raises the level, sends the log when it has happened, and puts t
   assert.strictEqual(report.endedAt - report.startedAt, 90 * 1000);
   assert.strictEqual(report.text, 'tapped play, \n nothing happened');
   assert.deepStrictEqual(report.diagnosis, { found: false, findings: [] });
+  assert.deepStrictEqual(report.levels, { raised: 'verbose', previous: 'warn' }, 'the report says what level the log holds of those minutes');
   assert.deepStrictEqual(world.sent, ['Glass 0.7.94 report: touch - tapped play, nothing happened']);
   assert.deepStrictEqual(world.settings, { level: 'warn', targets: ['display'] }, 'the level is back as it was');
   assert.strictEqual(world.files['/data/capture.json'], undefined, 'the marker is gone');

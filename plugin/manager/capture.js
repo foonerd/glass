@@ -141,7 +141,9 @@ class Capture {
       this.sending = false;
       this.restore();
     }
-    return { symptom: marker.symptom, startedAt: marker.startedAt, endedAt, text: said, diagnosis: marker.diagnosis, log };
+    // The levels, for the report to say what the log holds of those minutes.
+    const levels = { raised: RAISED.level, previous: (marker.previous && marker.previous.level) || null };
+    return { symptom: marker.symptom, startedAt: marker.startedAt, endedAt, text: said, diagnosis: marker.diagnosis, log, levels };
   }
 }
 
