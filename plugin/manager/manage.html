@@ -601,6 +601,7 @@
     <div id="tm-previews" class="meters"></div>
     <h3 id="tm-files-title"></h3>
     <div class="help" id="tm-files-help" style="margin-bottom:8px"></div>
+    <label class="switch" style="margin:0 0 10px"><input type="checkbox" id="tm-files-all"><span id="tm-files-all-word"></span></label>
     <table class="kv" id="tm-files"></table>
     <div id="tm-rotation" class="hidden">
       <h3 id="tm-rotation-title"></h3>
@@ -1117,31 +1118,51 @@
     });
   };
 
-  // Theme details.
   // Every file the theme names, found or missing where the display looks:
   // a maker sees what the theme calls for that is not there, missing in
-  // red, optional where the display does without it.
+  // red, optional where the display does without it. The files that are
+  // there are listed only with the switch on; the rest always.
   function loadThemeFiles(folder) {
     $('tm-files-title').textContent = t('MANAGER_THEME_FILES');
     $('tm-files-help').textContent = t('MANAGER_THEME_FILES_HELP');
+    $('tm-files-all-word').textContent = t('MANAGER_THEME_FILES_ALL');
+    $('tm-files-all').parentNode.title = t('MANAGER_THEME_FILES_ALL_HINT');
     $('tm-files').innerHTML = '<tr><td colspan="2" class="muted">…</td></tr>';
+    state.themeNamed = null;
     api('GET', '/api/themes/' + encodeURIComponent(folder) + '/named').then(function (named) {
       if (state.currentTheme !== folder) return;
-      var files = named.files || [];
-      var sum = named.summary || { named: files.length, found: 0, missing: 0, optional: 0 };
-      var head = '<tr><td>' + esc(t('MANAGER_THEME_FILES_COUNT')) + '</td><td>' + esc(sum.named + ' ' + t('MANAGER_FILES_NAMED') + ' · ' + sum.found + ' ' + t('MANAGER_ST_FOUND')) +
-        (sum.missing ? ' · <span class="missing-word">' + esc(sum.missing + ' ' + t('MANAGER_ST_MISSING')) + '</span>' : '') + (sum.optional ? ' · ' + esc(sum.optional + ' ' + t('MANAGER_FILE_OPTIONAL')) : '') + '</td></tr>';
-      // Missing first, then optional, then what is there; a file found in
-      // the theme's own folder needs no path, one found elsewhere shows it.
-      var order = { missing: 0, optional: 1, found: 2, elsewhere: 3 };
-      var inTheme = (named.dir || '').replace(/\/$/, '') + '/';
-      files = files.slice().sort(function (a, b) { return (order[a.state] || 0) - (order[b.state] || 0); });
-      $('tm-files').innerHTML = head + (files.length ? files.map(function (f) {
-        var badge = f.state === 'missing' ? '<span class="badge red">' + esc(t('MANAGER_ST_MISSING')) + '</span>' : f.state === 'optional' ? '<span class="badge gray">' + esc(t('MANAGER_FILE_OPTIONAL')) + '</span>' : f.state === 'elsewhere' ? '<span class="badge gray">' + esc(t('MANAGER_FILE_ELSEWHERE')) + '</span>' : '<span class="badge green">' + esc(t('MANAGER_ST_FOUND')) + '</span>';
-        var word = f.state === 'missing' ? t('MANAGER_FILE_MISSING_WORD') : f.state === 'optional' ? t('MANAGER_FILE_OPTIONAL_WORD') : (f.found && named.dir && f.found.indexOf(inTheme) === 0) ? '' : (f.found || '');
-        return '<tr><td>' + esc(f.key) + '</td><td>' + badge + esc(f.file) + (word ? ' · ' + esc(word) : '') + '</td></tr>';
-      }).join('') : '<tr><td colspan="2" class="muted">' + esc(t('MANAGER_THEME_FILES_NONE')) + '</td></tr>');
+      state.themeNamed = named;
+      paintThemeFiles();
     }).catch(function (e) { $('tm-files').innerHTML = '<tr><td colspan="2">' + esc(errorText(e)) + '</td></tr>'; });
+  }
+  // The meters that name a file, three by name and the rest counted.
+  function namedIn(f) {
+    if (!f.sections || !f.sections.length) return '';
+    return ' · ' + t('MANAGER_FILE_NAMED_IN') + ' ' + f.sections.slice(0, 3).join(', ') + (f.sections.length > 3 ? ' +' + (f.sections.length - 3) : '');
+  }
+  function paintThemeFiles() {
+    var named = state.themeNamed;
+    if (!named) return;
+    var all = $('tm-files-all').checked;
+    var files = named.files || [];
+    var sum = named.summary || { named: files.length, found: 0, missing: 0, optional: 0 };
+    var head = '<tr><td>' + esc(t('MANAGER_THEME_FILES_COUNT')) + '</td><td>' + esc(sum.named + ' ' + t('MANAGER_FILES_NAMED') + ' · ' + sum.found + ' ' + t('MANAGER_ST_FOUND')) +
+      (sum.missing ? ' · <span class="missing-word">' + esc(sum.missing + ' ' + t('MANAGER_ST_MISSING')) + '</span>' : '') + (sum.optional ? ' · ' + esc(sum.optional + ' ' + t('MANAGER_FILE_OPTIONAL')) : '') + '</td></tr>';
+    // Missing first, then optional, then what is there; a file found in
+    // the theme's own folder needs no path, one found elsewhere shows it.
+    var order = { missing: 0, optional: 1, elsewhere: 2, found: 3 };
+    var inTheme = (named.dir || '').replace(/\/$/, '') + '/';
+    var hidden = 0;
+    var rows = files.slice().sort(function (a, b) { return (order[a.state] || 0) - (order[b.state] || 0); }).filter(function (f) {
+      if (f.state === 'found' && !all) { hidden++; return false; }
+      return true;
+    }).map(function (f) {
+      var badge = f.state === 'missing' ? '<span class="badge red">' + esc(t('MANAGER_ST_MISSING')) + '</span>' : f.state === 'optional' ? '<span class="badge gray">' + esc(t('MANAGER_FILE_OPTIONAL')) + '</span>' : f.state === 'elsewhere' ? '<span class="badge gray">' + esc(t('MANAGER_FILE_ELSEWHERE')) + '</span>' : '<span class="badge green">' + esc(t('MANAGER_ST_FOUND')) + '</span>';
+      var word = f.state === 'missing' ? t('MANAGER_FILE_MISSING_WORD') : f.state === 'optional' ? t('MANAGER_FILE_OPTIONAL_WORD') : (f.found && named.dir && f.found.indexOf(inTheme) === 0) ? '' : (f.found || '');
+      return '<tr><td>' + esc(f.key) + '</td><td>' + badge + esc(f.file) + (word ? ' · ' + esc(word) : '') + esc(namedIn(f)) + '</td></tr>';
+    });
+    if (hidden) rows.push('<tr><td></td><td class="muted">' + esc(hidden + ' ' + t('MANAGER_THEME_FILES_HIDDEN')) + '</td></tr>');
+    $('tm-files').innerHTML = head + (files.length ? rows.join('') : '<tr><td colspan="2" class="muted">' + esc(t('MANAGER_THEME_FILES_NONE')) + '</td></tr>');
   }
   function openTheme(folder) {
     state.currentTheme = folder;
@@ -1728,7 +1749,8 @@
             var sum = { found: 0, missing: [], optional: [] };
             s.themeFiles.forEach(function (f) { var st = f.state || (f.found ? 'found' : 'optional'); if (st === 'missing') sum.missing.push(f); else if (st === 'optional') sum.optional.push(f); else sum.found++; });
             var line = s.themeFiles.length + ' ' + t('MANAGER_FILES_NAMED') + ' · ' + sum.found + ' ' + t('MANAGER_ST_FOUND') + (sum.missing.length ? ' · ' + sum.missing.length + ' ' + t('MANAGER_ST_MISSING') : '') + (sum.optional.length ? ' · ' + sum.optional.length + ' ' + t('MANAGER_FILE_OPTIONAL') : '');
-            return [line].concat(sum.missing.map(function (f) { return f.key + ' = ' + f.file + ' · ' + t('MANAGER_ST_MISSING').toUpperCase(); }), sum.optional.map(function (f) { return f.key + ' = ' + f.file + ' · ' + t('MANAGER_FILE_OPTIONAL'); })).join('\n');
+            var where = function (f) { return f.sections && f.sections.length ? ' · ' + t('MANAGER_FILE_NAMED_IN') + ' ' + f.sections.slice(0, 3).join(', ') + (f.sections.length > 3 ? ' +' + (f.sections.length - 3) : '') : ''; };
+            return [line].concat(sum.missing.map(function (f) { return f.key + ' = ' + f.file + ' · ' + t('MANAGER_ST_MISSING').toUpperCase() + where(f); }), sum.optional.map(function (f) { return f.key + ' = ' + f.file + ' · ' + t('MANAGER_FILE_OPTIONAL') + where(f); })).join('\n');
           })()]
         ]],
         ['MANAGER_ST_SECTION_NETWORK', [
@@ -2749,6 +2771,12 @@
     lookUi.safe = $('look-safe').checked;
     try { window.localStorage.setItem('glass.look.safe', lookUi.safe ? 'on' : 'off'); } catch (e) { /* kept for this page alone */ }
     paintLook(true);
+  };
+  // The theme files' switch: this browser's own choice, off unless turned on.
+  try { $('tm-files-all').checked = window.localStorage.getItem('glass.theme.files.all') === 'on'; } catch (e) { $('tm-files-all').checked = false; }
+  $('tm-files-all').onchange = function () {
+    try { window.localStorage.setItem('glass.theme.files.all', $('tm-files-all').checked ? 'on' : 'off'); } catch (e) { /* kept for this page alone */ }
+    paintThemeFiles();
   };
   $('look-preview').onclick = function (e) { var part = e.target.closest('[data-open]'); if (part) lookOpen(part.getAttribute('data-open'), true); };
   $('look-preview').onkeydown = function (e) {

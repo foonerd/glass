@@ -145,9 +145,14 @@ test('every file a theme names is found, missing, optional or elsewhere, as the 
     'vinyl.filename = disc.png,vinyl_disc.png',
     'volume.knob.image = knob.png',
     'time.total.font = fonts/Mine.ttf', 'playinfo.title.font = /Other.ttf', 'playinfo.album.font = fonts/Gone.ttf', 'volume.value.font = /abs/Abs.otf',
-    'font.light = Light.ttf', 'albumart.mask = none', 'reel.left.filename = tape.png,reel-left.png'
+    'font.light = Light.ttf', 'albumart.mask = none', 'reel.left.filename = tape.png,reel-left.png',
+    '[silver]', 'bgr.filename = gold-bgr.png', 'fgr.filename = gold-fgr.png'
   ].join('\n');
   const files = themeFiles(text, '/t/gold/', '/usr/share/fonts', exists);
+  // The same file named by two meters is one entry naming both, in the text's order.
+  assert.deepStrictEqual(files[0].sections, ['gold', 'silver']);
+  assert.deepStrictEqual(files[1].sections, ['gold', 'silver']);
+  assert.deepStrictEqual(files[2].sections, ['gold']);
   assert.deepStrictEqual(files.map(function (f) { return [f.key, f.file, f.state]; }), [
     ['bgr.filename', 'gold-bgr.png', 'found'],
     ['fgr.filename', 'gold-fgr.png', 'missing'],

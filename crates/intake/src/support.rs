@@ -21,6 +21,8 @@ pub struct RequiredFile {
     /// where it runs).
     pub state: String,
     pub reason: String,
+    /// The meter sections whose lines name it, so a maker finds the line.
+    pub sections: Vec<String>,
 }
 
 /// The theme's assets as the remote stands: the files named and their
@@ -53,7 +55,8 @@ pub fn assets_report(
 ) -> AssetsReport {
     let folder = format!("templates/{theme}/");
     let mut required = Vec::new();
-    for (key, file) in lead::tailor::files_named(meters_text) {
+    for named in lead::tailor::files_named(meters_text) {
+        let (key, file, sections) = (named.key, named.file, named.sections);
         let state;
         let mut reason = String::new();
         if file.starts_with('/') || file.contains(":\\") {
@@ -79,6 +82,7 @@ pub fn assets_report(
             file,
             state: state.to_string(),
             reason,
+            sections,
         });
     }
     let count = |s: &str| required.iter().filter(|r| r.state == s).count();
@@ -141,6 +145,7 @@ mod tests {
             ]
         );
         assert_eq!(report.required[1].reason, "HTTP 404");
+        assert_eq!(report.required[0].sections, vec!["gold"]);
         assert_eq!(
             report.required[2].reason,
             "offered by the player and not here"

@@ -450,19 +450,38 @@ pub fn kind_of(key: &str) -> Option<Kind> {
     None
 }
 
+/// One file a theme's text names, with every meter section that names it.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct NamedFile {
+    /// The key that names it, `bgr.filename`, `time.total.font`, …
+    pub key: String,
+    /// As the theme wrote it.
+    pub file: String,
+    /// The sections (`[meter]`) whose lines name it, in the text's order,
+    /// so a maker finds the line; empty for a line before any section.
+    pub sections: Vec<String>,
+}
+
 /// The files a theme's text names, each with the key that names it: the
 /// pictures (the keys of [`Kind::Picture`] and the backdrop, a list value
-/// giving each of its files) and a field's own font (`<field>.font`). For
-/// a remote to tell what it needs of the theme's folder.
-pub fn files_named(text: &str) -> Vec<(String, String)> {
-    let mut out = Vec::new();
+/// giving each of its files) and a field's own font (`<field>.font`). A
+/// file named by the same key in many meters is one entry with every
+/// section. For a remote to tell what it needs of the theme's folder, and
+/// for the Manager to say what a theme lacks.
+pub fn files_named(text: &str) -> Vec<NamedFile> {
+    let mut out: Vec<NamedFile> = Vec::new();
+    let mut section = String::new();
     for line in text.lines() {
         let line = line.trim();
-        if line.is_empty()
-            || line.starts_with('#')
-            || line.starts_with(';')
-            || line.starts_with('[')
-        {
+        if line.is_empty() || line.starts_with('#') || line.starts_with(';') {
+            continue;
+        }
+        if line.starts_with('[') {
+            section = line
+                .trim_start_matches('[')
+                .trim_end_matches(']')
+                .trim()
+                .to_string();
             continue;
         }
         let Some((key, value)) = line.split_once('=') else {
@@ -495,11 +514,20 @@ pub fn files_named(text: &str) -> Vec<(String, String)> {
             if file.is_empty() || file.eq_ignore_ascii_case("none") {
                 continue;
             }
-            if !out
-                .iter()
-                .any(|(k, f): &(String, String)| k == &key && f == file)
-            {
-                out.push((key.clone(), file.to_string()));
+            if let Some(have) = out.iter_mut().find(|n| n.key == key && n.file == file) {
+                if !section.is_empty() && !have.sections.iter().any(|s| s == &section) {
+                    have.sections.push(section.clone());
+                }
+            } else {
+                out.push(NamedFile {
+                    key: key.clone(),
+                    file: file.to_string(),
+                    sections: if section.is_empty() {
+                        Vec::new()
+                    } else {
+                        vec![section.clone()]
+                    },
+                });
             }
         }
     }
@@ -715,12 +743,15 @@ mod tests {
 
     #[test]
     fn the_files_a_theme_names_are_read_as_the_display_reads_them() {
-        let text = "[gold]\nmeter.type = circular\n# bgr.filename = old.png\nbgr.filename = gold-bgr.png\nbutton.play.image = play.png, play-lit.png\nvinyl.filename = disc.png,vinyl_disc.png\nreel.left.filename = tape.png, reel-left.png\ntonearm.filename = arm.png\nvolume.knob.image = knob.png\ntime.total.font = fonts/Mine.ttf\nfont.light = Light.ttf\nalbumart.mask = none\nscreen.bgr = sky.png\nbgr.filename = gold-bgr.png\n";
+        let text = "[gold]\nmeter.type = circular\n# bgr.filename = old.png\nbgr.filename = gold-bgr.png\nbutton.play.image = play.png, play-lit.png\nvinyl.filename = disc.png,vinyl_disc.png\nreel.left.filename = tape.png, reel-left.png\ntonearm.filename = arm.png\nvolume.knob.image = knob.png\ntime.total.font = fonts/Mine.ttf\nfont.light = Light.ttf\nalbumart.mask = none\nscreen.bgr = sky.png\n[silver]\nbgr.filename = gold-bgr.png\n";
         let named = files_named(text);
         let pairs: Vec<(&str, &str)> = named
             .iter()
-            .map(|(k, f)| (k.as_str(), f.as_str()))
+            .map(|n| (n.key.as_str(), n.file.as_str()))
             .collect();
+        // The same file named by two meters is one entry naming both.
+        assert_eq!(named[0].sections, vec!["gold", "silver"]);
+        assert_eq!(named[1].sections, vec!["gold"]);
         assert_eq!(
             pairs,
             vec![

@@ -84,8 +84,9 @@
 
   <div class="panel" id="assets-panel">
     <h2>Assets</h2>
+    <label class="switch" style="margin:0 0 10px" title="The files brought here are listed only with this on; what failed, is missing or optional always shows."><input type="checkbox" id="assets-all"> Show every file</label>
     <table class="kv" id="assets"></table>
-    <div class="help" style="margin-top:8px">What the theme on show names, each brought here as the player offered it, failed (offered, and the fetch failed, with the reason), missing (the theme names it and the player does not have it, so the player's own screen lacks it too), or elsewhere (a path on the player, not a theme file). A file that failed is tried again at the next sync: the player's theme changing, or the remote starting again.</div>
+    <div class="help" style="margin-top:8px">What the theme on show names, each brought here as the player offered it, failed (offered, and the fetch failed, with the reason), missing (the theme names it and the player does not have it, so the player's own screen lacks it too), or elsewhere (a path on the player, not a theme file), each with the meters that name it. The files brought are listed only with Show every file on, remembered by this browser; a report carries what is not fine, and the downloaded one every file. A file that failed is tried again at the next sync: the player's theme changing, or the remote starting again.</div>
   </div>
 
   <div class="panel" id="prereq-panel">
@@ -279,9 +280,17 @@
 
   // ---- the theme's assets, and what this machine has ----
   function renderAssets(s) {
-    $('assets').innerHTML = assetsRows(s).map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + (r[2] ? '<span class="badge ' + esc(r[2][0]) + '">' + esc(r[2][1]) + '</span>' : '') + esc(r[1]) + '</td></tr>'; }).join('');
+    $('assets').innerHTML = assetsRows(s, $('assets-all').checked).map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + (r[2] ? '<span class="badge ' + esc(r[2][0]) + '">' + esc(r[2][1]) + '</span>' : '') + esc(r[1]) + '</td></tr>'; }).join('');
   }
-  function assetsRows(s) {
+  // The meters that name a file, three by name and the rest counted.
+  function namedIn(sections) {
+    if (!sections || !sections.length) return '';
+    return ' · named in ' + sections.slice(0, 3).join(', ') + (sections.length > 3 ? ' and ' + (sections.length - 3) + ' more' : '');
+  }
+  // The rows of the Assets panel: the counts, then every file that is not
+  // fine (missing, failed, optional, elsewhere); the files brought only
+  // with `all`, as the switch asks, else one line counting them.
+  function assetsRows(s, all) {
     var a = s.assets;
     var rows = [];
     if (!a) {
@@ -291,11 +300,14 @@
       rows.push(['offered by the player', a.offered + ' files · ' + a.here + ' here' + (a.fetch_failed.length ? ' · ' + a.fetch_failed.length + ' failed to fetch' : '')]);
       // Missing first, then failed, then optional, then what is here.
       var order = { missing: 0, failed: 1, optional: 2, elsewhere: 3, brought: 4 };
+      var hidden = 0;
       a.required.slice().sort(function (x, y) { return (order[x.state] || 0) - (order[y.state] || 0); }).forEach(function (r) {
+        if (r.state === 'brought' && !all) { hidden++; return; }
         var word = { brought: 'brought', failed: 'FAILED: ' + (r.reason || ''), missing: 'MISSING: the player does not have it; its own screen does without it too', optional: 'optional: the player does not have it, and the display does without it (a field\'s font falls back to its style\'s, a knob to the arc)', elsewhere: 'a path on the player, not a theme file; the display looks for it where it runs' }[r.state] || r.state;
         var badge = { brought: ['green', 'brought'], failed: ['orange', 'failed'], missing: ['red', 'missing'], optional: ['gray', 'optional'], elsewhere: ['gray', 'elsewhere'] }[r.state] || ['gray', r.state];
-        rows.push([r.key, r.file + ' · ' + word, badge]);
+        rows.push([r.key, r.file + ' · ' + word + namedIn(r.sections), badge]);
       });
+      if (hidden) rows.push(['brought', hidden + ' files here as the player offered them, not listed; Show every file lists them']);
       a.fetch_failed.forEach(function (f) {
         if (!a.required.some(function (r) { return r.state === 'failed' && ('templates/' + a.theme + '/' + r.file) === f[0]; })) rows.push(['not brought', f[0] + ' · ' + f[1]]);
       });
@@ -360,7 +372,7 @@
       ['Status', rowsText(statusRows(b.status || {}))],
       ['Connection: ' + c.badge[1].toUpperCase() + (c.when ? ' (' + c.when + ')' : ''), rowsText(c.rows)],
       ['Firewall rules for this remote', rowsText(c.rules)],
-      ['Assets', rowsText(assetsRows(view))],
+      ['Assets', rowsText(assetsRows(view, false))],
       ['Prerequisites', rowsText(prereqRows(view))],
       ['Version', rowsText([['upgrade', (b.upgrade && b.upgrade.latest) ? 'offered ' + b.upgrade.latest.version + (b.upgrade.latest.test ? ' (a test release)' : '') : 'not looked at'], ['test releases', b.config && b.config.test_releases ? 'offered' : 'not offered']])],
       ['Player', rowsText(playerRows(b))],
@@ -652,6 +664,12 @@
     return c;
   }
   ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'gain', 'decay', 'r-name', 'r-port', 'r-log', 'face-shown', 'test-releases'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
+  // The Assets switch: this browser's own choice, off unless turned on.
+  try { $('assets-all').checked = window.localStorage.getItem('glass.remote.assets.all') === 'on'; } catch (e) { $('assets-all').checked = false; }
+  $('assets-all').onchange = function () {
+    try { window.localStorage.setItem('glass.remote.assets.all', $('assets-all').checked ? 'on' : 'off'); } catch (e) { /* kept for this page alone */ }
+    if (state.lastState) renderAssets(state.lastState);
+  };
   $('btn-win-leave').onclick = function () { api('POST', '/api/window', { mode: 'windowed' }).then(function () { toast('The display is a window now.'); }).catch(function (e) { toast(e.message, 'error'); }); };
   $('btn-win-full').onclick = function () { api('POST', '/api/window', { mode: 'fullscreen' }).then(function () { toast('The display takes the screen.'); }).catch(function (e) { toast(e.message, 'error'); }); };
   $('btn-cfg-import').onclick = function () { $('cfg-file').click(); };

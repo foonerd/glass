@@ -147,10 +147,13 @@ function fileIsOptional(key) {
 // `elsewhere` (a path outside the theme that is there).
 function themeFiles(metersText, themeDir, fontPath, exists) {
   const out = [];
-  const seen = new Set();
+  const seen = new Map();
+  let section = '';
   String(metersText || '').split(/\r?\n/).forEach(function (line) {
     const trimmed = line.trim();
-    if (!trimmed || trimmed[0] === '#' || trimmed[0] === ';' || trimmed[0] === '[') return;
+    if (!trimmed || trimmed[0] === '#' || trimmed[0] === ';') return;
+    // A file named by the same key in many meters is one entry naming every section.
+    if (trimmed[0] === '[') { section = trimmed.replace(/^\[/, '').replace(/\]$/, '').trim(); return; }
     const at = trimmed.indexOf('=');
     if (at === -1) return;
     const key = trimmed.slice(0, at).trim().toLowerCase();
@@ -164,8 +167,7 @@ function themeFiles(metersText, themeDir, fontPath, exists) {
       const file = raw.trim();
       if (!file || file.toLowerCase() === 'none') return;
       const id = key + '=' + file;
-      if (seen.has(id)) return;
-      seen.add(id);
+      if (seen.has(id)) { const have = seen.get(id); if (section && have.sections.indexOf(section) === -1) have.sections.push(section); return; }
       // As the display looks: a font at its absolute path, else inside the
       // theme folder, else under font.path (intake's resolve_own_font); a
       // picture inside the theme folder, or at its absolute path.
@@ -180,7 +182,9 @@ function themeFiles(metersText, themeDir, fontPath, exists) {
       }
       const found = candidates.find(function (p) { return exists(p); }) || null;
       const state = found ? (found === file ? 'elsewhere' : 'found') : fileIsOptional(key) ? 'optional' : 'missing';
-      out.push({ key: key, file: file, found: found, state: state });
+      const item = { key: key, file: file, found: found, state: state, sections: section ? [section] : [] };
+      seen.set(id, item);
+      out.push(item);
     });
   });
   return out;
