@@ -23,6 +23,7 @@ const { Previews } = require('./previews');
 const { Updater, UpdateError, compareVersions } = require('./update');
 const stable = require('./stable');
 const remotebehind = require('./remotebehind');
+const sheetfacts = require('./sheetfacts');
 const backgrounds = require('./backgrounds');
 const { Component, leastOf, pair } = require('./component');
 const views = require('./views');
@@ -1145,9 +1146,22 @@ class Manager {
         problem: (r.errors && (r.errors.serve || r.errors.channel)) || null
       };
     } catch (e) { /* the plugin has no remotes to report */ }
+    // glass-evo's facts, the remotes connected and the theme's own fonts:
+    // each left out where it cannot be read, the sheet stands without it.
+    let evo = null;
+    let remoteList = null;
+    let themeFonts = null;
+    try { evo = sheetfacts.evo(this.evoFacts(info)); } catch (e) { /* not all there */ }
+    try {
+      remoteList = sheetfacts.remoteRows(plugin.remoteInfo().remotes, { Glass: this.updater.latest, 'glass-evo': this.component.latest }, remotebehind.standing);
+    } catch (e) { /* no channel */ }
+    try { themeFonts = this.themeFonts(info.activeTheme); } catch (e) { /* no theme */ }
     return Object.assign(info, {
       measured: playing && rings.some(function (r) { return r.live; }),
       remotes: remotes,
+      remoteList: remoteList,
+      evo: evo,
+      themeFonts: themeFonts,
       manager: { port: this.port, url: this.url(), uptimeS: Math.round(process.uptime()) },
       catalog: {
         fetchedAt: this.catalog.fetchedAt,
@@ -1161,6 +1175,51 @@ class Manager {
       upgrade: { last: (this.updater.state && this.updater.state.last) || null, previous: this.updater.previous(), test: this.plugin.testReleases() },
       themeSize: (function () { const m = SIZE_PREFIX.exec(String(info.activeTheme || '')); return m ? m[1] + 'x' + m[2] : ''; })(),
       jobs: this.jobs.filter(function (j) { return j.state !== 'done' && j.state !== 'failed'; }).length
+    });
+  }
+
+  // The raw facts of glass-evo for the sheet, from what the plugin and the
+  // component hold; a fact that cannot be read is left out and the sheet
+  // says what it can. `info` is the plugin's status, read already.
+  evoFacts(info) {
+    const plugin = this.plugin;
+    const f = { now: Date.now() };
+    const read = function (name, fn) { try { f[name] = fn(); } catch (e) { /* left out */ } };
+    read('component', () => this.component.view());
+    read('owner', () => { const o = plugin.screenOwnerState(); return { owner: o.owner, mode: o.mode }; });
+    read('display', () => plugin.displayFacts());
+    if (f.display) {
+      f.displayBinary = f.display.binary;
+      f.displayStartedAt = f.display.since;
+      f.componentInstalledAt = f.display.componentInstalledAt;
+    }
+    read('module', () => { const m = plugin.faceModule(); return { mode: m.mode, face: m.face, has: m.has, version: m.version }; });
+    f.pages = info && info.face && typeof info.face.pages === 'number' ? info.face.pages : null;
+    read('look', () => {
+      const s = plugin.faceSettings();
+      const own = plugin.faceThemeFilesOf(s.settings.theme);
+      return { settings: s.settings, builtIn: s.builtIn, looks: s.looks, themeLook: s.themeLook, files: own ? own.files : [] };
+    });
+    read('themeSkies', () => {
+      const theme = String(info && info.activeTheme || '');
+      if (!theme || theme.indexOf('/') !== -1 || theme.indexOf('..') !== -1) return [];
+      return fs.readdirSync(path.join(this.paths.meterBase, theme, 'skies'));
+    });
+    read('picture', () => ({ found: !!plugin.backgroundPath(String((f.look && f.look.settings['idle.picture']) || '')) }));
+    read('faceSize', () => plugin.screenSettings().faceSize);
+    read('weather', () => plugin.weatherState());
+    return f;
+  }
+
+  // The theme on show's own fonts, each named by its meters.txt and found
+  // or not where the display looks; null where the theme is not read.
+  themeFonts(theme) {
+    const name = String(theme || '');
+    if (!name || name.indexOf('/') !== -1 || name.indexOf('..') !== -1) return null;
+    const dir = path.join(this.paths.meterBase, name);
+    const text = fs.readFileSync(path.join(dir, 'meters.txt'), 'utf8');
+    return sheetfacts.themeFonts(text, dir, this.plugin.fontPathDir() || '', function (p) {
+      try { return fs.statSync(p).isFile(); } catch (e) { return false; }
     });
   }
 

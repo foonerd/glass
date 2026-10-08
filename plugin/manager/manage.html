@@ -1658,6 +1658,7 @@
           ['MANAGER_TOUCH_TITLE', !s.interactive ? '-' : t('INTERACTIVE_' + String(s.interactive).toUpperCase())],
           ['MANAGER_PERF_TITLE', !s.performance ? '-' : t('MANAGER_PERF_' + String(s.performance.profile || 'custom').toUpperCase()) + (s.performance.profile === 'auto' && s.performance.auto ? ' (' + t('MANAGER_PERF_' + String(s.performance.auto).toUpperCase()) + ')' : '') + ' · ' + s.performance.values.frameRate + ' fps · ' + t('MANAGER_ST_GOVERNOR') + ' ' + (s.performance.governor ? t('MANAGER_ST_ON') : t('MANAGER_ST_OFF')) + (s.performance.board && s.performance.board.model ? ' · ' + s.performance.board.model : '')]
         ])],
+        ['MANAGER_ST_SECTION_EVO', evoRows(s.evo, reveal)],
         ['MANAGER_ST_SECTION_AUDIO', [
           ['MANAGER_ST_TAP', !audio ? '-' : (audio.tapInChain ? t('MANAGER_ST_TAP_IN') : t('MANAGER_ST_TAP_OUT')) + (audio.output ? ' · ' + t('MANAGER_ST_OUTPUT') + ' ' + audio.output : '')],
           ['MANAGER_ST_PLAYER', (s.channel.status || '-') + (s.channel.service ? ' · ' + s.channel.service : '') + (s.channel.title ? ' · ' + (s.channel.artist ? s.channel.artist + ' - ' : '') + s.channel.title : '') +
@@ -1676,12 +1677,18 @@
           ['MANAGER_ST_SHARE', !s.sharing ? '-' : (s.sharing.shared ? t('MANAGER_ST_SHARE_EDITABLE') : t('MANAGER_ST_SHARE_READONLY'))],
           ['MANAGER_CD_TITLE', !s.cardash || !s.cardash.enabled ? t('MANAGER_ST_OFF') : ((s.cardash.period === 'day' ? t('MANAGER_CD_NOW_DAY') : t('MANAGER_CD_NOW_NIGHT')) + ' ' + (s.cardash.period === 'day' ? s.cardash.dayTheme : s.cardash.nightTheme) + (s.cardash.next ? ' · ' + t('MANAGER_CD_NEXT') + ' ' + new Date(s.cardash.next.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') + (s.cardash.mode === 'sun' ? ' · ' + t('MANAGER_CD_MODE_SUN').toLowerCase() : ''))],
           ['MANAGER_ARTWORK_TITLE', !s.artwork ? '-' : (s.artwork.enabled ? t('MANAGER_ST_ON') : t('MANAGER_ST_OFF')) + (s.artwork.enabled ? ' · ' + (s.artwork.keyMode === 'project' ? t('FANART_KEY_MODE_PROJECT') : t('FANART_KEY_MODE_PERSONAL')) + ' · ' + (s.artwork.interval > 0 ? t('MANAGER_ST_EVERY') + ' ' + s.artwork.interval + ' s' : t('MANAGER_ST_ON_TITLE_CHANGE')) : '') + ' · ' + s.artwork.cachedArtists + ' ' + t('MANAGER_ST_ARTISTS_CACHED')],
-          ['MANAGER_ST_CATALOG', s.catalog.count + ' ' + t('MANAGER_CATALOG_ENTRIES') + (s.catalog.updated ? ' · ' + t('MANAGER_CATALOG_UPDATED') + ' ' + fmtDate(s.catalog.updated) : '') + ' · ' + s.catalog.installed + ' ' + t('MANAGER_ST_INSTALLED_FROM')]
+          ['MANAGER_ST_CATALOG', s.catalog.count + ' ' + t('MANAGER_CATALOG_ENTRIES') + (s.catalog.updated ? ' · ' + t('MANAGER_CATALOG_UPDATED') + ' ' + fmtDate(s.catalog.updated) : '') + ' · ' + s.catalog.installed + ' ' + t('MANAGER_ST_INSTALLED_FROM')],
+          ['MANAGER_ST_THEME_FONTS', !s.themeFonts ? '-' : !s.themeFonts.length ? t('MANAGER_ST_THEME_FONTS_NONE') : s.themeFonts.map(function (f) {
+            return f.key + ' = ' + f.file + ' · ' + t(f.found ? 'MANAGER_ST_FOUND' : 'MANAGER_ST_MISSING');
+          }).join('\n')]
         ]],
         ['MANAGER_ST_SECTION_NETWORK', [
           ['MANAGER_ST_REMOTES', !s.remotes || !s.remotes.enabled ? t('MANAGER_RM_OFF') :
           (s.remotes.serving ? t('MANAGER_RM_SERVING_UP') : t('MANAGER_RM_SERVING_DOWN')) + ' · ' + t('MANAGER_RM_FRAMES') + ' ' + s.remotes.ports.frames + ' · ' + t('MANAGER_RM_CHANNEL') + ' ' + s.remotes.ports.channel + ' · ' + t('MANAGER_RM_BEACON') + ' ' + s.remotes.ports.beacon +
-          ' · ' + s.remotes.receiving + ' ' + t('MANAGER_ST_RECEIVING') + (s.remotes.problem ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + s.remotes.problem : '')]
+          ' · ' + s.remotes.receiving + ' ' + t('MANAGER_ST_RECEIVING') + (s.remotes.problem ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + s.remotes.problem : '')],
+          ['MANAGER_ST_REMOTES_CONNECTED', !s.remoteList || !s.remoteList.length ? t('MANAGER_RM_NONE') : s.remoteList.map(function (r) {
+            return r.name + ' · ' + (r.product || 'Glass') + ' ' + (r.version || '?') + (r.behind === true ? ' · ' + t('MANAGER_RM_BEHIND').replace('{product}', r.product).replace('{latest}', r.latest) : r.behind === false ? ' · ' + t('MANAGER_ST_UP_TO_DATE') : '');
+          }).join('\n')]
         ]],
         ['MANAGER_ST_SECTION_FACE', [
           ['MANAGER_ST_FACE', !s.face ? '-' : s.face.pages + ' ' + t('MANAGER_ST_FACE_PAGES') + ' · ' + (s.face.frames ? t('MANAGER_ST_FACE_FRAMES') : t('MANAGER_ST_FACE_NO_FRAMES'))]
@@ -1692,7 +1699,12 @@
           ['MANAGER_ST_RELEASES', t(s.upgrade && s.upgrade.test ? 'MANAGER_ST_RELEASES_TEST' : 'MANAGER_ST_RELEASES_LATEST')],
           ['MANAGER_ST_BACKUP', !house || !house.newestBackup ? t('MANAGER_ST_BACKUP_NONE') : house.newestBackup.name + (house.newestBackup.at ? ' · ' + fmtDate(house.newestBackup.at) : '')],
           ['MANAGER_ST_DISK', s.diskFree !== null ? fmtBytes(s.diskFree) + ' ' + t('MANAGER_ST_FREE') : '-'],
-          ['MANAGER_ST_PROBLEMS', !house || !house.problems || !house.problems.length ? t('MANAGER_ST_NO_PROBLEMS') : house.problems.join('\n')]
+          ['MANAGER_ST_PROBLEMS', (function () {
+            // glass-evo's problems in words before the journal's last warnings.
+            var lines = (s.evo && s.evo.problems ? s.evo.problems : []).map(function (p) { return t('MANAGER_ST_EVO_PROBLEM_' + p.toUpperCase().replace(/-/g, '_')); });
+            lines = lines.concat(house && house.problems ? house.problems : []);
+            return lines.length ? lines.join('\n') : t('MANAGER_ST_NO_PROBLEMS');
+          })()]
         ]]
       ];
       var html = '';
@@ -2830,6 +2842,29 @@
   // on and whose the screen is, the kiosk as it stands, the screen's
   // settings, the touch mapping, and what the player has: panels, inputs,
   // backlights.
+  // glass-evo's rows on the sheet: the component and its pairing with this
+  // Glass, who holds the screen and with which binary, the views, the look
+  // and its own files, the picture, When the player stops, the face size,
+  // the forecast. A place is personal as an address is: hidden until revealed.
+  function evoRows(e, reveal) {
+    if (!e) return [['MANAGER_ST_EVO_COMPONENT', '-']];
+    var ago = function (seconds) { return seconds < 120 ? seconds + ' s' : seconds < 7200 ? Math.round(seconds / 60) + ' min' : (seconds / 3600).toFixed(1) + ' h'; };
+    var c = e.component;
+    var v = e.views;
+    var w = e.weather;
+    var look = e.look;
+    return [
+      ['MANAGER_ST_EVO_COMPONENT', !c ? t('MANAGER_EVO_NOT_INSTALLED') : c.version + (c.available ? '' : ' · ' + t('MANAGER_ST_NO_BINARY')) + (c.requires ? ' · ' + t('MANAGER_ST_EVO_REQUIRES') + ' ' + c.requires : '') + (e.least ? ' · ' + t('MANAGER_ST_EVO_LEAST') + ' ' + e.least : '') + (e.outdated ? ' · ' + t('MANAGER_ST_EVO_OUTDATED') : '') + (e.previous ? ' · ' + e.previous + ' ' + t('MANAGER_ST_EVO_KEPT') : '')],
+      ['MANAGER_ST_EVO_OWNER', t(e.owner === 'glass-evo' ? 'MANAGER_ST_EVO_OWNER_EVO' : 'MANAGER_ST_EVO_OWNER_KIOSK') + ' · ' + t(e.holdMode === 'kms' ? 'MANAGER_ST_EVO_HOLD_KMS' : e.holdMode === 'x' ? 'MANAGER_ST_EVO_HOLD_X' : 'MANAGER_ST_EVO_HOLD_NONE')],
+      ['MANAGER_ST_EVO_DISPLAY', !e.displayStartedAt ? t('MANAGER_ST_EVO_DISPLAY_NONE') : t(e.displayBinary ? 'MANAGER_ST_EVO_DISPLAY_FACE' : 'MANAGER_ST_EVO_DISPLAY_GLASS') + ' · ' + t('MANAGER_ST_SINCE') + ' ' + fmtDate(e.displayStartedAt) + (e.componentInstalledAt ? ' · ' + t('MANAGER_ST_EVO_INSTALLED') + ' ' + fmtDate(e.componentInstalledAt) : '') + (e.displayOlder ? ' · ' + t('MANAGER_ST_EVO_DISPLAY_OLDER') : '')],
+      ['MANAGER_ST_EVO_VIEWS', !v ? '-' : t('MANAGER_VIEWS_' + String(v.mode || 'follow').toUpperCase()) + ' · ' + (v.face ? t('MANAGER_ST_EVO_MODULE_EVO') + (v.version ? ' ' + v.version : '') : t('MANAGER_ST_EVO_MODULE_GLASS')) + (e.pages !== null ? ' · ' + e.pages + ' ' + t('MANAGER_ST_FACE_PAGES') : '')],
+      ['MANAGER_ST_EVO_LOOK', (look.name ? look.name + ' (' + t('MANAGER_ST_EVO_LOOK_' + String(look.source).toUpperCase()) + ')' : t('MANAGER_ST_EVO_LOOK_BUILTIN')) + (look.name && look.source !== 'missing' ? ' · ' + look.skies + ' ' + t('MANAGER_ST_EVO_SKIES') : '') + (look.themeBrings ? ' · ' + t('MANAGER_ST_EVO_THEME_BRINGS') + (look.themeSkies ? ', ' + look.themeSkies + ' ' + t('MANAGER_ST_EVO_SKIES') : '') : '')],
+      ['MANAGER_LOOK_PICTURE', !e.picture ? t('MANAGER_ST_EVO_PICTURE_NONE') : e.picture.name + ' · ' + t(e.picture.found ? 'MANAGER_ST_FOUND' : 'MANAGER_ST_MISSING')],
+      ['MANAGER_LOOK_IDLE_WAIT', t(e.idleWait === 'persist' ? 'MANAGER_LOOK_IDLE_WAIT_PERSIST' : 'MANAGER_LOOK_IDLE_WAIT_NONE')],
+      ['MANAGER_FACE_SIZE', !e.faceSize ? '-' : t('MANAGER_FACE_SIZE_' + String(e.faceSize).toUpperCase())],
+      ['MANAGER_ST_EVO_FORECAST', !w.on ? t('MANAGER_ST_OFF') : (reveal ? w.place : t('MANAGER_ST_HIDDEN')) + ' · °' + w.unit + ' · ' + t(w.span === 'week' ? 'MANAGER_LOOK_SPAN_WEEK' : 'MANAGER_LOOK_SPAN_TODAY') + ' · ' + (w.readingAgeS === null ? t('MANAGER_ST_EVO_NO_READING') : t('MANAGER_ST_EVO_READING_AGO').replace('{age}', ago(w.readingAgeS))) + (w.error ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + w.error : '')]
+    ];
+  }
   function screenRows(sc) {
     var none = t('MANAGER_SCREEN_NONE');
     var now = sc.now || {};

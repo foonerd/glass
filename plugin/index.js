@@ -1697,6 +1697,8 @@ Glass.prototype.startDisplayOnce = function () {
                         var child = spawn('/bin/sh', [LaunchScript], { uid: 1000, gid: 1000, env: env, stdio: ['ignore', 'pipe', 'pipe'] });
                         // The face, when glass-evo owns the screen: its failures to start are counted.
                         child.face = !!env.GLASS_BIN;
+                        // The binary that runs, for the status sheet: the component's, or Glass's own when none is named.
+                        child.binary = env.GLASS_BIN || '';
                         var lastErr = [];
                         var relay = function (chunk, isErr) {
                             String(chunk).split('\n').forEach(function (line) {
@@ -2409,6 +2411,23 @@ const REGISTER_FILE = DATA_DIR + '/screen-owner.json';
 
 Glass.prototype.evoComponent = function () {
     return component.installedAt(EVO_DIR, this.volumioArch());
+};
+
+// The display as it runs now, for the status sheet: whether one runs, whether
+// it is the face, which binary it was started with and since when. When the
+// component was installed is its manifest's time; null where none is here.
+Glass.prototype.displayFacts = function () {
+    var child = this.meterChild;
+    var running = !!(child && child.exitCode === null);
+    var installedAt = null;
+    try { installedAt = fs.statSync(EVO_DIR + '/manifest.json').mtime.toISOString(); } catch (e) { /* no component */ }
+    return {
+        running: running,
+        face: !!(running && child.face),
+        binary: running ? (child.binary || null) : null,
+        since: running ? (this.displayStartedAt || null) : null,
+        componentInstalledAt: installedAt
+    };
 };
 
 // The register: who owns the screen, since when, what was found, and what
@@ -5406,6 +5425,11 @@ function fontPathDir() {
     v = v.replace(/\/+$/, '');
     try { return v && fs.statSync(v).isDirectory() ? v : null; } catch (e) { return null; }
 }
+// The same for the Manager, which resolves a theme's own fonts as the display does.
+Glass.prototype.fontPathDir = function () {
+    this.loadConfigs();
+    return fontPathDir();
+};
 
 function filesOf(dir, filter) {
     var out = [];
