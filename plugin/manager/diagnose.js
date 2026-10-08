@@ -9,7 +9,7 @@
 // and found right), the string that says it with the values to fill in,
 // and the Manager's tab where it is set, when there is one.
 
-const SYMPTOMS = ['no-meters', 'not-moving', 'restarts', 'touch', 'screen', 'artwork', 'remotes', 'slow', 'other'];
+const SYMPTOMS = ['no-meters', 'not-moving', 'restarts', 'touch', 'screen', 'artwork', 'remotes', 'face', 'look', 'forecast', 'slow', 'other'];
 
 const cause = (check, key, fill, go) => ({ check, kind: 'cause', key, with: fill || {}, go: go || null });
 const note = (check, key, fill, go) => ({ check, kind: 'note', key, with: fill || {}, go: go || null });
@@ -285,6 +285,133 @@ const CHECKS = [
       const board = (p.board && p.board.model) || '?';
       return p.values.frameRate > suits ? note('rate', 'DIAG_RATE_ABOVE_BOARD', { rate: p.values.frameRate, suits, board }, 'system')
         : ok('rate', 'DIAG_RATE_SUITS', { rate: p.values.frameRate, board });
+    }
+  },
+
+  // ---- glass-evo: the face, the look panel, the forecast ----------------
+  // The facts are the status sheet's glass-evo section (sheetfacts.evo) and
+  // the theme's own fonts; a sheet without them, a Glass before 0.9.6 or a
+  // read that failed, says nothing here.
+  {
+    id: 'evo-component', symptoms: ['face', 'look', 'forecast', 'remotes', 'other'],
+    run(f) {
+      const e = f.status.evo;
+      if (!e) return null;
+      if (!e.component) return cause('evo-component', 'DIAG_EVO_NOT_INSTALLED', {}, 'system');
+      if (e.outdated) return cause('evo-component', 'DIAG_EVO_OUTDATED', { version: e.component.version, least: e.least || '?' }, 'system');
+      if (!e.component.available) return cause('evo-component', 'DIAG_EVO_NO_BINARY', { version: e.component.version, arch: f.status.arch || '?' }, 'system');
+      return ok('evo-component', 'DIAG_EVO_COMPONENT', { version: e.component.version });
+    }
+  },
+  {
+    id: 'evo-owner', symptoms: ['face', 'forecast'],
+    run(f) {
+      const e = f.status.evo;
+      if (!e || !e.component) return null;
+      return e.owner === 'glass-evo' ? ok('evo-owner', 'DIAG_EVO_OWNS') : cause('evo-owner', 'DIAG_EVO_KIOSK_OWNS', {}, 'screen');
+    }
+  },
+  {
+    // The display that runs where glass-evo owns the screen: started after
+    // the component's install, and with the component's binary.
+    id: 'evo-display', symptoms: ['face', 'look', 'forecast', 'restarts', 'other'],
+    run(f) {
+      const e = f.status.evo;
+      if (!e || !e.component || e.owner !== 'glass-evo' || !e.displayStartedAt) return null;
+      if (e.displayOlder) return cause('evo-display', 'DIAG_EVO_DISPLAY_OLDER', { version: e.component.version }, 'screen');
+      if (!e.displayBinary) return cause('evo-display', 'DIAG_EVO_GLASS_BINARY', {}, 'screen');
+      return ok('evo-display', 'DIAG_EVO_DISPLAY_FACE', { version: e.component.version });
+    }
+  },
+  {
+    // The module the views and the look panel draw with: the component's,
+    // present, and in this page the installed one.
+    id: 'evo-module', symptoms: ['look', 'remotes'],
+    run(f) {
+      const e = f.status.evo;
+      if (!e || !e.component || !e.views) return null;
+      if (e.views.mode === 'face' && !e.views.has) return cause('evo-module', 'DIAG_EVO_NO_MODULE', { version: e.component.version }, 'system');
+      if (!e.views.face) return note('evo-module', 'DIAG_EVO_VIEWS_THEME_ALONE', {}, 'screen');
+      const page = f.page && f.page.module;
+      if (page && page !== e.component.version) return cause('evo-module', 'DIAG_EVO_MODULE_STALE', { page, installed: e.component.version });
+      return ok('evo-module', 'DIAG_EVO_MODULE', { version: e.views.version || e.component.version });
+    }
+  },
+  {
+    id: 'evo-look', symptoms: ['face', 'look'],
+    run(f) {
+      const e = f.status.evo;
+      if (!e || !e.component || !e.look) return null;
+      const l = e.look;
+      if (l.source === 'missing') return cause('evo-look', 'DIAG_EVO_LOOK_MISSING', { name: l.name }, 'screen');
+      if (l.themeBrings) return note('evo-look', 'DIAG_EVO_THEME_LOOK', { folder: l.themeFolder || '?' }, 'screen');
+      return l.name ? ok('evo-look', 'DIAG_EVO_LOOK', { name: l.name }) : ok('evo-look', 'DIAG_EVO_LOOK_BUILTIN');
+    }
+  },
+  {
+    id: 'evo-picture', symptoms: ['face', 'look'],
+    run(f) {
+      const e = f.status.evo;
+      if (!e || !e.component || !e.picture) return null;
+      return e.picture.found ? ok('evo-picture', 'DIAG_EVO_PICTURE', { name: e.picture.name })
+        : cause('evo-picture', 'DIAG_EVO_PICTURE_MISSING', { name: e.picture.name }, 'screen');
+    }
+  },
+  {
+    id: 'evo-skies', symptoms: ['face', 'look', 'forecast'],
+    run(f) {
+      const e = f.status.evo;
+      const names = e && e.look && e.look.unknownSkies;
+      return names && names.length ? note('evo-skies', 'DIAG_EVO_SKIES_UNKNOWN', { names: names.join(', ') }) : null;
+    }
+  },
+  {
+    id: 'theme-fonts', symptoms: ['screen', 'remotes', 'other'],
+    run(f) {
+      const fonts = f.status.themeFonts;
+      if (!Array.isArray(fonts)) return null;
+      const missing = fonts.filter((x) => !x.found);
+      return missing.length ? note('theme-fonts', 'DIAG_THEME_FONT_MISSING', { theme: f.status.activeTheme || '?', files: missing.map((x) => x.key + ' = ' + x.file).join(', ') }) : null;
+    }
+  },
+  {
+    id: 'forecast-place', symptoms: ['face', 'forecast'],
+    run(f) {
+      const e = f.status.evo;
+      if (!e || !e.component || !e.weather) return null;
+      return e.weather.on ? ok('forecast-place', 'DIAG_FORECAST_PLACE') : cause('forecast-place', 'DIAG_FORECAST_NO_PLACE', {}, 'screen');
+    }
+  },
+  {
+    // The reading: there, fresh (the player asks every hour; three hours is
+    // stale), and the last request's error when it had one.
+    id: 'forecast-reading', symptoms: ['face', 'forecast'],
+    run(f) {
+      const e = f.status.evo;
+      if (!e || !e.component || !e.weather || !e.weather.on) return null;
+      const w = e.weather;
+      const error = w.error || '-';
+      if (w.readingAgeS === null) return cause('forecast-reading', 'DIAG_FORECAST_NO_READING', { error });
+      const minutes = Math.round(w.readingAgeS / 60);
+      if (w.readingAgeS > 3 * 3600) return cause('forecast-reading', 'DIAG_FORECAST_STALE', { minutes, error });
+      return w.error ? note('forecast-reading', 'DIAG_FORECAST_ERROR', { minutes, error: w.error }) : ok('forecast-reading', 'DIAG_FORECAST_FRESH', { minutes });
+    }
+  },
+  {
+    id: 'idle-wait', symptoms: ['face'],
+    run(f) {
+      const e = f.status.evo;
+      if (!e || !e.component || e.idleWait !== 'persist') return null;
+      return e.persistS === 0 ? note('idle-wait', 'DIAG_IDLE_WAIT_NO_PERSIST', {}, 'screen')
+        : note('idle-wait', 'DIAG_IDLE_WAIT_PERSIST', { seconds: e.persistS === null ? '?' : e.persistS }, 'screen');
+    }
+  },
+  {
+    id: 'skies-motion', symptoms: ['slow', 'face'],
+    run(f) {
+      const e = f.status.evo;
+      if (!e || !e.component || e.owner !== 'glass-evo' || !e.weather || !e.weather.on) return null;
+      return e.motion && e.smallBoard ? note('skies-motion', 'DIAG_SKIES_MOTION_SMALL', {}, 'screen') : null;
     }
   }
 ];

@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { evo, remoteRows, themeFonts, older } = require('../sheetfacts');
+const { evo, remoteRows, themeFonts, older, unknownSkies } = require('../sheetfacts');
 
 const NOW = Date.parse('2026-10-08T12:00:00Z');
 
@@ -20,10 +20,12 @@ function facts(over) {
       builtIn: { 'idle.wait': 'none', 'weather.span': 'today' },
       looks: [{ name: 'Mine', shipped: false }, { name: 'Example', shipped: true }],
       files: [{ path: 'skies/rain.gif' }, { path: 'skies/clear-day.png' }],
-      themeLook: { folder: '1280x400_Theme' }
+      themeLook: { folder: '1280x400_Theme' },
+      frostSuits: true
     },
     themeSkies: ['snow.gif'],
     picture: { found: true },
+    persistS: 15,
     faceSize: 'large',
     weather: { place: { name: 'Bergen, Vestland, Norway', latitude: 60.39, longitude: 5.32 }, unit: 'C', reading: { at: NOW / 1000 - 900 }, error: '' },
     now: NOW
@@ -40,10 +42,13 @@ test('the glass-evo section carries the component, the owner, the views, the loo
   assert.strictEqual(s.displayOlder, false, 'started after the install');
   assert.deepStrictEqual(s.views, { mode: 'follow', face: true, has: true, version: '0.2.4' });
   assert.strictEqual(s.pages, 2);
-  assert.deepStrictEqual(s.look, { name: 'Mine', source: 'user', skies: 2, themeBrings: true, themeSkies: 1 });
+  assert.deepStrictEqual(s.look, { name: 'Mine', source: 'user', skies: 2, themeBrings: true, themeFolder: '1280x400_Theme', themeSkies: 1, unknownSkies: [] });
   assert.deepStrictEqual(s.picture, { name: 'lake.jpg', found: true });
   assert.strictEqual(s.idleWait, 'persist');
+  assert.strictEqual(s.persistS, 15);
   assert.strictEqual(s.faceSize, 'large');
+  assert.strictEqual(s.motion, true, 'the skies move unless the setting says off');
+  assert.strictEqual(s.smallBoard, false);
   assert.deepStrictEqual(s.weather, { on: true, place: 'Bergen, Vestland, Norway', unit: 'C', span: 'week', readingAgeS: 900, error: '' });
   assert.deepStrictEqual(s.problems, []);
 });
@@ -71,10 +76,13 @@ test('a component older than this Glass works with, a look or a picture named bu
 });
 
 test('the built-in look, a shipped look, no picture, the forecast off, and nothing installed', () => {
-  const plain = evo(facts({ look: { settings: {}, builtIn: {}, looks: [], files: [], themeLook: null }, themeSkies: [], picture: null, weather: { place: null, unit: 'C', reading: null, error: '' } }));
-  assert.deepStrictEqual(plain.look, { name: null, source: 'builtin', skies: 0, themeBrings: false, themeSkies: 0 });
+  const plain = evo(facts({ look: { settings: { 'weather.motion': 'off' }, builtIn: {}, looks: [], files: [], themeLook: null, frostSuits: false }, themeSkies: [], picture: null, persistS: undefined, weather: { place: null, unit: 'C', reading: null, error: '' } }));
+  assert.deepStrictEqual(plain.look, { name: null, source: 'builtin', skies: 0, themeBrings: false, themeFolder: null, themeSkies: 0, unknownSkies: [] });
   assert.strictEqual(plain.picture, null);
   assert.strictEqual(plain.idleWait, 'none');
+  assert.strictEqual(plain.persistS, null);
+  assert.strictEqual(plain.motion, false);
+  assert.strictEqual(plain.smallBoard, true);
   assert.deepStrictEqual(plain.weather, { on: false, place: null, unit: 'C', span: 'today', readingAgeS: null, error: '' });
   const shipped = evo(facts({ look: Object.assign(facts().look, { settings: { theme: 'Example' }, files: [] }) }));
   assert.strictEqual(shipped.look.source, 'shipped');
@@ -118,6 +126,13 @@ test('a theme\'s own fonts are resolved as the display resolves them, each named
   ]);
   assert.deepStrictEqual(themeFonts('', '/t', '', exists), []);
   assert.deepStrictEqual(themeFonts('time.font = x.ttf', '', '', exists), [{ key: 'time.font', file: 'x.ttf', found: null }], 'no folder, nowhere to look');
+});
+
+test('a file under skies that is no sky is named, from the look and from the theme on show', () => {
+  assert.deepStrictEqual(unknownSkies(['skies/rain.gif', 'skies/Rainy.png', 'skies/clear-day.webp', 'skies/clear-day.svg', 'snow.jpeg', 'storm.gif', '.DS_Store']), ['Rainy.png', 'clear-day.svg', 'storm.gif']);
+  assert.deepStrictEqual(unknownSkies([]), []);
+  const s = evo(facts({ look: Object.assign(facts().look, { files: [{ path: 'skies/rainy.gif' }] }), themeSkies: ['snow.gif', 'notes.txt'] }));
+  assert.deepStrictEqual(s.look.unknownSkies, ['rainy.gif', 'notes.txt']);
 });
 
 test('versions compare by their three numbers', () => {

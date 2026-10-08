@@ -6,6 +6,20 @@
 // it read.
 
 const PICTURE = /\.(gif|png|webp|jpe?g)$/i;
+// The skies a theme may bring, by name: a file under `skies/` with another
+// name is not drawn.
+const SKY_NAMES = ['clear-day', 'clear-hot', 'clear-night', 'partly-day', 'partly-night', 'cloudy', 'fog', 'drizzle', 'rain', 'rain-heavy', 'snow', 'snow-heavy', 'thunder', 'thunder-night'];
+const OFF = /^(off|false|no|0)$/i;
+
+// The names under a skies folder that are no sky: not one of the names, or
+// not a picture the face reads.
+function unknownSkies(names) {
+  return (names || []).filter(function (n) {
+    const base = String(n).replace(/^.*\//, '');
+    if (base[0] === '.') return false;
+    return !PICTURE.test(base) || SKY_NAMES.indexOf(base.replace(PICTURE, '')) === -1;
+  }).map(function (n) { return String(n).replace(/^.*\//, ''); });
+}
 // A field's own font: any `<field>.font` key; the display's style fonts are
 // `font.<style>` and a size is `<field>.font.size`, neither of which this is.
 const OWN_FONT = /^(?!font\.)[a-z][a-z0-9.]*\.font$/;
@@ -66,11 +80,17 @@ function evo(f) {
       source: !name ? 'builtin' : !found ? 'missing' : found.shipped ? 'shipped' : 'user',
       skies: Array.isArray(look.files) ? look.files.filter(function (x) { return PICTURE.test(String(x.path || '')); }).length : 0,
       themeBrings: !!look.themeLook,
-      themeSkies: Array.isArray(f.themeSkies) ? f.themeSkies.filter(function (n) { return PICTURE.test(String(n)); }).length : 0
+      themeFolder: look.themeLook && look.themeLook.folder ? look.themeLook.folder : null,
+      themeSkies: Array.isArray(f.themeSkies) ? f.themeSkies.filter(function (n) { return PICTURE.test(String(n)); }).length : 0,
+      unknownSkies: unknownSkies((Array.isArray(look.files) ? look.files.map(function (x) { return x.path; }) : []).concat(Array.isArray(f.themeSkies) ? f.themeSkies : []))
     },
     picture: picture ? { name: picture, found: pictureFound } : null,
     idleWait: String(settings['idle.wait'] || builtIn['idle.wait'] || 'none'),
+    // The plugin's persist period, which "After the persist period" waits for.
+    persistS: typeof f.persistS === 'number' ? f.persistS : null,
     faceSize: f.faceSize || null,
+    motion: !OFF.test(String(settings['weather.motion'] || builtIn['weather.motion'] || 'on')),
+    smallBoard: look.frostSuits === false,
     weather: {
       on: !!w.place,
       place: w.place && w.place.name ? w.place.name : null,
@@ -116,4 +136,4 @@ function themeFonts(metersText, themeDir, fontPath, exists) {
   return out;
 }
 
-module.exports = { evo, remoteRows, themeFonts, older };
+module.exports = { evo, remoteRows, themeFonts, older, unknownSkies, SKY_NAMES };

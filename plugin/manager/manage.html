@@ -1791,7 +1791,10 @@
     }).catch(function (e) { toast(errorText(e), 'error'); });
   }
   function runDiagnosis(symptom) {
-    api('POST', '/api/diagnose', { symptom: symptom }).then(function (d) {
+    // What this page knows of itself: the glass-evo module it drew the
+    // likeness with, for the check against the one installed.
+    var page = { module: (typeof lookUi !== 'undefined' && lookUi.module && lookUi.moduleVersion) ? lookUi.moduleVersion : null };
+    api('POST', '/api/diagnose', { symptom: symptom, page: page }).then(function (d) {
       state.diagnosis = d;
       var kinds = diagKinds();
       diagShow(symptomTitle(d.symptom) + '. ' + t(d.found ? 'MANAGER_DIAG_FOUND' : 'MANAGER_DIAG_NOTHING'), (d.findings || []).map(function (x) {
@@ -2860,7 +2863,7 @@
       ['MANAGER_ST_EVO_VIEWS', !v ? '-' : t('MANAGER_VIEWS_' + String(v.mode || 'follow').toUpperCase()) + ' · ' + (v.face ? t('MANAGER_ST_EVO_MODULE_EVO') + (v.version ? ' ' + v.version : '') : t('MANAGER_ST_EVO_MODULE_GLASS')) + (e.pages !== null ? ' · ' + e.pages + ' ' + t('MANAGER_ST_FACE_PAGES') : '')],
       ['MANAGER_ST_EVO_LOOK', (look.name ? look.name + ' (' + t('MANAGER_ST_EVO_LOOK_' + String(look.source).toUpperCase()) + ')' : t('MANAGER_ST_EVO_LOOK_BUILTIN')) + (look.name && look.source !== 'missing' ? ' · ' + look.skies + ' ' + t('MANAGER_ST_EVO_SKIES') : '') + (look.themeBrings ? ' · ' + t('MANAGER_ST_EVO_THEME_BRINGS') + (look.themeSkies ? ', ' + look.themeSkies + ' ' + t('MANAGER_ST_EVO_SKIES') : '') : '')],
       ['MANAGER_LOOK_PICTURE', !e.picture ? t('MANAGER_ST_EVO_PICTURE_NONE') : e.picture.name + ' · ' + t(e.picture.found ? 'MANAGER_ST_FOUND' : 'MANAGER_ST_MISSING')],
-      ['MANAGER_LOOK_IDLE_WAIT', t(e.idleWait === 'persist' ? 'MANAGER_LOOK_IDLE_WAIT_PERSIST' : 'MANAGER_LOOK_IDLE_WAIT_NONE')],
+      ['MANAGER_LOOK_IDLE_WAIT', e.idleWait === 'persist' ? t('MANAGER_LOOK_IDLE_WAIT_PERSIST') + (typeof e.persistS === 'number' ? ' (' + e.persistS + ' s)' : '') : t('MANAGER_LOOK_IDLE_WAIT_NONE')],
       ['MANAGER_FACE_SIZE', !e.faceSize ? '-' : t('MANAGER_FACE_SIZE_' + String(e.faceSize).toUpperCase())],
       ['MANAGER_ST_EVO_FORECAST', !w.on ? t('MANAGER_ST_OFF') : (reveal ? w.place : t('MANAGER_ST_HIDDEN')) + ' · °' + w.unit + ' · ' + t(w.span === 'week' ? 'MANAGER_LOOK_SPAN_WEEK' : 'MANAGER_LOOK_SPAN_TODAY') + ' · ' + (w.readingAgeS === null ? t('MANAGER_ST_EVO_NO_READING') : t('MANAGER_ST_EVO_READING_AGO').replace('{age}', ago(w.readingAgeS))) + (w.error ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + w.error : '')]
     ];

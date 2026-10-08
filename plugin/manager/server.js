@@ -230,20 +230,23 @@ class Manager {
     app.get('/api/diagnose', function (req, res) {
       res.json({ symptoms: SYMPTOMS });
     });
-    const facts = async function () {
+    // `page` is what the page says of itself: the version of glass-evo's
+    // module it drew the likeness with, for the check against the installed.
+    const facts = async function (page) {
       const safe = function (fn, fallback) { try { return fn(); } catch (e) { return fallback; } };
       return {
         now: Date.now(),
         status: await self.status(),
         screen: safe(() => self.plugin.screenSettings(), null),
         update: safe(() => self.updater.view(), null),
-        log: safe(() => self.plugin.recentLog(300).lines, [])
+        log: safe(() => self.plugin.recentLog(300).lines, []),
+        page: { module: page && typeof page.module === 'string' ? page.module.slice(0, 32) : null }
       };
     };
     app.post('/api/diagnose', wrap(async function (req, res) {
       const symptom = String((req.body && req.body.symptom) || '');
       if (SYMPTOMS.indexOf(symptom) === -1) return res.status(400).json({ error: 'bad-symptom' });
-      res.json(diagnose(symptom, await facts()));
+      res.json(diagnose(symptom, await facts(req.body && req.body.page)));
     }));
 
     // The capture behind a report: Glass logs in full while the problem is
@@ -1198,8 +1201,9 @@ class Manager {
     read('look', () => {
       const s = plugin.faceSettings();
       const own = plugin.faceThemeFilesOf(s.settings.theme);
-      return { settings: s.settings, builtIn: s.builtIn, looks: s.looks, themeLook: s.themeLook, files: own ? own.files : [] };
+      return { settings: s.settings, builtIn: s.builtIn, looks: s.looks, themeLook: s.themeLook, files: own ? own.files : [], frostSuits: s.frostSuits };
     });
+    read('persistS', () => plugin.persistSettings().seconds);
     read('themeSkies', () => {
       const theme = String(info && info.activeTheme || '');
       if (!theme || theme.indexOf('/') !== -1 || theme.indexOf('..') !== -1) return [];

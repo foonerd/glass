@@ -7,6 +7,23 @@ const strings = require('../../i18n/strings_en.json').GLASS;
 
 const NOW = Date.parse('2026-10-01T05:00:00+01:00');
 
+// glass-evo in good order on the sheet: installed and paired, owning the
+// screen with its own binary started after the install, the views drawing
+// with its module, a shipped look, a picture that is there, a place with a
+// fresh reading.
+function healthyEvo() {
+  return {
+    component: { version: '0.2.4', available: true, requires: '0.9.3' }, least: '0.2.4', outdated: false, previous: null,
+    owner: 'glass-evo', holdMode: 'kms',
+    displayBinary: '/data/INTERNAL/glass/evo/bin/arm/glass-evo', displayStartedAt: '2026-10-01T03:00:00Z', componentInstalledAt: '2026-10-01T02:00:00Z', displayOlder: false,
+    views: { mode: 'follow', face: true, has: true, version: '0.2.4' }, pages: 0,
+    look: { name: 'Clear', source: 'shipped', skies: 0, themeBrings: false, themeFolder: null, themeSkies: 0, unknownSkies: [] },
+    picture: { name: 'lake.jpg', found: true }, idleWait: 'none', persistS: 15, faceSize: 'normal', motion: true, smallBoard: false,
+    weather: { on: true, place: 'Bergen, Vestland, Norway', unit: 'C', span: 'today', readingAgeS: 600, error: '' },
+    problems: []
+  };
+}
+
 // A player in good order: playing a file, measured, the display up on the
 // kiosk's X server, a touch panel, remotes served with none connected.
 function healthy() {
@@ -14,9 +31,11 @@ function healthy() {
     now: NOW,
     update: { current: '0.7.93', latest: { version: '0.7.93' }, available: false },
     log: [],
+    page: { module: '0.2.4' },
     status: {
       version: '0.7.93', arch: 'arm', binary: true, legacy: false, headless: false, running: true, timeout: 5,
       interactive: 'on', measured: true, diskFree: 900 * 1073741824, themeSize: '1280x720',
+      activeTheme: '1280x720_theme', themeFonts: [], evo: healthyEvo(),
       channel: { clients: 1, status: 'play', service: 'mpd' },
       showing: { rate: 30 },
       artwork: { enabled: true },
@@ -198,7 +217,8 @@ test('slow: a rate the display lowered, a rate above what suits the board, and w
   f = healthy(); f.status.legacy = true; f.status.binary = false; f.status.diskFree = 5 * 1048576; f.update.available = true; f.update.latest.version = '0.8.0';
   f.status.sheet.housekeeping.problems = ['a warning'];
   const r = diagnose('other', f);
-  assert.deepStrictEqual(kinds(r), ['cause:legacy', 'cause:binary', 'cause:disk', 'note:release', 'note:journal']);
+  // "Something else" runs everything: the five common checks, and of glass-evo's what stands (the component paired, the display its own).
+  assert.deepStrictEqual(kinds(r), ['cause:legacy', 'cause:binary', 'cause:disk', 'note:release', 'note:journal', 'ok:evo-component', 'ok:evo-display']);
   // Facts that are missing make no finding and no crash.
   assert.deepStrictEqual(diagnose('touch', { status: {} }).findings, []);
 });

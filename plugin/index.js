@@ -2430,6 +2430,12 @@ Glass.prototype.displayFacts = function () {
     };
 };
 
+// The persist period as the settings page has it: how long the meters stand
+// after a stop, which the face's "After the persist period" waits for.
+Glass.prototype.persistSettings = function () {
+    return { seconds: parseInt(this.config.get('persist_duration'), 10) || 0, display: String(this.config.get('persist_display') || 'freeze') };
+};
+
 // The register: who owns the screen, since when, what was found, and what
 // the take changed in order, each with what it was before; the way back
 // adds when it happened and what it restored.
