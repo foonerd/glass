@@ -18,7 +18,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { get } = require('./catalog');
 const { Zip, safeName } = require('./zip');
-const { compareVersions, offered, fetchChecked, verifyAgainstRelease } = require('./update');
+const { compareVersions, offered, fetchChecked, verifyAgainstRelease, verifyArchiveFile } = require('./update');
 
 const RELEASES_URL = 'https://api.github.com/repos/foonerd/glass-evo/releases/latest';
 const ASSET = /^glass-evo-(\d+\.\d+\.\d+)\.zip$/;
@@ -195,6 +195,8 @@ class Component {
     this.releasesUrl = options.releasesUrl || RELEASES_URL;
     this.fetch = options.fetch || get;
     this.test = options.test || function () { return false; };
+    // The project's key unless another PEM is given (tests sign with their own).
+    this.publicKey = options.publicKey || null;
     this.latest = null;
     this.checkedAt = null;
   }
@@ -390,7 +392,7 @@ class Component {
   async installFile(job, file, target) {
     try {
       const version = await manifestVersionOf(file);
-      await verifyAgainstRelease(this.fetch, this.releasesUrl, version, file, ASSET, job);
+      await this.verifyFile(job, file, version);
       const now = this.installed();
       if (now.installed && now.version === version) throw new ComponentError('same-version', 'glass-evo ' + version + ' is what is installed; nothing to install');
       const manifest = await this.unpack(file, target || { glass: this.glass, least: this.least }, version);
@@ -408,8 +410,23 @@ class Component {
   // is staged. Nothing is changed here.
   async examineFile(job, file) {
     const version = await manifestVersionOf(file);
+    const verified = await this.verifyFile(job, file, version);
+    return { file: file, version: version, verified: verified };
+  }
+
+  // A component zip brought by hand held to the signature it carries
+  // inside, with no network; one without (published before signing) to
+  // the release of its version on GitHub. Answers which.
+  async verifyFile(job, file, version) {
+    if (job) job.state = 'verifying';
+    const inside = await verifyArchiveFile(file, this.publicKey);
+    if (inside) {
+      this.logger.info('glass: manager component: ' + path.basename(file) + ' verified by the signature it carries (' + inside.files + ' files)');
+      return 'archive';
+    }
     await verifyAgainstRelease(this.fetch, this.releasesUrl, version, file, ASSET, job);
-    return { file: file, version: version };
+    this.logger.info('glass: manager component: ' + path.basename(file) + ' verified against release ' + version + ' on GitHub');
+    return 'release';
   }
 
   // The one before back in place, and the one in place kept as the one

@@ -344,3 +344,32 @@ test('a component zip brought by hand is held to its release, then in place; wit
   assert.deepStrictEqual([component.installed().version, component.previous().version], ['0.2.0', '0.1.10']);
   fs.rmSync(root, { recursive: true, force: true });
 });
+
+test('a component zip that carries its own signature goes in with no network', async () => {
+  const k = crypto.generateKeyPairSync('ed25519');
+  const key = { priv: k.privateKey, pub: k.publicKey.export({ type: 'spki', format: 'pem' }) };
+  {
+    let asked = 0;
+    const { root, component, job } = rig({ releasesUrl: 'r/latest', publicKey: key.pub, fetch: async function () { asked++; throw new Error('no route'); } });
+    await component.init();
+    // The component's zip as packaged, then MANIFEST and MANIFEST.sig put in as the release workflow does.
+    const plain = componentZip('0.1.10', { requires: '0.8.0' });
+    const { Zip } = require('../zip');
+    const plainFile = path.join(root, 'plain.zip');
+    fs.writeFileSync(plainFile, plain);
+    const zip = await Zip.open(plainFile);
+    const entries = [];
+    for (const e of zip.entries) { if (e.isRegular) entries.push({ name: e.name, data: await zip.read(e), mode: e.name.indexOf('bin/') === 0 ? 0o100755 : undefined }); }
+    await zip.close();
+    const manifest = Buffer.from(entries.map(function (f) { return sha(f.data) + '  ' + f.name; }).sort().join('\n') + '\n');
+    const signedFile = path.join(root, 'signed.zip');
+    fs.writeFileSync(signedFile, buildZip(entries.concat([{ name: 'MANIFEST', data: manifest }, { name: 'MANIFEST.sig', data: crypto.sign(null, manifest, key.priv) }])));
+    assert.deepStrictEqual(await component.installFile(job(), signedFile), { from: null, to: '0.1.10' });
+    assert.equal(asked, 0, 'no network for a signed archive');
+    assert.equal(component.installed().version, '0.1.10');
+    // Unsigned with no route: refused.
+    await assert.rejects(component.installFile(job(), plainFile), { code: 'unverified' });
+    assert.ok(asked > 0);
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

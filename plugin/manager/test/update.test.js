@@ -394,3 +394,39 @@ test('a signed release is held to its signature on download and from a file; an 
     await fsp.rm(dir, { recursive: true, force: true });
   }
 });
+
+test('a Glass zip that carries its own signature is staged with no network; one without is held to GitHub', async function () {
+  const { buildZip } = require('./zipwriter');
+  const key = (function () { const k = crypto.generateKeyPairSync('ed25519'); return { priv: k.privateKey, pub: k.publicKey.export({ type: 'spki', format: 'pem' }) }; })();
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glass-upd-archive-'));
+  try {
+    const files = [{ name: 'package.json', data: JSON.stringify({ name: 'glass', version: '0.9.23', glassEvo: { least: '0.2.4' } }) }, { name: 'bin/x64/glass', data: 'binary' }];
+    const manifest = Buffer.from(files.map(function (f) { return crypto.createHash('sha256').update(f.data).digest('hex') + '  ' + f.name; }).sort().join('\n') + '\n');
+    const signed = path.join(dir, 'signed.zip');
+    fs.writeFileSync(signed, buildZip(files.concat([{ name: 'MANIFEST', data: manifest }, { name: 'MANIFEST.sig', data: crypto.sign(null, manifest, key.priv) }])));
+    let asked = 0;
+    const updater = new Updater({
+      dir: path.join(dir, 'state'), version: '0.9.22', pluginPath: dir, plugin: {}, stagingDir: path.join(dir, 'staging'), publicKey: key.pub,
+      logger: { info: function () {}, warn: function () {} }, releasesUrl: 'r/latest',
+      fetch: async function () { asked++; throw new Error('no route to GitHub'); }
+    });
+    await updater.init();
+    const staged = await updater.stageFile({ state: 'queued' }, signed);
+    assert.equal(staged.verified, 'archive');
+    assert.equal(staged.files, 2);
+    assert.equal(asked, 0, 'no network for a signed archive');
+    // Unsigned, with GitHub out of reach: refused as unverified, nothing staged.
+    const plain = path.join(dir, 'plain.zip');
+    fs.writeFileSync(plain, buildZip(files));
+    await assert.rejects(updater.stageFile({ state: 'queued' }, plain), function (e) { return e.code === 'unverified'; });
+    assert.ok(asked > 0, 'GitHub asked for an unsigned archive');
+    // Signed and tampered: refused, with no network.
+    asked = 0;
+    const bad = path.join(dir, 'bad.zip');
+    fs.writeFileSync(bad, buildZip([files[0], { name: 'bin/x64/glass', data: 'trojan' }, { name: 'MANIFEST', data: manifest }, { name: 'MANIFEST.sig', data: crypto.sign(null, manifest, key.priv) }]));
+    await assert.rejects(updater.stageFile({ state: 'queued' }, bad), function (e) { return e.code === 'signature'; });
+    assert.equal(asked, 0);
+  } finally {
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
+});

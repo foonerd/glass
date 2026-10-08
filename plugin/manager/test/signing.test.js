@@ -4,7 +4,7 @@ const assert = require('node:assert/strict');
 const crypto = require('crypto');
 const fs = require('fs');
 const path = require('path');
-const { PUBLIC_KEY_PEM, verifySums, digestInSums, signedAssets } = require('../signing');
+const { PUBLIC_KEY_PEM, verifySums, digestInSums, signedAssets, verifyArchive } = require('../signing');
 
 // A key pair of the test's own, as the release workflow's is made.
 function pair() {
@@ -64,4 +64,51 @@ test('a release is signed when it carries both the sums and the signature, and n
   assert.equal(signedAssets({ assets: [asset('glass-1.zip', 9)] }), null);
   assert.equal(signedAssets({ assets: [asset('SHA256SUMS', 200000), asset('SHA256SUMS.sig', 64)] }), null, 'sums too large to be ours');
   assert.equal(signedAssets({}), null);
+});
+
+// An archive as the release workflow signs it: every file's digest in
+// MANIFEST, the manifest signed into MANIFEST.sig, both at the root.
+const { buildZip } = require('./zipwriter');
+const zipModule = require('../zip');
+function signedArchive(dir, name, files, key, options) {
+  options = options || {};
+  const lines = files.slice().sort(function (a, b) { return a.name < b.name ? -1 : 1; }).map(function (f) {
+    const data = Buffer.isBuffer(f.data) ? f.data : Buffer.from(f.data);
+    return crypto.createHash('sha256').update(options.wrongDigestFor === f.name ? Buffer.from('other') : data).digest('hex') + '  ' + f.name;
+  });
+  if (options.extraListed) lines.push('ab'.repeat(32) + '  ' + options.extraListed);
+  const manifest = Buffer.from(lines.join('\n') + '\n');
+  const sig = options.badSig ? Buffer.alloc(64, 1) : crypto.sign(null, manifest, key.priv);
+  const entries = files.slice();
+  if (!options.noManifest) entries.push({ name: 'MANIFEST', data: manifest });
+  if (!options.noSig) entries.push({ name: 'MANIFEST.sig', data: sig });
+  if (options.extraFile) entries.push({ name: options.extraFile, data: 'stray' });
+  const file = path.join(dir, name);
+  fs.writeFileSync(file, buildZip(entries));
+  return file;
+}
+
+test('an archive is held to the manifest and signature it carries, every file both ways, with no network', async () => {
+  const dir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'glass-sign-archive-'));
+  const key = pair();
+  const files = [{ name: 'package.json', data: '{"name":"glass","version":"0.9.23"}' }, { name: 'bin/x64/glass', data: 'binary' }, { name: 'index.js', data: '// glass' }];
+  const open = async function (file) { return zipModule.Zip.open(file); };
+  const check = async function (name, options) {
+    const zip = await open(signedArchive(dir, name, files, key, options));
+    try { return await verifyArchive(zip, key.pub); } finally { await zip.close(); }
+  };
+  const reject = async function (name, options, pattern) {
+    await assert.rejects(check(name, options), function (e) { return e.code === 'signature' && pattern.test(e.message); });
+  };
+  assert.deepEqual(await check('good.zip'), { files: 3 });
+  assert.equal(await check('unsigned.zip', { noManifest: true, noSig: true }), null, 'an archive before signing');
+  await reject('half.zip', { noSig: true }, /half a signature/);
+  await reject('badsig.zip', { badSig: true }, /does not verify/);
+  await reject('tampered.zip', { wrongDigestFor: 'bin/x64/glass' }, /bin\/x64\/glass does not match/);
+  await reject('stray.zip', { extraFile: 'extra.txt' }, /holds extra\.txt/);
+  await reject('lacking.zip', { extraListed: 'gone.txt' }, /lacks gone\.txt/);
+  // The project's key, not the test's: the test's signature does not verify.
+  const zip = await open(signedArchive(dir, 'other-key.zip', files, key));
+  try { await assert.rejects(verifyArchive(zip), function (e) { return e.code === 'signature'; }); } finally { await zip.close(); }
+  fs.rmSync(dir, { recursive: true, force: true });
 });

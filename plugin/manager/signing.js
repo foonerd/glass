@@ -58,4 +58,62 @@ function signedAssets(body) {
   return sums && sig ? { sums: sums, sig: sig } : null;
 }
 
-module.exports = { PUBLIC_KEY_PEM, SUMS_NAME, SIG_NAME, MAX_SUMS_BYTES, MAX_SIG_BYTES, verifySums, digestInSums, signedAssets };
+const MANIFEST_NAME = 'MANIFEST';
+const MANIFEST_SIG_NAME = 'MANIFEST.sig';
+// A manifest names every file of an archive; the plugin's zip has nearly two thousand.
+const MAX_MANIFEST_BYTES = 4 * 1024 * 1024;
+
+class SignatureError extends Error {
+  constructor(message) {
+    super(message);
+    this.code = 'signature';
+  }
+}
+
+// The lines of a manifest as `sha256sum` writes them: a map of path to digest.
+function parseManifest(text) {
+  const out = new Map();
+  String(text).split(/\r?\n/).forEach(function (line) {
+    const m = /^([0-9a-fA-F]{64})\s+\*?(.+?)\s*$/.exec(line);
+    if (m) out.set(m[2], m[1].toLowerCase());
+  });
+  return out;
+}
+
+// An archive held to the signature it carries inside: MANIFEST, every
+// file's digest, and MANIFEST.sig, signed with the project's key (or the
+// PEM given, for tests). `zip` is an open zip of the Manager's own reader:
+// `entries` with name, isRegular and size, and `read(entry)`. Every
+// regular file in the archive must be in the manifest with its digest,
+// and every file the manifest names must be in the archive. Answers
+// `null` for an archive that carries no manifest and no signature, as
+// every release before signing; throws a SignatureError where the
+// archive carries them and they do not hold. No network is used.
+async function verifyArchive(zip, pem) {
+  const entry = function (name) { return zip.entries.find(function (e) { return e.isRegular && e.name === name; }); };
+  const manifestEntry = entry(MANIFEST_NAME);
+  const sigEntry = entry(MANIFEST_SIG_NAME);
+  if (!manifestEntry && !sigEntry) return null;
+  if (!manifestEntry || !sigEntry) throw new SignatureError('the archive carries half a signature; it is not the release as published');
+  if (manifestEntry.size > MAX_MANIFEST_BYTES || sigEntry.size > MAX_SIG_BYTES) throw new SignatureError('the archive\'s manifest or signature has an unusable size');
+  const manifest = await zip.read(manifestEntry);
+  const sig = await zip.read(sigEntry);
+  if (!verifySums(manifest, sig, pem)) throw new SignatureError('the archive\'s signature does not verify; the archive is not the release as published');
+  const listed = parseManifest(manifest.toString('utf8'));
+  if (!listed.size) throw new SignatureError('the archive\'s manifest names no file');
+  const seen = new Set();
+  for (const e of zip.entries) {
+    if (!e.isRegular || e.name === MANIFEST_NAME || e.name === MANIFEST_SIG_NAME) continue;
+    const stated = listed.get(e.name);
+    if (!stated) throw new SignatureError('the archive holds ' + e.name + ', which its signed manifest does not name');
+    const digest = crypto.createHash('sha256').update(await zip.read(e)).digest('hex');
+    if (digest !== stated) throw new SignatureError(e.name + ' does not match the archive\'s signed manifest');
+    seen.add(e.name);
+  }
+  for (const name of listed.keys()) {
+    if (!seen.has(name)) throw new SignatureError('the archive lacks ' + name + ', which its signed manifest names');
+  }
+  return { files: seen.size };
+}
+
+module.exports = { PUBLIC_KEY_PEM, SUMS_NAME, SIG_NAME, MANIFEST_NAME, MANIFEST_SIG_NAME, MAX_SUMS_BYTES, MAX_SIG_BYTES, SignatureError, verifySums, digestInSums, signedAssets, parseManifest, verifyArchive };

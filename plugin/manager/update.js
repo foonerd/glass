@@ -180,6 +180,18 @@ async function examineGlassZip(file) {
   }
 }
 
+// An archive file held to the signature it carries inside, through the
+// Manager's own zip reader: the result of `signing.verifyArchive`, null
+// for an archive without one.
+async function verifyArchiveFile(file, pem) {
+  const zip = await Zip.open(file);
+  try {
+    return await signing.verifyArchive(zip, pem);
+  } finally {
+    await zip.close();
+  }
+}
+
 // A file's SHA-256, streamed.
 function digestOf(file) {
   return new Promise(function (resolve, reject) {
@@ -276,6 +288,8 @@ class Updater {
     this.fetch = options.fetch || get;
     this.test = options.test || function () { return false; };
     this.stagingDir = options.stagingDir || STAGING_DIR;
+    // The project's key unless another PEM is given (tests sign with their own).
+    this.publicKey = options.publicKey || null;
     this.latest = null;
     this.checkedAt = null;
     this.state = {};
@@ -388,7 +402,14 @@ class Updater {
   async stageFile(job, file) {
     const found = await examineGlassZip(file);
     if (found.version === this.version) throw new UpdateError('same-version', 'Glass ' + found.version + ' is what runs; nothing to install');
-    const release = await verifyAgainstRelease(this.fetch, this.releasesUrl, found.version, file, ASSET, job);
+    // An archive that carries its own signature is verified here, with no
+    // network; one without (published before signing) is held to the
+    // release on GitHub.
+    if (job) job.state = 'verifying';
+    const inside = await verifyArchiveFile(file, this.publicKey);
+    const release = inside ? { version: found.version, asset: 'glass-' + found.version + '.zip', verified: 'archive', files: inside.files }
+      : Object.assign(await verifyAgainstRelease(this.fetch, this.releasesUrl, found.version, file, ASSET, job), { verified: 'release' });
+    this.logger.info('glass: manager: ' + path.basename(file) + (inside ? ' verified by the signature it carries (' + inside.files + ' files)' : ' verified against release ' + found.version + ' on GitHub'));
     await fsp.mkdir(this.stagingDir, { recursive: true });
     const name = 'glass-' + found.version + '.zip';
     const to = path.join(this.stagingDir, name);
@@ -401,7 +422,7 @@ class Updater {
         await fsp.rm(file, { force: true });
       }
     }
-    return { name: name, file: to, version: found.version, least: found.least, release: release };
+    return { name: name, file: to, version: found.version, least: found.least, release: release, verified: release.verified, files: release.files || null };
   }
 
   // The kept zip of the version before the last upgrade, staged for the
@@ -489,4 +510,4 @@ function automaticBackup(manifest, name) {
   return /^before-\d+\.\d+\.\d+(-\d{8}-\d{6})?$/.test(String(name || ''));
 }
 
-module.exports = { automaticBackup: automaticBackup, Updater: Updater, UpdateError: UpdateError, compareVersions: compareVersions, parseRelease: parseRelease, newestRelease: newestRelease, offered: offered, released: released, fetchChecked: fetchChecked, verifySigned: verifySigned, examineGlassZip: examineGlassZip, digestOf: digestOf, verifyAgainstRelease: verifyAgainstRelease, RELEASES_URL: RELEASES_URL, KEEP_AUTOMATIC_BACKUPS: KEEP_AUTOMATIC_BACKUPS, MAX_ZIP_BYTES: MAX_ZIP_BYTES };
+module.exports = { automaticBackup: automaticBackup, Updater: Updater, UpdateError: UpdateError, compareVersions: compareVersions, parseRelease: parseRelease, newestRelease: newestRelease, offered: offered, released: released, fetchChecked: fetchChecked, verifySigned: verifySigned, verifyArchiveFile: verifyArchiveFile, examineGlassZip: examineGlassZip, digestOf: digestOf, verifyAgainstRelease: verifyAgainstRelease, RELEASES_URL: RELEASES_URL, KEEP_AUTOMATIC_BACKUPS: KEEP_AUTOMATIC_BACKUPS, MAX_ZIP_BYTES: MAX_ZIP_BYTES };
