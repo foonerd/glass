@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.17] - 2026-10-08
+
+- **A phone's photo stands upright on the screen.** A picture whose metadata carries an orientation tag, as a phone's portrait photo does, was drawn as stored, on its side, while the Manager's preview showed it upright: the screens now decode every picture with the tag applied, the backdrop, the picture when nothing plays, album art, animated pictures, the tailor's resampling and theme pictures alike, and a picture's size is read as shown, so the frame rule for a `*-ext.*` picture takes a portrait photo as portrait. Asked on the forum.
+
 ## [0.9.16] - 2026-10-08
 
 - **The files list fits a theme of fifty meters.** On the Themes tab's details and on a remote's Assets panel, the files that are there are listed only with **Show every file** on, a switch the browser remembers and off by default; what is missing, failed, optional or elsewhere always shows, with a line counting the files not listed, so a whole theme is one line and a broken one shows its holes without a scroll. A remote's report carries what is not fine; the downloaded one carries every file.
