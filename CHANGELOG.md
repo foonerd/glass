@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.6] - 2026-10-08
+
+- **The status sheet brought up to glass-evo.** Everything the product gained since 0.8.60 was absent from the sheet. A **glass-evo** section after Screen now says: the component's version with the least this Glass works with, whether it is outdated, what Glass it needs and the version kept for going back; who owns the screen and how glass-evo holds it (the screen itself or an X server of its own); which binary the display runs, since when, and when the component was installed, with a word when the display started before the install and runs the old one; what the Face tab and Anymote show and whose module they bring, with the pages open; the look chosen and where it comes from (your own, shipped, or built in, and named but not installed), how many skies it brings, and whether the theme on show brings a look and skies of its own; the picture when nothing plays, found or missing; When the player stops; the face size; the forecast's place (hidden with the addresses until revealed, as a place is personal), unit, span, the reading's age and the last request's error. Network and remotes gains the remotes connected, each with what it is, its version and whether a later release is out; Themes gains the theme on show's own fonts, each found or missing where the display looks; Housekeeping's problems say in words when the display is older than the component's install, the component is older than this Glass works with, the look or the picture named is missing, or a place is set with no reading. Copy as text carries all of it.
+
 ## [0.9.5] - 2026-10-08
 
 - **No person named in the plugin's own words.** The help for a settings backup's name gave a forum user's handle as an example; the examples are plain words now, in English, German and French.
