@@ -333,15 +333,43 @@ pub fn raster(scene: &Scene) -> Frame {
     .clone()
 }
 
+/// Decode a picture's bytes with the orientation its metadata asks for
+/// applied: a phone's portrait photo is stored on its side with a tag,
+/// which a browser honours and a bare decode does not, so the screens
+/// show what the Manager's preview shows. A picture without a tag, or in
+/// a format that carries none, decodes as it is.
+pub fn decode_oriented(bytes: &[u8]) -> image::ImageResult<image::DynamicImage> {
+    use image::ImageDecoder;
+    let mut decoder = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()?
+        .into_decoder()?;
+    let orientation = decoder
+        .orientation()
+        .unwrap_or(image::metadata::Orientation::NoTransforms);
+    let mut image = image::DynamicImage::from_decoder(decoder)?;
+    image.apply_orientation(orientation);
+    Ok(image)
+}
+
+/// A picture's size as it is shown, from its header: the turned cases of
+/// its orientation tag swap width and height.
+pub fn oriented_size(bytes: &[u8]) -> image::ImageResult<(u32, u32)> {
+    use image::metadata::Orientation::{Rotate270, Rotate270FlipH, Rotate90, Rotate90FlipH};
+    use image::ImageDecoder;
+    let mut decoder = image::ImageReader::new(std::io::Cursor::new(bytes))
+        .with_guessed_format()?
+        .into_decoder()?;
+    let (w, h) = decoder.dimensions();
+    Ok(match decoder.orientation() {
+        Ok(Rotate90 | Rotate270 | Rotate90FlipH | Rotate270FlipH) => (h, w),
+        _ => (w, h),
+    })
+}
+
 /// Decode a picture by its content and stretch it to `w` by `h`, as the
 /// player's engine does with album art, then cut it with `mask` if given.
 pub fn read_art(path: &Path, w: u32, h: u32, mask: Option<&Frame>) -> Option<Frame> {
-    let image = image::ImageReader::new(std::io::Cursor::new(read_file(path)?))
-        .with_guessed_format()
-        .ok()?
-        .decode()
-        .ok()?
-        .into_rgba8();
+    let image = decode_oriented(&read_file(path)?).ok()?.into_rgba8();
     let frame = Frame {
         blend: Blend::Normal,
         width: image.width(),
@@ -361,12 +389,7 @@ pub fn read_art(path: &Path, w: u32, h: u32, mask: Option<&Frame>) -> Option<Fra
 /// picture.
 pub fn read_covering(path: &Path, w: u32, h: u32) -> Option<Frame> {
     let (w, h) = (w.max(1), h.max(1));
-    let image = image::ImageReader::new(std::io::Cursor::new(read_file(path)?))
-        .with_guessed_format()
-        .ok()?
-        .decode()
-        .ok()?
-        .into_rgba8();
+    let image = decode_oriented(&read_file(path)?).ok()?.into_rgba8();
     let (iw, ih) = (image.width().max(1), image.height().max(1));
     // The larger of the two ratios fills both ways.
     let (sw, sh) = if u64::from(w) * u64::from(ih) >= u64::from(h) * u64::from(iw) {
@@ -435,12 +458,7 @@ pub fn read_frames(path: &Path, side: u32) -> Option<Vec<(Frame, u32)>> {
             ));
         }
     } else {
-        let image = image::ImageReader::new(std::io::Cursor::new(&bytes))
-            .with_guessed_format()
-            .ok()?
-            .decode()
-            .ok()?
-            .into_rgba8();
+        let image = decode_oriented(&bytes).ok()?.into_rgba8();
         frames.push((fit_square(image, side), 0));
     }
     (!frames.is_empty()).then_some(frames)
@@ -482,11 +500,7 @@ fn fit_square(image: image::RgbaImage, side: u32) -> Frame {
 
 /// A picture file's size, from its header.
 pub fn picture_size(path: &Path) -> Option<(u32, u32)> {
-    image::ImageReader::new(std::io::Cursor::new(read_file(path)?))
-        .with_guessed_format()
-        .ok()?
-        .into_dimensions()
-        .ok()
+    oriented_size(&read_file(path)?).ok()
 }
 
 /// A picture file scaled by `sx` and `sy` into another file of the same
@@ -509,10 +523,7 @@ pub fn resample_picture_onto(
     canvas: Option<((u32, u32), (i32, i32))>,
 ) -> Result<(u32, u32), String> {
     let bytes = read_file(src).ok_or_else(|| format!("{}: cannot be read", src.display()))?;
-    let image = image::ImageReader::new(std::io::Cursor::new(bytes))
-        .with_guessed_format()
-        .map_err(|e| format!("{}: {e}", src.display()))?
-        .decode()
+    let image = decode_oriented(&bytes)
         .map_err(|e| format!("{}: {e}", src.display()))?
         .into_rgba8();
     let (w, h) = (
@@ -7963,12 +7974,7 @@ pub fn write_png(path: &Path, frame: &Frame) -> Result<(), String> {
 pub fn read_png(path: &Path) -> Option<Frame> {
     // The format is read from the bytes, not the name: a remote keeps the
     // pictures it fetches under hashed names with no telling extension.
-    let image = image::ImageReader::new(std::io::Cursor::new(read_file(path)?))
-        .with_guessed_format()
-        .ok()?
-        .decode()
-        .ok()?
-        .into_rgba8();
+    let image = decode_oriented(&read_file(path)?).ok()?.into_rgba8();
     let width = image.width();
     let height = image.height();
     Some(Frame {
@@ -10411,5 +10417,44 @@ mod analyser_tests {
         );
         assert_eq!(read_frames(&dir.join("none.png"), 10), None);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A JPEG whose metadata says it is stored on its side (orientation
+    /// 6, the phone's portrait photo): decoded as a browser shows it, and
+    /// its size reported as shown; without the tag, as stored.
+    #[test]
+    fn a_picture_is_decoded_as_its_orientation_tag_says() {
+        // 4 by 2, the left half red, the right half blue.
+        let mut stored = image::RgbImage::new(4, 2);
+        for (x, _, px) in stored.enumerate_pixels_mut() {
+            *px = if x < 2 {
+                image::Rgb([255, 0, 0])
+            } else {
+                image::Rgb([0, 0, 255])
+            };
+        }
+        let mut plain = Vec::new();
+        image::codecs::jpeg::JpegEncoder::new_with_quality(&mut plain, 100)
+            .encode_image(&stored)
+            .unwrap();
+        // The EXIF segment: little-endian TIFF, one entry, Orientation = 6.
+        let mut exif =
+            b"Exif\0\0II\x2a\0\x08\0\0\0\x01\0\x12\x01\x03\0\x01\0\0\0\x06\0\0\0\0\0\0\0".to_vec();
+        let len = (exif.len() + 2) as u16;
+        let mut tagged = plain[..2].to_vec();
+        tagged.extend_from_slice(&[0xFF, 0xE1, (len >> 8) as u8, len as u8]);
+        tagged.append(&mut exif);
+        tagged.extend_from_slice(&plain[2..]);
+        assert_eq!(oriented_size(&plain).unwrap(), (4, 2));
+        assert_eq!(oriented_size(&tagged).unwrap(), (2, 4));
+        let shown = decode_oriented(&tagged).unwrap().into_rgb8();
+        assert_eq!((shown.width(), shown.height()), (2, 4));
+        // Turned a quarter clockwise, the red left half is the top half.
+        let top = shown.get_pixel(0, 0);
+        let bottom = shown.get_pixel(0, 3);
+        assert!(top[0] > 200 && top[2] < 60, "top {:?}", top);
+        assert!(bottom[2] > 200 && bottom[0] < 60, "bottom {:?}", bottom);
+        let as_is = decode_oriented(&plain).unwrap().into_rgb8();
+        assert_eq!((as_is.width(), as_is.height()), (4, 2));
     }
 }
