@@ -27,7 +27,7 @@ For a face theme's own skies (glass-evo 0.2.2, from Gelo5's question "where are 
 
 ## [0.9.1] - 2026-10-07
 
-Andrew, 2026-10-07, on a theme whose time fields name `fonts/font.ttf` beside its `meters.txt`: "Apparently, this theme fonts does not work". With glass-evo 0.2.1.
+Just a Nerd, 2026-10-07, on a theme whose time fields name `fonts/font.ttf` beside its `meters.txt`: "Apparently, this theme fonts does not work". With glass-evo 0.2.1.
 
 - **A field's own font reaches the Face tab and Anymote.** A text or time field's `.font` is looked for as an absolute path, in the theme folder and under `font.path`, and the display found it on a player and on a remote but never in a browser view, where the theme's files live in the page's table and not on any disk: the view set such a field in its style's font. The candidates are now tried where the display reads its files, the table included, so the Face tab and Anymote draw the field in the font the theme names, as the player's screen does. The player's screen and the remotes were right before.
 
@@ -50,7 +50,7 @@ Glass 0.9.0 gathers the 0.8 series, 0.8.0 to 0.8.90, 1 to 8 October 2026, into o
 
 ## [0.8.90] - 2026-10-07
 
-Andrew, 2026-10-08: "FIX - never reported: Screen -> Buttons - does not have custom background override like all other element have." With glass-evo 0.1.54.
+Just a Nerd, 2026-10-08: "FIX - never reported: Screen -> Buttons - does not have custom background override like all other element have." With glass-evo 0.1.54.
 
 - **The buttons' own background, behind More in the Buttons section.** Background (how solid the bar's glass is; as the Backgrounds section's How solid unless moved) and Background colour (the bar's and the More sheet's; the look's unless said), as the clock, the date and the forecast have theirs; the likeness draws the bar with them. Keys `buttons.glass`, `buttons.tint`.
 - **How solid moves the forecast's background too.** It had moved the sheet's, the clock's and the date's, each at its distance, and left the forecast's where it was; it moves the forecast's and a buttons' own background the same way now.
@@ -58,27 +58,27 @@ Andrew, 2026-10-08: "FIX - never reported: Screen -> Buttons - does not have cus
 
 ## [0.8.89] - 2026-10-07
 
-Andrew, 2026-10-08, after a likeness that did not agree with the screen until the player was rebooted: "YOU SHOULD TRACK SUCH SHIT".
+Just a Nerd, 2026-10-08, after a likeness that did not agree with the screen until the player was rebooted: "YOU SHOULD TRACK SUCH SHIT".
 
 - **The likeness's module is the installed component's, always.** The look panel fetched glass-evo's module once, by a bare address a browser may keep from before an update. It now asks the Manager which component is installed and fetches the module by that version, and brings the module again when a component job finishes, so the likeness is drawn by the module the screen runs.
 
 ## [0.8.88] - 2026-10-07
 
-Andrew, 2026-10-08: "I selected to wait 15 second - NO LONGER RESPECTED! THIS SHOULD BE A SWITCH IN SCREEN - IMMEDIATE - RESPECT TIMEOUT". With glass-evo 0.1.53.
+Just a Nerd, 2026-10-08: "I selected to wait 15 second - NO LONGER RESPECTED! THIS SHOULD BE A SWITCH IN SCREEN - IMMEDIATE - RESPECT TIMEOUT". With glass-evo 0.1.53.
 
 - **When the player stops, in the Backgrounds section of the look panel.** "The clock at once" (as before, unless the look says) or "After the persist period": with the second, the screen glass-evo holds keeps the theme, with its countdown where the plugin's Keep Display Active After Pause/Stop says so, and shows the clock, the date, the forecast and the picture when that period ends. Kept with the look as every setting is; key `idle.wait`.
 - **Glass names glass-evo 0.1.53 as the least it works with.**
 
 ## [0.8.87] - 2026-10-07
 
-Andrew, 2026-10-08: "REMOTE AND FACE AND ANYMOTE - ALL LOST CUSTOM BACKGROUND", on the picture when nothing plays (0.8.63), which had been built for the player's own screen alone. With glass-evo 0.1.52.
+Just a Nerd, 2026-10-08: "REMOTE AND FACE AND ANYMOTE - ALL LOST CUSTOM BACKGROUND", on the picture when nothing plays (0.8.63), which had been built for the player's own screen alone. With glass-evo 0.1.52.
 
 - **The picture when nothing plays reaches the browser views.** A face in the Face tab or on Anymote asks the page for the picture the look names as it asks for the album art: wanted under the home at `backgrounds/<name>`, fetched by the page from `/api/backgrounds/<name>/file` and put into its table, marked missing when the player has none. The theme shows until it is in, as on the player. `intake::host_picture`, for a face as `overlay::face::host_picture`; the table keeps two such pictures at most.
 - **And the remote displays.** `/api/remote/config` carries, in its `face` part, `picture: { name, url }` when the look names a picture the player has; a remote's sync brings it to `backgrounds/<name>` under its home beside the faces, the folder emptied first, and the remote names the folder in `GLASS_BACKGROUNDS`. The configuration's version already covers the face part, so a change of picture reaches the remotes at once.
 
 ## [0.8.86] - 2026-10-07
 
-Andrew's step 4 of the weather: "Now - Dramatise icons. Snow, thunderstorm, rain, drizzle, heat, etc. I am sure we can add some light frame animations here." With glass-evo 0.1.51.
+Just a Nerd's step 4 of the weather: "Now - Dramatise icons. Snow, thunderstorm, rain, drizzle, heat, etc. I am sure we can add some light frame animations here." With glass-evo 0.1.51.
 
 - **The skies move, in the likeness as on the screen.** In the Forecast section, "Skies move" (on unless the look says) lets each sky keep its shape and gain one small motion at its own pace; the likeness draws the forecast again eight times a second while the panel is on show, so it moves with the screen. "Thunder flashes" (off unless the look says) lights the bolt and the cloud for a tenth of a second every eight to twenty seconds. Off, every sky stands still and nothing about the screen's refresh changes. Keys `weather.motion`, `weather.thunder`.
 - **Skies in colour** (on unless the look says): a yellow sun, red when scorching, a pale moon, clouds and fog in greys, drizzle and rain in blues, white snow, the storm dark with a yellow bolt, heavy weather murkier with more falling. Off, every sky is in the forecast's colour as before. Key `weather.colour`.
@@ -86,7 +86,7 @@ Andrew's step 4 of the weather: "Now - Dramatise icons. Snow, thunderstorm, rain
 
 ## [0.8.85] - 2026-10-07
 
-Andrew's step 3 of the weather: "Forecast - add Heatmap toggle/slider - perhaps color picker for start and end? with some logical defaults? This is for numbers only. Also, second toggle - apply to days, still forecast. Apply to date - override date with heatmap - first override exception." With glass-evo 0.1.50.
+Just a Nerd's step 3 of the weather: "Forecast - add Heatmap toggle/slider - perhaps color picker for start and end? with some logical defaults? This is for numbers only. Also, second toggle - apply to days, still forecast. Apply to date - override date with heatmap - first override exception." With glass-evo 0.1.50.
 
 - **The forecast's heatmap.** In the Forecast section, "Heatmap" sets every temperature the forecast shows in the colour of its degree, numbers only: from "Cold" at −10 °C, through the forecast's own colour at 12 °C, to "Warm" at 30 °C, each a colour of your own (blue and red unless said). "Also the week's days" colours the week's lows and highs too; "Also the date" sets the date in the colour of the temperature now, with the date's own colour in the middle of the scale, the one link between pieces, by your switch. Every switch is off unless the look says. Keys `weather.heat`, `weather.cold`, `weather.warm`, `weather.heat.days`, `weather.heat.date`.
 - **The likeness draws it through the module**, which now takes the player's reading for the date's line as well as the forecast's.
@@ -94,14 +94,14 @@ Andrew's step 3 of the weather: "Forecast - add Heatmap toggle/slider - perhaps 
 
 ## [0.8.84] - 2026-10-07
 
-Andrew: "Global is background, not date - should not be linked at all." With glass-evo 0.1.47.
+Just a Nerd: "Global is background, not date - should not be linked at all." With glass-evo 0.1.47.
 
 - **The forecast's colour, strength, background and background colour are its own.** 0.8.83 had them follow the date's where the look left them so; nothing links one piece to another now. "Same as the rest" means the look's own ink and tint, as it does for the clock and the date, and the likeness draws the forecast's glass from its own settings alone.
 - **Glass names glass-evo 0.1.47 as the least it works with.**
 
 ## [0.8.83] - 2026-10-07
 
-Andrew, on the forecast's finer settings: "Forecast Background does not show in preview, shows on glass when saved. DATE is missing background, and Color changes both, date and forecast!" With glass-evo 0.1.46.
+Just a Nerd, on the forecast's finer settings: "Forecast Background does not show in preview, shows on glass when saved. DATE is missing background, and Color changes both, date and forecast!" With glass-evo 0.1.46.
 
 - **The forecast's own background shows in the likeness.** The likeness drew a forecast's glass as the date's whatever the look said; it draws the forecast's own strength and colour now, the date's where the look leaves them so (`lookmodel.weatherGlassKey`, `weatherTint`, tested), as the screen does.
 - **The date's Background and Background colour show on the grid.** They were shown only with the date at the top of the screen, where it first had a glass of its own; a date on the grid has one too.
@@ -109,14 +109,14 @@ Andrew, on the forecast's finer settings: "Forecast Background does not show in 
 
 ## [0.8.82] - 2026-10-07
 
-Andrew, on step 2 of the weather: "What it shows dropdown is always empty - it should show what is selected." With glass-evo 0.1.46, which draws today's line and the span's columns as he chose from the mockups.
+Just a Nerd, on step 2 of the weather: "What it shows dropdown is always empty - it should show what is selected." With glass-evo 0.1.46, which draws today's line and the span's columns as he chose from the mockups.
 
 - **"What it shows" shows what is chosen.** The page painted a choice only for the clock's face and dial; the forecast's span is painted as one of its six words now, today unless said (`lookmodel.span`, tested).
 - **Glass names glass-evo 0.1.46 as the least it works with.**
 
 ## [0.8.81] - 2026-10-07
 
-Andrew's step 2 of the weather, from his question of 2026-10-06: "What if user wants a day (24h) forecast, or day every 2 or 4 forecast? Or week forecast?" With glass-evo 0.1.45.
+Just a Nerd's step 2 of the weather, from his question of 2026-10-06: "What if user wants a day (24h) forecast, or day every 2 or 4 forecast? Or week forecast?" With glass-evo 0.1.45.
 
 - **The forecast's span.** The Forecast section's "What it shows" is today as a line, the next 24 hours every 2, 3, 4 or 6 hours, or the week; the face and the likeness draw the hours and the week as columns in the forecast's cells, each its time, its sky and its temperature (the week each day's low and high). The key is `weather.span`, `today` unless said.
 - **The reading carries the hours and the week.** The plugin asks Open-Meteo for the hourly forecast beside the daily one, seven days in one request every half hour as before, and the `weather` line carries `hours` (24 from the next whole hour at the place: `hour`, `temp`, `code`, `day`) and `days` (7 from today: `weekday`, `code`, `low`, `high`) beside what it carried. The overlay crate names `Hour` and `Day`. A display that does not know the fields ignores them.
@@ -130,7 +130,7 @@ Found on the player's page before it was handed over, with glass-evo 0.1.44.
 
 ## [0.8.79] - 2026-10-07
 
-Andrew: "Now - weather. Exact same principle - grid, the same way as clock and date." With glass-evo 0.1.44.
+Just a Nerd: "Now - weather. Exact same principle - grid, the same way as clock and date." With glass-evo 0.1.44.
 
 - **Today's forecast, for a place the user chooses.** The Forecast section on the Screen tab: on or off, a place found by name (a town or a city; the first eight matches to pick from), the degrees in °C or °F, and the reading as the player holds it. The plugin asks Open-Meteo once a place is set, every half hour, keeps the reading across restarts and drops one older than three hours; "Weather data by Open-Meteo" stands in the section, as its licence asks. The display hears a `weather` line on the channel (`place`, `unit`, `now`, `code`, `day`, `today`, `low`, `high`, `rain`, `at`; `off` when there is nothing), and `GET /api/weather`, `GET /api/weather/search?name=` and `POST /api/weather` serve the section.
 - **On the grid and only, as the clock and the date are.** The section has "On the grid" (the bottom row across the three columns unless the look says), "Inside its cells", "Margin" and a size of its own, and behind More its own colour, strength and background, each the date's unless said. The forecast on the same cells as the clock or the date, aligned the same, shares their glass in the order clock, date, forecast.
@@ -139,7 +139,7 @@ Andrew: "Now - weather. Exact same principle - grid, the same way as clock and d
 
 ## [0.8.78] - 2026-10-07
 
-Andrew, on the date on the grid, set in the browser's type in the likeness and in the face's own on the glass: "Rejected. I requested date to be wired exactly as the clock is. Preview vs glass." With glass-evo 0.1.43.
+Just a Nerd, on the date on the grid, set in the browser's type in the likeness and in the face's own on the glass: "Rejected. I requested date to be wired exactly as the clock is. Preview vs glass." With glass-evo 0.1.43.
 
 - **The module draws every piece of the likeness.** The date, and a clock in type, are set by glass-evo's own module in the look's bold font, brought from the player, as the face sets them on the screen: the same shapes, the same room, pixel for pixel at the likeness's scale. A drawn clock face was already the module's. Nothing stands in for the module: until it and the font are here, the likeness shows no type.
 - **For the face's types,** the overlay crate names `FontFiles` beside `Input`, `Metadata` and `TextStyle`, so a page's module can load fonts the way the display does.
@@ -147,7 +147,7 @@ Andrew, on the date on the grid, set in the browser's type in the likeness and i
 
 ## [0.8.77] - 2026-10-07
 
-Andrew, on the accepted clock: "Now - wire date exactly the same way in grid. We are moving the face to grid and only." With glass-evo 0.1.42.
+Just a Nerd, on the accepted clock: "Now - wire date exactly the same way in grid. We are moving the face to grid and only." With glass-evo 0.1.42.
 
 - **The date on the grid, as the clock is.** The Date section has the same nine cells ("On the grid", with "As the look places it" to leave them), "Inside its cells" and "Margin" as the Clock section; `date.place` takes cells beside its three words, `date.align` and `date.margin` are the date's own. The Where words show only while the date is off the grid, and the section's summary says "On the grid" while it is on it.
 - **The likeness as the screen.** The date on the grid stands in its cells as the face sets it: a size the look comes with fitted to the cells, a size the user set kept, the margin from every side, and a date larger than its cells running over the side it is aligned to. The clock and the date on the same cells with the same alignment stand one under the other on one glass, the clock first, each against the side the block is aligned to; the date is set first and the clock takes what it leaves of the cells' height. A date off the grid stands as before, and the clock with it.
@@ -155,7 +155,7 @@ Andrew, on the accepted clock: "Now - wire date exactly the same way in grid. We
 
 ## [0.8.76] - 2026-10-07
 
-Andrew, aligning a clock larger than its row on the grid: "Up is down, down is up." With glass-evo 0.1.41.
+Just a Nerd, aligning a clock larger than its row on the grid: "Up is down, down is up." With glass-evo 0.1.41.
 
 - **A clock larger than its cells runs over on the side it is aligned to, in the likeness as on the screen.** Before, the likeness kept the margin only on the sides the clock was aligned to and set the clock's edge there, so a clock larger than its cells hung off the far side and "top" moved it down. Now the margin is kept from every side of the cells, as the face keeps it, and a clock whose glass is larger than the cells less the margin stands the margin from the far side instead, its excess over the side named: "top" always moves it up and "left" always left. A clock that fits its cells stands exactly as before. `lookmodel.turned` and `lookmodel.flexed` name the rule, tested.
 
@@ -167,7 +167,7 @@ Andrew, aligning a clock larger than its row on the grid: "Up is down, down is u
 
 ## [0.8.74] - 2026-10-07
 
-The clock on the idle screen's grid, the first step of the grid at Andrew's word ("introduce grid. We will test only clock in grid end-to-end. Move clock to grid."), with his margin ("meant user controlled margins!"). The face draws it from glass-evo 0.1.40; this is the Manager's part, for the clock alone, as 0.8.72 and 0.8.73 carried it before the night's rollback.
+The clock on the idle screen's grid, the first step of the grid at Just a Nerd's word ("introduce grid. We will test only clock in grid end-to-end. Move clock to grid."), with his margin ("meant user controlled margins!"). The face draws it from glass-evo 0.1.40; this is the Manager's part, for the clock alone, as 0.8.72 and 0.8.73 carried it before the night's rollback.
 
 - **The clock on the grid, in the look panel.** With glass-evo 0.1.40 the Clock section gets "On the grid": nine cells to press, one for a cell and then another for the block between them, with "As the look places it" to take the clock off the grid again; "Inside its cells", nine squares for where the clock stands inside what it occupies; and "Margin", units of a 720th of the height between the clock's glass and the sides of its cells it is aligned to, 20 as before and 0 for the corner. The likeness draws the clock in its cells by the face's rules: the margin kept from the side it is aligned to, the glass giving way as the clock takes more, a size the look comes with fitted to the cells and a size the user set kept.
 - Keys for a look or a face theme: `clock.place`, `clock.align`, `clock.margin`. Shown only where the glass-evo installed knows them. Nothing else changes.
@@ -175,13 +175,13 @@ The clock on the idle screen's grid, the first step of the grid at Andrew's word
 
 ## [0.8.73] - 2026-10-07
 
-Andrew, placing the clock in a corner of the grid: "Perhaps a margin should be introduced?" and "meant user controlled margins!" The face has it from glass-evo 0.1.40.
+Just a Nerd, placing the clock in a corner of the grid: "Perhaps a margin should be introduced?" and "meant user controlled margins!" The face has it from glass-evo 0.1.40.
 
 - **Margin** in the Clock section, shown while the clock is on the grid: units of a 720th of the height between the clock's glass and the sides of its cells it is aligned to; 20 as before, 0 for the corner. The likeness keeps the same margin (`clock.margin`).
 
 ## [0.8.72] - 2026-10-07
 
-The first step of the idle screen's grid, at Andrew's word: "introduce grid. We will test only clock in grid end-to-end. Move clock to grid." The face draws it from glass-evo 0.1.39; this is the Manager's part, for the clock alone.
+The first step of the idle screen's grid, at Just a Nerd's word: "introduce grid. We will test only clock in grid end-to-end. Move clock to grid." The face draws it from glass-evo 0.1.39; this is the Manager's part, for the clock alone.
 
 - **The clock on the grid, in the look panel.** With glass-evo 0.1.39 the Clock section gets "On the grid": nine cells to press, one for a cell and then another for the block between them, with "As the look places it" to take the clock off the grid again; and "Inside its cells", nine squares for where the clock stands inside what it occupies. The likeness draws the clock in its cells by the face's rules: the margin kept from the side it is aligned to, the glass giving way as the clock takes more, a size the look comes with fitted to the cells and a size the user set kept.
 - Keys for a look or a face theme: `clock.place`, `clock.align`. Shown only where the glass-evo installed knows them. Nothing else changes.
@@ -200,7 +200,7 @@ Asked on the forum: "an option to add custom fonts for: artist, title and album.
 
 ## [0.8.69] - 2026-10-06
 
-Asked by Andrew, looking at the radio icons of 0.8.66 on the screen: "DAB and FM (standard) are squashed and with indicator starting below line, they look off. Few proper mockups here will help." Chosen from three mockups, then adjusted twice at his word (MONO dead centred, the bars clear of the M and the same distance from the letters in every set), and with the plugin's coming STEREO word taken on.
+Asked by Just a Nerd, looking at the radio icons of 0.8.66 on the screen: "DAB and FM (standard) are squashed and with indicator starting below line, they look off. Few proper mockups here will help." Chosen from three mockups, then adjusted twice at his word (MONO dead centred, the bars clear of the M and the same distance from the letters in every set), and with the plugin's coming STEREO word taken on.
 
 - **The radio icons redrawn.** The FM and DAB letters at their full height, the five signal bars standing on the letters' baseline with their tops on a parabola, rounded, the unlit ones outlined; MONO dead centred under smaller FM letters. The names and the lookup are unchanged, so a theme's own icons stay as they are.
 - **FM in stereo.** The radio plugin will name a stereo station `FM STEREO ◦◦●●●`; the icon is looked for under `fm_stereo_3`, `fm_stereo`, `fm_3`, `fm`, as a mono one is under its own word, and the plugin brings `fm_stereo_0` to `fm_stereo_5` and `fm_stereo` beside the mono set.
@@ -208,7 +208,7 @@ Asked by Andrew, looking at the radio icons of 0.8.66 on the screen: "DAB and FM
 
 ## [0.8.68] - 2026-10-06
 
-Asked by Andrew on the screen-off of 0.8.67: gradual, not abrupt.
+Asked by Just a Nerd on the screen-off of 0.8.67: gradual, not abrupt.
 
 - **The screen goes black and comes back over a fade.** "Over, milliseconds" beside "Screen off after" in the look panel: how long the screen takes to go black and to come back, 500 (half a second) unless said, 0 for at once, up to 120000 (two minutes). The face's setting `face.idle.fade`, in a face theme `[idle] fade`. Drawn by glass-evo from 0.1.36.
 
