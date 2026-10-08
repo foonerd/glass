@@ -466,8 +466,10 @@
         <label class="switch"><input type="checkbox" id="upd-upload"><span id="upd-upload-label"></span></label>
         <div class="help" id="upd-upload-help"></div>
         <div id="upd-upload-box" class="hidden" style="margin-top:8px">
-          <div class="row" style="margin-top:6px"><span id="upd-file-glass-label" style="min-width:160px"></span><input type="file" id="upd-file-glass" accept=".zip,application/zip"></div>
-          <div class="row" style="margin-top:6px"><span id="upd-file-evo-label" style="min-width:160px"></span><input type="file" id="upd-file-evo" accept=".zip,application/zip"></div>
+          <input type="file" id="upd-file-glass" accept=".zip,application/zip" class="hidden">
+          <input type="file" id="upd-file-evo" accept=".zip,application/zip" class="hidden">
+          <div class="row" style="margin-top:6px"><button class="small" id="btn-upd-pick-glass"></button><span class="muted" id="upd-file-glass-name"></span></div>
+          <div class="row" style="margin-top:6px"><button class="small" id="btn-upd-pick-evo"></button><span class="muted" id="upd-file-evo-name"></span></div>
           <div class="row" style="margin-top:8px"><button class="primary" id="btn-upd-files"></button></div>
           <div class="help" id="upd-upload-note"></div>
         </div>
@@ -857,7 +859,8 @@
     $('btn-upd-notes').textContent = t('MANAGER_UPD_NOTES');
     $('upd-test-label').textContent = t('MANAGER_UPD_TEST'); $('upd-test-help').textContent = t('MANAGER_UPD_TEST_HELP');
     $('upd-upload-label').textContent = t('MANAGER_UPD_UPLOAD'); $('upd-upload-help').textContent = t('MANAGER_UPD_UPLOAD_HELP');
-    $('upd-file-glass-label').textContent = t('MANAGER_UPD_FILE_GLASS'); $('upd-file-evo-label').textContent = t('MANAGER_UPD_FILE_EVO');
+    $('btn-upd-pick-glass').textContent = t('MANAGER_UPD_FILE_GLASS'); $('btn-upd-pick-evo').textContent = t('MANAGER_UPD_FILE_EVO');
+    $('upd-file-glass-name').textContent = t('MANAGER_UPD_NO_FILE'); $('upd-file-evo-name').textContent = t('MANAGER_UPD_NO_FILE');
     $('btn-upd-files').textContent = t('MANAGER_UPD_FILES_GO'); $('upd-upload-note').textContent = t('MANAGER_UPD_UPLOAD_NOTE');
     $('tm-close').textContent = t('MANAGER_CLOSE');
     $('tm-activate').textContent = t('MANAGER_ACTIVATE');
@@ -2493,7 +2496,7 @@
     };
     box.innerHTML = '<div class="help">' + esc(t('MANAGER_LOOK_PICTURE_HELP')) + '</div>' +
       '<div class="looks">' + [''].concat(lookUi.f.backgrounds || []).map(thumb).join('') + '</div>' +
-      '<div class="row" style="margin:-6px 0 16px"><label class="help" for="look-pic-file">' + esc(t('MANAGER_LOOK_PICTURE_UPLOAD')) + '</label> <input type="file" id="look-pic-file" accept="image/jpeg,image/png,image/webp"></div>';
+      '<div class="row" style="margin:-6px 0 16px"><button class="small" id="look-pic-btn">' + esc(t('MANAGER_LOOK_PICTURE_UPLOAD')) + '</button><input type="file" id="look-pic-file" accept="image/jpeg,image/png,image/webp" class="hidden"></div>';
   }
   // The panel as the model stands: the cards too where the looks, the
   // picture or the face size may have changed.
@@ -2765,6 +2768,8 @@
     }
     var pick = e.target.closest('[data-pic]');
     if (pick) { lookUi.v['idle.picture'] = pick.getAttribute('data-pic'); lookUi.mode = 'idle'; paintLook(true); }
+    // The Manager's own button opens the browser's hidden file control.
+    if (e.target.closest('#look-pic-btn')) $('look-pic-file').click();
   };
   $('look-pictures').onchange = function (e) {
     var input = e.target;
@@ -3180,6 +3185,15 @@
       toast(t('MANAGER_SAVED'));
     }).catch(function (e) { box.checked = !box.checked; toast(errorText(e), 'error'); }).then(function () { box.disabled = false; });
   };
+  // The files are chosen through the Manager's own buttons, the browser's
+  // control kept hidden, and the name chosen shown beside each.
+  [['btn-upd-pick-glass', 'upd-file-glass', 'upd-file-glass-name'], ['btn-upd-pick-evo', 'upd-file-evo', 'upd-file-evo-name']].forEach(function (ids) {
+    $(ids[0]).onclick = function () { $(ids[1]).click(); };
+    $(ids[1]).onchange = function () {
+      var file = $(ids[1]).files[0];
+      $(ids[2]).textContent = file ? file.name + ' (' + fmtBytes(file.size) + ')' : t('MANAGER_UPD_NO_FILE');
+    };
+  });
   // The files chosen go to the player, the glass-evo zip first and held,
   // then the Glass zip, which takes it with it where it needs a newer
   // glass-evo; a glass-evo zip alone is installed at once.
@@ -3196,7 +3210,10 @@
       if (glass && evo) chain = api('POST', '/api/evo/upload?hold=1', evo, true).then(function () { return api('POST', '/api/update/upload', glass, true); }).then(function (d) { followUpgrade(d.job); });
       else if (glass) chain = api('POST', '/api/update/upload', glass, true).then(function (d) { followUpgrade(d.job); });
       else chain = api('POST', '/api/evo/upload', evo, true).then(function (d) { $('jobs-update').innerHTML = ''; followEvo(d.job); });
-      chain.catch(function (e) { $('jobs-update').innerHTML = ''; toast(errorText(e), 'error'); }).then(function () { $('btn-upd-files').disabled = false; });
+      chain.catch(function (e) { $('jobs-update').innerHTML = ''; toast(errorText(e), 'error'); }).then(function () {
+        $('btn-upd-files').disabled = false;
+        ['upd-file-glass', 'upd-file-evo'].forEach(function (id) { $(id).value = ''; $(id + '-name').textContent = t('MANAGER_UPD_NO_FILE'); });
+      });
     });
   };
   // Test releases: asked of the player, which looks both releases up again.
