@@ -478,11 +478,20 @@ pub fn decode(line: &[u8]) -> Option<Event> {
                 .map(|items| items.iter().map(queue_item).collect())
                 .unwrap_or_default(),
         )),
-        "persist" => Some(Event::Persist {
-            mode: text("mode"),
-            seconds: value.get("seconds").and_then(Value::as_u64).unwrap_or(0) as u32,
-            started_ms: value.get("startedAt").and_then(Value::as_u64).unwrap_or(0),
-        }),
+        "persist" => {
+            eprintln!(
+                "TRACE decode persist: {}",
+                String::from_utf8_lossy(line)
+                    .chars()
+                    .take(160)
+                    .collect::<String>()
+            );
+            Some(Event::Persist {
+                mode: text("mode"),
+                seconds: value.get("seconds").and_then(Value::as_u64).unwrap_or(0) as u32,
+                started_ms: value.get("startedAt").and_then(Value::as_u64).unwrap_or(0),
+            })
+        }
         "calibrate" => Some(Event::Calibrate {
             points: value
                 .get("points")
