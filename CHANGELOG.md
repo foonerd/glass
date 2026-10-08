@@ -2,6 +2,11 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.13] - 2026-10-08
+
+- **A remote makes a report, as the player does.** The remote's page has a **Report** panel: say in a line what you did and what you saw, and **Make a report** builds it from everything the remote knows, its Status, Connection with the firewall rules, Assets, Prerequisites and Version panels as text, the player's side as far as the remote can read it from the player's Manager (Glass and glass-evo versions, who owns the screen, the theme on show, remote displays served and on which ports, the player's state and its recent problems), and the remote's own last log lines, which the display now keeps in memory for this. **Copy for the forum** cuts a report longer than a post takes with a word on the file; **Open a GitHub issue** goes to the repository of what the remote is, Glass for the standalone and glass-evo for the bundle; **Download the report** saves the whole as a file with the player's sheet under it as its Manager answered it. Addresses and host names stay hidden unless **Reveal addresses** is pressed. The report's forms are the one script the Manager's page uses, served by the remote itself. `GET /api/support` on the remote's port answers the bundle as JSON.
+- **Stickers on the Connection panel.** Each path carries a sticker, green for a part that works, orange for a part that fails, grey for one not tested or only informative, and the panel's own sticker says connected, problem, or no connection in red when nothing answers. The report's text carries the same words in brackets.
+
 ## [0.9.12] - 2026-10-08
 
 - **The likeness's safe margins lie over everything, and have a switch.** The green hairlines at the screen's edge and the theme's frame's edge were drawn with the boxes, so a piece of the face that ran over the frame's edge covered them. They are drawn last now, over everything the likeness draws, and a **Safe margins** switch under the likeness hides them, on unless turned off, the choice kept by the browser.
