@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.10] - 2026-10-08
+
+- **A remote says what is blocked, with no ambiguity.** A remote's page has a **Connection** panel: each path to the player tried from the remote's side (the Manager, the channel and the player's own web over TCP, each open, refused, timed out or unreachable with the words), and the frames path over UDP judged from both ends: Check now asks the player, over the channel, to send three probe datagrams to the remote's frames port, and the verdict says arrived (open) or blocked (the player sent, nothing came), naming the side and the fix. A player older than this release is told apart from a block. The remote now hears frames on one fixed port, 5585 unless its configuration says another (`frames_port`; 0 for one the system chooses, as before), so a firewall rule can name it; the panel prints the rule table for this remote: the program's path, direction, protocol and port for each path. The player's channel answers a remote's probe request (`probe` → `probed`), and the Manager keeps each remote's frames port.
+
 ## [0.9.9] - 2026-10-08
 
 - **A remote takes test releases too.** A remote's Version panel offered the latest release only, where the player's System tab has had "Offer test releases" since 0.8.5. The remote's settings page now has the same switch under its Version panel, worded as the player's and off unless said: with it on, the remote is offered the newest of the repository's last ten releases, a test release among them and said so beside its version, as soon as it is published; off, the latest release as before. The switch is applied with the other settings and kept in the remote's configuration. The upgrade's checks stay as they were: the archive against the release's checksum, the new display tried, the one before kept. The bundle built with glass-evo carries the switch from the glass-evo release built on this Glass.
