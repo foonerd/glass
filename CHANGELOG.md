@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.26] - 2026-10-08
+
+The second trial pair, for the online upgrade: nothing new in Glass beyond the version. glass-evo 0.2.26, numbered with it, carries an icon on Windows.
+
 ## [0.9.25] - 2026-10-08
 
 - **The glass-evo zip given with a Glass zip that is what runs already now goes in.** Before, the Glass zip was refused as the version installed and the glass-evo zip given with it was dropped. Now Glass is left as it is, the glass-evo zip is installed, and the job says so without a restart.
