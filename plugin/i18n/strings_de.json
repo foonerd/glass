@@ -295,7 +295,7 @@
     "BACKUP_SECTION_DELETE_DESC": "Eine gespeicherte Sicherung dauerhaft aus dem internen Speicher entfernen.",
     "BACKUP_INFO": "Erstellen Sie eine benannte Sicherung aller Plugin-Einstellungen (config.json, meter.txt, spectrum.txt). Sicherungen werden im internen Speicher abgelegt und überstehen Plugin-Deinstallation und -Neuinstallation, sodass Sie nach einem Update oder einer Neuinstallation dort weitermachen können, wo Sie aufgehört haben. Wählen Sie eine Sicherung aus der Liste unten zum Wiederherstellen oder Löschen aus.",
     "BACKUP_NAME": "Sicherungsname",
-    "BACKUP_NAME_DOC": "Ein kurzer beschreibender Name für die neue Sicherung (zum Beispiel: 'Studio-Setup', 'Weihnachten', 'Gelo5-Experiment'). Nur Buchstaben, Ziffern, Leerzeichen, Punkte, Bindestriche und Unterstriche. Max. 64 Zeichen.",
+    "BACKUP_NAME_DOC": "Ein kurzer beschreibender Name für die neue Sicherung (zum Beispiel: 'Studio-Setup', 'Weihnachten', 'Wohnzimmer'). Nur Buchstaben, Ziffern, Leerzeichen, Punkte, Bindestriche und Unterstriche. Max. 64 Zeichen.",
     "BACKUP_CREATE": "Sicherung erstellen",
     "BACKUP_CREATE_DOC": "Aktuelle Plugin-Einstellungen als neue Sicherung unter dem oben eingegebenen Namen speichern.",
     "BACKUP_SELECTED": "Vorhandene Sicherungen",

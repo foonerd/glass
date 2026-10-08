@@ -295,7 +295,7 @@
     "BACKUP_SECTION_DELETE_DESC": "Permanently remove a saved snapshot from Internal Storage.",
     "BACKUP_INFO": "Create a named backup of all plugin settings (config.json, meter.txt, spectrum.txt). Backups are stored in Internal Storage and survive plugin uninstall/reinstall, so you can pick up where you left off after an update or a fresh install. Pick a backup from the list below to restore or delete it.",
     "BACKUP_NAME": "Backup name",
-    "BACKUP_NAME_DOC": "A short descriptive name for the new backup (for example: 'studio setup', 'christmas', 'gelo5 experiment'). Letters, digits, spaces, dots, hyphens and underscores only. Max 64 characters.",
+    "BACKUP_NAME_DOC": "A short descriptive name for the new backup (for example: 'studio setup', 'christmas', 'living room'). Letters, digits, spaces, dots, hyphens and underscores only. Max 64 characters.",
     "BACKUP_CREATE": "Create backup",
     "BACKUP_CREATE_DOC": "Save current plugin settings as a new backup under the name typed above.",
     "BACKUP_SELECTED": "Existing backups",

@@ -295,7 +295,7 @@
     "BACKUP_SECTION_DELETE_DESC": "Supprimer définitivement une sauvegarde enregistrée du stockage interne.",
     "BACKUP_INFO": "Créez une sauvegarde nommée de tous les paramètres du plugin (config.json, meter.txt, spectrum.txt). Les sauvegardes sont stockées dans le stockage interne et survivent à la désinstallation/réinstallation du plugin, pour reprendre là où vous vous étiez arrêté après une mise à jour ou une nouvelle installation. Choisissez une sauvegarde dans la liste ci-dessous pour la restaurer ou la supprimer.",
     "BACKUP_NAME": "Nom de la sauvegarde",
-    "BACKUP_NAME_DOC": "Un nom court et descriptif pour la nouvelle sauvegarde (par exemple: 'studio', 'noel', 'experience gelo5'). Lettres, chiffres, espaces, points, tirets et tirets bas uniquement. Max 64 caractères.",
+    "BACKUP_NAME_DOC": "Un nom court et descriptif pour la nouvelle sauvegarde (par exemple: 'studio', 'noel', 'salon'). Lettres, chiffres, espaces, points, tirets et tirets bas uniquement. Max 64 caractères.",
     "BACKUP_CREATE": "Créer une sauvegarde",
     "BACKUP_CREATE_DOC": "Enregistrer les paramètres actuels du plugin comme nouvelle sauvegarde sous le nom saisi ci-dessus.",
     "BACKUP_SELECTED": "Sauvegardes existantes",
