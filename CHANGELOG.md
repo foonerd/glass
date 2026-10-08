@@ -2,6 +2,11 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.16] - 2026-10-08
+
+- **The files list fits a theme of fifty meters.** On the Themes tab's details and on a remote's Assets panel, the files that are there are listed only with **Show every file** on, a switch the browser remembers and off by default; what is missing, failed, optional or elsewhere always shows, with a line counting the files not listed, so a whole theme is one line and a broken one shows its holes without a scroll. A remote's report carries what is not fine; the downloaded one carries every file.
+- **Each row names the meters that name the file**, three by name and the rest counted, in the details, the status sheet, the remote's Assets panel and `GET /api/themes/<folder>/named` and `/api/support` (`sections`), so a maker finds the line in a theme of many meters.
+
 ## [0.9.15] - 2026-10-08
 
 The public release of what the pre-releases 0.9.6 to 0.9.14 brought, tried on a player and on remotes of both flavours. Nothing is new in it beyond the version. Glass-evo 0.2.15 is its companion, built on it.
