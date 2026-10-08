@@ -141,6 +141,15 @@ pub struct Release {
     /// remote set to take them.
     #[serde(default)]
     pub test: bool,
+    /// The archive's name in the release, as the signed sums name it.
+    #[serde(default)]
+    pub asset: String,
+    /// The signed sums and their signature, where the release carries
+    /// them; none for a release published before signing.
+    #[serde(default)]
+    pub sums_url: Option<String>,
+    #[serde(default)]
+    pub sig_url: Option<String>,
 }
 
 /// How many of the repository's last releases a remote on test releases
@@ -260,6 +269,25 @@ fn release_from(
         .filter(|hex| hex.len() == 64 && hex.bytes().all(|b| b.is_ascii_hexdigit()))
         .ok_or("the release states no checksum for the archive")?
         .to_ascii_lowercase();
+    // A signed release carries both the sums and the signature, small and
+    // at the release's own address; one without either is unsigned.
+    let small = |name: &str, max: u64| -> Option<String> {
+        let a = body
+            .get("assets")
+            .and_then(Value::as_array)?
+            .iter()
+            .find(|a| a.get("name").and_then(Value::as_str) == Some(name))?;
+        let size = a.get("size").and_then(Value::as_u64).unwrap_or(0);
+        let url = a.get("browser_download_url").and_then(Value::as_str)?;
+        (size > 0 && size <= max && (!strict || url.starts_with(&home))).then(|| url.to_string())
+    };
+    let (sums_url, sig_url) = match (
+        small(super::signing::SUMS_NAME, super::signing::MAX_SUMS),
+        small(super::signing::SIG_NAME, super::signing::MAX_SIG),
+    ) {
+        (Some(s), Some(g)) => (Some(s), Some(g)),
+        _ => (None, None),
+    };
     Ok(Release {
         version,
         url,
@@ -271,6 +299,9 @@ fn release_from(
             .unwrap_or("")
             .to_string(),
         test,
+        asset: wanted,
+        sums_url,
+        sig_url,
     })
 }
 
@@ -358,7 +389,52 @@ pub fn download(release: &Release, mut told: impl FnMut(u64)) -> Result<Vec<u8>,
         archive.extend_from_slice(&chunk[..n]);
         told(archive.len() as u64);
     }
-    checked(release, archive)
+    let archive = checked(release, archive)?;
+    // A signed release is held to its signature too; an unsigned one is
+    // taken as before signing.
+    let small = |url: &str, max: u64| -> Result<Vec<u8>, String> {
+        let mut response = agent(Duration::from_secs(60))
+            .get(url)
+            .header(
+                "User-Agent",
+                concat!("glass-remote/", env!("CARGO_PKG_VERSION")),
+            )
+            .call()
+            .map_err(|e| format!("the release's signature could not be fetched: {e}"))?;
+        response
+            .body_mut()
+            .with_config()
+            .limit(max)
+            .read_to_vec()
+            .map_err(|e| format!("the release's signature could not be read: {e}"))
+    };
+    let sums = release
+        .sums_url
+        .as_deref()
+        .map(|u| small(u, super::signing::MAX_SUMS))
+        .transpose()?;
+    let sig = release
+        .sig_url
+        .as_deref()
+        .map(|u| small(u, super::signing::MAX_SIG))
+        .transpose()?;
+    let key = super::signing::public_key()?;
+    let held = super::signing::held_to_signature(
+        &key,
+        &release.asset,
+        &release.sha256,
+        sums.as_deref(),
+        sig.as_deref(),
+    )?;
+    if held == "signed" {
+        logline::say!(
+            Info,
+            "upgrade",
+            "{} verified against the release's signature",
+            release.asset
+        );
+    }
+    Ok(archive)
 }
 
 /// An archive as fetched, if it is the one the release states.
@@ -1136,6 +1212,9 @@ mod tests {
             sha256: digest,
             page: String::new(),
             test: false,
+            asset: String::new(),
+            sums_url: None,
+            sig_url: None,
         };
         assert_eq!(checked(&release, archive.clone()), Ok(archive.clone()));
         assert!(checked(&release, b"an archivE".to_vec())
@@ -1315,6 +1394,9 @@ mod tests {
             sha256: String::new(),
             page: String::new(),
             test: false,
+            asset: String::new(),
+            sums_url: None,
+            sig_url: None,
         };
         let product = glass();
         // One that says another version, one that fails, one that is no program: the old one stays.

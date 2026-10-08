@@ -12,6 +12,7 @@ const path = require('path');
 const { get, persisting, CatalogError } = require('./catalog');
 const { zipDirectory } = require('./zipwrite');
 const { Zip } = require('./zip');
+const signing = require('./signing');
 
 const RELEASES_URL = 'https://api.github.com/repos/foonerd/glass/releases/latest';
 const STAGING_DIR = '/tmp/plugins';
@@ -72,9 +73,41 @@ function parseRelease(body, pattern) {
     page: String(body.html_url || ''),
     prerelease: !!body.prerelease,
     url: String(asset.browser_download_url || ''),
+    asset: String(asset.name || ''),
     bytes: Number(asset.size) || 0,
-    sha256: digest ? digest[1] : null
+    sha256: digest ? digest[1] : null,
+    // The sums and their signature, where the release is signed; null before signing.
+    signed: signing.signedAssets(body)
   };
+}
+
+// A file held to the release's signature, where the release carries one:
+// the sums and the signature fetched, the signature checked against the
+// project's key, and the file's digest held to the sums' line for its
+// asset. A release without a signature is as it was before signing:
+// `unsigned`, installed on its digest alone. A signature that does not
+// verify, or sums that do not name the asset or name another digest, is a
+// release that is not as published: refused.
+async function verifySigned(release, digest, fetch, job) {
+  if (!release || !release.signed) return 'unsigned';
+  if (job) job.state = 'verifying';
+  const small = async function (what, max) {
+    const res = await fetch(what.url, { limit: Math.min(max, what.bytes + 1) });
+    return res.body;
+  };
+  let sums;
+  let sig;
+  try {
+    sums = await small(release.signed.sums, signing.MAX_SUMS_BYTES);
+    sig = await small(release.signed.sig, signing.MAX_SIG_BYTES);
+  } catch (e) {
+    throw new UpdateError('signature', 'the release\'s signature could not be fetched (' + (e && e.message ? e.message : e) + '); nothing was installed');
+  }
+  if (!signing.verifySums(sums, sig)) throw new UpdateError('signature', 'the release\'s signature does not verify; the release is not as published');
+  const stated = signing.digestInSums(sums, release.asset);
+  if (!stated) throw new UpdateError('signature', 'the release\'s signed sums do not name ' + release.asset);
+  if (stated !== digest) throw new UpdateError('signature', 'the file does not match the signed digest of ' + release.asset + '; it is not the release as published');
+  return 'signed';
 }
 
 // The newest of a list of releases that carries the zip, by version:
@@ -170,7 +203,9 @@ async function verifyAgainstRelease(fetch, latestUrl, version, file, pattern, jo
   if (!release.sha256) throw new UpdateError('unverified', 'release ' + version + ' states no digest for its zip; nothing was installed');
   const stat = await fsp.stat(file);
   if (release.bytes && stat.size !== release.bytes) throw new UpdateError('size', 'the file is ' + stat.size + ' bytes, the release zip ' + release.bytes + '; it is not the release as published');
-  if ((await digestOf(file)) !== release.sha256) throw new UpdateError('checksum', 'the file does not match the digest of release ' + version + '; it is not the release as published');
+  const digest = await digestOf(file);
+  if (digest !== release.sha256) throw new UpdateError('checksum', 'the file does not match the digest of release ' + version + '; it is not the release as published');
+  release.signature = await verifySigned(release, digest, fetch, job);
   return release;
 }
 
@@ -204,7 +239,10 @@ async function fetchChecked(release, file, job, options) {
     });
     job.state = 'verifying';
     if (received !== release.bytes) throw new UpdateError('size', 'downloaded ' + received + ' bytes, expected ' + release.bytes);
-    if (hash.digest('hex') !== release.sha256) throw new UpdateError('checksum', 'the download does not match the release digest');
+    const digest = hash.digest('hex');
+    if (digest !== release.sha256) throw new UpdateError('checksum', 'the download does not match the release digest');
+    // A signed release is held to its signature too; an unsigned one is as before.
+    release.signature = await verifySigned(release, digest, options.fetch || get, job);
   };
   try {
     await persisting(once, {
@@ -220,6 +258,7 @@ async function fetchChecked(release, file, job, options) {
     await fsp.rm(file, { force: true });
     throw e instanceof UpdateError || e instanceof CatalogError ? e : new UpdateError('network', e.message);
   }
+  if (release.signature === 'signed') (options.logger || console).info('glass: manager: ' + path.basename(file) + ' verified against the release\'s signature');
 }
 
 class Updater {
@@ -450,4 +489,4 @@ function automaticBackup(manifest, name) {
   return /^before-\d+\.\d+\.\d+(-\d{8}-\d{6})?$/.test(String(name || ''));
 }
 
-module.exports = { automaticBackup: automaticBackup, Updater: Updater, UpdateError: UpdateError, compareVersions: compareVersions, parseRelease: parseRelease, newestRelease: newestRelease, offered: offered, released: released, fetchChecked: fetchChecked, examineGlassZip: examineGlassZip, digestOf: digestOf, verifyAgainstRelease: verifyAgainstRelease, RELEASES_URL: RELEASES_URL, KEEP_AUTOMATIC_BACKUPS: KEEP_AUTOMATIC_BACKUPS, MAX_ZIP_BYTES: MAX_ZIP_BYTES };
+module.exports = { automaticBackup: automaticBackup, Updater: Updater, UpdateError: UpdateError, compareVersions: compareVersions, parseRelease: parseRelease, newestRelease: newestRelease, offered: offered, released: released, fetchChecked: fetchChecked, verifySigned: verifySigned, examineGlassZip: examineGlassZip, digestOf: digestOf, verifyAgainstRelease: verifyAgainstRelease, RELEASES_URL: RELEASES_URL, KEEP_AUTOMATIC_BACKUPS: KEEP_AUTOMATIC_BACKUPS, MAX_ZIP_BYTES: MAX_ZIP_BYTES };

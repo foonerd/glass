@@ -192,6 +192,17 @@ jobs:
           cp -r bin/windows-x64 "dist/$top/bin"
           cp -r remote/windows remote/README.md "dist/$top/remote/"
           (cd dist && zip -qr "$top.zip" "$top") && rm -rf "dist/$top"
+      # Every asset's digest in SHA256SUMS, signed with the project's
+      # release key (secret RELEASE_SIGNING_KEY, the Ed25519 private key as
+      # PEM) and checked against the public key the products carry
+      # (keys/release-signing.pub), so no release goes out that a player
+      # would refuse. Without the secret the release is published unsigned,
+      # and a player installs it as it did before signing.
+      - name: Sign the release
+        if: ${{ secrets.RELEASE_SIGNING_KEY != '' }}
+        env:
+          RELEASE_SIGNING_KEY: ${{ secrets.RELEASE_SIGNING_KEY }}
+        run: scripts/sign-release.sh dist keys/release-signing.pub
       - name: Notes from the changelog
         run: scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > dist/notes.md
       # Published as a pre-release: no player is offered it but one set to
@@ -205,3 +216,5 @@ jobs:
             dist/glass-*.zip
             dist/glass-*.tar.gz
             dist/glass-*-android.apk
+            dist/SHA256SUMS
+            dist/SHA256SUMS.sig

@@ -328,3 +328,69 @@ test('the updater stages a zip brought by hand under the release name, any versi
   await assert.rejects(updater.stageFile({ state: 'queued' }, same), function (e) { return e.code === 'same-version'; });
   await fsp.rm(dir, { recursive: true, force: true });
 });
+
+// A release body with the zip and, where asked, the sums and their signature.
+function signedBody(version, zipBytes, options) {
+  options = options || {};
+  const digest = crypto.createHash('sha256').update(zipBytes).digest('hex');
+  const name = 'glass-' + version + '.zip';
+  const sums = (options.sumsDigest || digest) + '  ' + (options.sumsName || name) + '\n';
+  const sig = options.badSig ? Buffer.alloc(64, 7) : crypto.sign(null, Buffer.from(sums), options.key.priv);
+  const assets = [{ name: name, size: zipBytes.length, digest: 'sha256:' + digest, browser_download_url: 'zip' }];
+  if (!options.unsigned) assets.push({ name: 'SHA256SUMS', size: sums.length, browser_download_url: 'sums' }, { name: 'SHA256SUMS.sig', size: sig.length, browser_download_url: 'sig' });
+  return { body: { tag_name: 'v' + version, assets: assets }, sums: sums, sig: sig };
+}
+
+test('a signed release is held to its signature on download and from a file; an unsigned one installs as before', async function () {
+  const signing = require('../signing');
+  const key = (function () { const k = crypto.generateKeyPairSync('ed25519'); return { priv: k.privateKey, pub: k.publicKey.export({ type: 'spki', format: 'pem' }) }; })();
+  // The verifier takes the test's key in place of the project's for this test alone.
+  const real = signing.verifySums;
+  signing.verifySums = function (sums, sig) { return real(sums, sig, key.pub); };
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glass-upd-signed-'));
+  try {
+    const made = await glassZip(dir, '0.9.21');
+    const bytes = await fsp.readFile(made);
+    const serve = function (set) {
+      return async function (url, opts) {
+        if (url === 'zip') { opts.sink(bytes, bytes.length); return {}; }
+        if (url === 'sums') return { body: Buffer.from(set.sums) };
+        if (url === 'sig') return { body: set.sig };
+        return { body: Buffer.from(JSON.stringify(set.body)) };
+      };
+    };
+    const job = { state: 'queued' };
+    // Signed, and as published: fetched, verified, kept.
+    let set = signedBody('0.9.21', bytes, { key: key });
+    let release = parseRelease(set.body);
+    assert.ok(release.signed, 'the release carries its sums and signature');
+    await fetchChecked(release, path.join(dir, 'a.zip'), job, { fetch: serve(set), logger: { info: function () {} } });
+    assert.equal(release.signature, 'signed');
+    assert.ok(fs.existsSync(path.join(dir, 'a.zip')));
+    // A signature that does not verify: refused, the file gone.
+    set = signedBody('0.9.21', bytes, { key: key, badSig: true });
+    await assert.rejects(fetchChecked(parseRelease(set.body), path.join(dir, 'b.zip'), job, { fetch: serve(set), logger: { info: function () {} } }), function (e) { return e.code === 'signature' && /does not verify/.test(e.message); });
+    assert.ok(!fs.existsSync(path.join(dir, 'b.zip')));
+    // Sums that name another digest for the zip, or do not name it at all.
+    set = signedBody('0.9.21', bytes, { key: key, sumsDigest: 'ee'.repeat(32) });
+    await assert.rejects(fetchChecked(parseRelease(set.body), path.join(dir, 'c.zip'), job, { fetch: serve(set), logger: { info: function () {} } }), function (e) { return e.code === 'signature' && /signed digest/.test(e.message); });
+    set = signedBody('0.9.21', bytes, { key: key, sumsName: 'other.zip' });
+    await assert.rejects(fetchChecked(parseRelease(set.body), path.join(dir, 'd.zip'), job, { fetch: serve(set), logger: { info: function () {} } }), function (e) { return e.code === 'signature' && /do not name/.test(e.message); });
+    // Unsigned, as every release before signing: installed on its digest alone.
+    set = signedBody('0.9.21', bytes, { key: key, unsigned: true });
+    release = parseRelease(set.body);
+    assert.equal(release.signed, null);
+    await fetchChecked(release, path.join(dir, 'e.zip'), job, { fetch: serve(set), logger: { info: function () {} } });
+    assert.equal(release.signature, 'unsigned');
+    // From a file: the same holds.
+    set = signedBody('0.9.21', bytes, { key: key });
+    const byTag = async function (url, opts) { return url === 'r/tags/v0.9.21' ? { body: Buffer.from(JSON.stringify(set.body)) } : serve(set)(url, opts); };
+    const verified = await verifyAgainstRelease(byTag, 'r/latest', '0.9.21', made, undefined, { state: 'queued' });
+    assert.equal(verified.signature, 'signed');
+    set = signedBody('0.9.21', bytes, { key: key, badSig: true });
+    await assert.rejects(verifyAgainstRelease(byTag, 'r/latest', '0.9.21', made, undefined, { state: 'queued' }), function (e) { return e.code === 'signature'; });
+  } finally {
+    signing.verifySums = real;
+    await fsp.rm(dir, { recursive: true, force: true });
+  }
+});

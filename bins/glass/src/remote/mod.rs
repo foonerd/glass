@@ -6,6 +6,7 @@
 
 pub mod config;
 pub mod run;
+pub mod signing;
 pub mod upgrade;
 
 use std::io::Read;
