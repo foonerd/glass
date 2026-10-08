@@ -2,6 +2,11 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.24] - 2026-10-08
+
+- **Install from a file on a remote.** The remote's Version panel has "Install from a file", off until turned on, for a remote that cannot reach GitHub: this machine's archive from the release, downloaded elsewhere, is held to the signature it carries inside with no network, its binary tried and put in place as an upgrade from GitHub is, the one before kept beside it, and the remote starts again as the new version. An archive of the other kind, Glass's on a bundle remote or glass-evo's on a Glass one, replaces the remote with that kind once the page has asked. `POST /api/upgrade/upload` takes the archive as the body, `?switch=1` says the other kind is wanted. The bundle has the same.
+- **A glass-evo zip given with the Glass zip now goes in**, before the Glass does, whatever glass-evo is installed; before, it went in only when the new Glass needed a newer glass-evo than the one here, and was dropped otherwise.
+
 ## [0.9.23] - 2026-10-08
 
 - **The signature travels inside the archive.** Every archive of a release, the plugin zip, the remotes' archives and the Windows zip, now carries `MANIFEST`, every file's digest, and `MANIFEST.sig`, the manifest's signature made with the project's key. A file brought by hand is verified with no network at all: the Manager checks the manifest's signature with the public key it carries, then every file in the zip against the manifest, both ways, and only then installs; an archive published before signing is looked up on GitHub as before, and refused where that is out of reach. A user behind a firewall downloads the same two files as anyone, `glass-<version>.zip` and `glass-evo-<version>.zip`, and nothing beside them. The sums beside the assets stay for the online path and for a check by hand.
