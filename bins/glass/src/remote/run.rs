@@ -904,19 +904,54 @@ pub fn remote_main(
                 logline::say!(
                     Info,
                     "remotes",
-                    "synced from {}: theme {} ({} fetched, {} kept, configuration {})",
+                    "synced from {}: theme {} ({} fetched, {} kept, {} failed, configuration {})",
                     beacon.address(),
                     synced.theme,
                     synced.fetched,
                     synced.kept,
+                    synced.failed.len(),
                     synced.version
                 );
+                let failed = synced.failed.len();
+                let face_owner = synced.face_owner.clone();
                 app.set_status(|s| {
-                    s.synced = format!(
-                        "{} fetched, {} kept, configuration {}",
-                        synced.fetched, synced.kept, synced.version
-                    )
+                    s.synced = if failed == 0 {
+                        format!(
+                            "{} fetched, {} kept, configuration {}",
+                            synced.fetched, synced.kept, synced.version
+                        )
+                    } else {
+                        format!(
+                            "{} fetched, {} kept, {failed} FAILED, configuration {}",
+                            synced.fetched, synced.kept, synced.version
+                        )
+                    };
+                    s.face_owner = face_owner;
                 });
+                // The theme's assets as they stand here, for the page: what
+                // the theme names against what came.
+                let root = match &choice.local {
+                    Some(local) => local
+                        .templates
+                        .parent()
+                        .map(|p| p.to_path_buf())
+                        .unwrap_or_else(|| home.clone()),
+                    None => home.clone(),
+                };
+                let meters = std::fs::read_to_string(
+                    root.join("templates")
+                        .join(&synced.theme)
+                        .join("meters.txt"),
+                )
+                .unwrap_or_default();
+                let report = intake::support::assets_report(
+                    &synced.theme,
+                    &meters,
+                    &synced.offered,
+                    &synced.failed,
+                    |relative| root.join(relative).is_file(),
+                );
+                app.set_assets(Some(home.clone()), Some(report));
                 synced.theme
             }
             Err(err) => {
@@ -945,6 +980,7 @@ pub fn remote_main(
                 app.set_status(|s| {
                     s.synced = format!("kept from before; the last sync failed: {err}")
                 });
+                app.set_assets(Some(home.clone()), None);
                 choice.theme.clone().unwrap_or_default()
             }
         };

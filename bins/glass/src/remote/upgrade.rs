@@ -834,6 +834,12 @@ pub fn under_service() -> bool {
     std::env::var_os("INVOCATION_ID").is_some()
 }
 
+/// Whether an upgrade is on trial: the note of it is in the cache until a
+/// start has lived its minute.
+pub fn on_trial(cache: &Path) -> bool {
+    cache.join(NOTE).is_file()
+}
+
 /// How long a display started by the one before it waits before it looks
 /// for its page's port, so the one before has left it.
 const HANDOVER: Duration = Duration::from_millis(1500);

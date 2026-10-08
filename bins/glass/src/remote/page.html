@@ -77,6 +77,18 @@
     <div class="help" style="margin-top:8px">A firewall on this machine (Bitdefender, Windows Defender Firewall, ufw and the like) takes a rule in these terms: the program, the direction, the protocol and the port. The ports are the player's own, as its Remotes tab sets them.</div>
   </div>
 
+  <div class="panel" id="assets-panel">
+    <h2>Assets</h2>
+    <table class="kv" id="assets"></table>
+    <div class="help" style="margin-top:8px">What the theme on show names, each brought here as the player offered it, failed (offered, and the fetch failed, with the reason), missing (the theme names it and the player does not have it, so the player's own screen lacks it too), or elsewhere (a path on the player, not a theme file). A file that failed is tried again at the next sync: the player's theme changing, or the remote starting again.</div>
+  </div>
+
+  <div class="panel" id="prereq-panel">
+    <h2>Prerequisites</h2>
+    <table class="kv" id="prereq"></table>
+    <div class="help" style="margin-top:8px">What this machine has for the display to run: the program and how it was started, what draws the frames and whether in software, the screens, the fonts brought, and the folders the remote keeps things in.</div>
+  </div>
+
   <div class="panel">
     <h2>Player</h2>
     <div class="help" style="margin-bottom:10px">The players this remote knows. The one marked is shown; the others wait. A player found on the network brings its own name and ports.</div>
@@ -240,9 +252,44 @@
       renderUpgrade(s);
       renderStatus(s.status);
       renderConnection(s);
+      renderAssets(s);
+      renderPrerequisites(s);
       if (!state.dirty) fill(s.config);
       renderPlayers(s.config);
     });
+  }
+
+  // ---- the theme's assets, and what this machine has ----
+  function renderAssets(s) {
+    var a = s.assets;
+    var rows = [];
+    if (!a) {
+      rows.push(['theme', (s.status && s.status.synced) ? 'not read: ' + s.status.synced : 'no sync yet']);
+    } else {
+      rows.push(['theme', a.theme + ' · ' + a.required.length + ' files named · ' + a.brought + ' brought' + (a.failed ? ' · ' + a.failed + ' FAILED' : '') + (a.missing ? ' · ' + a.missing + ' MISSING on the player' : '')]);
+      rows.push(['offered by the player', a.offered + ' files · ' + a.here + ' here' + (a.fetch_failed.length ? ' · ' + a.fetch_failed.length + ' failed to fetch' : '')]);
+      a.required.forEach(function (r) {
+        var word = { brought: 'brought', failed: 'FAILED: ' + (r.reason || ''), missing: 'MISSING: the player does not have it; its own screen does without it too', elsewhere: 'a path on the player, not a theme file; the display looks for it where it runs' }[r.state] || r.state;
+        rows.push([r.key, r.file + ' · ' + word]);
+      });
+      a.fetch_failed.forEach(function (f) {
+        if (!a.required.some(function (r) { return r.state === 'failed' && ('templates/' + a.theme + '/' + r.file) === f[0]; })) rows.push(['not brought', f[0] + ' · ' + f[1]]);
+      });
+    }
+    $('assets').innerHTML = rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
+  }
+  function fmtBytes(n) { return n >= 1073741824 ? (n / 1073741824).toFixed(1) + ' GB' : n >= 1048576 ? Math.round(n / 1048576) + ' MB' : Math.round(n / 1024) + ' kB'; }
+  function renderPrerequisites(s) {
+    var p = s.prerequisites || {}; var st = s.status || {};
+    var screens = (st.monitors || []).map(function (m) { return (m.index + 1) + ': ' + m.name + ' ' + m.width + 'x' + m.height; }).join(' · ');
+    var rows = [
+      ['program', (p.face ? p.face + ' on Glass ' : 'Glass ') + p.version + ' · ' + p.os + ' ' + p.arch + ' · ' + p.exe + (p.under_service ? ' · started by the user service' : ' · started by hand') + (p.previous_kept ? ' · the version before is kept beside it' : '') + (p.on_trial ? ' · an upgrade on trial' : '')],
+      ['draws with', st.driver ? st.renderer + ' on ' + st.driver + (st.software ? ' · SOFTWARE: no graphics acceleration here; frames cost the processor' : ' · hardware') : 'no window yet (headless, or not opened)'],
+      ['screens', screens || 'none seen (headless, or no window yet)'],
+      ['fonts', (p.fonts ? p.fonts[0] + ' of the plugin\'s · ' + p.fonts[1] + ' of the player\'s web fonts · ' + p.fonts[2] + ' uploaded' : '-') + ' · a theme\'s own fonts are in Assets'],
+      ['folders', 'configuration ' + p.config_path + ' · cache ' + p.cache_path + (p.cache_writable ? ' (writable' : ' (NOT WRITABLE') + (p.cache_free ? ', ' + fmtBytes(p.cache_free) + ' free)' : ')') + (p.home_path ? ' · this player\'s files under ' + p.home_path : '')]
+    ];
+    $('prereq').innerHTML = rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
   }
 
   // ---- the connection: each path to the player, and the firewall rules ----

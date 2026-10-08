@@ -822,9 +822,14 @@ fn session(
                         surface.grab_after(after, std::path::PathBuf::from(path));
                     }
                     if let Some(remote) = remote.as_deref() {
-                        remote
-                            .app
-                            .set_status(|s| s.monitors = remote::run::monitors_of(&surface));
+                        let monitors = remote::run::monitors_of(&surface);
+                        let (driver, renderer, software) = surface.renderer();
+                        remote.app.set_status(|s| {
+                            s.monitors = monitors;
+                            s.driver = driver;
+                            s.renderer = renderer;
+                            s.software = software;
+                        });
                     }
                     *window = Some((options, surface));
                 }

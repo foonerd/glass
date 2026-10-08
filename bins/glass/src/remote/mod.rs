@@ -48,6 +48,74 @@ pub struct Status {
     pub monitors: Vec<MonitorInfo>,
     /// Whether the face this display carries is drawn in this session.
     pub face_shown: bool,
+    /// What draws the frames, once the window opened: the video driver, the
+    /// renderer, and whether it draws in software.
+    pub driver: String,
+    pub renderer: String,
+    pub software: bool,
+    /// Whose the player's screen is, as the last sync heard it.
+    pub face_owner: String,
+}
+
+/// What this machine has for the display to run, for the page's
+/// Prerequisites panel and the support bundle.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct Prerequisites {
+    pub version: String,
+    pub arch: String,
+    pub os: String,
+    pub exe: String,
+    pub under_service: bool,
+    pub previous_kept: bool,
+    pub on_trial: bool,
+    pub face: String,
+    /// Files in the home's font folders: the plugin's, the player's web
+    /// fonts, the uploaded ones.
+    pub fonts: [usize; 3],
+    pub config_path: String,
+    pub cache_path: String,
+    pub home_path: String,
+    pub cache_writable: bool,
+    /// Free bytes where the cache is; 0 where the system does not say.
+    pub cache_free: u64,
+}
+
+/// Whether a folder takes a file now, by writing and removing one.
+fn writable(dir: &std::path::Path) -> bool {
+    let probe = dir.join(".glass-writable");
+    match std::fs::write(&probe, b"x") {
+        Ok(()) => {
+            let _ = std::fs::remove_file(&probe);
+            true
+        }
+        Err(_) => false,
+    }
+}
+
+/// Free bytes on the file system under `dir`; 0 where it cannot be asked.
+#[cfg(unix)]
+fn free_bytes(dir: &std::path::Path) -> u64 {
+    use std::os::unix::ffi::OsStrExt;
+    let Ok(path) = std::ffi::CString::new(dir.as_os_str().as_bytes()) else {
+        return 0;
+    };
+    let mut stat: libc::statvfs = unsafe { std::mem::zeroed() };
+    // SAFETY: a C string that lives through the call and a struct the call fills.
+    if unsafe { libc::statvfs(path.as_ptr(), &mut stat) } != 0 {
+        return 0;
+    }
+    (stat.f_bavail as u64).saturating_mul(stat.f_frsize as u64)
+}
+
+#[cfg(not(unix))]
+fn free_bytes(_dir: &std::path::Path) -> u64 {
+    0
+}
+
+fn files_in(dir: &std::path::Path) -> usize {
+    std::fs::read_dir(dir)
+        .map(|entries| entries.flatten().filter(|e| e.path().is_file()).count())
+        .unwrap_or(0)
 }
 
 /// What the page's Connection panel shows: the paths to the player, each
@@ -223,6 +291,10 @@ pub struct RemoteApp {
     probe_request: AtomicBool,
     /// The player's beacon of the session on, for the connection checks.
     beacon: Mutex<Option<Beacon>>,
+    /// The theme's assets as the last sync left them, for the page.
+    assets: Mutex<Option<intake::support::AssetsReport>>,
+    /// The home of the session on: where the player's files are kept here.
+    home: Mutex<Option<PathBuf>>,
 }
 
 impl RemoteApp {
@@ -250,7 +322,61 @@ impl RemoteApp {
             }),
             probe_request: AtomicBool::new(false),
             beacon: Mutex::new(None),
+            assets: Mutex::new(None),
+            home: Mutex::new(None),
         })
+    }
+
+    /// The theme's assets as the sync left them, and the home they are in.
+    pub fn set_assets(&self, home: Option<PathBuf>, report: Option<intake::support::AssetsReport>) {
+        *self.home.lock().unwrap_or_else(|e| e.into_inner()) = home;
+        *self.assets.lock().unwrap_or_else(|e| e.into_inner()) = report;
+    }
+
+    pub fn assets(&self) -> Option<intake::support::AssetsReport> {
+        self.assets
+            .lock()
+            .map(|a| a.clone())
+            .unwrap_or_else(|e| e.into_inner().clone())
+    }
+
+    /// What this machine has for the display to run, read now.
+    pub fn prerequisites(&self) -> Prerequisites {
+        let home = self.home.lock().unwrap_or_else(|e| e.into_inner()).clone();
+        let fonts = match &home {
+            Some(home) => [
+                files_in(&home.join("fonts")),
+                files_in(&home.join("webfonts")),
+                files_in(&home.join("customfonts")),
+            ],
+            None => [0, 0, 0],
+        };
+        let exe = std::env::current_exe().unwrap_or_default();
+        let previous = exe.with_file_name(match exe.file_name().and_then(|n| n.to_str()) {
+            Some(name) if name.ends_with(".exe") => {
+                format!("{}.prev.exe", name.trim_end_matches(".exe"))
+            }
+            Some(name) => format!("{name}.prev"),
+            None => "glass.prev".to_string(),
+        });
+        Prerequisites {
+            version: env!("CARGO_PKG_VERSION").to_string(),
+            arch: std::env::consts::ARCH.to_string(),
+            os: std::env::consts::OS.to_string(),
+            exe: exe.to_string_lossy().into_owned(),
+            under_service: upgrade::under_service(),
+            previous_kept: previous.is_file(),
+            on_trial: upgrade::on_trial(&self.cache),
+            face: self.face().unwrap_or_default(),
+            fonts,
+            config_path: self.path.to_string_lossy().into_owned(),
+            cache_path: self.cache.to_string_lossy().into_owned(),
+            home_path: home
+                .map(|h| h.to_string_lossy().into_owned())
+                .unwrap_or_default(),
+            cache_writable: self.cache.is_dir() && writable(&self.cache),
+            cache_free: free_bytes(&self.cache),
+        }
     }
 
     /// The player's beacon for the session on, said when a session starts.
@@ -643,6 +769,8 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
                     "cache": app.cache.to_string_lossy(),
                     "connection": app.connection(),
                     "exe": std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
+                    "assets": app.assets(),
+                    "prerequisites": app.prerequisites(),
                 }),
             );
         }

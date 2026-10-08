@@ -117,6 +117,11 @@ pub struct Surface {
     placement: Option<(i32, i32)>,
     fit: bool,
     keys: bool,
+    /// What draws the frames: the video driver the window opened on, the
+    /// renderer's name, and whether it draws in software.
+    driver: String,
+    renderer: String,
+    software: bool,
     /// The frame size the window was made or fitted for.
     frame_size: (u32, u32),
     /// Pointer events since the last take, in frame pixels.
@@ -389,6 +394,10 @@ impl Surface {
                 format!(", turned {rotation}")
             }
         );
+        let driver = video.current_video_driver().to_string();
+        let renderer = info.name.to_string();
+        let software =
+            info.flags & (sdl2::sys::SDL_RendererFlags::SDL_RENDERER_SOFTWARE as u32) != 0;
         let creator = canvas.texture_creator();
         let pump = sdl.event_pump()?;
         sdl.mouse().show_cursor(options.pointer);
@@ -400,6 +409,9 @@ impl Surface {
             placement: None,
             fit: options.fit,
             keys: options.keys,
+            driver,
+            renderer,
+            software,
             frame_size: (width, height),
             pointer: Vec::new(),
             last_offset: (0, 0),
@@ -413,6 +425,12 @@ impl Surface {
             raw_lifts: Vec::new(),
             recording_lifts: false,
         })
+    }
+
+    /// What draws the frames: the video driver, the renderer's name, and
+    /// whether it draws in software, for a report.
+    pub fn renderer(&self) -> (String, String, bool) {
+        (self.driver.clone(), self.renderer.clone(), self.software)
     }
 
     /// Set the panel's touch frame right from now on, as a calibration

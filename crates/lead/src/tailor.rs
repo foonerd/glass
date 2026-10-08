@@ -450,6 +450,53 @@ pub fn kind_of(key: &str) -> Option<Kind> {
     None
 }
 
+/// The files a theme's text names, each with the key that names it: the
+/// pictures (the keys of [`Kind::Picture`] and the backdrop, a list value
+/// giving each of its files) and a field's own font (`<field>.font`). For
+/// a remote to tell what it needs of the theme's folder.
+pub fn files_named(text: &str) -> Vec<(String, String)> {
+    let mut out = Vec::new();
+    for line in text.lines() {
+        let line = line.trim();
+        if line.is_empty()
+            || line.starts_with('#')
+            || line.starts_with(';')
+            || line.starts_with('[')
+        {
+            continue;
+        }
+        let Some((key, value)) = line.split_once('=') else {
+            continue;
+        };
+        let key = key.trim().to_ascii_lowercase();
+        let value = value.trim();
+        let kind = kind_of(&key);
+        let picture = matches!(kind, Some(Kind::Picture) | Some(Kind::Backdrop));
+        let font = key.ends_with(".font") && !key.starts_with("font.");
+        if !picture && !font {
+            continue;
+        }
+        let files: Vec<&str> = if font {
+            vec![value]
+        } else {
+            value.split(',').collect()
+        };
+        for file in files {
+            let file = file.trim();
+            if file.is_empty() || file.eq_ignore_ascii_case("none") {
+                continue;
+            }
+            if !out
+                .iter()
+                .any(|(k, f): &(String, String)| k == &key && f == file)
+            {
+                out.push((key.clone(), file.to_string()));
+            }
+        }
+    }
+    out
+}
+
 /// A tailored text: the new text, the pictures it names, and what could
 /// not be scaled.
 #[derive(Debug, Default, Clone, PartialEq)]

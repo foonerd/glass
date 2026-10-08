@@ -34,6 +34,7 @@ mod channel;
 pub mod hops;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod remote;
+pub mod support;
 pub mod wants;
 pub use channel::{decode as decode_event, Channel, Command, Event, QueueItem, RemoteHello};
 

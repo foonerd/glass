@@ -446,6 +446,12 @@ pub struct Synced {
     /// Whose the player's screen is, as the player said: `glass-evo` where
     /// its face holds it. Empty from a player that does not say.
     pub face_owner: String,
+    /// The files the player offered that could not be brought, each with
+    /// the reason: the display shows without them. From 0.9.11; before, the
+    /// first failure ended the sync and nothing was shown.
+    pub failed: Vec<(String, String)>,
+    /// Every file the player offered, as a path under the home.
+    pub offered: Vec<String>,
 }
 
 /// What was fetched before, by path under the home, with its checksum.
@@ -470,6 +476,8 @@ pub struct Sync {
     agent: ureq::Agent,
     ledger: Ledger,
     log: Vec<String>,
+    /// The files that could not be brought in this run, with the reason.
+    failed: Vec<(String, String)>,
 }
 
 impl Sync {
@@ -489,6 +497,7 @@ impl Sync {
             player: player.trim_end_matches('/').to_string(),
             agent,
             ledger,
+            failed: Vec::new(),
             log: Vec::new(),
         }
     }
@@ -519,28 +528,34 @@ impl Sync {
                 std::fs::create_dir_all(&dir).map_err(|e| format!("{}: {e}", dir.display()))?;
                 std::fs::write(dir.join("face.txt"), &theme.text)
                     .map_err(|e| format!("{}: {e}", dir.display()))?;
-                // The theme's own skies beside it, each checked against its checksum.
+                // The theme's own skies beside it, each checked against its
+                // checksum; one that cannot be brought is noted, and the face
+                // draws that sky as its own.
                 for file in &theme.files {
                     if !crate::bring::face_theme_file_ok(&file.path) || file.url.trim().is_empty() {
                         continue;
                     }
+                    let relative = format!("faces/{}/{}", theme.name.trim(), file.path);
                     let url = format!("{}{}", self.manager, file.url.trim());
-                    let bytes = self.get_bytes(&url)?;
-                    if !file.sha256.is_empty() {
-                        let digest = format!("{:x}", Sha256::digest(&bytes));
-                        if digest != file.sha256 {
-                            return Err(format!(
-                                "{}: checksum {digest} is not {}",
-                                file.path, file.sha256
-                            ));
+                    let brought = (|| -> Result<(), String> {
+                        let bytes = self.get_bytes(&url)?;
+                        if !file.sha256.is_empty() {
+                            let digest = format!("{:x}", Sha256::digest(&bytes));
+                            if digest != file.sha256 {
+                                return Err(format!("checksum {digest} is not {}", file.sha256));
+                            }
                         }
+                        let path = dir.join(&file.path);
+                        if let Some(parent) = path.parent() {
+                            std::fs::create_dir_all(parent)
+                                .map_err(|e| format!("{}: {e}", parent.display()))?;
+                        }
+                        std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))
+                    })();
+                    if let Err(why) = brought {
+                        self.log.push(format!("{relative}: not brought: {why}"));
+                        self.failed.push((relative, why));
                     }
-                    let path = dir.join(&file.path);
-                    if let Some(parent) = path.parent() {
-                        std::fs::create_dir_all(parent)
-                            .map_err(|e| format!("{}: {e}", parent.display()))?;
-                    }
-                    std::fs::write(&path, bytes).map_err(|e| format!("{}: {e}", path.display()))?;
                 }
             }
         }
@@ -660,11 +675,24 @@ impl Sync {
         self.bring_face(&config.face)?;
         let mut fetched = 0usize;
         let mut kept = 0usize;
-        let mut count = |brought: bool| if brought { fetched += 1 } else { kept += 1 };
+        let mut offered: Vec<String> = Vec::new();
+        // A file that cannot be brought is noted and the rest go on: the
+        // display shows with what came, and the page says what is missing.
+        let mut count = |sync: &mut Self, relative: &str, url: &str, sha256: &str| {
+            offered.push(relative.to_string());
+            match sync.bring(relative, url, sha256) {
+                Ok(true) => fetched += 1,
+                Ok(false) => kept += 1,
+                Err(why) => {
+                    sync.log.push(format!("{relative}: not brought: {why}"));
+                    sync.failed.push((relative.to_string(), why));
+                }
+            }
+        };
 
         for item in asset_plan(&config) {
             let url = format!("{}{}", self.manager, item.url);
-            count(self.bring(&item.relative, &url, &item.sha256)?);
+            count(self, &item.relative, &url, &item.sha256);
         }
         if config.assets.webfonts.is_empty() {
             self.log.push(
@@ -695,8 +723,14 @@ impl Sync {
             .map_err(|e| format!("theme files: {e}"))?;
             for item in theme_plan(&theme) {
                 let url = format!("{}{}", self.manager, item.url);
-                count(self.bring(&item.relative, &url, &item.sha256)?);
+                count(self, &item.relative, &url, &item.sha256);
             }
+        }
+        // The theme's own text is what a display needs: without it there
+        // is nothing to show, whatever else came.
+        let meters = format!("templates/{theme_wanted}/meters.txt");
+        if let Some((_, why)) = self.failed.iter().find(|(p, _)| p == &meters) {
+            return Err(format!("{meters}: {why}"));
         }
         self.ledger.version = config.version.clone();
         self.ledger.theme = theme_wanted.clone();
@@ -712,6 +746,8 @@ impl Sync {
             fetched,
             kept,
             face_owner: self.ledger.face_owner.clone(),
+            failed: std::mem::take(&mut self.failed),
+            offered,
         })
     }
 }
