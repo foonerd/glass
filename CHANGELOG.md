@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.9] - 2026-10-08
+
+- **A remote takes test releases too.** A remote's Version panel offered the latest release only, where the player's System tab has had "Offer test releases" since 0.8.5. The remote's settings page now has the same switch under its Version panel, worded as the player's and off unless said: with it on, the remote is offered the newest of the repository's last ten releases, a test release among them and said so beside its version, as soon as it is published; off, the latest release as before. The switch is applied with the other settings and kept in the remote's configuration. The upgrade's checks stay as they were: the archive against the release's checksum, the new display tried, the one before kept. The bundle built with glass-evo carries the switch from the glass-evo release built on this Glass.
+
 ## [0.9.8] - 2026-10-08
 
 - **Make a report, whole.** The report carried the sheet as it was before glass-evo and could only be copied. Now it carries the sheet as it stands, the glass-evo section with it, the addresses and the forecast's place hidden unless revealed; its window line says the log level Glass wrote at in those minutes and the level it goes back to; **Download the report** saves the whole as a text file named by the player and the minute, beside Copy for the forum and the GitHub issue; a report longer than a forum post takes is cut at a line with a word that the file has the whole. The report's forms live in one script the page and the tests share.
