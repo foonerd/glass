@@ -981,6 +981,7 @@ fn session(
                 leave = Some("settings changed");
             }
             remote.note(&source, &skin, governor.target());
+            remote.probe_step(&mut source);
             // The player moved to another meter of the theme: show it too.
             if mirroring {
                 if let Some((theme, meter)) = source.take_showing() {

@@ -37,7 +37,20 @@ pub struct RemoteSession {
     received_at_status: u64,
     name: String,
     page: String,
+    /// A probe of the frames path under way: when it was asked, how many
+    /// probes had arrived before, and what the player answered.
+    probe: Option<ProbeRun>,
 }
+
+struct ProbeRun {
+    asked: Instant,
+    probes_before: u64,
+    answered: Option<(u32, String)>,
+}
+
+/// How long a probe waits for the player's datagrams after the player
+/// said it sent them, or for the player to say anything at all.
+const PROBE_WAIT: Duration = Duration::from_millis(2500);
 
 /// The window as the remote's display settings say, under a title.
 fn window_options_of(display: &super::config::Display, title: String) -> WindowOptions {
@@ -76,10 +89,13 @@ impl RemoteSession {
             frames_address(&self.beacon).map_err(|e| format!("{}: {e}", self.beacon.address()))?;
         let id = intake::remote::remote_id(&self.app.cache);
         let release = env!("CARGO_PKG_VERSION").to_string();
-        let hops = NetHops::new(frames, &id, &self.name, &release)
+        let config = self.app.config();
+        let hops = NetHops::on_port(frames, config.frames_port, &id, &self.name, &release)
             .map_err(|e| format!("frames socket: {e}"))?
-            .with_gain_db(self.app.config().gain_db)
-            .with_spectrum_decay(self.app.config().spectrum_decay);
+            .with_gain_db(config.gain_db)
+            .with_spectrum_decay(config.spectrum_decay);
+        let frames_port = hops.local_port();
+        self.app.set_connection(|c| c.frames_port = frames_port);
         let channel = intake::Channel::tcp(format!(
             "{}:{}",
             self.beacon.address(),
@@ -92,11 +108,12 @@ impl RemoteSession {
             screen: [skin.width, skin.height],
             page: self.page.clone(),
             face: self.app.face().unwrap_or_default(),
+            frames_port,
         });
         logline::say!(
             Info,
             "remotes",
-            "remote {} of {}: frames from {frames}, channel {}:{}",
+            "remote {} of {}: frames from {frames} on port {frames_port}, channel {}:{}",
             self.name,
             self.beacon.name,
             self.beacon.address(),
@@ -150,6 +167,73 @@ impl RemoteSession {
             s.screen = screen;
             s.rate = rate;
         });
+    }
+
+    /// The probe of the frames path, a step a frame: asked of the player
+    /// when the page asked for one, then judged as soon as a probe datagram
+    /// arrives, or when the wait is over. The verdict rests on both ends:
+    /// what the player said it sent, and what arrived here.
+    pub fn probe_step(&mut self, source: &mut TapSource) {
+        if self.probe.is_none() && self.app.take_probe_request() {
+            let probes_before = source.hop_probes();
+            let now = super::now_secs();
+            if source.ask_probe() {
+                self.app.set_connection(|c| {
+                    c.probe = super::Probe {
+                        state: "running".to_string(),
+                        at: now,
+                        ..Default::default()
+                    }
+                });
+                self.probe = Some(ProbeRun {
+                    asked: Instant::now(),
+                    probes_before,
+                    answered: None,
+                });
+            } else {
+                self.app.set_connection(|c| {
+                    c.probe = super::Probe {
+                        state: "no-channel".to_string(),
+                        at: now,
+                        ..Default::default()
+                    }
+                });
+            }
+            return;
+        }
+        let Some(run) = self.probe.as_mut() else {
+            return;
+        };
+        if let Some(answer) = source.take_probed() {
+            run.answered = Some(answer);
+        }
+        let arrived = source.hop_probes().saturating_sub(run.probes_before);
+        let waited = run.asked.elapsed();
+        let (sent, to) = run.answered.clone().unwrap_or((0, String::new()));
+        let verdict = super::probe_verdict(
+            arrived,
+            run.answered.as_ref().map(|a| a.0),
+            waited >= PROBE_WAIT,
+        );
+        let Some(state) = verdict else {
+            return;
+        };
+        self.probe = None;
+        let now = super::now_secs();
+        self.app.set_connection(|c| {
+            c.probe = super::Probe {
+                state: state.to_string(),
+                sent,
+                arrived,
+                to,
+                at: now,
+            }
+        });
+        logline::say!(
+            Info,
+            "remotes",
+            "frames probe: {state} (the player sent {sent}, {arrived} arrived)"
+        );
     }
 
     /// A touch on the window: play or pause the player.
@@ -752,6 +836,7 @@ pub fn remote_main(
             s.player_release = beacon.release.clone();
             s.page = page.clone();
         });
+        app.set_beacon(Some(beacon.clone()));
         if let Some(note) = unreached {
             let outcome = status_screen(
                 &run,
@@ -896,6 +981,7 @@ pub fn remote_main(
             received_at_status: 0,
             name,
             page,
+            probe: None,
         };
         if let ThemeChoice::Own { meter, .. } | ThemeChoice::Local { meter, .. } = &player.theme {
             logline::say!(

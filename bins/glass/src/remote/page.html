@@ -67,6 +67,16 @@
     <table class="kv" id="status"></table>
   </div>
 
+  <div class="panel" id="connection-panel">
+    <h2>Connection</h2>
+    <table class="kv" id="connection"></table>
+    <div style="margin-top:10px"><button class="small" id="btn-connection-check">Check now</button> <span class="help" id="connection-when"></span></div>
+    <div class="help" style="margin-top:8px">Each path to the player is tried from here. The frames path is judged from both ends: the player is asked, over the channel, to send three probe datagrams to this remote's frames port, and the verdict says whether they arrived. Where something is blocked the row names the side and the fix.</div>
+    <h3 style="margin:14px 0 6px;font-size:14px">Firewall rules for this remote</h3>
+    <table class="kv" id="firewall"></table>
+    <div class="help" style="margin-top:8px">A firewall on this machine (Bitdefender, Windows Defender Firewall, ufw and the like) takes a rule in these terms: the program, the direction, the protocol and the port. The ports are the player's own, as its Remotes tab sets them.</div>
+  </div>
+
   <div class="panel">
     <h2>Player</h2>
     <div class="help" style="margin-bottom:10px">The players this remote knows. The one marked is shown; the others wait. A player found on the network brings its own name and ports.</div>
@@ -229,10 +239,65 @@
       $('paths').textContent = 'Configuration: ' + s.configPath + ' · cache: ' + s.cache;
       renderUpgrade(s);
       renderStatus(s.status);
+      renderConnection(s);
       if (!state.dirty) fill(s.config);
       renderPlayers(s.config);
     });
   }
+
+  // ---- the connection: each path to the player, and the firewall rules ----
+  // The states come from the remote; the words are set here, each with the
+  // side that is at fault and the fix, so nothing is left to guess.
+  function tcpWords(row, st) {
+    var what = { manager: 'the player\'s Manager', channel: 'the player\'s channel', web: 'the player\'s own web (album art)' }[row.name] || row.name;
+    var where = row.host + ':' + row.port + ' (TCP)';
+    if (row.state === 'open') return [what, where + ' · open, answered in ' + row.ms + ' ms'];
+    if (row.state === 'refused') return [what, where + ' · REFUSED: the player is not listening there. The player: check that remote displays are served and the ports on its Remotes tab are these.'];
+    if (row.state === 'timeout') return [what, where + ' · TIMED OUT: dropped on the way. The player or the network between: a firewall on the player, or a router between networks, drops TCP ' + row.port + '. (' + row.detail + ')'];
+    if (row.state === 'unreachable') return [what, where + ' · UNREACHABLE: no route, or the name does not resolve. The network: check the player\'s name or address on this page. (' + row.detail + ')'];
+    return [what, where + ' · ' + (row.state || 'not tried') + (row.detail ? ': ' + row.detail : '')];
+  }
+  function probeWords(c, st) {
+    var p = c.probe || {};
+    var port = c.frames_port ? 'UDP ' + c.frames_port : 'UDP (no port yet)';
+    var per = st && st.frames_per_s ? ', frames received ' + st.frames_per_s.toFixed(0) + ' a second' : '';
+    switch (p.state) {
+      case 'arrived': return port + ' · OPEN: the player sent ' + p.sent + ' probe datagrams to ' + p.to + ' and ' + p.arrived + ' arrived' + per + '.';
+      case 'blocked': return port + ' · BLOCKED: the player sent ' + p.sent + ' probe datagrams to ' + p.to + ' and none arrived. This machine: a firewall here drops UDP in on port ' + c.frames_port + '; allow the program below, or that port, inbound. (A router between networks drops it the same way.)';
+      case 'not-sent': return port + ' · NOT TESTED: the player could not send a probe (its Glass is older than 0.9.10, or it does not know this remote\'s port). Upgrade the player; meanwhile, frames arriving while it plays' + (per ? ' (' + per.slice(2) + ')' : '') + ' say the path is open.';
+      case 'no-answer': return port + ' · NO ANSWER: the channel took the request and the player said nothing within the wait. Check again; if it stays so, the player\'s Glass is older than 0.9.10.';
+      case 'no-channel': return port + ' · NOT TESTED: the channel to the player is down, so nothing could be asked. See the channel row.';
+      case 'running': return port + ' · testing…';
+      default: return port + ' · not tested yet' + (per ? ' (frames received' + per.slice(16) + ')' : '') + '. Press Check now.';
+    }
+  }
+  function renderConnection(s) {
+    var c = s.connection || {}; var st = s.status || {}; var pl = c.player || {};
+    var rows = (c.tcp || []).map(function (row) { return tcpWords(row, st); });
+    rows.push(['the player\'s frames', probeWords(c, st)]);
+    rows.push(['the player\'s beacon', 'UDP ' + (pl.beacon || 5579) + ' · used only to find players on the network; a player added by name needs it not. Broadcasts do not cross a router.']);
+    rows.push(['this page', 'TCP ' + (s.config ? s.config.page_port : '') + ' · reached from another device only where a firewall here allows it in; the same machine needs no rule.']);
+    if (!c.tcp || !c.tcp.length) rows.unshift(['the player', pl.host ? pl.host + ' · not tried yet. Press Check now.' : 'none: add a player first.']);
+    $('connection').innerHTML = rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
+    $('connection-when').textContent = c.checked_at ? 'Checked ' + new Date(c.checked_at * 1000).toLocaleTimeString() : '';
+    var program = s.exe || 'the glass program';
+    var rules = [
+      ['in, UDP ' + (c.frames_port || '(the frames port)'), 'the frames the player sends · program ' + program],
+      ['in, UDP ' + (pl.beacon || 5579), 'finding players on the network (optional) · the same program'],
+      ['in, TCP ' + (s.config ? s.config.page_port : ''), 'this settings page from other devices (optional) · the same program'],
+      ['out, TCP ' + [pl.manager, pl.channel, pl.web].filter(Boolean).join(', ') + (pl.host ? ' to ' + pl.host : ''), 'the Manager, the channel, album art · the same program']
+    ];
+    $('firewall').innerHTML = rules.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('');
+  }
+  $('btn-connection-check').onclick = function () {
+    $('btn-connection-check').disabled = true;
+    api('POST', '/api/connection/check').then(function () {
+      // The TCP connects take up to three seconds each, the probe up to three: read back as they land.
+      var reads = 0;
+      var again = function () { api('GET', '/api/state').then(function (s) { renderConnection(s); if (++reads < 5) setTimeout(again, 1500); else $('btn-connection-check').disabled = false; }).catch(function () { $('btn-connection-check').disabled = false; }); };
+      setTimeout(again, 800);
+    }).catch(function (e) { toast(e.message, 'error'); $('btn-connection-check').disabled = false; });
+  };
   function renderStatus(st) {
     var rows = [
       ['Showing', st.phase || ''],

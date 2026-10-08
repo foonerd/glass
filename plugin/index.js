@@ -144,10 +144,17 @@ Channel.prototype.attach = function (conn) {
                     screen: Array.isArray(r.screen) ? r.screen.slice(0, 2).map(function (n) { return parseInt(n, 10) || 0; }) : [0, 0],
                     // The remote's own settings page, when it serves one.
                     page: /^https?:\/\/[^\s"'<>]{1,150}$/.test(String(r.page || '')) ? String(r.page) : '',
+                    // The UDP port the remote hears frames on, for a probe of that path (from 0.9.10).
+                    framesPort: (parseInt(r.frames_port, 10) >= 1 && parseInt(r.frames_port, 10) <= 65535) ? parseInt(r.frames_port, 10) : 0,
                     address: String(conn.remoteAddress || '').replace(/^::ffff:/, ''),
                     since: new Date().toISOString()
                 };
                 self.logger.info(id + 'channel: remote ' + conn.remote.name + ' (' + conn.remote.address + ', ' + conn.remote.release + ')');
+            } else if (message && message.kind === 'probe' && conn.remote) {
+                // A remote asks whether UDP reaches it: three probe datagrams
+                // go to its frames port, and the answer says how many went
+                // where, so the remote can judge the path from both ends.
+                self.probeRemote(conn);
             } else if (message && message.kind === 'showing' && !conn.remote) {
                 // The player's own display says which meter it shows; the
                 // remotes that follow the player hear of it.
@@ -172,6 +179,43 @@ Channel.prototype.attach = function (conn) {
     conn.on('error', detach);
     conn.on('close', detach);
     self.onAttach();
+};
+
+// Three probe datagrams to a remote's frames port, and the answer on the
+// channel: how many were sent and where to. A remote without a known port
+// (before 0.9.10) is told none went, so it does not take silence for a block.
+Channel.prototype.probeRemote = function (conn) {
+    var self = this;
+    var r = conn.remote;
+    if (!r.framesPort || !r.address) {
+        self.tell(conn, { kind: 'probed', sent: 0, to: '' });
+        return;
+    }
+    var to = r.address + ':' + r.framesPort;
+    var socket = null;
+    try {
+        var dgram = require('dgram');
+        socket = dgram.createSocket(r.address.indexOf(':') === -1 ? 'udp4' : 'udp6');
+    } catch (e) {
+        self.logger.warn(id + 'channel: probe to ' + to + ': ' + (e && e.message ? e.message : e));
+        self.tell(conn, { kind: 'probed', sent: 0, to: to });
+        return;
+    }
+    var sent = 0;
+    var left = 3;
+    var finish = function () {
+        try { socket.close(); } catch (e) {}
+        self.logger.info(id + 'channel: probe to ' + to + ': ' + sent + ' of 3 sent');
+        self.tell(conn, { kind: 'probed', sent: sent, to: to });
+    };
+    socket.on('error', function () { /* counted by the send's own callback */ });
+    for (var n = 1; n <= 3; n++) {
+        socket.send(Buffer.from(JSON.stringify({ glass: 'probe', n: n })), r.framesPort, r.address, function (err) {
+            if (!err) { sent += 1; }
+            left -= 1;
+            if (left === 0) { finish(); }
+        });
+    }
 };
 
 // The same channel over TCP, for remote displays on the network.

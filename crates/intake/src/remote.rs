@@ -30,6 +30,11 @@ pub const DEFAULT_PLAYER_PORT: u16 = 3000;
 /// A subscribe goes to the player this often; it forgets a remote after fifteen seconds.
 const SUBSCRIBE_EVERY: Duration = Duration::from_secs(5);
 const DATAGRAM_MAX: usize = 8192;
+/// The port a remote hears frames on unless its configuration says
+/// another: one number a firewall rule can name.
+pub const DEFAULT_REMOTE_FRAMES_PORT: u16 = 5585;
+/// How a probe datagram from the plugin begins: not a frame, counted apart.
+const PROBE_MARK: &[u8] = b"{\"glass\":\"probe\"";
 
 /// The frames as they arrive from the player over UDP, merged between
 /// two looks; the decoding, the ordering, the gain and the decay are
@@ -41,17 +46,28 @@ pub struct NetHops {
     subscribed_at: Option<Instant>,
     buffer: Vec<u8>,
     wire: WireHops,
+    probes: u64,
 }
 
 impl NetHops {
-    /// Subscribes to the player's frames port from a port of this host's own.
+    /// Subscribes to the player's frames port from a port of this host's
+    /// own: `port`, or when that is taken or 0, one the system gives.
     pub fn new(server: SocketAddr, id: &str, name: &str, release: &str) -> std::io::Result<Self> {
-        let bind: SocketAddr = if server.is_ipv4() {
-            "0.0.0.0:0".parse().unwrap()
-        } else {
-            "[::]:0".parse().unwrap()
+        Self::on_port(server, DEFAULT_REMOTE_FRAMES_PORT, id, name, release)
+    }
+
+    pub fn on_port(
+        server: SocketAddr,
+        port: u16,
+        id: &str,
+        name: &str,
+        release: &str,
+    ) -> std::io::Result<Self> {
+        let any = if server.is_ipv4() { "0.0.0.0" } else { "[::]" };
+        let socket = match UdpSocket::bind(format!("{any}:{port}")) {
+            Ok(socket) if port != 0 => socket,
+            _ => UdpSocket::bind(format!("{any}:0"))?,
         };
-        let socket = UdpSocket::bind(bind)?;
         socket.set_nonblocking(true)?;
         let subscribe = serde_json::json!({
             "glass": "subscribe",
@@ -69,11 +85,17 @@ impl NetHops {
             subscribed_at: None,
             buffer: vec![0u8; DATAGRAM_MAX],
             wire: WireHops::new(),
+            probes: 0,
         })
     }
 
     pub fn server(&self) -> SocketAddr {
         self.server
+    }
+
+    /// The port this host hears frames on.
+    pub fn local_port(&self) -> u16 {
+        self.socket.local_addr().map(|a| a.port()).unwrap_or(0)
     }
 
     /// Scale the levels by a gain in decibels, within plus or minus twelve.
@@ -107,7 +129,11 @@ impl Hops for NetHops {
             match self.socket.recv_from(&mut self.buffer) {
                 Ok((n, from)) => {
                     if from.ip() == self.server.ip() {
-                        self.wire.push(&self.buffer[..n]);
+                        if self.buffer[..n].starts_with(PROBE_MARK) {
+                            self.probes += 1;
+                        } else {
+                            self.wire.push(&self.buffer[..n]);
+                        }
                     }
                 }
                 Err(err) if err.kind() == ErrorKind::WouldBlock => break,
@@ -120,6 +146,10 @@ impl Hops for NetHops {
 
     fn stats(&self) -> (u64, u64) {
         self.wire.stats()
+    }
+
+    fn probes(&self) -> u64 {
+        self.probes
     }
 }
 
@@ -963,6 +993,54 @@ mod tests {
         assert_eq!(hops.stats(), (4, 1));
         thread::sleep(Duration::from_millis(600));
         assert!(hops.take().quiet, "no frame for half a second is silence");
+    }
+
+    /// A probe datagram from the player is counted apart from the frames,
+    /// never refused as garbage; one from elsewhere is not counted at all.
+    /// The port asked for is the one bound, and a taken port falls back.
+    #[test]
+    fn a_probe_from_the_player_is_counted_apart_and_the_port_is_the_one_asked() {
+        let server = UdpSocket::bind("127.0.0.1:0").unwrap();
+        let server_addr = server.local_addr().unwrap();
+        let holder = UdpSocket::bind("0.0.0.0:0").unwrap();
+        let taken = holder.local_addr().unwrap().port();
+        let mut hops = NetHops::on_port(server_addr, taken, "t", "Test", "0.9.10").unwrap();
+        assert_ne!(hops.local_port(), 0);
+        assert_ne!(
+            hops.local_port(),
+            taken,
+            "a port in use falls back to one the system gives"
+        );
+        let hops_addr: SocketAddr = format!("127.0.0.1:{}", hops.local_port()).parse().unwrap();
+        hops.take();
+        server
+            .send_to(br#"{"glass":"probe","n":1}"#, hops_addr)
+            .unwrap();
+        server
+            .send_to(br#"{"glass":"probe","n":2}"#, hops_addr)
+            .unwrap();
+        server.send_to(b"nonsense", hops_addr).unwrap();
+        thread::sleep(Duration::from_millis(50));
+        hops.take();
+        assert_eq!(hops.probes(), 2);
+        assert_eq!(
+            hops.stats(),
+            (1, 1),
+            "the garbage is refused, the probes are not frames"
+        );
+        let elsewhere = UdpSocket::bind("127.0.0.2:0");
+        if let Ok(elsewhere) = elsewhere {
+            elsewhere
+                .send_to(br#"{"glass":"probe","n":3}"#, hops_addr)
+                .unwrap();
+            thread::sleep(Duration::from_millis(50));
+            hops.take();
+            assert_eq!(
+                hops.probes(),
+                2,
+                "a probe from another address is not the player's"
+            );
+        }
     }
 
     #[test]

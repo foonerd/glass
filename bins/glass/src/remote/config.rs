@@ -294,6 +294,15 @@ pub struct RemoteConfig {
     /// releases, a pre-release among them; off, the latest release only.
     #[serde(default)]
     pub test_releases: bool,
+    /// The UDP port this remote hears the player's frames on, one number a
+    /// firewall rule can name; 0 lets the system choose one, as before
+    /// 0.9.10. A port in use falls back to one the system chooses.
+    #[serde(default = "default_frames_port")]
+    pub frames_port: u16,
+}
+
+fn default_frames_port() -> u16 {
+    intake::remote::DEFAULT_REMOTE_FRAMES_PORT
 }
 
 /// When a remote that carries a face shows it: where the player's own
@@ -340,6 +349,7 @@ impl Default for RemoteConfig {
             spectrum_decay: 0.0,
             face: FaceShown::default(),
             test_releases: false,
+            frames_port: intake::remote::DEFAULT_REMOTE_FRAMES_PORT,
         }
     }
 }
@@ -430,6 +440,12 @@ impl RemoteConfig {
     pub fn check(&self) -> Result<(), String> {
         if self.page_port < 1024 {
             return Err("the page port must be 1024 or above".to_string());
+        }
+        if self.frames_port != 0 && self.frames_port < 1024 {
+            return Err(
+                "the frames port must be 1024 or above, or 0 for one the system chooses"
+                    .to_string(),
+            );
         }
         for (id, player) in &self.players {
             if let ThemeChoice::Local { folder, .. } = &player.theme {

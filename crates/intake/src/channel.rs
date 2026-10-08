@@ -57,6 +57,9 @@ pub enum Event {
     /// The plugin asks the display to calibrate its touch panel: the
     /// display shows targets, reads the fingers and reports the map.
     Calibrate { points: u32 },
+    /// The plugin's answer to a remote's probe request: how many probe
+    /// datagrams it sent to the remote's frames port, and where to.
+    Probed { sent: u32, to: String },
 }
 
 /// One track of the player's queue, as the plugin's `queue` line carries it.
@@ -151,6 +154,14 @@ pub struct RemoteHello {
     /// out by a display without one (the standalone remote).
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub face: String,
+    /// The UDP port this remote hears frames on, for the plugin's probe;
+    /// left out where there is none (a display on the player itself).
+    #[serde(default, skip_serializing_if = "port_is_none")]
+    pub frames_port: u16,
+}
+
+fn port_is_none(port: &u16) -> bool {
+    *port == 0
 }
 
 impl RemoteHello {
@@ -382,6 +393,13 @@ impl Channel {
         self.send_line(&command.line())
     }
 
+    /// Ask the plugin to send probe datagrams to this remote's frames port,
+    /// so the remote can tell an open UDP path from a blocked one. The
+    /// answer comes as [`Event::Probed`].
+    pub fn ask_probe(&mut self) -> bool {
+        self.send_line("{\"kind\":\"probe\"}\n")
+    }
+
     /// Tell the plugin which meter this display shows, so remotes that
     /// follow the player can show the same one.
     pub fn report_showing(&mut self, theme: &str, meter: &str, rate: u32) -> bool {
@@ -472,6 +490,14 @@ pub fn decode(line: &[u8]) -> Option<Event> {
                 .unwrap_or(5)
                 .clamp(3, 9) as u32,
         }),
+        "probed" => Some(Event::Probed {
+            sent: value
+                .get("sent")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                .min(u32::MAX as u64) as u32,
+            to: text("to"),
+        }),
         _ => None,
     }
 }
@@ -479,6 +505,26 @@ pub fn decode(line: &[u8]) -> Option<Event> {
 #[cfg(test)]
 mod decode_tests {
     use super::*;
+
+    /// The plugin's answer to a probe request: how many datagrams went
+    /// where; a count that is no number is none sent.
+    #[test]
+    fn the_probed_line_is_decoded() {
+        assert_eq!(
+            decode(br#"{"kind":"probed","sent":3,"to":"10.0.0.7:5585"}"#),
+            Some(Event::Probed {
+                sent: 3,
+                to: "10.0.0.7:5585".to_string()
+            })
+        );
+        assert_eq!(
+            decode(br#"{"kind":"probed","sent":"x"}"#),
+            Some(Event::Probed {
+                sent: 0,
+                to: String::new()
+            })
+        );
+    }
 
     /// The persist line carries the mode, the seconds and when it began;
     /// a cleared one has an empty mode; an unknown kind is nothing.
@@ -662,6 +708,7 @@ mod tests {
             screen: [1280, 720],
             page: "http://10.0.0.7:5583/".into(),
             face: String::new(),
+            frames_port: 5585,
         });
         assert!(channel.connected());
         assert_eq!(channel.name(), address.to_string());
@@ -678,7 +725,7 @@ mod tests {
         let (hello, command) = server.join().unwrap();
         assert_eq!(
             hello,
-            "{\"kind\":\"hello\",\"remote\":{\"id\":\"kitchen\",\"name\":\"Kitchen\",\"page\":\"http://10.0.0.7:5583/\",\"release\":\"0.7.0\",\"screen\":[1280,720]}}\n"
+            "{\"kind\":\"hello\",\"remote\":{\"frames_port\":5585,\"id\":\"kitchen\",\"name\":\"Kitchen\",\"page\":\"http://10.0.0.7:5583/\",\"release\":\"0.7.0\",\"screen\":[1280,720]}}\n"
         );
         assert_eq!(command, "{\"kind\":\"command\",\"name\":\"toggle\"}\n");
     }

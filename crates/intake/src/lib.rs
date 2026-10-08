@@ -1601,6 +1601,10 @@ pub trait Hops {
     fn stats(&self) -> (u64, u64) {
         (0, 0)
     }
+    /// Probe datagrams that arrived, for a source on a wire; none elsewhere.
+    fn probes(&self) -> u64 {
+        0
+    }
 }
 
 /// The tap's ring under `/dev/shm`, looked for again when it goes.
@@ -1679,6 +1683,8 @@ pub struct TapSource {
     config_seen: Option<(String, String, String)>,
     showing_seen: Option<(String, String)>,
     show_asked: Option<String>,
+    /// The plugin's answer to a probe request, until taken.
+    probed_seen: Option<(u32, String)>,
     weather_held: Option<lead::Weather>,
     /// The meter's fall, as the old scope shaped it, on the pipe scale.
     decay: tap::legacy::Meter,
@@ -1842,6 +1848,22 @@ impl TapSource {
     pub fn hop_stats(&self) -> (u64, u64) {
         self.hops.stats()
     }
+
+    /// Probe datagrams that reached the hops, on a wire.
+    pub fn hop_probes(&self) -> u64 {
+        self.hops.probes()
+    }
+
+    /// Ask the player to probe this remote's frames port. False without a channel.
+    pub fn ask_probe(&mut self) -> bool {
+        self.channel.as_mut().is_some_and(Channel::ask_probe)
+    }
+
+    /// The plugin's answer to the probe request since the last call: how
+    /// many datagrams it sent, and where to.
+    pub fn take_probed(&mut self) -> Option<(u32, String)> {
+        self.probed_seen.take()
+    }
     pub fn new(spectrum_bins: usize, meter_max: f32) -> Self {
         let bins = spectrum_bins.max(1);
         // The plugin's channel, when it serves one: the first state is
@@ -1855,6 +1877,7 @@ impl TapSource {
             config_seen: None,
             showing_seen: None,
             show_asked: None,
+            probed_seen: None,
             weather_held: None,
             decay: tap::legacy::Meter::new(METER_DECAY_MS, meter_max.max(1.0) as u32),
             bins_mapper: tap::legacy::Regroup::new(
@@ -2282,6 +2305,7 @@ impl Source for TapSource {
                     self.persist_held = (!mode.is_empty()).then_some((mode, seconds, started_ms));
                 }
                 Event::Calibrate { points } => self.calibrate_asked = Some(points),
+                Event::Probed { sent, to } => self.probed_seen = Some((sent, to)),
                 Event::Hello { .. } => {}
             }
         }

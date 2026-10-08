@@ -50,6 +50,146 @@ pub struct Status {
     pub face_shown: bool,
 }
 
+/// What the page's Connection panel shows: the paths to the player, each
+/// tried from this side, and the probe of the frames path judged from
+/// both ends. The words are the page's; this carries states and numbers.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct Connection {
+    /// Seconds since 1970 of the last Check now; 0 before one.
+    pub checked_at: u64,
+    /// The TCP paths: the Manager, the channel, the player's own web.
+    pub tcp: Vec<TcpPath>,
+    /// The frames path over UDP, judged by a probe.
+    pub probe: Probe,
+    /// The port this remote hears frames on, 0 before a session binds one.
+    pub frames_port: u16,
+    /// The player's ports as its beacon says them, for the rule table.
+    pub player: PlayerPorts,
+}
+
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct PlayerPorts {
+    pub host: String,
+    pub frames: u16,
+    pub channel: u16,
+    pub manager: u16,
+    pub web: u16,
+    pub beacon: u16,
+}
+
+/// One TCP path tried with a connect: `open`, `refused` (nothing listens
+/// there), `timeout` (dropped on the way), `unreachable` (no route, or a
+/// name that does not resolve), or `error` with the words.
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct TcpPath {
+    pub name: String,
+    pub host: String,
+    pub port: u16,
+    pub state: String,
+    pub detail: String,
+    pub ms: u64,
+}
+
+/// The frames path's probe: `idle` (none asked), `running`, `arrived`
+/// (UDP in is open), `blocked` (the player sent and nothing came),
+/// `not-sent` (the player could not send: no port known, an older
+/// player), `no-answer` (the channel took the request and said nothing),
+/// `no-channel` (the request could not be sent).
+#[derive(Clone, Debug, Default, Serialize)]
+pub struct Probe {
+    pub state: String,
+    pub sent: u32,
+    pub arrived: u64,
+    pub to: String,
+    pub at: u64,
+}
+
+/// The probe's verdict from what arrived, what the player said it sent,
+/// and whether the wait is over; none while there is still something to
+/// wait for.
+pub fn probe_verdict(arrived: u64, sent: Option<u32>, waited: bool) -> Option<&'static str> {
+    if arrived > 0 {
+        return Some("arrived");
+    }
+    if !waited {
+        return None;
+    }
+    Some(match sent {
+        None => "no-answer",
+        Some(0) => "not-sent",
+        Some(_) => "blocked",
+    })
+}
+
+/// A TCP connect's outcome as a state word, from the error's kind.
+pub fn tcp_state(err: &std::io::Error) -> &'static str {
+    use std::io::ErrorKind;
+    match err.kind() {
+        ErrorKind::ConnectionRefused => "refused",
+        ErrorKind::TimedOut | ErrorKind::WouldBlock => "timeout",
+        ErrorKind::HostUnreachable
+        | ErrorKind::NetworkUnreachable
+        | ErrorKind::AddrNotAvailable => "unreachable",
+        _ => "error",
+    }
+}
+
+/// Seconds since 1970, for the page's "when".
+pub fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0)
+}
+
+/// One TCP path tried: a connect with a short timeout, the outcome and how
+/// long it took.
+pub fn try_tcp(name: &str, host: &str, port: u16, timeout: Duration) -> TcpPath {
+    use std::net::ToSocketAddrs;
+    let started = std::time::Instant::now();
+    let addrs = match (host, port).to_socket_addrs() {
+        Ok(addrs) => addrs.collect::<Vec<_>>(),
+        Err(err) => {
+            return TcpPath {
+                name: name.to_string(),
+                host: host.to_string(),
+                port,
+                state: "unreachable".to_string(),
+                detail: format!("the name does not resolve: {err}"),
+                ms: started.elapsed().as_millis() as u64,
+            }
+        }
+    };
+    let mut last: Option<std::io::Error> = None;
+    for addr in addrs {
+        match std::net::TcpStream::connect_timeout(&addr, timeout) {
+            Ok(_) => {
+                return TcpPath {
+                    name: name.to_string(),
+                    host: host.to_string(),
+                    port,
+                    state: "open".to_string(),
+                    detail: String::new(),
+                    ms: started.elapsed().as_millis() as u64,
+                }
+            }
+            Err(err) => last = Some(err),
+        }
+    }
+    let (state, detail) = match last {
+        Some(err) => (tcp_state(&err), err.to_string()),
+        None => ("unreachable", "the name resolves to no address".to_string()),
+    };
+    TcpPath {
+        name: name.to_string(),
+        host: host.to_string(),
+        port,
+        state: state.to_string(),
+        detail,
+        ms: started.elapsed().as_millis() as u64,
+    }
+}
+
 /// One screen of this machine.
 #[derive(Clone, Debug, Default, Serialize)]
 pub struct MonitorInfo {
@@ -77,6 +217,12 @@ pub struct RemoteApp {
     upgrade: Mutex<upgrade::State>,
     /// An upgrade is in place: the display is to become the new binary.
     restart: AtomicBool,
+    /// The paths to the player as last tried, for the page's Connection panel.
+    connection: Mutex<Connection>,
+    /// The page asked for a probe of the frames path; the session takes it.
+    probe_request: AtomicBool,
+    /// The player's beacon of the session on, for the connection checks.
+    beacon: Mutex<Option<Beacon>>,
 }
 
 impl RemoteApp {
@@ -95,7 +241,80 @@ impl RemoteApp {
                 ..Default::default()
             }),
             restart: AtomicBool::new(false),
+            connection: Mutex::new(Connection {
+                probe: Probe {
+                    state: "idle".to_string(),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+            probe_request: AtomicBool::new(false),
+            beacon: Mutex::new(None),
         })
+    }
+
+    /// The player's beacon for the session on, said when a session starts.
+    pub fn set_beacon(&self, beacon: Option<Beacon>) {
+        let ports = beacon.as_ref().map(|b| PlayerPorts {
+            host: b.address(),
+            frames: b.frames_port,
+            channel: b.channel_port,
+            manager: b.manager_port,
+            web: b.player_port,
+            beacon: DEFAULT_BEACON_PORT,
+        });
+        *self.beacon.lock().unwrap_or_else(|e| e.into_inner()) = beacon;
+        if let Some(ports) = ports {
+            self.set_connection(|c| c.player = ports);
+        }
+    }
+
+    pub fn connection(&self) -> Connection {
+        self.connection
+            .lock()
+            .map(|c| c.clone())
+            .unwrap_or_else(|e| e.into_inner().clone())
+    }
+
+    pub fn set_connection(&self, change: impl FnOnce(&mut Connection)) {
+        let mut guard = self.connection.lock().unwrap_or_else(|e| e.into_inner());
+        change(&mut guard);
+    }
+
+    /// The page asks for a probe of the frames path; the session takes it
+    /// on its next step.
+    pub fn request_probe(&self) {
+        self.probe_request.store(true, Ordering::Release);
+    }
+
+    pub fn take_probe_request(&self) -> bool {
+        self.probe_request.swap(false, Ordering::AcqRel)
+    }
+
+    /// Check now: the TCP paths tried from here with a three second limit
+    /// each, kept for the page. Blocks for as long as the connects take;
+    /// the route runs it on a thread of its own.
+    pub fn check_connection(&self) {
+        let Some(beacon) = self
+            .beacon
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+        else {
+            return;
+        };
+        let host = beacon.address();
+        let limit = Duration::from_secs(3);
+        let tcp = vec![
+            try_tcp("manager", &host, beacon.manager_port, limit),
+            try_tcp("channel", &host, beacon.channel_port, limit),
+            try_tcp("web", &host, beacon.player_port, limit),
+        ];
+        let at = now_secs();
+        self.set_connection(|c| {
+            c.tcp = tcp;
+            c.checked_at = at;
+        });
     }
 
     /// What this display is a release of, said once at the start.
@@ -422,8 +641,19 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
                     "upgradeInPlace": upgrade::in_place(),
                     "configPath": app.path.to_string_lossy(),
                     "cache": app.cache.to_string_lossy(),
+                    "connection": app.connection(),
+                    "exe": std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(),
                 }),
             );
+        }
+        // Check now on the Connection panel: the TCP paths tried on a thread
+        // of their own, and the frames path probed by the session through
+        // the channel. Answers at once; the state says how it went.
+        (Method::Post, "/api/connection/check") => {
+            app.request_probe();
+            let app = app.clone();
+            std::thread::spawn(move || app.check_connection());
+            respond_json(request, 200, json!({ "ok": true }));
         }
         // The display's own upgrade: a look at the releases, and the
         // upgrade to the latest one known. Neither takes anything from the
@@ -781,5 +1011,61 @@ mod tests {
         app.set_phase("showing");
         assert_eq!(app.status().phase, "showing");
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The probe's verdict rests on both ends: anything arrived is open at
+    /// once; nothing arrived is judged only when the wait is over, by what
+    /// the player said it sent.
+    #[test]
+    fn the_probe_is_judged_from_both_ends() {
+        assert_eq!(probe_verdict(1, None, false), Some("arrived"));
+        assert_eq!(probe_verdict(2, Some(3), true), Some("arrived"));
+        assert_eq!(
+            probe_verdict(0, Some(3), false),
+            None,
+            "still waiting for the datagrams"
+        );
+        assert_eq!(
+            probe_verdict(0, None, false),
+            None,
+            "still waiting for the player"
+        );
+        assert_eq!(probe_verdict(0, Some(3), true), Some("blocked"));
+        assert_eq!(probe_verdict(0, Some(0), true), Some("not-sent"));
+        assert_eq!(probe_verdict(0, None, true), Some("no-answer"));
+    }
+
+    /// A connect's failure is one of four words, by its kind.
+    #[test]
+    fn a_tcp_failure_is_named_by_its_kind() {
+        use std::io::{Error, ErrorKind};
+        assert_eq!(
+            tcp_state(&Error::from(ErrorKind::ConnectionRefused)),
+            "refused"
+        );
+        assert_eq!(tcp_state(&Error::from(ErrorKind::TimedOut)), "timeout");
+        assert_eq!(
+            tcp_state(&Error::from(ErrorKind::HostUnreachable)),
+            "unreachable"
+        );
+        assert_eq!(tcp_state(&Error::from(ErrorKind::Other)), "error");
+        // A port nothing listens on, on this machine: refused, quickly.
+        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = free.local_addr().unwrap().port();
+        drop(free);
+        let path = try_tcp("channel", "127.0.0.1", port, Duration::from_secs(2));
+        assert_eq!(
+            (path.name.as_str(), path.state.as_str(), path.port),
+            ("channel", "refused", port)
+        );
+        // One that listens: open.
+        let open = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = open.local_addr().unwrap().port();
+        let path = try_tcp("manager", "127.0.0.1", port, Duration::from_secs(2));
+        assert_eq!(path.state, "open");
+        // A name that does not resolve: unreachable, with the words.
+        let path = try_tcp("web", "no-such-host.invalid", 3000, Duration::from_secs(2));
+        assert_eq!(path.state, "unreachable");
+        assert!(path.detail.contains("resolve"));
     }
 }
