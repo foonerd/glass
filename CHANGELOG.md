@@ -109,7 +109,7 @@ The forecast's background did not show in the likeness, the date's Background co
 
 ## [0.8.82] - 2026-10-07
 
-The Forecast section's What it shows showed nothing of what was chosen. With glass-evo 0.1.46, which draws today's line and the span's columns as chosen from the mockups. With glass-evo 0.1.46, which draws today's line and the span's columns as he chose from the mockups.
+The Forecast section's What it shows showed nothing of what was chosen. With glass-evo 0.1.46, which draws today's line and the span's columns as chosen from the mockups.
 
 - **"What it shows" shows what is chosen.** The page painted a choice only for the clock's face and dial; the forecast's span is painted as one of its six words now, today unless said (`lookmodel.span`, tested).
 - **Glass names glass-evo 0.1.46 as the least it works with.**
