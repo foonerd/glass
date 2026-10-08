@@ -11,6 +11,7 @@ const fsp = require('fs/promises');
 const path = require('path');
 const { get, persisting, CatalogError } = require('./catalog');
 const { zipDirectory } = require('./zipwrite');
+const { Zip } = require('./zip');
 
 const RELEASES_URL = 'https://api.github.com/repos/foonerd/glass/releases/latest';
 const STAGING_DIR = '/tmp/plugins';
@@ -106,6 +107,70 @@ async function offered(fetch, latestUrl, test, pattern) {
     throw new UpdateError('bad-release', 'the release answer is not JSON');
   }
   return test ? newestRelease(body, pattern) : parseRelease(body, pattern);
+}
+
+// The release of one version, looked up by its tag, for a file brought by
+// hand: the release states the digest the file is held to.
+async function released(fetch, latestUrl, version, pattern) {
+  const res = await fetch(latestUrl.replace(/\/latest$/, '/tags/v' + version), {
+    headers: { accept: 'application/vnd.github+json', 'x-github-api-version': '2022-11-28' },
+    limit: MAX_RELEASE_BYTES
+  });
+  let body;
+  try {
+    body = JSON.parse(res.body.toString('utf8'));
+  } catch (e) {
+    throw new UpdateError('bad-release', 'the release answer is not JSON');
+  }
+  return parseRelease(body, pattern);
+}
+
+// What a zip brought by hand is: the plugin's package at its root, named
+// glass, with a version, and the least glass-evo it works with.
+async function examineGlassZip(file) {
+  const zip = await Zip.open(file);
+  try {
+    const entry = zip.entries.find(function (e) { return e.isRegular && e.name === 'package.json'; });
+    if (!entry || entry.size > MAX_RELEASE_BYTES) throw new UpdateError('bad-zip', 'the zip holds no package.json at its root; it is not a Glass release');
+    let pkg;
+    try {
+      pkg = JSON.parse((await zip.read(entry)).toString('utf8'));
+    } catch (e) {
+      throw new UpdateError('bad-zip', 'the package.json in the zip is not JSON');
+    }
+    if (!pkg || pkg.name !== 'glass' || !/^\d+\.\d+\.\d+$/.test(String(pkg.version || ''))) throw new UpdateError('bad-zip', 'the zip is not a Glass release');
+    const least = pkg.glassEvo && /^\d+\.\d+\.\d+$/.test(String(pkg.glassEvo.least || '')) ? String(pkg.glassEvo.least) : null;
+    return { version: String(pkg.version), least: least };
+  } finally {
+    await zip.close();
+  }
+}
+
+// A file's SHA-256, streamed.
+function digestOf(file) {
+  return new Promise(function (resolve, reject) {
+    const hash = require('crypto').createHash('sha256');
+    fs.createReadStream(file).on('data', function (c) { hash.update(c); }).on('error', reject).on('end', function () { resolve(hash.digest('hex')); });
+  });
+}
+
+// A file brought by hand held to the release of its version: the release
+// looked up by its tag, the file's size and digest as the release states
+// them. A file that cannot be verified is not installed: the release not
+// looked up (no way to GitHub), stating no digest, or not matching.
+async function verifyAgainstRelease(fetch, latestUrl, version, file, pattern, job) {
+  if (job) job.state = 'verifying';
+  let release;
+  try {
+    release = await released(fetch, latestUrl, version, pattern);
+  } catch (e) {
+    throw new UpdateError('unverified', 'release ' + version + ' could not be looked up to verify the file (' + (e && e.message ? e.message : e) + '); nothing was installed');
+  }
+  if (!release.sha256) throw new UpdateError('unverified', 'release ' + version + ' states no digest for its zip; nothing was installed');
+  const stat = await fsp.stat(file);
+  if (release.bytes && stat.size !== release.bytes) throw new UpdateError('size', 'the file is ' + stat.size + ' bytes, the release zip ' + release.bytes + '; it is not the release as published');
+  if ((await digestOf(file)) !== release.sha256) throw new UpdateError('checksum', 'the file does not match the digest of release ' + version + '; it is not the release as published');
+  return release;
 }
 
 // A release's zip fetched to a file and checked: its size and its digest
@@ -276,6 +341,29 @@ class Updater {
     return { name: name, file: file, version: release.version };
   }
 
+  // A zip brought by hand (a player that cannot reach GitHub's files),
+  // examined, verified against the release of its version, and in the
+  // staging directory under the release's name. Any version but the one
+  // that runs: older, for a way back to a given release, as well as newer.
+  async stageFile(job, file) {
+    const found = await examineGlassZip(file);
+    if (found.version === this.version) throw new UpdateError('same-version', 'Glass ' + found.version + ' is what runs; nothing to install');
+    const release = await verifyAgainstRelease(this.fetch, this.releasesUrl, found.version, file, ASSET, job);
+    await fsp.mkdir(this.stagingDir, { recursive: true });
+    const name = 'glass-' + found.version + '.zip';
+    const to = path.join(this.stagingDir, name);
+    if (path.resolve(file) !== path.resolve(to)) {
+      await fsp.rm(to, { force: true });
+      try {
+        await fsp.rename(file, to);
+      } catch (e) {
+        await fsp.copyFile(file, to);
+        await fsp.rm(file, { force: true });
+      }
+    }
+    return { name: name, file: to, version: found.version, least: found.least, release: release };
+  }
+
   // The kept zip of the version before the last upgrade, staged for the
   // plugin manager.
   async stagePrevious(job) {
@@ -361,4 +449,4 @@ function automaticBackup(manifest, name) {
   return /^before-\d+\.\d+\.\d+(-\d{8}-\d{6})?$/.test(String(name || ''));
 }
 
-module.exports = { automaticBackup: automaticBackup, Updater: Updater, UpdateError: UpdateError, compareVersions: compareVersions, parseRelease: parseRelease, newestRelease: newestRelease, offered: offered, fetchChecked: fetchChecked, RELEASES_URL: RELEASES_URL, KEEP_AUTOMATIC_BACKUPS: KEEP_AUTOMATIC_BACKUPS };
+module.exports = { automaticBackup: automaticBackup, Updater: Updater, UpdateError: UpdateError, compareVersions: compareVersions, parseRelease: parseRelease, newestRelease: newestRelease, offered: offered, released: released, fetchChecked: fetchChecked, examineGlassZip: examineGlassZip, digestOf: digestOf, verifyAgainstRelease: verifyAgainstRelease, RELEASES_URL: RELEASES_URL, KEEP_AUTOMATIC_BACKUPS: KEEP_AUTOMATIC_BACKUPS, MAX_ZIP_BYTES: MAX_ZIP_BYTES };

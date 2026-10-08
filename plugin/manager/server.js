@@ -20,7 +20,7 @@ const { trackFileFor } = require('./trackfile');
 const logging = require('./logging');
 const { Catalog, CatalogError } = require('./catalog');
 const { Previews } = require('./previews');
-const { Updater, UpdateError, compareVersions } = require('./update');
+const { Updater, UpdateError, compareVersions, MAX_ZIP_BYTES } = require('./update');
 const stable = require('./stable');
 const remotebehind = require('./remotebehind');
 const sheetfacts = require('./sheetfacts');
@@ -985,11 +985,12 @@ class Manager {
     }));
 
     // Upgrading Glass itself.
+    const uploadOn = function () { return typeof self.plugin.uploadInstall === 'function' && self.plugin.uploadInstall() === true; };
     app.get('/api/update', wrap(async function (req, res) {
       try {
-        res.json(await self.updater.check(false));
+        res.json(Object.assign(await self.updater.check(false), { upload: uploadOn() }));
       } catch (e) {
-        res.json(Object.assign(self.updater.view(), { error: failure(e) }));
+        res.json(Object.assign(self.updater.view(), { upload: uploadOn(), error: failure(e) }));
       }
     }));
 
@@ -1043,6 +1044,36 @@ class Manager {
       const job = self.newJob('rollback', 'Glass ' + previous.version);
       job.target = previous.version;
       self.runUpgrade(job, true);
+      res.status(202).json({ ok: true, job: job });
+    }));
+
+    // Install from a file: an extra for a player that cannot reach
+    // GitHub's files, off unless turned on. Off, the uploads are refused.
+    app.post('/api/update/upload-switch', wrap(async function (req, res) {
+      const body = req.body || {};
+      if (typeof body.upload !== 'boolean') return res.status(400).json({ error: 'bad-request', message: 'upload must be true or false' });
+      const result = self.plugin.setUploadInstall(body.upload);
+      if (!body.upload) self.heldEvo = null;
+      res.json({ ok: true, changed: result.changed, upload: result.upload });
+    }));
+
+    // A Glass release zip as the request body: examined, verified against
+    // the release of its version, then installed as the online path
+    // installs, the glass-evo zip held beforehand going in with it where
+    // that Glass needs a newer one.
+    app.post('/api/update/upload', wrap(async function (req, res) {
+      if (!uploadOn()) return res.status(403).json({ error: 'switch-off', message: 'install from a file is off on this player' });
+      if (upgrading()) return res.status(409).json({ error: 'busy' });
+      await fsp.mkdir(self.updater.stagingDir, { recursive: true });
+      const file = path.join(self.updater.stagingDir, 'upload-' + Date.now() + '.zip');
+      try {
+        await self.receive(req, file, MAX_ZIP_BYTES);
+      } catch (e) {
+        await fsp.rm(file, { force: true });
+        return res.status(e.code === 'too-large' ? 413 : 400).json(failure(e));
+      }
+      const job = self.newJob('upgrade', 'Glass (file)');
+      self.runUploadInstall(job, file);
       res.status(202).json({ ok: true, job: job });
     }));
 
@@ -1107,6 +1138,37 @@ class Manager {
       if (componentBusy()) return res.status(409).json({ error: 'busy' });
       const job = self.newJob('component', 'glass-evo ' + previous.version);
       self.runComponent(job, true);
+      res.status(202).json({ ok: true, job: job });
+    }));
+
+    // A glass-evo release zip as the request body: installed at once, held
+    // to this Glass; or, with `hold`, verified and kept for the Glass zip
+    // that follows, to go in with it. Refused while the switch is off.
+    app.post('/api/evo/upload', wrap(async function (req, res) {
+      if (!uploadOn()) return res.status(403).json({ error: 'switch-off', message: 'install from a file is off on this player' });
+      if (componentBusy()) return res.status(409).json({ error: 'busy' });
+      await fsp.mkdir(self.component.stateDir, { recursive: true });
+      const file = path.join(self.component.stateDir, 'upload-' + Date.now() + '.zip');
+      try {
+        await self.receive(req, file, MAX_ZIP_BYTES);
+      } catch (e) {
+        await fsp.rm(file, { force: true });
+        return res.status(e.code === 'too-large' ? 413 : 400).json(failure(e));
+      }
+      if (String(req.query.hold || '') === '1') {
+        const held = self.heldEvo;
+        self.heldEvo = null;
+        if (held) await fsp.rm(held.file, { force: true });
+        try {
+          self.heldEvo = await self.component.examineFile({ state: 'queued' }, file);
+        } catch (e) {
+          await fsp.rm(file, { force: true });
+          return res.status(400).json(failure(e));
+        }
+        return res.json({ ok: true, held: { version: self.heldEvo.version } });
+      }
+      const job = self.newJob('component', 'glass-evo (file)');
+      self.runComponentFile(job, file);
       res.status(202).json({ ok: true, job: job });
     }));
 
@@ -1520,6 +1582,54 @@ class Manager {
       try {
         if (rollback) await self.component.rollback();
         else await self.component.install(job);
+        self.plugin.componentChanged();
+        self.finish(job, null);
+      } catch (e) {
+        self.finish(job, e);
+      }
+    });
+  }
+
+  // A Glass release brought by hand goes in as the online path's does,
+  // the glass-evo zip held with it first where that Glass needs a newer
+  // one; a Glass that needs one and has none given is refused by the
+  // least version it must be.
+  runUploadInstall(job, file) {
+    const self = this;
+    self.exclusive(async function () {
+      const held = self.heldEvo;
+      self.heldEvo = null;
+      try {
+        const staged = await self.updater.stageFile(job, file);
+        job.name = 'Glass ' + staged.version;
+        job.target = staged.version;
+        const paired = await pair(self.component, staged, job, { file: held ? held.file : null, byHand: true });
+        let result;
+        try {
+          result = await self.updater.apply(job, staged);
+        } catch (e) {
+          if (paired) {
+            try { await self.component.rollback(); } catch (e2) { self.logger.warn('glass: manager component: not put back after the upgrade failed: ' + e2.message); }
+          }
+          throw e;
+        }
+        job.endedAt = new Date().toISOString();
+        self.logger.info('glass: manager ' + job.kind + ' from ' + result.from + ' to ' + result.to + ' from a file: plugin replaced, backend restarting');
+      } catch (e) {
+        await fsp.rm(file, { force: true });
+        if (held) await fsp.rm(held.file, { force: true });
+        self.finish(job, e);
+      }
+    });
+  }
+
+  // A glass-evo release brought by hand, in place and the face told.
+  runComponentFile(job, file) {
+    const self = this;
+    self.exclusive(async function () {
+      try {
+        const result = await self.component.installFile(job, file);
+        job.name = 'glass-evo ' + result.to;
         self.plugin.componentChanged();
         self.finish(job, null);
       } catch (e) {

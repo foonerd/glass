@@ -289,3 +289,54 @@ test('the face for a browser is carried out of the component, checked, where the
   assert.equal(r.component.installed().face, null, 'a module named outside face/ is no module');
 });
 
+
+test('a component zip brought by hand is held to its release, then in place; with a Glass by hand it goes in with it or is asked for', async () => {
+  // The releases as GitHub would answer a lookup by tag, one per version made.
+  const shelf = {};
+  const { root, component, job } = rig({
+    releasesUrl: 'r/latest',
+    fetch: async function (url) {
+      const v = url.replace(/^.*\/v/, '');
+      if (!shelf[v]) throw new Error('no such release');
+      return { body: Buffer.from(JSON.stringify(release(v, shelf[v].zip, shelf[v].digest))) };
+    }
+  });
+  await component.init();
+  const made = function (version, options, digest) {
+    const zip = componentZip(version, options);
+    shelf[version] = { zip: zip, digest: digest };
+    const file = path.join(root, 'up-' + version + '.zip');
+    fs.writeFileSync(file, zip);
+    return file;
+  };
+  // Installed from a file, held to the release of its version.
+  assert.deepStrictEqual(await component.installFile(job(), made('0.1.10', { requires: '0.8.0' })), { from: null, to: '0.1.10' });
+  assert.equal(component.installed().version, '0.1.10');
+  assert.ok(!fs.existsSync(path.join(root, 'up-0.1.10.zip')), 'the file is gone after');
+  // Not the release as published: refused, nothing changed, the file gone.
+  const bad = made('0.1.11', { requires: '0.8.0' }, 'f'.repeat(64));
+  await assert.rejects(component.installFile(job(), bad), { code: 'checksum' });
+  assert.equal(component.installed().version, '0.1.10');
+  assert.ok(!fs.existsSync(bad));
+  // A release that cannot be looked up: unverified, never installed.
+  const lost = path.join(root, 'lost.zip');
+  fs.writeFileSync(lost, componentZip('0.1.12'));
+  await assert.rejects(component.installFile(job(), lost), { code: 'unverified' });
+  // The version installed: nothing to do.
+  await assert.rejects(component.installFile(job(), made('0.1.10', { requires: '0.8.0' })), { code: 'same-version' });
+  // Examined and held for a Glass by hand: its version, the file kept.
+  const held = await component.examineFile(job(), made('0.2.0', { requires: '0.9.0' }));
+  assert.equal(held.version, '0.2.0');
+  assert.ok(fs.existsSync(held.file));
+  // A Glass by hand that needs 0.2.0: asked for without a file, taken with one.
+  const staged = function (version, least) {
+    const file = path.join(root, 'glass-' + version + '.zip');
+    fs.writeFileSync(file, buildZip([{ name: 'package.json', data: JSON.stringify({ name: 'glass', glassEvo: { least: least } }) }]));
+    return { file: file, version: version };
+  };
+  await assert.rejects(pair(component, staged('0.9.0', '0.2.0'), job(), { byHand: true }), { code: 'needs-evo', message: /needs glass-evo 0\.2\.0 or later/ });
+  assert.equal(component.installed().version, '0.1.10');
+  assert.equal(await pair(component, staged('0.9.0', '0.2.0'), job(), { byHand: true, file: held.file }), true);
+  assert.deepStrictEqual([component.installed().version, component.previous().version], ['0.2.0', '0.1.10']);
+  fs.rmSync(root, { recursive: true, force: true });
+});

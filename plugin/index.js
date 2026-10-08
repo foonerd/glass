@@ -1713,6 +1713,21 @@ Glass.prototype.setTestReleases = function (on) {
     return { changed: true, test: wanted };
 };
 
+// Installing a release from a file brought by hand, for a player that
+// cannot reach GitHub's files: an extra, off unless turned on. Off, the
+// Manager refuses the upload, not merely hides it.
+Glass.prototype.uploadInstall = function () {
+    return this.config.get('uploadInstall') === true;
+};
+
+Glass.prototype.setUploadInstall = function (on) {
+    var wanted = on === true;
+    if (this.uploadInstall() === wanted) { return { changed: false, upload: wanted }; }
+    this.config.set('uploadInstall', wanted);
+    this.logger.info(id + 'releases: install from a file ' + (wanted ? 'is on' : 'is off'));
+    return { changed: true, upload: wanted };
+};
+
 // The display launched once: nothing when the player has no screen of its
 // own or the display already runs; its lines relayed to the journal; on
 // exit, re-armed, restarted or left, as the exit action says.

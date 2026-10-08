@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 const crypto = require('crypto');
 const http = require('http');
-const { compareVersions, parseRelease, newestRelease, offered, fetchChecked, Updater, automaticBackup } = require('../update');
+const { compareVersions, parseRelease, newestRelease, offered, fetchChecked, Updater, automaticBackup, examineGlassZip, digestOf, verifyAgainstRelease } = require('../update');
 const { zipDirectory } = require('../zipwrite');
 const zip = require('../zip');
 
@@ -247,4 +247,78 @@ test('an upgrade\'s own backups are told from a user\'s by what the manifest say
   assert.equal(automaticBackup({}, 'before-0.7'), false);
   assert.equal(automaticBackup(undefined, 'before-0.7.12'), true);
   assert.equal(automaticBackup(null, ''), false);
+});
+
+// A plugin zip as a release carries it: package.json at the root naming
+// glass, its version and the least glass-evo.
+async function glassZip(dir, version, least) {
+  const src = path.join(dir, 'src-' + version);
+  await fsp.mkdir(path.join(src, 'bin'), { recursive: true });
+  await fsp.writeFile(path.join(src, 'package.json'), JSON.stringify({ name: 'glass', version: version, glassEvo: { least: least || '0.1.9' } }));
+  await fsp.writeFile(path.join(src, 'bin', 'glass'), 'binary ' + version);
+  const file = path.join(dir, 'glass-' + version + '-made.zip');
+  await zipDirectory(src, file);
+  return file;
+}
+
+test('a zip brought by hand is examined, then held to the release of its version by tag', async function () {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glass-upd-file-'));
+  const file = await glassZip(dir, '0.8.5', '0.1.12');
+  assert.deepEqual(await examineGlassZip(file), { version: '0.8.5', least: '0.1.12' });
+  const bytes = await fsp.readFile(file);
+  const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+  assert.equal(await digestOf(file), digest);
+  const asked = [];
+  const answer = function (size, sha) {
+    return async function (url) {
+      asked.push(url);
+      return { body: Buffer.from(JSON.stringify({ tag_name: 'v0.8.5', assets: [{ name: 'glass-0.8.5.zip', size: size, digest: sha ? 'sha256:' + sha : undefined, browser_download_url: 'u' }] })) };
+    };
+  };
+  const job = { state: 'queued' };
+  const release = await verifyAgainstRelease(answer(bytes.length, digest), 'r/latest', '0.8.5', file, undefined, job);
+  assert.equal(release.version, '0.8.5');
+  assert.equal(job.state, 'verifying');
+  assert.deepEqual(asked, ['r/tags/v0.8.5'], 'the release is looked up by its tag, not the latest');
+  // Not the release as published: the digest, then the size.
+  await assert.rejects(verifyAgainstRelease(answer(bytes.length, 'a'.repeat(64)), 'r/latest', '0.8.5', file), function (e) { return e.code === 'checksum'; });
+  await assert.rejects(verifyAgainstRelease(answer(bytes.length + 1, digest), 'r/latest', '0.8.5', file), function (e) { return e.code === 'size'; });
+  // No way to look the release up, or a release stating no digest: unverified, never installed.
+  await assert.rejects(verifyAgainstRelease(async function () { throw new Error('no route'); }, 'r/latest', '0.8.5', file), function (e) { return e.code === 'unverified' && /no route/.test(e.message); });
+  await assert.rejects(verifyAgainstRelease(answer(bytes.length, null), 'r/latest', '0.8.5', file), function (e) { return e.code === 'unverified'; });
+  // Not a Glass release at all.
+  const other = path.join(dir, 'other.zip');
+  await fsp.mkdir(path.join(dir, 'other'), { recursive: true });
+  await fsp.writeFile(path.join(dir, 'other', 'meters.txt'), '[a]\n');
+  await zipDirectory(path.join(dir, 'other'), other);
+  await assert.rejects(examineGlassZip(other), function (e) { return e.code === 'bad-zip'; });
+  await fsp.rm(dir, { recursive: true, force: true });
+});
+
+test('the updater stages a zip brought by hand under the release name, any version but the one that runs', async function () {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glass-upd-stage-'));
+  const made = await glassZip(dir, '0.8.5');
+  const bytes = await fsp.readFile(made);
+  const digest = crypto.createHash('sha256').update(bytes).digest('hex');
+  const updater = new Updater({
+    dir: path.join(dir, 'state'), version: '0.8.6', pluginPath: dir, plugin: {}, stagingDir: path.join(dir, 'staging'),
+    logger: { info: function () {}, warn: function () {} }, releasesUrl: 'r/latest',
+    fetch: async function (url) {
+      return { body: Buffer.from(JSON.stringify({ tag_name: url.replace(/^.*\/v/, 'v'), assets: [{ name: 'glass-0.8.5.zip', size: bytes.length, digest: 'sha256:' + digest, browser_download_url: 'u' }] })) };
+    }
+  });
+  await updater.init();
+  // Older than what runs: a way back to a given release, staged all the same.
+  const upload = path.join(dir, 'upload-1.zip');
+  await fsp.copyFile(made, upload);
+  const staged = await updater.stageFile({ state: 'queued' }, upload);
+  assert.equal(staged.name, 'glass-0.8.5.zip');
+  assert.equal(staged.file, path.join(dir, 'staging', 'glass-0.8.5.zip'));
+  assert.equal(staged.version, '0.8.5');
+  assert.equal(staged.least, '0.1.9');
+  assert.ok(fs.existsSync(staged.file) && !fs.existsSync(upload), 'moved under the release name');
+  // The version that runs: nothing to install.
+  const same = await glassZip(dir, '0.8.6');
+  await assert.rejects(updater.stageFile({ state: 'queued' }, same), function (e) { return e.code === 'same-version'; });
+  await fsp.rm(dir, { recursive: true, force: true });
 });

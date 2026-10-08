@@ -52,6 +52,9 @@ const CONFIG = [
   ['animation', 'tuning'], ['frameRate', 'tuning'], ['rotationFPS', 'tuning'], ['rotationQuality', 'tuning'], ['transitionType', 'tuning'],
   ['perfProfile', 'tuning'], ['logLevel', 'tuning'], ['logTargets', 'tuning'],
   ['testReleases', 'tests'],
+  // Install from a file is turned on by hand by a player that cannot reach
+  // GitHub's files: it stays, or the way back would strand that player.
+  ['uploadInstall', ALWAYS],
   // Whether an uninstall leaves the themes, and marks of things done once.
   ['doNotDeleteThemes', ALWAYS], ['legacyImported', ALWAYS], ['sideOutputsRetired', ALWAYS]
 ];

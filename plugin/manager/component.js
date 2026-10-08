@@ -18,7 +18,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { get } = require('./catalog');
 const { Zip, safeName } = require('./zip');
-const { compareVersions, offered, fetchChecked } = require('./update');
+const { compareVersions, offered, fetchChecked, verifyAgainstRelease } = require('./update');
 
 const RELEASES_URL = 'https://api.github.com/repos/foonerd/glass-evo/releases/latest';
 const ASSET = /^glass-evo-(\d+\.\d+\.\d+)\.zip$/;
@@ -121,8 +121,12 @@ function pairPlan(installed, target) {
 // glass-evo, and an older one is updated first, held to that Glass. A
 // Glass older than the component needs is not installed at all. Answers
 // whether the component was changed; a pair that cannot be made is an
-// error, and nothing was changed.
-async function pair(component, staged, job) {
+// error, and nothing was changed. `options.file` is a component zip
+// brought by hand to go in with the Glass; `options.byHand` says the
+// Glass itself came by hand, so a component it needs is not fetched: it
+// is asked for, by the least version it must be.
+async function pair(component, staged, job, options) {
+  options = options || {};
   const here = component.installed();
   if (!here.installed) return false;
   let least = null;
@@ -138,17 +142,40 @@ async function pair(component, staged, job) {
   if (plan.action === 'refuse') {
     throw new ComponentError('pair', 'glass-evo ' + here.version + ' needs Glass ' + plan.needs + ' or later; put glass-evo back to its previous version first');
   }
-  try {
-    const view = await component.check(true);
-    if (!view.latest || compareVersions(view.latest.version, plan.least) < 0) {
-      throw new ComponentError('too-old', 'the latest glass-evo released is ' + (view.latest ? view.latest.version : 'not known'));
+  if (options.file) {
+    try {
+      await component.installFile(job, options.file, { glass: staged.version, least: plan.least });
+    } catch (e) {
+      throw new ComponentError('pair', 'Glass ' + staged.version + ' needs glass-evo ' + plan.least + ' or later, and the glass-evo file given could not be installed (' + (e && e.message ? e.message : e) + '); nothing was changed');
     }
-    await component.install(job, { glass: staged.version, least: plan.least });
-  } catch (e) {
-    throw new ComponentError('pair', 'Glass ' + staged.version + ' needs glass-evo ' + plan.least + ' or later, which could not be installed (' + (e && e.message ? e.message : e) + '); nothing was changed');
+  } else if (options.byHand) {
+    throw new ComponentError('needs-evo', 'Glass ' + staged.version + ' needs glass-evo ' + plan.least + ' or later; give its zip with the Glass zip', { least: plan.least });
+  } else {
+    try {
+      const view = await component.check(true);
+      if (!view.latest || compareVersions(view.latest.version, plan.least) < 0) {
+        throw new ComponentError('too-old', 'the latest glass-evo released is ' + (view.latest ? view.latest.version : 'not known'));
+      }
+      await component.install(job, { glass: staged.version, least: plan.least });
+    } catch (e) {
+      throw new ComponentError('pair', 'Glass ' + staged.version + ' needs glass-evo ' + plan.least + ' or later, which could not be installed (' + (e && e.message ? e.message : e) + '); nothing was changed');
+    }
   }
   component.logger.info('glass: manager upgrade: glass-evo brought to ' + component.installed().version + ' for Glass ' + staged.version);
   return true;
+}
+
+// The version a component zip says it is, from its manifest, read before
+// the zip is held to the release of that version.
+async function manifestVersionOf(file) {
+  const zip = await Zip.open(file);
+  try {
+    const found = zip.entries.find(function (e) { return e.isRegular && e.name === 'manifest.json'; });
+    if (!found || found.size > MAX_TEXT_BYTES) throw new ComponentError('bad-manifest', 'the zip holds no manifest; it is not a glass-evo release');
+    return manifestOf((await zip.read(found)).toString('utf8')).version;
+  } finally {
+    await zip.close();
+  }
 }
 
 class Component {
@@ -355,6 +382,35 @@ class Component {
     }
   }
 
+  // A component zip brought by hand: what its manifest says it is, held
+  // to the release of that version (its digest as the release states it),
+  // then unpacked and in place as any release. Older than the one here or
+  // newer; `target` as install's. The file is gone after, either way.
+  async installFile(job, file, target) {
+    try {
+      const version = await manifestVersionOf(file);
+      await verifyAgainstRelease(this.fetch, this.releasesUrl, version, file, ASSET, job);
+      const now = this.installed();
+      if (now.installed && now.version === version) throw new ComponentError('same-version', 'glass-evo ' + version + ' is what is installed; nothing to install');
+      const manifest = await this.unpack(file, target || { glass: this.glass, least: this.least }, version);
+      job.state = 'applying';
+      await this.swapIn();
+      this.logger.info('glass: manager component: glass-evo ' + (now.installed ? now.version + ' to ' : '') + manifest.version + ' installed from a file');
+      return { from: now.installed ? now.version : null, to: manifest.version };
+    } finally {
+      await fsp.rm(file, { force: true });
+    }
+  }
+
+  // A component zip brought by hand to go in with a Glass that comes the
+  // same way: what it says it is, verified now, installed when the Glass
+  // is staged. Nothing is changed here.
+  async examineFile(job, file) {
+    const version = await manifestVersionOf(file);
+    await verifyAgainstRelease(this.fetch, this.releasesUrl, version, file, ASSET, job);
+    return { file: file, version: version };
+  }
+
   // The one before back in place, and the one in place kept as the one
   // before. Only where it goes with this Glass.
   async rollback() {
@@ -397,4 +453,4 @@ class Component {
   }
 }
 
-module.exports = { Component, ComponentError, RELEASES_URL, ASSET, leastOf, manifestOf, misfit, installedAt, pairPlan, pair };
+module.exports = { Component, ComponentError, RELEASES_URL, ASSET, leastOf, manifestOf, misfit, installedAt, pairPlan, pair, manifestVersionOf };
