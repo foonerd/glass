@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.18] - 2026-10-08
+
+- **Install from a file.** An extra for a player that cannot reach GitHub's files, or reaches them too slowly, while another machine in the house can: the release zips downloaded there, `glass-<version>.zip` and `glass-evo-<version>.zip`, are installed from the System tab. It is off on every player until **Install from a file** is turned on; off, the player refuses such uploads rather than hiding the control. Before anything is touched, each file is looked up by the version it says it is and held to that release's digest, a few kilobytes from GitHub's API: a file that is not the release as published, or whose release cannot be looked up, is refused and nothing is installed. A Glass zip then goes in as the online upgrade does, the settings backed up, the installed plugin kept for going back, the backend restarted; a Glass that needs a newer glass-evo takes the glass-evo zip given with it and is refused without one, by the least version it needs; a glass-evo zip is held to the Glass installed as any release is. Any version but the one installed can be given, an older one included. `POST /api/update/upload` and `POST /api/evo/upload` take the zip as the body; `POST /api/update/upload-switch` sets the switch; `GET /api/update` says whether it is on. The switch stays through "Back to the stable release", as a key brought by hand does.
+
 ## [0.9.17] - 2026-10-08
 
 - **A phone's photo stands upright on the screen.** A picture whose metadata carries an orientation tag, as a phone's portrait photo does, was drawn as stored, on its side, while the Manager's preview showed it upright: the screens now decode every picture with the tag applied, the backdrop, the picture when nothing plays, album art, animated pictures, the tailor's resampling and theme pictures alike, and a picture's size is read as shown, so the frame rule for a `*-ext.*` picture takes a portrait photo as portrait. Asked on the forum.
