@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.25] - 2026-10-08
+
+- **The glass-evo zip given with a Glass zip that is what runs already now goes in.** Before, the Glass zip was refused as the version installed and the glass-evo zip given with it was dropped. Now Glass is left as it is, the glass-evo zip is installed, and the job says so without a restart.
+
 ## [0.9.24] - 2026-10-08
 
 - **Install from a file on a remote.** The remote's Version panel has "Install from a file", off until turned on, for a remote that cannot reach GitHub: this machine's archive from the release, downloaded elsewhere, is held to the signature it carries inside with no network, its binary tried and put in place as an upgrade from GitHub is, the one before kept beside it, and the remote starts again as the new version. An archive of the other kind, Glass's on a bundle remote or glass-evo's on a Glass one, replaces the remote with that kind once the page has asked. `POST /api/upgrade/upload` takes the archive as the body, `?switch=1` says the other kind is wanted. The bundle has the same.
