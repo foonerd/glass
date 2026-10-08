@@ -2303,6 +2303,9 @@ impl Source for TapSource {
                     seconds,
                     started_ms,
                 } => {
+                    eprintln!(
+                        "TRACE arm persist: mode={mode:?} seconds={seconds} started={started_ms}"
+                    );
                     self.persist_held = (!mode.is_empty()).then_some((mode, seconds, started_ms));
                 }
                 Event::Calibrate { points } => self.calibrate_asked = Some(points),
@@ -2423,16 +2426,18 @@ impl Source for TapSource {
         if self.metadata_every.is_some() || wants::host_pictures() {
             metadata.art_file = self.art.file();
         }
-        if self.metadata_every.is_some() {
+        if let Some((mode, seconds, started_ms)) = &self.persist_held {
+            // The line the plugin pushed over the channel: the one truth a
+            // remote has, which has no persist file of the player's; on the
+            // player's own screen it says what the file says.
+            metadata.persist_mode = mode.clone();
+            metadata.persist_left =
+                persist_left(*seconds, *started_ms, lead::epoch_nanos() / 1_000_000);
+        } else if self.metadata_every.is_some() {
             let now_epoch_ms = lead::epoch_nanos() / 1_000_000;
             let (mode, left) = persist_state(PERSIST_FILE, now_epoch_ms);
             metadata.persist_mode = mode;
             metadata.persist_left = left;
-        } else if let Some((mode, seconds, started_ms)) = &self.persist_held {
-            // The line the plugin pushed stands in for the file.
-            metadata.persist_mode = mode.clone();
-            metadata.persist_left =
-                persist_left(*seconds, *started_ms, lead::epoch_nanos() / 1_000_000);
         }
         if let Some(show) = self.fanart.as_mut() {
             if self
