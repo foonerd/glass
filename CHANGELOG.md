@@ -2,6 +2,18 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.15] - 2026-10-08
+
+The public release of what the pre-releases 0.9.6 to 0.9.14 brought, tried on a player and on remotes of both flavours. Nothing is new in it beyond the version. Glass-evo 0.2.15 is its companion, built on it.
+
+- **Diagnostics on the Status tab** (0.9.6 to 0.9.8): the status sheet with glass-evo's own section, the remotes connected and the files the theme on show names; **Find a problem** over twelve symptoms, each finding a cause or a note with where to go; **Make a report**, copied for the forum, opened as a GitHub issue or downloaded.
+- **Test releases on remotes** (0.9.9): a remote's page offers pre-releases with a switch, as the player's System tab does.
+- **The Connection panel** (0.9.10, 0.9.13): each path to the player tried from the remote's side, the frames path judged from both ends by a probe the player sends on request, the firewall rules for the remote in the terms a firewall takes, and stickers on every row.
+- **Assets and Prerequisites** (0.9.11): every file the theme names, brought, failed, missing or elsewhere; a file that cannot be brought no longer stops the sync; what the machine has for the display to run.
+- **The likeness is the screen** (0.9.11, 0.9.12): the look panel draws the theme's frame placed as the display places it, with green hairlines at the frame's and the safe margins' edges behind a switch that is on by default.
+- **A report from a remote** (0.9.13): the remote's page makes a report of its own side and the player's, for the forum, an issue or a file.
+- **The files a theme names, on the player** (0.9.14): a red count on the theme card, the full list under its details, missing in red and optional where the display does without; the same stickers on the remote.
+
 ## [0.9.14] - 2026-10-08
 
 - **The files a theme names, on the player.** The Manager reads every file a theme's text calls for, the pictures of every kind and every `<field>.font`, and looks for each where the display looks. A theme card on the Themes tab carries a red count of the files the theme names and does not have; its **Details** list every file with a sticker, found, **missing** in red (the theme names it and it is not there, so the display draws without it), **optional** in grey (not there, and the display has a fallback it documents: a field's own font falls back to its style's font, a knob's picture to the arc), or elsewhere (a path outside the theme that is there), the missing first. The status sheet's Themes section carries the same for the theme on show, in place of the fonts alone, and Find a problem names the missing files as a cause under "No meters", "The picture is turned, cropped or in the wrong place", "A remote display, the Face or Anymote" and "Something else", the optional ones as a note. A record's, a reel's or the tonearm's list of pictures names the track's own pictures first and the theme's file last, and only the last is looked for. `GET /api/themes/<folder>/named` answers the list.
