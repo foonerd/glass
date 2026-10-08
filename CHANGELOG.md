@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.20] - 2026-10-08
+
+- **A job that failed says so in red**, on the Themes tab, under Glass releases and under glass-evo alike, where the reason stood in grey. A Glass zip chosen as the glass-evo zip, or the other way round, is named as such instead of "no package.json" or "no manifest".
+
 ## [0.9.19] - 2026-10-08
 
 - **The Manager's own file buttons.** Install from a file chooses its zips through the Manager's buttons, the name and size chosen shown beside each, and the look panel's picture upload is a button of the same kind: the browser's own file control is no longer shown anywhere on the page.
