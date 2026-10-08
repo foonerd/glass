@@ -54,6 +54,7 @@
   .badge.red { background: var(--danger); color: #fff; }
   table.kv td .badge { margin-right: 8px; }
   .missing-word { color: var(--danger); font-weight: 600; }
+  .failed-word { color: var(--danger); }
   .card .body { padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; flex: 1; }
   .card .title { font-weight: 600; color: #fff; word-break: break-word; }
   .card .meta { color: var(--muted); font-size: 13px; display: flex; flex-wrap: wrap; gap: 6px 12px; }
@@ -1337,7 +1338,7 @@
       html += '<div class="job" data-job="' + esc(String(j.id)) + '"><b>' + esc(j.name) + '</b> · ' + esc(t(label)) +
         (j.state === 'downloading' || j.state === 'unpacking' ? ' ' + pct + '%' + (j.progress.total ? ' (' + fmtBytes(j.progress.done) + ' / ' + fmtBytes(j.progress.total) + ')' : '') : '') +
         (packaging ? ' · ' + esc(t('MANAGER_PACKAGE_PROGRESS').replace('{done}', j.progress.done).replace('{total}', j.progress.total).replace('{s}', left)) : '') +
-        (j.state === 'failed' && j.error ? ' <span class="muted">' + esc(errorText({ code: j.error.error, message: j.error.message })) + '</span>' : '') +
+        (j.state === 'failed' && j.error ? ' <span class="failed-word">' + esc(errorText({ code: j.error.error, message: j.error.message })) + '</span>' : '') +
         (j.kind === 'package' && j.state === 'done' ? ' <a class="small" href="/api/jobs/' + esc(String(j.id)) + '/file">' + esc(t('MANAGER_PACKAGE_DOWNLOAD')) + '</a>' : '') +
         (j.state === 'downloading' || j.state === 'unpacking' || packaging ? '<div class="progress"><div style="width:' + pct + '%"></div></div>' : '') +
         '</div>';
@@ -3305,7 +3306,7 @@
       var label = { queued: 'MANAGER_JOB_QUEUED', downloading: 'MANAGER_JOB_DOWNLOADING', verifying: 'MANAGER_JOB_CHECKING', applying: 'MANAGER_EVO_JOB_APPLYING', failed: 'MANAGER_JOB_FAILED' }[j.state] || j.state;
       $('jobs-evo').innerHTML = '<div class="job"><b>' + esc(j.name) + '</b> · ' + esc(t(label)) +
         (j.state === 'downloading' ? ' ' + pct + '%<div class="progress"><div style="width:' + pct + '%"></div></div>' : '') +
-        (j.state === 'failed' && j.error ? ' <span class="muted">' + esc(errorText({ code: j.error.error, message: j.error.message })) + '</span>' : '') + '</div>';
+        (j.state === 'failed' && j.error ? ' <span class="failed-word">' + esc(errorText({ code: j.error.error, message: j.error.message })) + '</span>' : '') + '</div>';
     };
     draw(job);
     var tick = function () {
@@ -3355,7 +3356,7 @@
       var label = { queued: 'MANAGER_JOB_QUEUED', downloading: 'MANAGER_JOB_DOWNLOADING', verifying: 'MANAGER_JOB_CHECKING', 'backing-up': 'MANAGER_JOB_BACKING_UP', applying: 'MANAGER_JOB_APPLYING', restarting: 'MANAGER_UPD_RESTARTING', failed: 'MANAGER_JOB_FAILED' }[j.state] || j.state;
       jobsEl.innerHTML = '<div class="job"><b>' + esc(j.name) + '</b> · ' + esc(t(label)) + (extra ? ' · ' + esc(extra) : '') +
         (j.state === 'downloading' || j.state === 'backing-up' ? ' ' + pct + '%<div class="progress"><div style="width:' + pct + '%"></div></div>' : '') +
-        (j.state === 'failed' && j.error ? ' <span class="muted">' + esc(errorText({ code: j.error.error, message: j.error.message })) + '</span>' : '') + '</div>';
+        (j.state === 'failed' && j.error ? ' <span class="failed-word">' + esc(errorText({ code: j.error.error, message: j.error.message })) + '</span>' : '') + '</div>';
     };
     draw(job);
     var restarting = false;

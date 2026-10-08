@@ -131,6 +131,7 @@ async function examineGlassZip(file) {
   const zip = await Zip.open(file);
   try {
     const entry = zip.entries.find(function (e) { return e.isRegular && e.name === 'package.json'; });
+    if (!entry && zip.entries.some(function (e) { return e.isRegular && e.name === 'manifest.json'; })) throw new UpdateError('bad-zip', 'the zip is a glass-evo release; choose it as the glass-evo zip');
     if (!entry || entry.size > MAX_RELEASE_BYTES) throw new UpdateError('bad-zip', 'the zip holds no package.json at its root; it is not a Glass release');
     let pkg;
     try {

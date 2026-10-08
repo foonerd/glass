@@ -324,6 +324,10 @@ test('a component zip brought by hand is held to its release, then in place; wit
   await assert.rejects(component.installFile(job(), lost), { code: 'unverified' });
   // The version installed: nothing to do.
   await assert.rejects(component.installFile(job(), made('0.1.10', { requires: '0.8.0' })), { code: 'same-version' });
+  // A Glass zip in the glass-evo slot is named as such.
+  const glassZip = path.join(root, 'glass.zip');
+  fs.writeFileSync(glassZip, buildZip([{ name: 'package.json', data: '{"name":"glass"}' }]));
+  await assert.rejects(component.installFile(job(), glassZip), { code: 'bad-manifest', message: /Glass release/ });
   // Examined and held for a Glass by hand: its version, the file kept.
   const held = await component.examineFile(job(), made('0.2.0', { requires: '0.9.0' }));
   assert.equal(held.version, '0.2.0');

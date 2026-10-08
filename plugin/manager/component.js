@@ -171,6 +171,7 @@ async function manifestVersionOf(file) {
   const zip = await Zip.open(file);
   try {
     const found = zip.entries.find(function (e) { return e.isRegular && e.name === 'manifest.json'; });
+    if (!found && zip.entries.some(function (e) { return e.isRegular && e.name === 'package.json'; })) throw new ComponentError('bad-manifest', 'the zip is a Glass release; choose it as the Glass zip');
     if (!found || found.size > MAX_TEXT_BYTES) throw new ComponentError('bad-manifest', 'the zip holds no manifest; it is not a glass-evo release');
     return manifestOf((await zip.read(found)).toString('utf8')).version;
   } finally {

@@ -292,6 +292,12 @@ test('a zip brought by hand is examined, then held to the release of its version
   await fsp.writeFile(path.join(dir, 'other', 'meters.txt'), '[a]\n');
   await zipDirectory(path.join(dir, 'other'), other);
   await assert.rejects(examineGlassZip(other), function (e) { return e.code === 'bad-zip'; });
+  // A glass-evo zip in the Glass slot is named as such.
+  const evo = path.join(dir, 'evo.zip');
+  await fsp.mkdir(path.join(dir, 'evo'), { recursive: true });
+  await fsp.writeFile(path.join(dir, 'evo', 'manifest.json'), '{}');
+  await zipDirectory(path.join(dir, 'evo'), evo);
+  await assert.rejects(examineGlassZip(evo), function (e) { return e.code === 'bad-zip' && /glass-evo release/.test(e.message); });
   await fsp.rm(dir, { recursive: true, force: true });
 });
 
