@@ -135,7 +135,8 @@ impl RemoteApp {
         true
     }
 
-    /// Ask GitHub for the latest release of what this display is, and keep
+    /// Ask GitHub for the release this display is offered, the latest or
+    /// with the test releases switch the newest of the last ten, and keep
     /// the answer for the page. Nothing where another look or an upgrade is
     /// under way, or the display is offered none.
     pub fn check_upgrade(&self) {
@@ -145,7 +146,7 @@ impl RemoteApp {
         if !self.begin_upgrade("checking") {
             return;
         }
-        let found = upgrade::latest(&product);
+        let found = upgrade::offered(&product, self.config().test_releases);
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())

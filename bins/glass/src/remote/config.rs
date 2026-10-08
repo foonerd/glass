@@ -289,6 +289,11 @@ pub struct RemoteConfig {
     /// display without one has nothing to draw, whatever this says.
     #[serde(default)]
     pub face: FaceShown,
+    /// Whether this remote is offered test releases, as the player's
+    /// "Offer test releases": the newest of the repository's last ten
+    /// releases, a pre-release among them; off, the latest release only.
+    #[serde(default)]
+    pub test_releases: bool,
 }
 
 /// When a remote that carries a face shows it: where the player's own
@@ -334,6 +339,7 @@ impl Default for RemoteConfig {
             log_level: None,
             spectrum_decay: 0.0,
             face: FaceShown::default(),
+            test_releases: false,
         }
     }
 }

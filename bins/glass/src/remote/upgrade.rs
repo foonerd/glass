@@ -7,8 +7,10 @@
 //!
 //! What may be fetched is fixed here and by the face: the repository, the
 //! archive's name, the file inside it. The page that asks for an upgrade
-//! names none of them, so all a request can do is bring the latest release
-//! that is no pre-release.
+//! names none of them, so all a request can do is bring the release
+//! offered: the latest, which is never a pre-release, or on a remote set
+//! to take test releases the newest of the repository's last ten, as the
+//! player's own Manager offers them.
 //!
 //! A new binary that cannot hold on does not stay: it is tried with
 //! `--version` before it takes the place, and a note of the upgrade is kept
@@ -135,7 +137,15 @@ pub struct Release {
     pub bytes: u64,
     pub sha256: String,
     pub page: String,
+    /// A test release (GitHub's pre-release mark), offered only to a
+    /// remote set to take them.
+    #[serde(default)]
+    pub test: bool,
 }
+
+/// How many of the repository's last releases a remote on test releases
+/// looks through, as the player's Manager does.
+const LAST_RELEASES: u32 = 10;
 
 /// Three numbers of a version, a `v` before them passed over; none for
 /// anything else.
@@ -158,21 +168,61 @@ pub fn newer(latest: &str, current: &str) -> bool {
 
 /// The release in GitHub's answer, with this machine's archive: its
 /// address, its size and its digest as the release states them. `strict`
-/// holds the address to the product's own releases on GitHub.
+/// holds the address to the product's own releases on GitHub. A test
+/// release is refused: this is the latest, as a remote not set to take
+/// test releases is offered it.
 pub fn release_of(
     body: &Value,
     product: &Product,
     folders: &[&str],
     strict: bool,
 ) -> Result<Release, String> {
+    release_from(body, product, folders, strict, false)
+}
+
+/// The newest of a list of releases, by version, that holds this machine's
+/// archive: test releases among them, drafts and releases without the
+/// archive passed over. What a remote set to take test releases is offered.
+pub fn newest_of(
+    list: &[Value],
+    product: &Product,
+    folders: &[&str],
+    strict: bool,
+) -> Result<Release, String> {
+    let mut best: Option<Release> = None;
+    for body in list {
+        let Ok(release) = release_from(body, product, folders, strict, true) else {
+            continue;
+        };
+        if best
+            .as_ref()
+            .is_none_or(|b| newer(&release.version, &b.version))
+        {
+            best = Some(release);
+        }
+    }
+    best.ok_or_else(|| "no release of the last ten holds an archive for this machine".to_string())
+}
+
+/// One release read from GitHub's answer; `allow_test` takes a test
+/// release as offered, marked so.
+fn release_from(
+    body: &Value,
+    product: &Product,
+    folders: &[&str],
+    strict: bool,
+    allow_test: bool,
+) -> Result<Release, String> {
     let tag = body.get("tag_name").and_then(Value::as_str).unwrap_or("");
     let version = tag.trim_start_matches('v').to_string();
     if numbers(&version).is_none() {
         return Err(format!("the release's tag is no version: {tag:?}"));
     }
-    if body.get("prerelease").and_then(Value::as_bool) == Some(true)
-        || body.get("draft").and_then(Value::as_bool) == Some(true)
-    {
+    if body.get("draft").and_then(Value::as_bool) == Some(true) {
+        return Err("the release is a draft".to_string());
+    }
+    let test = body.get("prerelease").and_then(Value::as_bool) == Some(true);
+    if test && !allow_test {
         return Err("the release is a test release".to_string());
     }
     let wanted = archive_name(&product.asset, &version, folders)
@@ -220,6 +270,7 @@ pub fn release_of(
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string(),
+        test,
     })
 }
 
@@ -240,11 +291,19 @@ fn agent(timeout: Duration) -> ureq::Agent {
         .new_agent()
 }
 
-/// The latest release of the product that is no test release, with this
-/// machine's archive.
-pub fn latest(product: &Product) -> Result<Release, String> {
+/// The release of the product this remote is offered, with this machine's
+/// archive: the latest, which is never a test release, or with `test` the
+/// newest of the repository's last ten whatever its mark.
+pub fn offered(product: &Product, test: bool) -> Result<Release, String> {
     let (base, strict) = api();
-    let url = format!("{base}/repos/{}/releases/latest", product.repository);
+    let url = if test {
+        format!(
+            "{base}/repos/{}/releases?per_page={LAST_RELEASES}",
+            product.repository
+        )
+    } else {
+        format!("{base}/repos/{}/releases/latest", product.repository)
+    };
     let text = agent(Duration::from_secs(20))
         .get(&url)
         .header(
@@ -256,12 +315,19 @@ pub fn latest(product: &Product) -> Result<Release, String> {
         .map_err(|e| format!("the releases could not be read: {e}"))?
         .body_mut()
         .with_config()
-        .limit(1024 * 1024)
+        .limit(4 * 1024 * 1024)
         .read_to_string()
         .map_err(|e| format!("the releases could not be read: {e}"))?;
     let body: Value = serde_json::from_str(&text)
         .map_err(|e| format!("the releases' answer is not JSON: {e}"))?;
-    release_of(&body, product, arch_folders(), strict)
+    if test {
+        let list = body
+            .as_array()
+            .ok_or("the releases' answer is not a list")?;
+        newest_of(list, product, arch_folders(), strict)
+    } else {
+        release_of(&body, product, arch_folders(), strict)
+    }
 }
 
 /// The release's archive, whole and checked: its size and its digest as
@@ -988,6 +1054,66 @@ mod tests {
         let mut test_release = body.clone();
         test_release["prerelease"] = Value::Bool(true);
         assert!(release_of(&test_release, &glass(), &["x64"], true).is_err());
+        assert!(!release.test, "the latest is never a test release");
+    }
+
+    #[test]
+    fn a_remote_on_test_releases_is_offered_the_newest_of_the_last_ten() {
+        let digest = format!("sha256:{}", "ab".repeat(32));
+        let home = "https://github.com/foonerd/glass/releases/download/";
+        let at = |v: &str| format!("{home}v{v}/glass-{v}-x64.tar.gz");
+        let named = |v: &str, test: bool, draft: bool| {
+            let mut body = answer(
+                &format!("v{v}"),
+                &format!("glass-{v}-x64.tar.gz"),
+                &at(v),
+                5,
+                &digest,
+            );
+            body["prerelease"] = Value::Bool(test);
+            body["draft"] = Value::Bool(draft);
+            body
+        };
+        // The newest by version wins, a test release among them; a draft
+        // and a release without this machine's archive are passed over.
+        let list = vec![
+            named("0.9.6", false, false),
+            named("0.9.7", true, false),
+            named("0.9.9", true, true),
+            answer(
+                "v0.9.8",
+                "glass-0.9.8-armv7.tar.gz",
+                &at("0.9.8"),
+                5,
+                &digest,
+            ),
+            named("0.9.5", false, false),
+        ];
+        let release = newest_of(&list, &glass(), &["x64"], true).expect("a release");
+        assert_eq!((release.version.as_str(), release.test), ("0.9.7", true));
+        // The same list with the test release made the latest: still the newest.
+        let plain: Vec<Value> = list
+            .iter()
+            .cloned()
+            .map(|mut b| {
+                b["prerelease"] = Value::Bool(false);
+                b
+            })
+            .collect();
+        let release = newest_of(&plain, &glass(), &["x64"], true).expect("a release");
+        assert_eq!((release.version.as_str(), release.test), ("0.9.7", false));
+        // Nothing for this machine in any of them: none.
+        assert!(newest_of(&list, &glass(), &["armv8"], true)
+            .unwrap_err()
+            .contains("no release"));
+        assert!(newest_of(&[], &glass(), &["x64"], true).is_err());
+        // The latest alone never takes a test release; the list does.
+        assert!(release_of(&named("0.9.7", true, false), &glass(), &["x64"], true).is_err());
+        assert!(release_from(&named("0.9.7", true, false), &glass(), &["x64"], true, true).is_ok());
+        assert!(
+            release_from(&named("0.9.7", false, true), &glass(), &["x64"], true, true).is_err(),
+            "a draft is never offered"
+        );
     }
 
     #[test]
@@ -1003,6 +1129,7 @@ mod tests {
             bytes: archive.len() as u64,
             sha256: digest,
             page: String::new(),
+            test: false,
         };
         assert_eq!(checked(&release, archive.clone()), Ok(archive.clone()));
         assert!(checked(&release, b"an archivE".to_vec())
@@ -1181,6 +1308,7 @@ mod tests {
             bytes: 1,
             sha256: String::new(),
             page: String::new(),
+            test: false,
         };
         let product = glass();
         // One that says another version, one that fails, one that is no program: the old one stays.

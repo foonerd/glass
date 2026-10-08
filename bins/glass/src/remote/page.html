@@ -136,7 +136,11 @@
     <h2>Version</h2>
     <div id="upgrade-body"></div>
     <div style="margin-top:10px"><button class="small" id="btn-upgrade-check">Look for a later release</button> <button class="small primary hidden" id="btn-upgrade-install"></button></div>
-    <div class="help" style="margin-top:8px">An upgrade fetches the latest release of this remote from GitHub, checks it against the release's checksum, tries it, puts it in place of the one that runs and starts the display again as it. The one before is kept beside it, as glass.prev, and comes back by itself if the new one cannot hold on.</div>
+    <div class="help" style="margin-top:8px">An upgrade fetches the release offered to this remote from GitHub, checks it against the release's checksum, tries it, puts it in place of the one that runs and starts the display again as it. The one before is kept beside it, as glass.prev, and comes back by itself if the new one cannot hold on.</div>
+    <div class="form" style="margin-top:10px">
+      <div class="full"><label><input type="checkbox" id="test-releases"> Offer test releases</label></div>
+      <div class="full help">A release is first published as a test release, tried on the project's own players, and then made the latest. With this on, as on the player's System tab, this remote is offered the newest of the repository's last ten releases, a test release among them, as soon as it is published; off, it is offered the latest release only. Applied with the other settings.</div>
+    </div>
   </div>
 
   <div class="panel">
@@ -191,7 +195,7 @@
     if (!p) return;
     var idle = u.phase === 'idle';
     var lines = ['This remote is ' + p.name + ' ' + p.version + (p.name === 'Glass' ? '.' : ', on Glass ' + s.release + '.')];
-    if (u.latest) lines.push(u.available ? 'The latest release is ' + u.latest.version + '.' : 'That is the latest release.');
+    if (u.latest) lines.push((u.available ? 'The release offered is ' + u.latest.version : 'That is the release offered') + (u.latest.test ? ', a test release.' : '.'));
     var doing = { checking: 'Looking at the releases.', installing: 'Putting it in place.', restarting: 'Starting again as the new version.' }[u.phase];
     if (u.phase === 'downloading') doing = 'Fetching ' + (u.latest ? u.latest.version : '') + (u.latest && u.latest.bytes ? ', ' + Math.round((u.done || 0) * 100 / u.latest.bytes) + '%' : '') + '.';
     if (doing) lines.push(doing);
@@ -368,6 +372,7 @@
     $('d-fps').value = c.display.fps || ''; $('d-fit').checked = !!c.display.fit;
     $('gain').value = c.gain_db; $('decay').value = c.spectrum_decay ? c.spectrum_decay : ''; $('r-name').value = c.name; $('r-port').value = c.page_port; $('r-log').value = c.log_level || '';
     $('face-shown').value = c.face || 'follow';
+    $('test-releases').checked = !!c.test_releases;
     renderNames();
   }
   function gather() {
@@ -389,9 +394,10 @@
     c.display = { mode: $('d-mode').value, position: (x !== '' && y !== '') ? [parseInt(x, 10) || 0, parseInt(y, 10) || 0] : null, fit: $('d-fit').checked, fps: $('d-fps').value ? parseInt($('d-fps').value, 10) : null, monitor: parseInt($('d-monitor').value, 10) || 0 };
     c.gain_db = parseFloat($('gain').value) || 0; c.spectrum_decay = parseFloat($('decay').value) || 0; c.name = $('r-name').value.trim(); c.page_port = parseInt($('r-port').value, 10) || 5583; c.log_level = $('r-log').value || null;
     c.face = $('face-shown').value || 'follow';
+    c.test_releases = $('test-releases').checked;
     return c;
   }
-  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'gain', 'decay', 'r-name', 'r-port', 'r-log', 'face-shown'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
+  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'gain', 'decay', 'r-name', 'r-port', 'r-log', 'face-shown', 'test-releases'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
   $('btn-win-leave').onclick = function () { api('POST', '/api/window', { mode: 'windowed' }).then(function () { toast('The display is a window now.'); }).catch(function (e) { toast(e.message, 'error'); }); };
   $('btn-win-full').onclick = function () { api('POST', '/api/window', { mode: 'fullscreen' }).then(function () { toast('The display takes the screen.'); }).catch(function (e) { toast(e.message, 'error'); }); };
   $('btn-cfg-import').onclick = function () { $('cfg-file').click(); };
