@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.5] - 2026-10-08
+
+- **No person named in the plugin's own words.** The help for a settings backup's name gave a forum user's handle as an example; the examples are plain words now, in English, German and French.
+
 ## [0.9.4] - 2026-10-07
 
 For a face theme's own skies (glass-evo 0.2.4): the likeness draws a look's skies when the look is chosen, not only when it is saved.
