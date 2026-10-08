@@ -1084,6 +1084,8 @@
     "MANAGER_LOOK_BUILTIN_SAYS": "Farben aus dem Cover",
     "MANAGER_LOOK_IDLE": "Wenn nichts spielt",
     "MANAGER_LOOK_PLAYING": "Während Musik spielt",
+    "MANAGER_LOOK_SAFE": "Sichere Ränder",
+    "MANAGER_LOOK_SAFE_HINT": "Grüne Haarlinien am Rand des Bildschirms und am Rand des Themenrahmens, über allem, was die Vorschau zeichnet: was dazwischen liegt, zeigt der Bildschirm.",
     "MANAGER_LOOK_PREVIEW_HELP": "Ein Abbild des Bildschirms am Player. Die Tasten erscheinen, wenn der Bildschirm berührt wird. Ein Klick auf ein Teil öffnet seine Einstellungen.",
     "MANAGER_LOOK_PICK": "Zum Anpassen klicken",
     "MANAGER_LOOK_ADJUST": "Dieses Aussehen anpassen",

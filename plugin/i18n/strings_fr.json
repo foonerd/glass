@@ -1084,6 +1084,8 @@
     "MANAGER_LOOK_BUILTIN_SAYS": "Couleurs tirées de la pochette",
     "MANAGER_LOOK_IDLE": "Quand rien ne joue",
     "MANAGER_LOOK_PLAYING": "Pendant la musique",
+    "MANAGER_LOOK_SAFE": "Marges de sécurité",
+    "MANAGER_LOOK_SAFE_HINT": "Des filets verts au bord de l'écran et au bord du cadre du thème, par-dessus tout ce que l'aperçu dessine : ce qui est entre eux est ce que l'écran montre.",
     "MANAGER_LOOK_PREVIEW_HELP": "Une image approchée de l'écran du lecteur. Les boutons apparaissent quand on touche l'écran. Cliquez sur un élément pour l'ajuster.",
     "MANAGER_LOOK_PICK": "Cliquer pour ajuster",
     "MANAGER_LOOK_ADJUST": "Ajuster cette apparence",
