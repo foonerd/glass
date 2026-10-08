@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.22] - 2026-10-08
+
+The release of 0.9.21's signing, whose workflow file GitHub rejected before any build (a secret read in a step's condition): the signing step now reads the secret in its shell and publishes unsigned when there is none. Nothing else is new. Every release from here carries `SHA256SUMS` and `SHA256SUMS.sig`.
+
 ## [0.9.21] - 2026-10-08
 
 - **Signed releases.** Every release carries `SHA256SUMS`, every asset's digest, and `SHA256SUMS.sig`, that file's Ed25519 signature made in the release workflow with the project's key, checked there against the public key the products carry before anything is published. The Manager holds a release to its signature before installing it, from GitHub or from a file: the signature over the sums, then the zip's digest against the signed line for it; a release that fails either is refused and nothing is installed. A remote display holds its own upgrade to the same signature. A release published before signing carries no signature and installs as it always did, on the digest GitHub states, so the way back to an older release keeps working. The public key is `keys/release-signing.pub`; `scripts/sign-release.sh` makes the sums and the signature.
