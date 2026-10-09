@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.31] - 2026-10-09
+
+- **The shelf answers a remote.** A remote asks the player's shelf for `glass` or `glass-evo`, its archive's stem, while the shelf named its archives `Glass`, so the list a remote read was empty and the remote went to GitHub as before; found with a remote against a player's own shelf. The shelf now answers by the stem as well as by the name.
+
 ## [0.9.30] - 2026-10-09
 
 - **The player's shelf for remotes.** Under "Install from a file" on the System tab the player keeps a release archive for each kind of remote, `glass-<version>-<arch>.tar.gz`, the `windows-x64` zip, glass-evo's for the bundle, and offers them on the network in the shape GitHub's releases have: a remote looks at its player first and at GitHub second, takes the newer of the two, and so a remote that cannot reach GitHub upgrades from its player. An archive put on the shelf is held to the signature it carries inside and named by what it says it is; the shelf holds one per product and platform, a newer one replacing the older, under a ceiling in megabytes (128 unless set, 16 to 2048) with the usage shown; a player's zip, an Android package or an unsigned archive is refused. Behind the same switch: off, nothing is served. `GET /api/shelf`, `POST /api/shelf` (the archive as the body), `DELETE /api/shelf/:name`, `POST /api/shelf/ceiling`, and for remotes `GET /api/shelf/releases?product=` and `GET /api/shelf/files/:name`.
