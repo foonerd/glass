@@ -2,6 +2,11 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.30] - 2026-10-09
+
+- **The player's shelf for remotes.** Under "Install from a file" on the System tab the player keeps a release archive for each kind of remote, `glass-<version>-<arch>.tar.gz`, the `windows-x64` zip, glass-evo's for the bundle, and offers them on the network in the shape GitHub's releases have: a remote looks at its player first and at GitHub second, takes the newer of the two, and so a remote that cannot reach GitHub upgrades from its player. An archive put on the shelf is held to the signature it carries inside and named by what it says it is; the shelf holds one per product and platform, a newer one replacing the older, under a ceiling in megabytes (128 unless set, 16 to 2048) with the usage shown; a player's zip, an Android package or an unsigned archive is refused. Behind the same switch: off, nothing is served. `GET /api/shelf`, `POST /api/shelf` (the archive as the body), `DELETE /api/shelf/:name`, `POST /api/shelf/ceiling`, and for remotes `GET /api/shelf/releases?product=` and `GET /api/shelf/files/:name`.
+- **A remote's upgrade from the player's shelf.** "Look for a later release" asks the player's Manager for this machine's archive before GitHub; an archive from the shelf is held to the signature inside it before its binary is tried, as one brought by hand is, and the panel says the release offered is from the player's shelf. The bundle has the same.
+
 ## [0.9.29] - 2026-10-09
 
 - **No fanart.tv key ships with Glass.** The "Project key" choice is gone: the artist fanart slideshow uses the listener's own fanart.tv key, free to register, and nothing else. A developer may place a key in `dev/fanart.key` under the player's Glass folder, outside every package, which is then used in its place and said so on the Artwork tab; the release check refuses a key-like literal in the plugin's source.
