@@ -472,6 +472,16 @@
           <div class="row" style="margin-top:6px"><button class="small" id="btn-upd-pick-evo"></button><span class="muted" id="upd-file-evo-name"></span></div>
           <div class="row" style="margin-top:8px"><button class="primary" id="btn-upd-files"></button></div>
           <div class="help" id="upd-upload-note"></div>
+          <div id="shelf-box" style="margin-top:14px">
+            <div><b id="shelf-title"></b></div>
+            <div class="help" id="shelf-help"></div>
+            <div id="shelf-list" style="margin-top:6px"></div>
+            <div class="row" style="margin-top:6px"><span class="muted" id="shelf-usage"></span></div>
+            <div class="row" style="margin-top:6px"><label for="shelf-ceiling" id="shelf-ceiling-label"></label> <input type="number" id="shelf-ceiling" min="16" max="2048" step="16" style="width:6em"> <span class="muted">MB</span> <button class="small" id="btn-shelf-ceiling"></button></div>
+            <input type="file" id="shelf-file" accept=".zip,.gz,.tgz,application/zip,application/gzip" class="hidden">
+            <div class="row" style="margin-top:6px"><button class="small" id="btn-shelf-pick"></button><span class="muted" id="shelf-file-name"></span></div>
+            <div class="row" style="margin-top:6px"><button class="primary" id="btn-shelf-add"></button></div>
+          </div>
         </div>
       </div>
       <pre id="upd-notes" class="hidden" style="white-space:pre-wrap;margin-top:10px;font:inherit;font-size:13px;color:#ccc;background:#1a1a1a;border:1px solid var(--line);border-radius:8px;padding:10px"></pre>
@@ -721,7 +731,7 @@
     }
     var known = { 'checksum': 'MANAGER_ERR_CHECKSUM', 'size': 'MANAGER_ERR_SIZE', 'units-differ': 'MANAGER_ERR_UNITS', 'bad-theme': 'MANAGER_ERR_BAD_THEME', 'not-a-zip': 'MANAGER_ERR_NOT_ZIP', 'timeout': 'MANAGER_ERR_NETWORK', 'network': 'MANAGER_ERR_NETWORK', 'too-large': 'MANAGER_ERR_TOO_LARGE', 'render-failed': 'MANAGER_ERR_RENDER',
       'owns-screen': 'MANAGER_EVO_ERR_OWNS_SCREEN', 'needs-glass': 'MANAGER_EVO_ERR_NEEDS_GLASS', 'too-old': 'MANAGER_EVO_ERR_TOO_OLD', 'no-binary': 'MANAGER_EVO_ERR_NO_BINARY', 'pair': 'MANAGER_EVO_ERR_PAIR', 'bad-manifest': 'MANAGER_EVO_ERR_MANIFEST',
-      'no-release': 'MANAGER_ERR_NO_RELEASE', 'bad-release': 'MANAGER_ERR_NO_RELEASE', 'up-to-date': 'MANAGER_UPD_UPTODATE', 'no-previous': 'MANAGER_UPD_NONE', 'no-digest': 'MANAGER_ERR_NO_DIGEST', 'apply': 'MANAGER_ERR_APPLY', 'busy': 'MANAGER_ERR_BUSY', 'switch-off': 'MANAGER_ERR_SWITCH_OFF', 'unverified': 'MANAGER_ERR_UNVERIFIED', 'bad-zip': 'MANAGER_ERR_BAD_ZIP', 'same-version': 'MANAGER_ERR_SAME_VERSION', 'needs-evo': 'MANAGER_ERR_NEEDS_EVO', 'bad-backup': 'MANAGER_ERR_BAD_BACKUP', 'not-a-font': 'MANAGER_FONTS_NOT_A_FONT', 'bad-font': 'MANAGER_FONTS_BAD_CHOICE', 'empty': 'MANAGER_FONTS_NOT_A_FONT', 'bad-time': 'MANAGER_CD_ERR_TIME', 'same-time': 'MANAGER_CD_ERR_SAME', 'bad-theme': 'MANAGER_CD_ERR_THEME', 'bad-location': 'MANAGER_CD_ERR_LOCATION', 'no-location': 'MANAGER_CD_ERR_NO_LOCATION', 'bad-offset': 'MANAGER_CD_ERR_OFFSET' };
+      'no-release': 'MANAGER_ERR_NO_RELEASE', 'bad-release': 'MANAGER_ERR_NO_RELEASE', 'up-to-date': 'MANAGER_UPD_UPTODATE', 'no-previous': 'MANAGER_UPD_NONE', 'no-digest': 'MANAGER_ERR_NO_DIGEST', 'apply': 'MANAGER_ERR_APPLY', 'busy': 'MANAGER_ERR_BUSY', 'switch-off': 'MANAGER_ERR_SWITCH_OFF', 'unverified': 'MANAGER_ERR_UNVERIFIED', 'bad-zip': 'MANAGER_ERR_BAD_ZIP', 'same-version': 'MANAGER_ERR_SAME_VERSION', 'needs-evo': 'MANAGER_ERR_NEEDS_EVO', 'shelf-full': 'MANAGER_ERR_SHELF_FULL', 'not-remote-archive': 'MANAGER_ERR_NOT_REMOTE_ARCHIVE', 'unsigned': 'MANAGER_ERR_UNSIGNED', 'signature': 'MANAGER_ERR_UNSIGNED', 'not-a-tar': 'MANAGER_ERR_NOT_REMOTE_ARCHIVE', 'bad-backup': 'MANAGER_ERR_BAD_BACKUP', 'not-a-font': 'MANAGER_FONTS_NOT_A_FONT', 'bad-font': 'MANAGER_FONTS_BAD_CHOICE', 'empty': 'MANAGER_FONTS_NOT_A_FONT', 'bad-time': 'MANAGER_CD_ERR_TIME', 'same-time': 'MANAGER_CD_ERR_SAME', 'bad-theme': 'MANAGER_CD_ERR_THEME', 'bad-location': 'MANAGER_CD_ERR_LOCATION', 'no-location': 'MANAGER_CD_ERR_NO_LOCATION', 'bad-offset': 'MANAGER_CD_ERR_OFFSET' };
     if (known[code]) return t(known[code]) + (e.message && e.message !== code ? ' (' + e.message + ')' : '');
     return e.message || t('MANAGER_ERROR');
   }
@@ -861,6 +871,9 @@
     $('btn-upd-pick-glass').textContent = t('MANAGER_UPD_FILE_GLASS'); $('btn-upd-pick-evo').textContent = t('MANAGER_UPD_FILE_EVO');
     $('upd-file-glass-name').textContent = t('MANAGER_UPD_NO_FILE'); $('upd-file-evo-name').textContent = t('MANAGER_UPD_NO_FILE');
     $('btn-upd-files').textContent = t('MANAGER_UPD_FILES_GO'); $('upd-upload-note').textContent = t('MANAGER_UPD_UPLOAD_NOTE');
+    $('shelf-title').textContent = t('MANAGER_SHELF_TITLE'); $('shelf-help').textContent = t('MANAGER_SHELF_HELP');
+    $('shelf-ceiling-label').textContent = t('MANAGER_SHELF_CEILING'); $('btn-shelf-ceiling').textContent = t('MANAGER_SAVE');
+    $('btn-shelf-pick').textContent = t('MANAGER_SHELF_PICK'); $('shelf-file-name').textContent = t('MANAGER_UPD_NO_FILE'); $('btn-shelf-add').textContent = t('MANAGER_SHELF_ADD');
     $('tm-close').textContent = t('MANAGER_CLOSE');
     $('tm-activate').textContent = t('MANAGER_ACTIVATE');
     $('tm-render').textContent = t('MANAGER_RENDER');
@@ -3176,7 +3189,53 @@
     $('upd-test').checked = !!u.test;
     $('upd-upload').checked = !!u.upload;
     $('upd-upload-box').classList.toggle('hidden', !u.upload);
+    if (u.upload) loadShelf();
   }
+  // The shelf for remotes: the archives the player keeps for its remotes'
+  // machines, each with its product, version and platform, the usage
+  // against the ceiling, and the ceiling itself.
+  function paintShelf(v) {
+    state.shelf = v;
+    var rows = (v.archives || []).slice().sort(function (a, b) { return (a.product + a.platformName).localeCompare(b.product + b.platformName); });
+    $('shelf-list').innerHTML = rows.length ? rows.map(function (a) {
+      return '<div class="row" style="margin-top:4px"><span>' + esc(a.product + ' ' + a.version + ' · ' + a.platformName + ' · ' + fmtBytes(a.bytes)) + '</span> <button class="small" data-shelf-remove="' + esc(a.name) + '">' + esc(t('MANAGER_SHELF_REMOVE')) + '</button></div>';
+    }).join('') : '<div class="muted">' + esc(t('MANAGER_SHELF_EMPTY')) + '</div>';
+    $('shelf-usage').textContent = t('MANAGER_SHELF_USAGE') + ' ' + fmtBytes(v.usedBytes || 0) + ' / ' + v.ceilingMb + ' MB';
+    if (document.activeElement !== $('shelf-ceiling')) $('shelf-ceiling').value = v.ceilingMb;
+    Array.prototype.forEach.call($('shelf-list').querySelectorAll('[data-shelf-remove]'), function (btn) {
+      btn.onclick = function () {
+        var name = btn.getAttribute('data-shelf-remove');
+        confirmDialog(t('MANAGER_SHELF_REMOVE'), name, t('MANAGER_SHELF_REMOVE')).then(function (ok) {
+          if (!ok) return;
+          api('DELETE', '/api/shelf/' + encodeURIComponent(name)).then(paintShelf).catch(function (e) { toast(errorText(e), 'error'); });
+        });
+      };
+    });
+  }
+  function loadShelf() {
+    api('GET', '/api/shelf').then(paintShelf).catch(function (e) { toast(errorText(e), 'error'); });
+  }
+  $('btn-shelf-ceiling').onclick = function () {
+    api('POST', '/api/shelf/ceiling', { mb: Number($('shelf-ceiling').value) }).then(function () { toast(t('MANAGER_SAVED')); loadShelf(); }).catch(function (e) { toast(errorText(e), 'error'); });
+  };
+  $('btn-shelf-pick').onclick = function () { $('shelf-file').click(); };
+  $('shelf-file').onchange = function () {
+    var file = $('shelf-file').files[0];
+    $('shelf-file-name').textContent = file ? file.name + ' (' + fmtBytes(file.size) + ')' : t('MANAGER_UPD_NO_FILE');
+  };
+  $('btn-shelf-add').onclick = function () {
+    var file = $('shelf-file').files[0];
+    if (!file) { toast(t('MANAGER_UPD_FILE_NONE'), 'error'); return; }
+    $('btn-shelf-add').disabled = true;
+    toast(t('MANAGER_UPD_UPLOADING'));
+    api('POST', '/api/shelf', file, 'application/octet-stream').then(function (v) {
+      toast(t('MANAGER_SHELF_ADDED') + ' ' + v.archive.product + ' ' + v.archive.version + ' · ' + v.archive.platformName);
+      paintShelf(v);
+    }).catch(function (e) { toast(errorText(e), 'error'); }).then(function () {
+      $('btn-shelf-add').disabled = false;
+      $('shelf-file').value = ''; $('shelf-file-name').textContent = t('MANAGER_UPD_NO_FILE');
+    });
+  };
   // Install from a file: the switch asked of the player; off, the player
   // refuses the uploads, so the box is shown only when it says on.
   $('upd-upload').onchange = function () {

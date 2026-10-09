@@ -26,6 +26,7 @@ const remotebehind = require('./remotebehind');
 const sheetfacts = require('./sheetfacts');
 const backgrounds = require('./backgrounds');
 const { Component, leastOf, pair } = require('./component');
+const { Shelf, MAX_ARCHIVE_BYTES: MAX_SHELF_ARCHIVE } = require('./shelf');
 const views = require('./views');
 const picture = require('./picture');
 const { zipDirectory } = require('./zipwrite');
@@ -103,6 +104,11 @@ class Manager {
       least: leastOf(packageText),
       arch: function () { return plugin.volumioArch(); },
       test: function () { return plugin.testReleases(); },
+      logger: this.logger
+    });
+    this.shelf = new Shelf({
+      dir: path.join(paths.dataDir, 'shelf'),
+      ceilingMb: function () { return typeof plugin.shelfCeilingMb === 'function' ? plugin.shelfCeilingMb() : undefined; },
       logger: this.logger
     });
     this.capture = new Capture({
@@ -1075,6 +1081,70 @@ class Manager {
       const job = self.newJob('upgrade', 'Glass (file)');
       self.runUploadInstall(job, file);
       res.status(202).json({ ok: true, job: job });
+    }));
+
+    // The shelf for remotes: the archives kept for the remotes' machines,
+    // offered on the network in the shape GitHub's releases have, so a
+    // remote looks at its player first. Behind the same switch: off, the
+    // uploads are refused and nothing is served, and a remote goes to
+    // GitHub as before.
+    app.get('/api/shelf', wrap(async function (req, res) {
+      res.json(Object.assign(await self.shelf.view(), { upload: uploadOn() }));
+    }));
+
+    app.post('/api/shelf/ceiling', wrap(async function (req, res) {
+      const body = req.body || {};
+      if (!Number.isFinite(Number(body.mb))) return res.status(400).json({ error: 'bad-request', message: 'mb must be a number' });
+      const result = self.plugin.setShelfCeilingMb(Number(body.mb));
+      res.json({ ok: true, changed: result.changed, ceilingMb: result.ceilingMb });
+    }));
+
+    // A remote's release archive as the request body: held to the
+    // signature it carries inside, named by what it says it is, placed
+    // with the one of the same product and platform dropped.
+    app.post('/api/shelf', wrap(async function (req, res) {
+      if (!uploadOn()) return res.status(403).json({ error: 'switch-off', message: 'install from a file is off on this player' });
+      await fsp.mkdir(self.shelf.dir, { recursive: true });
+      const file = path.join(self.shelf.dir, 'incoming-' + Date.now());
+      try {
+        await self.receive(req, file, MAX_SHELF_ARCHIVE);
+      } catch (e) {
+        await fsp.rm(file, { force: true });
+        return res.status(e.code === 'too-large' ? 413 : 400).json(failure(e));
+      }
+      try {
+        const placed = await self.shelf.place(file);
+        res.json(Object.assign({ ok: true, archive: placed }, await self.shelf.view()));
+      } catch (e) {
+        res.status(e.code === 'shelf-full' ? 409 : 400).json(failure(e));
+      }
+    }));
+
+    app.delete('/api/shelf/:name', wrap(async function (req, res) {
+      const gone = await self.shelf.remove(String(req.params.name || ''));
+      if (!gone) return res.status(404).json({ error: 'not-found' });
+      res.json(Object.assign({ ok: true }, await self.shelf.view()));
+    }));
+
+    // What a remote reads: the shelf's archives of its product as a list
+    // of releases, the assets at this player's address as the remote
+    // reached it.
+    const shelfBase = function (req) {
+      return 'http://' + String(req.headers.host || ('127.0.0.1:' + self.port)).replace(/[^A-Za-z0-9.:\[\]-]/g, '');
+    };
+    app.get('/api/shelf/releases', wrap(async function (req, res) {
+      if (!uploadOn()) return res.status(403).json({ error: 'switch-off', message: 'install from a file is off on this player' });
+      res.json(await self.shelf.releases(String(req.query.product || ''), shelfBase(req)));
+    }));
+
+    app.get('/api/shelf/files/:name', wrap(async function (req, res) {
+      if (!uploadOn()) return res.status(403).json({ error: 'switch-off', message: 'install from a file is off on this player' });
+      const found = await self.shelf.file(String(req.params.name || ''));
+      if (!found) return res.status(404).json({ error: 'not-found' });
+      res.setHeader('Content-Type', 'application/octet-stream');
+      res.setHeader('Content-Length', String(found.bytes));
+      res.setHeader('Cache-Control', 'no-store');
+      fs.createReadStream(found.path).on('error', function () { res.destroy(); }).pipe(res);
     }));
 
     // Back to the stable release: what the act would do on this player

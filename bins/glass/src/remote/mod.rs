@@ -556,7 +556,39 @@ impl RemoteApp {
         if !self.begin_upgrade("checking") {
             return;
         }
-        let found = upgrade::offered(&product, self.config().test_releases);
+        // The player's shelf first: a player with install from a file on
+        // keeps archives for its remotes' machines and offers them here on
+        // the network, so a remote that cannot reach GitHub still upgrades.
+        let player = self
+            .config()
+            .player()
+            .map(|(_, p)| (p.host.clone(), p.manager_port));
+        let shelf = player.and_then(|(host, port)| {
+            match upgrade::offered_by_player(&product, &host, port) {
+                Ok(release) => {
+                    logline::say!(
+                        Info,
+                        "remotes",
+                        "upgrade: the player at {host} offers {} {} from its shelf",
+                        product.name,
+                        release.version
+                    );
+                    Some(release)
+                }
+                Err(why) => {
+                    logline::say!(
+                        Verbose,
+                        "remotes",
+                        "upgrade: nothing from the player at {host}: {why}"
+                    );
+                    None
+                }
+            }
+        });
+        let found = upgrade::prefer(
+            shelf,
+            upgrade::offered(&product, self.config().test_releases),
+        );
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_secs())

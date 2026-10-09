@@ -1737,6 +1737,21 @@ Glass.prototype.setUploadInstall = function (on) {
     return { changed: true, upload: wanted };
 };
 
+// The ceiling of the shelf for remotes, in megabytes: the archives the
+// player keeps for its remotes' machines never weigh more together. Held
+// inside the shelf's bounds; the default where nothing is set.
+Glass.prototype.shelfCeilingMb = function () {
+    return require('./manager/shelf').ceilingBounded(this.config.get('shelfCeilingMb'));
+};
+
+Glass.prototype.setShelfCeilingMb = function (mb) {
+    var wanted = require('./manager/shelf').ceilingBounded(mb);
+    if (this.shelfCeilingMb() === wanted) { return { changed: false, ceilingMb: wanted }; }
+    this.config.set('shelfCeilingMb', wanted);
+    this.logger.info(id + 'releases: the shelf for remotes is bounded at ' + wanted + ' MB');
+    return { changed: true, ceilingMb: wanted };
+};
+
 // The display launched once: nothing when the player has no screen of its
 // own or the display already runs; its lines relayed to the journal; on
 // exit, re-armed, restarted or left, as the exit action says.

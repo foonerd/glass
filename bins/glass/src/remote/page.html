@@ -175,7 +175,7 @@
     <h2>Version</h2>
     <div id="upgrade-body"></div>
     <div style="margin-top:10px"><button class="small" id="btn-upgrade-check">Look for a later release</button> <button class="small primary hidden" id="btn-upgrade-install"></button></div>
-    <div class="help" style="margin-top:8px">An upgrade fetches the release offered to this remote from GitHub, checks it against the release's checksum, tries it, puts it in place of the one that runs and starts the display again as it. The one before is kept beside it, as glass.prev, and comes back by itself if the new one cannot hold on.</div>
+    <div class="help" style="margin-top:8px">An upgrade fetches the release offered to this remote, checks it against the release's checksum and signature, tries it, puts it in place of the one that runs and starts the display again as it. The one before is kept beside it, as glass.prev, and comes back by itself if the new one cannot hold on. The release is looked for on the player first, where its Manager keeps archives for remotes (System tab, Install from a file), and on GitHub second; the newer of the two is offered.</div>
     <div class="form" style="margin-top:10px">
       <div class="full"><label><input type="checkbox" id="test-releases"> Offer test releases</label></div>
       <div class="full help">A release is first published as a test release, tried on the project's own players, and then made the latest. With this on, as on the player's System tab, this remote is offered the newest of the repository's last ten releases, a test release among them, as soon as it is published; off, it is offered the latest release only. Applied with the other settings.</div>
@@ -243,7 +243,7 @@
     if (!p) return;
     var idle = u.phase === 'idle';
     var lines = ['This remote is ' + p.name + ' ' + p.version + (p.name === 'Glass' ? '.' : ', on Glass ' + s.release + '.')];
-    if (u.latest) lines.push((u.available ? 'The release offered is ' + u.latest.version : 'That is the release offered') + (u.latest.test ? ', a test release.' : '.'));
+    if (u.latest) lines.push((u.available ? 'The release offered is ' + u.latest.version : 'That is the release offered') + (u.latest.test ? ', a test release' : '') + (u.latest.source === 'player' ? ', from the player\'s shelf.' : '.'));
     var doing = { checking: 'Looking at the releases.', installing: 'Putting it in place.', restarting: 'Starting again as the new version.' }[u.phase];
     if (u.phase === 'downloading') doing = 'Fetching ' + (u.latest ? u.latest.version : '') + (u.latest && u.latest.bytes ? ', ' + Math.round((u.done || 0) * 100 / u.latest.bytes) + '%' : '') + '.';
     if (doing) lines.push(doing);

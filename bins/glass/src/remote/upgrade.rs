@@ -150,7 +150,14 @@ pub struct Release {
     pub sums_url: Option<String>,
     #[serde(default)]
     pub sig_url: Option<String>,
+    /// Where the release was found: `github`, or `player` for one on the
+    /// player's shelf, held to the signature inside its archive.
+    #[serde(default)]
+    pub source: String,
 }
+
+pub const SOURCE_GITHUB: &str = "github";
+pub const SOURCE_PLAYER: &str = "player";
 
 /// How many of the repository's last releases a remote on test releases
 /// looks through, as the player's Manager does.
@@ -302,6 +309,7 @@ fn release_from(
         asset: wanted,
         sums_url,
         sig_url,
+        source: SOURCE_GITHUB.to_string(),
     })
 }
 
@@ -361,6 +369,64 @@ pub fn offered(product: &Product, test: bool) -> Result<Release, String> {
     }
 }
 
+/// Where a player's Manager lists the shelf's archives of a product, in
+/// the shape GitHub's releases have.
+pub fn shelf_url(host: &str, manager_port: u16, asset: &str) -> String {
+    format!(
+        "http://{host}:{manager_port}/api/shelf/releases?product={}",
+        asset.trim_end_matches('-')
+    )
+}
+
+/// The newest release on a player's shelf that holds this machine's
+/// archive, marked as the player's. The addresses are the player's, not
+/// GitHub's, so the strict check is off.
+pub fn from_shelf(body: &Value, product: &Product, folders: &[&str]) -> Result<Release, String> {
+    let list = body.as_array().ok_or("the shelf's answer is not a list")?;
+    newest_of(list, product, folders, false).map(|mut release| {
+        release.source = SOURCE_PLAYER.to_string();
+        release
+    })
+}
+
+/// The release the player's shelf offers this remote, where the player
+/// keeps one for this machine and has install from a file on. A player
+/// with it off refuses, and that is no release.
+pub fn offered_by_player(
+    product: &Product,
+    host: &str,
+    manager_port: u16,
+) -> Result<Release, String> {
+    let text = agent(Duration::from_secs(6))
+        .get(&shelf_url(host, manager_port, &product.asset))
+        .header(
+            "User-Agent",
+            concat!("glass-remote/", env!("CARGO_PKG_VERSION")),
+        )
+        .call()
+        .map_err(|e| format!("the player's shelf could not be read: {e}"))?
+        .body_mut()
+        .with_config()
+        .limit(1024 * 1024)
+        .read_to_string()
+        .map_err(|e| format!("the player's shelf could not be read: {e}"))?;
+    let body: Value =
+        serde_json::from_str(&text).map_err(|e| format!("the shelf's answer is not JSON: {e}"))?;
+    from_shelf(&body, product, arch_folders())
+}
+
+/// The release offered of the two looks: the player's shelf first, GitHub
+/// second. The newer of the two where both answer; at the same version
+/// the player's, which is on the network here; GitHub's error only where
+/// the player offers nothing.
+pub fn prefer(shelf: Option<Release>, github: Result<Release, String>) -> Result<Release, String> {
+    match (shelf, github) {
+        (Some(s), Ok(g)) if newer(&g.version, &s.version) => Ok(g),
+        (Some(s), _) => Ok(s),
+        (None, g) => g,
+    }
+}
+
 /// The release's archive, whole and checked: its size and its digest as
 /// the release states them. `told` hears how many bytes have come.
 pub fn download(release: &Release, mut told: impl FnMut(u64)) -> Result<Vec<u8>, String> {
@@ -390,6 +456,21 @@ pub fn download(release: &Release, mut told: impl FnMut(u64)) -> Result<Vec<u8>,
         told(archive.len() as u64);
     }
     let archive = checked(release, archive)?;
+    let key = super::signing::public_key()?;
+    // An archive from the player's shelf is held to the signature it
+    // carries inside, as one brought by hand is: the shelf is not GitHub,
+    // and the signature inside is the one trust.
+    if release.source == SOURCE_PLAYER {
+        let entries = entries_of(&archive)?;
+        let files = super::signing::verify_manifest(&entries, &key)?;
+        logline::say!(
+            Info,
+            "upgrade",
+            "{} from the player's shelf verified by the signature it carries ({files} files)",
+            release.asset
+        );
+        return Ok(archive);
+    }
     // A signed release is held to its signature too; an unsigned one is
     // taken as before signing.
     let small = |url: &str, max: u64| -> Result<Vec<u8>, String> {
@@ -418,7 +499,6 @@ pub fn download(release: &Release, mut told: impl FnMut(u64)) -> Result<Vec<u8>,
         .as_deref()
         .map(|u| small(u, super::signing::MAX_SIG))
         .transpose()?;
-    let key = super::signing::public_key()?;
     let held = super::signing::held_to_signature(
         &key,
         &release.asset,
@@ -770,6 +850,7 @@ pub fn install_examined(
         asset: String::new(),
         sums_url: None,
         sig_url: None,
+        source: String::new(),
     };
     install(&examined.binary, exe, cache, running, &release)
 }
@@ -1165,6 +1246,98 @@ mod tests {
         })
     }
 
+    #[test]
+    fn the_players_shelf_is_read_as_github_is_and_marked_as_the_players() {
+        let digest = format!("sha256:{}", "ab".repeat(32));
+        let body = serde_json::json!([
+            answer(
+                "v0.9.30",
+                "glass-0.9.30-x64.tar.gz",
+                "http://player.local:5582/api/shelf/files/glass-0.9.30-x64.tar.gz",
+                4_000_000,
+                &digest
+            ),
+            answer(
+                "v0.9.29",
+                "glass-0.9.29-x64.tar.gz",
+                "http://player.local:5582/api/shelf/files/glass-0.9.29-x64.tar.gz",
+                3_900_000,
+                &digest
+            ),
+        ]);
+        let release = from_shelf(&body, &glass(), &["x64"]).expect("the newest on the shelf");
+        assert_eq!(release.version, "0.9.30");
+        assert_eq!(release.source, SOURCE_PLAYER);
+        assert!(
+            release.url.starts_with("http://player.local:5582/"),
+            "the player's address, not GitHub's"
+        );
+        assert_eq!(
+            (release.sums_url, release.sig_url),
+            (None, None),
+            "the shelf carries no sums; the signature inside holds"
+        );
+        assert!(
+            from_shelf(&body, &glass(), &["armv8"]).is_err(),
+            "nothing for another machine"
+        );
+        assert!(
+            from_shelf(&serde_json::json!({}), &glass(), &["x64"]).is_err(),
+            "not a list"
+        );
+        assert_eq!(
+            shelf_url("player.local", 5582, "glass-evo-"),
+            "http://player.local:5582/api/shelf/releases?product=glass-evo"
+        );
+    }
+
+    #[test]
+    fn the_players_shelf_is_preferred_unless_github_is_newer() {
+        let from = |version: &str, source: &str| Release {
+            version: version.to_string(),
+            url: String::new(),
+            bytes: 1,
+            sha256: String::new(),
+            page: String::new(),
+            test: false,
+            asset: String::new(),
+            sums_url: None,
+            sig_url: None,
+            source: source.to_string(),
+        };
+        let pick = |s: Option<Release>, g: Result<Release, String>| {
+            prefer(s, g).map(|r| (r.version, r.source))
+        };
+        assert_eq!(
+            pick(Some(from("0.9.30", "player")), Ok(from("0.9.29", "github"))),
+            Ok(("0.9.30".into(), "player".into()))
+        );
+        assert_eq!(
+            pick(Some(from("0.9.30", "player")), Ok(from("0.9.30", "github"))),
+            Ok(("0.9.30".into(), "player".into())),
+            "at the same version the player's, on the network here"
+        );
+        assert_eq!(
+            pick(Some(from("0.9.29", "player")), Ok(from("0.9.30", "github"))),
+            Ok(("0.9.30".into(), "github".into()))
+        );
+        assert_eq!(
+            pick(
+                Some(from("0.9.30", "player")),
+                Err("no way to GitHub".into())
+            ),
+            Ok(("0.9.30".into(), "player".into()))
+        );
+        assert_eq!(
+            pick(None, Ok(from("0.9.30", "github"))),
+            Ok(("0.9.30".into(), "github".into()))
+        );
+        assert_eq!(
+            pick(None, Err("no way to GitHub".into())),
+            Err("no way to GitHub".into())
+        );
+    }
+
     /// A tar of regular files, as `tar` writes them, gzipped.
     fn tar_gz(files: &[(&str, &[u8])]) -> Vec<u8> {
         let mut tar = Vec::new();
@@ -1351,6 +1524,7 @@ mod tests {
             asset: String::new(),
             sums_url: None,
             sig_url: None,
+            source: String::new(),
         };
         assert_eq!(checked(&release, archive.clone()), Ok(archive.clone()));
         assert!(checked(&release, b"an archivE".to_vec())
@@ -1533,6 +1707,7 @@ mod tests {
             asset: String::new(),
             sums_url: None,
             sig_url: None,
+            source: String::new(),
         };
         let product = glass();
         // One that says another version, one that fails, one that is no program: the old one stays.
