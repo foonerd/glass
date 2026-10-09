@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.28] - 2026-10-09
+
+- **An uploaded font on a Windows remote.** A font uploaded to the player, chosen for a style, drew in the fallback font on a Windows remote while the player and a Linux remote drew it: the remote keeps its copy under a drive path, which begins with no slash, and the resolver took only a slash-led path for a whole one. A path is now absolute as the platform says. Asked on the forum.
+
 ## [0.9.27] - 2026-10-08
 
 - **A remote waits for the persist period before its face.** With "When the player stops: After the persist period", a remote showed the clock the moment the player paused or stopped, while the player's own screen waited: the countdown the plugin pushes over the channel was kept by the remote but never read, since the display looked for the player's persist file first, which a remote does not have. The line pushed over the channel is now read first, on every display; the file where there is no line.
