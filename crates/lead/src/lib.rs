@@ -4219,7 +4219,9 @@ pub fn fonts_from_config(text: &str, plugin_fonts: &Path) -> FontFiles {
         if builtin || force_builtin && !is_file(Path::new(value)) {
             return shipped(face);
         }
-        if value.starts_with('/') && is_file(Path::new(value)) {
+        // A whole path to a file that is there is kept as it is: on Windows
+        // a drive's path, which begins with no slash.
+        if Path::new(value).is_absolute() && is_file(Path::new(value)) {
             return value.to_string();
         }
         if base.is_empty() {
@@ -4235,7 +4237,7 @@ pub fn fonts_from_config(text: &str, plugin_fonts: &Path) -> FontFiles {
             .join("DSEG7Classic-Italic.ttf")
             .to_string_lossy()
             .into_owned()
-    } else if base.is_empty() || digi.starts_with('/') && is_file(Path::new(digi)) {
+    } else if base.is_empty() || Path::new(digi).is_absolute() && is_file(Path::new(digi)) {
         digi.to_string()
     } else {
         // A player font by its name, under `font.path` as the other styles'.
