@@ -389,7 +389,16 @@ const THEME_GALLERY_CACHE_EXTS = ['.png', '.jpg', '.jpeg'];
 const FanartCacheDir = PluginPath + '/fanart-cache';
 const FanartSectionPrefix = 'user_interface/glass/fanart-cache/';
 const FanartPersonalArtDir = '/data/albumart/personal/artist';
-const FANART_TV_PROJECT_KEY = '9bb4ee75161ec1245cb377bf2716b90b';
+// No fanart.tv key ships with Glass: a listener brings their own. For
+// development a key is read from a file on the player, outside every
+// package: present, it is used in place of the personal key.
+const DEV_FANART_KEY_FILE = '/data/INTERNAL/glass/dev/fanart.key';
+function devFanartKey() {
+    try {
+        var key = String(fs.readFileSync(DEV_FANART_KEY_FILE, 'utf8') || '').trim();
+        return /^[0-9a-f]{32}$/i.test(key) ? key : '';
+    } catch (e) { return ''; }
+}
 const FANART_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const FANART_IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp'];
 const FANART_MAX_IMAGES = 30;
@@ -4188,7 +4197,7 @@ Glass.prototype.fanartResolveMBID = async function (artist) {
 };
 
 Glass.prototype.fanartFetchFanartTv = async function (mbid, apiKey) {
-  var url = 'https://webservice.fanart.tv/v3/music/' + encodeURIComponent(mbid) + '?api_key=' + encodeURIComponent(apiKey || FANART_TV_PROJECT_KEY);
+  var url = 'https://webservice.fanart.tv/v3/music/' + encodeURIComponent(mbid) + '?api_key=' + encodeURIComponent(apiKey);
   var body = await fanartHttpsGetText(url, { 'Accept': 'application/json' }, 10000);
   var json = JSON.parse(body);
   var urls = [];
@@ -4273,15 +4282,12 @@ Glass.prototype.getArtistFanart = async function (data) {
       sourceSig = localSource.fingerprint;
     }
 
-    // Tier 3: fanart.tv full set (MBID via MusicBrainz). Key mode decides which
-    // api_key is used: 'project' = built-in key (testing/development only),
-    // 'personal' = the listener's own fanart.tv key (required; skipped if blank).
+    // Tier 3: fanart.tv full set (MBID via MusicBrainz). The api_key is the
+    // development key on the player where one is present, else the
+    // listener's own fanart.tv key; none, and this tier is skipped.
     if (!picked.length) {
-      var keyMode = self.config.get('fanartKeyMode') || 'personal';
-      var apiKey = '';
-      if (keyMode === 'project') {
-        apiKey = FANART_TV_PROJECT_KEY;
-      } else {
+      var apiKey = devFanartKey();
+      if (!apiKey) {
         try { apiKey = (self.config.get('fanart_personal_key') || '').trim(); } catch (e) {}
       }
       if (apiKey) {
@@ -5958,12 +5964,12 @@ Glass.prototype.setDisplayPlacement = function (data) {
 // The artist fanart slideshow's settings.
 Glass.prototype.artworkSettings = function () {
     var self = this;
-    var keyMode = self.config.get('fanartKeyMode') || 'personal';
     var order = self.config.get('fanartOrder') || 'sequential';
     var transition = self.config.get('fanartTransition') || 'none';
     return {
         enabled: self.config.get('fanartEnabled') === true,
-        keyMode: keyMode === 'project' ? 'project' : 'personal',
+        // 'development' where the player holds a development key file; else the listener's own key.
+        keyMode: devFanartKey() ? 'development' : 'personal',
         personalKey: String(self.config.get('fanart_personal_key') || ''),
         interval: parseInt(self.config.get('fanartInterval'), 10) || 0,
         order: order === 'random' ? 'random' : 'sequential',
@@ -5979,7 +5985,7 @@ Glass.prototype.setArtworkSettings = function (data) {
     var now = self.artworkSettings();
     var pickBool = function (v, fallback) { return v === undefined ? fallback : (v === true || v === 'true'); };
     var enabled = pickBool(data.enabled, now.enabled);
-    var keyMode = data.keyMode === undefined ? now.keyMode : (data.keyMode === 'project' ? 'project' : 'personal');
+    var keyMode = 'personal';
     var key = data.personalKey === undefined ? now.personalKey : String(data.personalKey).trim();
     var interval = data.interval === undefined ? now.interval : parseInt(data.interval, 10);
     if (isNaN(interval) || interval < 0) { interval = 0; }

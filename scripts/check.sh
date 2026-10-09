@@ -158,4 +158,11 @@ else
   echo "check: undefined names: neither node nor docker found, skipped" >&2
 fi
 
+# No API key in the source: a 32-hex literal in the plugin is one.
+if grep -nE "['\"][0-9a-f]{32}['\"]" plugin/index.js plugin/manager/*.js | grep -v "test/" >/dev/null; then
+  echo "check: a key-like literal is in the plugin's source:" >&2
+  grep -nE "['\"][0-9a-f]{32}['\"]" plugin/index.js plugin/manager/*.js | grep -v "test/" >&2
+  exit 1
+fi
+
 echo "check: clean"

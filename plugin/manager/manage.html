@@ -322,7 +322,6 @@
           <label id="art-keymode-label"></label>
           <select id="art-keymode">
             <option value="personal"></option>
-            <option value="project"></option>
           </select>
         </div>
         <div>
@@ -828,7 +827,6 @@
     $('art-enabled-label').textContent = t('FANART_ENABLE_LABEL');
     $('art-keymode-label').textContent = t('FANART_KEY_MODE_LABEL');
     $('art-keymode').options[0].textContent = t('FANART_KEY_MODE_PERSONAL');
-    $('art-keymode').options[1].textContent = t('FANART_KEY_MODE_PROJECT');
     $('art-key-label').textContent = t('FANART_KEY_LABEL');
     $('art-interval-label').textContent = t('FANART_INTERVAL_LABEL');
     $('art-order-label').textContent = t('FANART_ORDER_LABEL');
@@ -1602,7 +1600,10 @@
   function loadArtwork() {
     api('GET', '/api/artwork').then(function (a) {
       $('art-enabled').checked = a.enabled;
-      $('art-keymode').value = a.keyMode;
+      // A development key on the player stands in for the choice: the label says so.
+      $('art-keymode').value = 'personal';
+      $('art-keymode').disabled = a.keyMode === 'development';
+      $('art-keymode-label').textContent = a.keyMode === 'development' ? t('MANAGER_ART_DEV_KEY') : t('FANART_KEY_MODE_LABEL');
       $('art-key').value = a.personalKey;
       $('art-interval').value = a.interval;
       $('art-order').value = a.order;
@@ -1759,7 +1760,7 @@
         }).join(' · ') + ' · ' + s.fonts.uploaded + ' ' + t('MANAGER_ST_FONTS_UPLOADED')],
           ['MANAGER_ST_SHARE', !s.sharing ? '-' : (s.sharing.shared ? t('MANAGER_ST_SHARE_EDITABLE') : t('MANAGER_ST_SHARE_READONLY'))],
           ['MANAGER_CD_TITLE', !s.cardash || !s.cardash.enabled ? t('MANAGER_ST_OFF') : ((s.cardash.period === 'day' ? t('MANAGER_CD_NOW_DAY') : t('MANAGER_CD_NOW_NIGHT')) + ' ' + (s.cardash.period === 'day' ? s.cardash.dayTheme : s.cardash.nightTheme) + (s.cardash.next ? ' · ' + t('MANAGER_CD_NEXT') + ' ' + new Date(s.cardash.next.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : '') + (s.cardash.mode === 'sun' ? ' · ' + t('MANAGER_CD_MODE_SUN').toLowerCase() : ''))],
-          ['MANAGER_ARTWORK_TITLE', !s.artwork ? '-' : (s.artwork.enabled ? t('MANAGER_ST_ON') : t('MANAGER_ST_OFF')) + (s.artwork.enabled ? ' · ' + (s.artwork.keyMode === 'project' ? t('FANART_KEY_MODE_PROJECT') : t('FANART_KEY_MODE_PERSONAL')) + ' · ' + (s.artwork.interval > 0 ? t('MANAGER_ST_EVERY') + ' ' + s.artwork.interval + ' s' : t('MANAGER_ST_ON_TITLE_CHANGE')) : '') + ' · ' + s.artwork.cachedArtists + ' ' + t('MANAGER_ST_ARTISTS_CACHED')],
+          ['MANAGER_ARTWORK_TITLE', !s.artwork ? '-' : (s.artwork.enabled ? t('MANAGER_ST_ON') : t('MANAGER_ST_OFF')) + (s.artwork.enabled ? ' · ' + (s.artwork.keyMode === 'development' ? t('MANAGER_ART_DEV_KEY') : t('FANART_KEY_MODE_PERSONAL')) + ' · ' + (s.artwork.interval > 0 ? t('MANAGER_ST_EVERY') + ' ' + s.artwork.interval + ' s' : t('MANAGER_ST_ON_TITLE_CHANGE')) : '') + ' · ' + s.artwork.cachedArtists + ' ' + t('MANAGER_ST_ARTISTS_CACHED')],
           ['MANAGER_ST_CATALOG', s.catalog.count + ' ' + t('MANAGER_CATALOG_ENTRIES') + (s.catalog.updated ? ' · ' + t('MANAGER_CATALOG_UPDATED') + ' ' + fmtDate(s.catalog.updated) : '') + ' · ' + s.catalog.installed + ' ' + t('MANAGER_ST_INSTALLED_FROM')],
           ['MANAGER_ST_THEME_FILES', !s.themeFiles ? '-' : !s.themeFiles.length ? t('MANAGER_ST_THEME_FILES_NONE') : (function () {
             // The counts, then the files that are not there, missing before optional.
