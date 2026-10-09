@@ -63,6 +63,9 @@ test('the archives of a product are offered in the shape GitHub\'s releases have
   assert.deepEqual(list[1], { tag_name: 'v0.9.29', name: 'Glass 0.9.29', draft: false, prerelease: false, html_url: 'http://player.local:5582/manage', assets: [{ name: 'glass-0.9.29-x64.tar.gz', size: 10, browser_download_url: 'http://player.local:5582/api/shelf/files/glass-0.9.29-x64.tar.gz', digest: 'sha256:' + 'a'.repeat(64) }] });
   assert.equal(releasesOf(archives, 'glass-evo', 'http://p').length, 1);
   assert.deepEqual(releasesOf(archives, 'other', 'http://p'), []);
+  // A remote asks by its asset's stem, as the standalone does: `glass`, not `Glass`.
+  assert.deepEqual(releasesOf(archives, 'glass', 'http://player.local:5582'), list, 'the stem names the product too');
+  assert.deepEqual(releasesOf(archives, '', 'http://p'), []);
 });
 
 test('an archive is placed by what it says it is, the one of the same kind dropped, the ceiling held, the rest refused', async () => {

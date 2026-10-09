@@ -125,8 +125,11 @@ async function examine(file, pem) {
 // (`http://<host>:<port>`, as the remote reached the player). What a
 // remote reads with its own release code, unchanged.
 function releasesOf(archives, product, base) {
+  // A remote asks by its asset's stem, `glass` or `glass-evo`; the page
+  // and the index say `Glass`. Either names the product.
+  const wanted = String(product || '').toLowerCase() === 'glass' ? 'Glass' : String(product || '');
   const byVersion = new Map();
-  archives.filter(function (a) { return a.product === product; }).forEach(function (a) {
+  archives.filter(function (a) { return a.product === wanted; }).forEach(function (a) {
     if (!byVersion.has(a.version)) byVersion.set(a.version, []);
     byVersion.get(a.version).push({
       name: a.name,
@@ -136,7 +139,7 @@ function releasesOf(archives, product, base) {
     });
   });
   return Array.from(byVersion.keys()).sort(byVersionDesc).map(function (version) {
-    return { tag_name: 'v' + version, name: product + ' ' + version, draft: false, prerelease: false, html_url: base + '/manage', assets: byVersion.get(version) };
+    return { tag_name: 'v' + version, name: wanted + ' ' + version, draft: false, prerelease: false, html_url: base + '/manage', assets: byVersion.get(version) };
   });
 }
 
