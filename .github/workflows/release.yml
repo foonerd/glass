@@ -207,8 +207,11 @@ jobs:
             exit 0
           fi
           scripts/sign-release.sh dist keys/release-signing.pub
-      - name: Notes from the changelog
-        run: scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > dist/notes.md
+      - name: Notes from the changelog, with the sponsorship footer
+        run: |
+          scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > dist/notes.md
+          printf '\n' >> dist/notes.md
+          cat .github/release-footer.md >> dist/notes.md
       # Published as a pre-release: no player is offered it but one set to
       # take test releases. It is made the latest by hand once it has been
       # tried (gh release edit <tag> --prerelease=false --latest).
