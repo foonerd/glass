@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.29] - 2026-10-09
+
+- **No fanart.tv key ships with Glass.** The "Project key" choice is gone: the artist fanart slideshow uses the listener's own fanart.tv key, free to register, and nothing else. A developer may place a key in `dev/fanart.key` under the player's Glass folder, outside every package, which is then used in its place and said so on the Artwork tab; the release check refuses a key-like literal in the plugin's source.
+
 ## [0.9.28] - 2026-10-09
 
 - **An uploaded font on a Windows remote.** A font uploaded to the player, chosen for a style, drew in the fallback font on a Windows remote while the player and a Linux remote drew it: the remote keeps its copy under a drive path, which begins with no slash, and the resolver took only a slash-led path for a whole one. A path is now absolute as the platform says. Asked on the forum.
