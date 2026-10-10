@@ -1231,10 +1231,35 @@ pub fn picture_kind(bytes: &[u8]) -> Option<&'static str> {
     }
 }
 
+/// Whether the art cache's trouble has been said: a folder that cannot be
+/// made or written is said once, not at every track.
+#[cfg(not(target_arch = "wasm32"))]
+static ART_CACHE_SAID: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Why a picture was not fetched, said: the cache's trouble once, at Warn,
+/// since nothing will show until it is mended; a fetch that fails at
+/// Verbose, since a track without a cover is ordinary.
+#[cfg(not(target_arch = "wasm32"))]
+fn art_gave_up(cache: bool, why: &str) {
+    if cache {
+        if !ART_CACHE_SAID.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            logline::say!(Warn, "artwork", "album art: {why}; no picture will show");
+        }
+    } else {
+        logline::say!(Verbose, "artwork", "album art: {why}");
+    }
+}
+
 #[cfg(not(target_arch = "wasm32"))]
 fn fetch_art(reported: &str) -> Option<PathBuf> {
     let dir = std::env::temp_dir().join("glass-art");
-    std::fs::create_dir_all(&dir).ok()?;
+    if let Err(e) = std::fs::create_dir_all(&dir) {
+        art_gave_up(
+            true,
+            &format!("the cache folder {} cannot be made: {e}", dir.display()),
+        );
+        return None;
+    }
     let path = dir.join(format!("{:016x}.img", fnv1a(reported)));
     if path.is_file() {
         // Taken up again: it counts as new, so it is not the next to go.
@@ -1243,11 +1268,18 @@ fn fetch_art(reported: &str) -> Option<PathBuf> {
         }
         return Some(path);
     }
+    let url = art_url(reported);
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(3)))
         .build()
         .new_agent();
-    let mut response = agent.get(art_url(reported)).call().ok()?;
+    let mut response = match agent.get(&url).call() {
+        Ok(response) => response,
+        Err(e) => {
+            art_gave_up(false, &format!("{url} could not be fetched: {e}"));
+            return None;
+        }
+    };
     let labelled = response
         .headers()
         .get("content-type")
@@ -1255,13 +1287,29 @@ fn fetch_art(reported: &str) -> Option<PathBuf> {
         .unwrap_or("")
         .to_ascii_lowercase()
         .contains("image");
-    let bytes = response.body_mut().read_to_vec().ok()?;
+    let bytes = match response.body_mut().read_to_vec() {
+        Ok(bytes) => bytes,
+        Err(e) => {
+            art_gave_up(false, &format!("{url} could not be read: {e}"));
+            return None;
+        }
+    };
     // A picture by the server's word, or by its own first bytes where the
     // server gives no word or another.
     if !labelled && picture_kind(&bytes).is_none() {
+        art_gave_up(
+            false,
+            &format!("{url} answered no picture ({} bytes)", bytes.len()),
+        );
         return None;
     }
-    std::fs::write(&path, bytes).ok()?;
+    if let Err(e) = std::fs::write(&path, bytes) {
+        art_gave_up(
+            true,
+            &format!("the picture cannot be kept at {}: {e}", path.display()),
+        );
+        return None;
+    }
     prune_art(&dir, PICTURES_KEPT, &path);
     Some(path)
 }
