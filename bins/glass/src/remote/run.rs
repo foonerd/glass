@@ -40,6 +40,11 @@ pub struct RemoteSession {
     /// A probe of the frames path under way: when it was asked, how many
     /// probes had arrived before, and what the player answered.
     probe: Option<ProbeRun>,
+    /// The text of a theme from this machine that could not be read when
+    /// the session began: looked at once a second, and the session begins
+    /// again the moment it can be read, as when the app has been given
+    /// access to the device's files.
+    unread_text: Option<std::path::PathBuf>,
 }
 
 struct ProbeRun {
@@ -147,6 +152,18 @@ impl RemoteSession {
             "frames {per_s:.0}/s, received {received}, refused {refused}, channel {}",
             if connected { "up" } else { "down" }
         );
+        if let Some(text) = &self.unread_text {
+            if std::fs::read_to_string(text).is_ok() {
+                logline::say!(
+                    Info,
+                    "remotes",
+                    "{} can be read now; starting the session again",
+                    text.display()
+                );
+                self.unread_text = None;
+                self.app.nudge();
+            }
+        }
         let theme = self.theme.clone();
         let meter = skin.name.clone();
         let screen = [skin.width, skin.height];
@@ -862,7 +879,10 @@ pub fn remote_main(
                 Outcome::Reload(_) => continue,
             }
         }
-        // The theme: the player's, or one of its own.
+        // The theme: the player's, or one of its own. A theme from this
+        // machine whose text cannot be read is said so, and on Android the
+        // app is asked to get access to the device's files.
+        let mut unread_text = None;
         let (choice, follow) = match &player.theme {
             ThemeChoice::Follow { .. } => (Choice::default(), true),
             ThemeChoice::Own { folder, meter } => (
@@ -878,6 +898,23 @@ pub fn remote_main(
             ThemeChoice::Local { folder, meter } => {
                 let dir = app.config().themes_dir.unwrap_or_default();
                 let (templates, spectrum) = super::config::local_roots(&dir);
+                let text = templates.join(folder).join("meters.txt");
+                if let Err(e) = std::fs::read_to_string(&text) {
+                    logline::say!(
+                        Warn,
+                        "remotes",
+                        "the theme's text cannot be read: {}: {e}{}",
+                        text.display(),
+                        if cfg!(target_os = "android") {
+                            "; the app needs access to the device's files, asked for now"
+                        } else {
+                            ""
+                        }
+                    );
+                    #[cfg(target_os = "android")]
+                    crate::android::ask_storage_access();
+                    unread_text = Some(text);
+                }
                 (
                     Choice {
                         theme: Some(folder.clone()),
@@ -1018,6 +1055,7 @@ pub fn remote_main(
             name,
             page,
             probe: None,
+            unread_text,
         };
         if let ThemeChoice::Own { meter, .. } | ThemeChoice::Local { meter, .. } = &player.theme {
             logline::say!(

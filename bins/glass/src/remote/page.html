@@ -134,7 +134,7 @@
       </div>
       <div id="local-block" class="full hidden">
         <div class="form">
-          <div class="full"><label>Themes folder on this machine</label><input type="text" id="local-dir" placeholder="/media/music/glass or \\player\Internal Storage\glass"><div class="help">Theme folders, or a templates folder with templates_spectrum beside it, as the player's own data folder is laid out. A network share is mounted first, or named by its UNC path on Windows.</div></div>
+          <div class="full"><label>Themes folder on this machine</label><input type="text" id="local-dir" placeholder="/media/music/glass or \\player\Internal Storage\glass"><div class="help">Theme folders, or a templates folder with templates_spectrum beside it, as the player's own data folder is laid out. A network share is mounted first, or named by its UNC path on Windows. On Android the app needs access to the device's files to read a theme under Download: it asks for it (All files access) once a theme chosen here cannot be read, and the access can be given at any time in the system's settings for the app; the theme is read as soon as the access is there.</div></div>
           <div class="full"><button class="small" id="btn-local-read">Read the folder</button> <span class="help" id="local-found"></span></div>
         </div>
       </div>
@@ -602,7 +602,8 @@
     if (!dir) { state.local = []; $('local-found').textContent = ''; renderOwn(); return Promise.resolve(); }
     return api('GET', '/api/local/themes?dir=' + encodeURIComponent(dir)).then(function (d) {
       state.local = d.themes || [];
-      $('local-found').textContent = state.local.length + (state.local.length === 1 ? ' theme in ' : ' themes in ') + d.templates + (state.local.some(function (t) { return t.spectrum; }) ? ', spectrum twins in ' + d.spectrum : '');
+      var unread = state.local.filter(function (t) { return t.problem; }).length;
+      $('local-found').textContent = state.local.length + (state.local.length === 1 ? ' theme in ' : ' themes in ') + d.templates + (state.local.some(function (t) { return t.spectrum; }) ? ', spectrum twins in ' + d.spectrum : '') + (unread ? '; ' + unread + ' cannot be read: ' + state.local.filter(function (t) { return t.problem; })[0].problem : '');
       renderOwn();
     }).catch(function (e) { state.local = []; $('local-found').textContent = 'Not read: ' + e.message; renderOwn(); });
   }
@@ -612,7 +613,7 @@
   function renderOwn() {
     var own = currentOwn(); var list = themeList();
     var sel = $('own-theme'); var chosen = sel.value || (own && own.folder) || '';
-    sel.innerHTML = list.map(function (t) { return '<option value="' + esc(t.folder) + '">' + esc(t.folder) + (t.width ? ' (' + t.width + 'x' + t.height + ')' : '') + (t.active ? ' (on the player)' : '') + '</option>'; }).join('');
+    sel.innerHTML = list.map(function (t) { return '<option value="' + esc(t.folder) + '">' + esc(t.folder) + (t.width ? ' (' + t.width + 'x' + t.height + ')' : '') + (t.active ? ' (on the player)' : '') + (t.problem ? ' (cannot be read)' : '') + '</option>'; }).join('');
     if (chosen && list.some(function (t) { return t.folder === chosen; })) sel.value = chosen;
     renderNames();
   }

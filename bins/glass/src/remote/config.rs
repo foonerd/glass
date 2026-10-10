@@ -152,6 +152,11 @@ pub struct LocalTheme {
     pub spectrum: bool,
     pub width: Option<u32>,
     pub height: Option<u32>,
+    /// Why the theme's text could not be read, where it could not: a
+    /// folder listed whose files this program may not open, as on Android
+    /// without access to the device's files.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<String>,
 }
 
 /// The themes under a folder on this machine: every folder with a
@@ -170,7 +175,10 @@ pub fn local_themes(dir: &str) -> Result<Vec<LocalTheme>, String> {
         if name.starts_with('.') || !path.join("meters.txt").is_file() {
             continue;
         }
-        let text = std::fs::read_to_string(path.join("meters.txt")).unwrap_or_default();
+        let (text, problem) = match std::fs::read_to_string(path.join("meters.txt")) {
+            Ok(text) => (text, None),
+            Err(e) => (String::new(), Some(e.to_string())),
+        };
         let (width, height) = size_in_name(name);
         themes.push(LocalTheme {
             folder: name.to_string(),
@@ -178,6 +186,7 @@ pub fn local_themes(dir: &str) -> Result<Vec<LocalTheme>, String> {
             spectrum: spectrum.join(name).join("spectrum.txt").is_file(),
             width,
             height,
+            problem,
         });
     }
     themes.sort_by(|a, b| a.folder.cmp(&b.folder));
@@ -767,6 +776,7 @@ mod local_tests {
                     spectrum: true,
                     width: Some(1280),
                     height: Some(720),
+                    problem: None,
                 },
                 LocalTheme {
                     folder: "plain".to_string(),
@@ -774,6 +784,7 @@ mod local_tests {
                     spectrum: false,
                     width: None,
                     height: None,
+                    problem: None,
                 },
             ]
         );

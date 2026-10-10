@@ -714,6 +714,13 @@ impl RemoteApp {
         self.generation.load(Ordering::Acquire)
     }
 
+    /// Ask the frame loop for another start with the configuration as it
+    /// is, as a change to it would: for what changed outside it, such as a
+    /// theme's folder that can be read now.
+    pub fn nudge(&self) {
+        self.generation.fetch_add(1, Ordering::AcqRel);
+    }
+
     /// Change the configuration, check it, keep it, and say so.
     pub fn update(&self, change: impl FnOnce(&mut RemoteConfig)) -> Result<RemoteConfig, String> {
         let mut guard = self.config.lock().unwrap_or_else(|e| e.into_inner());

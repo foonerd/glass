@@ -11,6 +11,29 @@ use crate::{run_with, Overlay};
 extern "C" {
     fn SDL_AndroidGetInternalStoragePath() -> *const c_char;
     fn SDL_SetHint(name: *const c_char, value: *const c_char) -> c_int;
+    fn SDL_AndroidSendMessage(command: u32, param: c_int) -> c_int;
+}
+
+/// The message to the app's activity that opens the system's screen where
+/// the app is given access to the device's files: `COMMAND_USER + 1` on
+/// the Java side (GlassActivity).
+const ASK_STORAGE_ACCESS: u32 = 0x8001;
+static ASKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Ask the activity, once per start of the app, to open the system's
+/// screen that grants access to the device's files: Android lets an app
+/// read what other apps put under Download only with it, and a theme
+/// from a folder on the device lies there. The activity does nothing
+/// when the access is there already.
+pub fn ask_storage_access() {
+    if ASKED.swap(true, std::sync::atomic::Ordering::AcqRel) {
+        return;
+    }
+    // SAFETY: SDL's own call, made from any thread; it posts a message to
+    // the activity's handler and reads nothing of ours.
+    unsafe {
+        SDL_AndroidSendMessage(ASK_STORAGE_ACCESS, 0);
+    }
 }
 
 #[allow(unused_unsafe)]
@@ -39,6 +62,12 @@ pub unsafe fn enter(
         let dir = CStr::from_ptr(storage).to_string_lossy().into_owned();
         set_env("XDG_CONFIG_HOME", &format!("{dir}/config"));
         set_env("XDG_CACHE_HOME", &format!("{dir}/cache"));
+        // The system's temp folder on Android, /data/local/tmp, is the
+        // shell's and closed to an app: what the display keeps for a while,
+        // the album art it fetches among it, goes under the app's cache.
+        let tmp = format!("{dir}/cache/tmp");
+        let _ = std::fs::create_dir_all(&tmp);
+        set_env("TMPDIR", &tmp);
     }
     // A meter theme is landscape; the window turns with the device within that.
     if let (Ok(name), Ok(value)) = (
