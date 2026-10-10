@@ -4197,6 +4197,37 @@ pub fn meter_text_at(meters_txt: &str, meter: &str) -> (Option<(u32, u32)>, Opti
 /// or a file name under `font.path`, the player's own fonts. An older
 /// configuration's `use.system.fonts = False` sets every style to the
 /// built-in face, as it always meant. `font.digi` is the clock font,
+/// Whether a font's value is a whole path rather than a name under
+/// `font.path`: one that begins with a slash, on every target the display
+/// runs on, or one the platform calls absolute, a drive's path on Windows.
+/// The slash is checked by itself: in the browser's module, built for
+/// wasm32-unknown-unknown, the standard library calls no slash-led path
+/// absolute (that target is neither unix nor wasi, so it asks for a
+/// Windows prefix), and the uploaded font's path on the player was taken
+/// for a name there from 0.9.28 to 0.9.33.
+pub fn whole_path(value: &str) -> bool {
+    value.starts_with('/') || Path::new(value).is_absolute()
+}
+
+#[cfg(test)]
+mod whole_path_tests {
+    use super::whole_path;
+
+    #[test]
+    fn a_slash_led_path_is_whole_on_every_target_and_a_name_is_not() {
+        assert!(whole_path("/data/INTERNAL/glass/customfonts/Mine.ttf"));
+        assert!(whole_path("/glass/customfonts/Mine.ttf"));
+        assert!(!whole_path("Mine.ttf"));
+        assert!(!whole_path("customfonts/Mine.ttf"));
+        assert!(!whole_path(""));
+        // A drive's path is the platform's to call whole; a slash-led one needs no platform.
+        assert_eq!(
+            whole_path("C:\\Users\\x\\glass-remote\\customfonts\\Mine.ttf"),
+            std::path::Path::new("C:\\Users\\x\\glass-remote\\customfonts\\Mine.ttf").is_absolute()
+        );
+    }
+}
+
 /// DSEG7 unless a file is named, by a path or under `font.path` as the
 /// others. The fallback is the built-in regular face.
 pub fn fonts_from_config(text: &str, plugin_fonts: &Path) -> FontFiles {
@@ -4219,9 +4250,8 @@ pub fn fonts_from_config(text: &str, plugin_fonts: &Path) -> FontFiles {
         if builtin || force_builtin && !is_file(Path::new(value)) {
             return shipped(face);
         }
-        // A whole path to a file that is there is kept as it is: on Windows
-        // a drive's path, which begins with no slash.
-        if Path::new(value).is_absolute() && is_file(Path::new(value)) {
+        // A whole path to a file that is there is kept as it is.
+        if whole_path(value) && is_file(Path::new(value)) {
             return value.to_string();
         }
         if base.is_empty() {
@@ -4237,7 +4267,7 @@ pub fn fonts_from_config(text: &str, plugin_fonts: &Path) -> FontFiles {
             .join("DSEG7Classic-Italic.ttf")
             .to_string_lossy()
             .into_owned()
-    } else if base.is_empty() || Path::new(digi).is_absolute() && is_file(Path::new(digi)) {
+    } else if base.is_empty() || whole_path(digi) && is_file(Path::new(digi)) {
         digi.to_string()
     } else {
         // A player font by its name, under `font.path` as the other styles'.
