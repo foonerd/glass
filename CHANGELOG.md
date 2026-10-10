@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.34] - 2026-10-10
+
+- **An uploaded font in the browser views again.** From 0.9.28 the Face tab and Anymote drew a style set to an uploaded font in the fallback font, so a title in a script the fallback lacks came out empty, while the player's screen and the remotes drew it. The 0.9.28 fix took the platform's word for a whole path, and in the browser's module the platform calls no slash-led path whole. A path that begins with a slash is whole on every target again, beside the platform's word for a drive's path on Windows. Asked on the forum.
+
 ## [0.9.33] - 2026-10-10
 
 - **The album art fetch says why it gave up.** A picture that could not be fetched, read or kept left no line, so a report could narrow the search without naming the fault. Now a cache folder that cannot be made or written is said once, as a warning, and a fetch that fails is said at the verbose level with the address and the reason, under the `artwork` target.
