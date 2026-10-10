@@ -2,6 +2,11 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.32] - 2026-10-10
+
+- **Album art on Android.** A remote keeps the album art it fetches under the system's temp folder; on Android that folder is the shell's and closed to an app, so every picture was dropped before it was saved and none ever showed. The app now keeps them under its own cache. Asked on the forum.
+- **A theme from a folder on an Android device.** Chosen, such a theme showed a grey screen: Android lets an app read what other apps put under Download only with access to the device's files, which the app never asked for; the folder was listed, since listing is allowed while reading is not, and the theme's text came back empty. The app now asks for the access ("All files access" from Android 11, the read permission before) the first time a theme from the device cannot be read, the display logs why a theme's text could not be read, the page's list says which theme cannot be read, and the theme is taken up as soon as the access is there. Asked on the forum.
+
 ## [0.9.31] - 2026-10-09
 
 - **The shelf answers a remote.** A remote asks the player's shelf for `glass` or `glass-evo`, its archive's stem, while the shelf named its archives `Glass`, so the list a remote read was empty and the remote went to GitHub as before; found with a remote against a player's own shelf. The shelf now answers by the stem as well as by the name.
