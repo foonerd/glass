@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.33] - 2026-10-10
+
+- **The album art fetch says why it gave up.** A picture that could not be fetched, read or kept left no line, so a report could narrow the search without naming the fault. Now a cache folder that cannot be made or written is said once, as a warning, and a fetch that fails is said at the verbose level with the address and the reason, under the `artwork` target.
+
 ## [0.9.32] - 2026-10-10
 
 - **Album art on Android.** A remote keeps the album art it fetches under the system's temp folder; on Android that folder is the shell's and closed to an app, so every picture was dropped before it was saved and none ever showed. The app now keeps them under its own cache. Asked on the forum.
