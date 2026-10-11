@@ -1,8 +1,8 @@
 # The strip on the CD changer's touch screen: a low row of rounded bars in
 # one colour, drawn by the engine.
 [cd-strip]
-spectrum.x = 1190
-spectrum.y = 938
+spectrum.x = 1130
+spectrum.y = 915
 bgr.type = color
 bgr.color = 0,0,0,0
 style = bars
