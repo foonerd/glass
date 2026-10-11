@@ -3450,19 +3450,11 @@ pub fn render_changer(spec: &lead::ChangerSpec, discs: &[lead::Disc]) -> (Frame,
         );
     }
     let mask = label_mask(spec.disc_size);
-    for (slot, (cx, cy)) in centres.iter().enumerate() {
-        let (cx, cy) = (cx - ox, cy - oy);
-        // The spindle the disc sits on, seen whole in an empty slot.
-        disc_shape(&mut frame, cx, cy, d * 0.07, darker(body_color, 35));
-        disc_shape(&mut frame, cx, cy, d * 0.05, lighter(body_color, 6));
-        disc_shape(&mut frame, cx, cy, d * 0.02, darker(body_color, 80));
-        let Some(disc) = discs.get(slot) else {
-            continue;
-        };
-        // The disc: a dark edge, a silver base, the cover as its label inside
-        // a clear rim, the hub and the hole.
-        disc_shape(&mut frame, cx, cy, d / 2.0, darker(body_color, 50));
-        disc_shape(&mut frame, cx, cy, d / 2.0 - 1.5, lighter(body_color, 18));
+    // A disc drawn about a centre: a dark edge, a silver base, the cover as
+    // its label inside a clear rim, the hub and the hole.
+    let draw_disc = |frame: &mut Frame, cx: f32, cy: f32, disc: &lead::Disc| {
+        disc_shape(frame, cx, cy, d / 2.0, darker(body_color, 50));
+        disc_shape(frame, cx, cy, d / 2.0 - 1.5, lighter(body_color, 18));
         if !disc.art_file.is_empty() {
             if let Some(label) = read_art(
                 Path::new(&disc.art_file),
@@ -3471,23 +3463,40 @@ pub fn render_changer(spec: &lead::ChangerSpec, discs: &[lead::Disc]) -> (Frame,
                 Some(&mask),
             ) {
                 let at = ((cx - d / 2.0).round() as i32, (cy - d / 2.0).round() as i32);
-                blit_op(&label, at).paint(&mut Band::whole(&mut frame));
+                blit_op(&label, at).paint(&mut Band::whole(frame));
             }
         }
-        disc_shape(&mut frame, cx, cy, d * 0.13, lighter(body_color, 10));
-        disc_shape(&mut frame, cx, cy, d * 0.075, darker(body_color, 30));
-        disc_shape(&mut frame, cx, cy, d * 0.035, darker(body_color, 90));
+        disc_shape(frame, cx, cy, d * 0.13, lighter(body_color, 10));
+        disc_shape(frame, cx, cy, d * 0.075, darker(body_color, 30));
+        disc_shape(frame, cx, cy, d * 0.035, darker(body_color, 90));
+    };
+    // The spindle a slot holds its disc on, seen whole when the slot is
+    // empty: no disc in the queue for it, or its disc out on the platter.
+    let spindle = |frame: &mut Frame, cx: f32, cy: f32| {
+        disc_shape(frame, cx, cy, d * 0.07, darker(body_color, 35));
+        disc_shape(frame, cx, cy, d * 0.05, lighter(body_color, 6));
+        disc_shape(frame, cx, cy, d * 0.02, darker(body_color, 80));
+    };
+    for (slot, (cx, cy)) in centres.iter().enumerate() {
+        let (cx, cy) = (cx - ox, cy - oy);
+        spindle(&mut frame, cx, cy);
+        match discs.get(slot) {
+            Some(disc) if !disc.playing => draw_disc(&mut frame, cx, cy, disc),
+            _ => {}
+        }
     }
-    // The platter at the park: a dark glass ring, the dish, its spindle.
+    // The platter at the park: a dark glass ring, the dish, its spindle, and
+    // the playing disc on it, out of its slot, under the head.
     {
         let (px, py) = (hx - ox, hy - oy);
         disc_shape(&mut frame, px, py, platter, darker(body_color, 120));
         disc_shape(&mut frame, px, py, platter * 0.9, darker(body_color, 150));
         disc_shape(&mut frame, px, py, platter * 0.74, lighter(body_color, 4));
         disc_shape(&mut frame, px, py, platter * 0.7, body_color);
-        disc_shape(&mut frame, px, py, d * 0.07, darker(body_color, 35));
-        disc_shape(&mut frame, px, py, d * 0.05, lighter(body_color, 6));
-        disc_shape(&mut frame, px, py, d * 0.02, darker(body_color, 80));
+        spindle(&mut frame, px, py);
+        if let Some(disc) = discs.iter().find(|disc| disc.playing) {
+            draw_disc(&mut frame, px, py, disc);
+        }
     }
     // The head over the platter: a block with a darker rim and a lighter
     // face, its hinge a line across the end nearest the rail, its lamp at
@@ -3578,7 +3587,6 @@ mod changer_tests {
         let discs = vec![
             lead::Disc {
                 index: 3,
-                playing: true,
                 title: "A".into(),
                 ..Default::default()
             },
@@ -3589,6 +3597,20 @@ mod changer_tests {
             },
         ];
         let (frame, at) = render_changer(&spec, &discs);
+        // The playing disc leaves its slot for the platter under the head:
+        // beside the head's block the platter shows the disc, not its ring.
+        let mut playing = discs.clone();
+        playing[0].playing = true;
+        let (out, _) = render_changer(&spec, &playing);
+        let beside_head = (330 + 126 - at.0, 300 - at.1);
+        assert!(
+            pixel(&out, beside_head.0, beside_head.1)[0] > pixel(&frame, beside_head.0, beside_head.1)[0],
+            "the playing disc lies on the platter"
+        );
+        assert!(
+            pixel(&out, 760 + 120 - at.0, 300 - at.1)[0] < pixel(&frame, 760 + 120 - at.0, 300 - at.1)[0],
+            "its slot is empty meanwhile"
+        );
         // The picture reaches from before the head to past the last slot's recess.
         assert!(
             at.0 < 330 - 51 && at.1 < 300 - 150 - 54,

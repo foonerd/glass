@@ -58,8 +58,9 @@ volume.arc.width = 5
 volume.arc.glow = 10
 volume.color = 240,240,245
 volume.bg.color = 40,40,46
-volume.value.pos = 280,788,regular
+volume.value.pos = 56,792,regular
 volume.value.align = center
+volume.value.maxwidth = 448
 volume.value.format = {}
 volume.value.mute = MUTE
 
@@ -147,8 +148,9 @@ volume.arc.width = 5
 volume.arc.glow = 10
 volume.color = 240,240,245
 volume.bg.color = 40,40,46
-volume.value.pos = 280,788,regular
+volume.value.pos = 56,792,regular
 volume.value.align = center
+volume.value.maxwidth = 448
 volume.value.format = {}
 volume.value.mute = MUTE
 
