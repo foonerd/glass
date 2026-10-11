@@ -3448,7 +3448,14 @@ pub struct ChangerMotion {
     /// its dissolve under way.
     leaving: Option<(lead::Disc, usize)>,
     fade: Option<Move>,
+    /// When the player last stopped being engaged: a player reports a
+    /// short stop between two tracks, which is no stop for the mechanism.
+    disengaged_ms: Option<u64>,
 }
+
+/// How long a player may report no play before the mechanism takes it for
+/// a pause or a stop: the gap a player leaves between two tracks.
+const DISENGAGE_GRACE_MS: u64 = 1500;
 
 impl ChangerMotion {
     pub fn advance(&mut self, changer: &plot::Changer, now_ms: u64) -> ChangerPose {
@@ -3465,7 +3472,17 @@ impl ChangerMotion {
             .position(|disc| disc.playing)
             .and_then(|slot| centres.get(slot).copied())
             .map(along_of);
-        let engaged = changer.engaged && playing.is_some();
+        // A player reports a short stop between two tracks: the mechanism
+        // keeps playing through it, and takes a pause or a stop for one
+        // only after the grace.
+        let player_engaged = if changer.engaged {
+            self.disengaged_ms = None;
+            true
+        } else {
+            let since = *self.disengaged_ms.get_or_insert(now_ms);
+            now_ms.saturating_sub(since) < DISENGAGE_GRACE_MS
+        };
+        let engaged = player_engaged && playing.is_some();
         let dt = self
             .last_ms
             .map_or(0.0, |last| (now_ms.saturating_sub(last) as f32 / 1000.0).min(0.5));
@@ -3477,7 +3494,7 @@ impl ChangerMotion {
         let radius = *self.radius.get_or_insert(home);
         // The park is for a pause or a stop alone: while the player plays
         // on, a frame without its disc holds the arm where it is.
-        let target_along = if changer.engaged {
+        let target_along = if player_engaged {
             playing.unwrap_or(along)
         } else {
             park
@@ -3617,6 +3634,47 @@ pub struct ChangerDrawing {
     pub over: Option<(Frame, (i32, i32))>,
 }
 
+/// A piece cut to the well's span along the bar, `lo..hi`: what lies
+/// outside the slots is not shown, so a disc sliding in comes from behind
+/// the well's edge. None when nothing of the piece lies within.
+fn within_well(
+    piece: Frame,
+    at: (i32, i32),
+    horizontal: bool,
+    lo: i32,
+    hi: i32,
+) -> Option<(Frame, (i32, i32))> {
+    let (start, len) = if horizontal {
+        (at.0, piece.width as i32)
+    } else {
+        (at.1, piece.height as i32)
+    };
+    let from = start.max(lo);
+    let to = (start + len).min(hi);
+    if to <= from {
+        return None;
+    }
+    if from == start && to == start + len {
+        return Some((piece, at));
+    }
+    let (x0, y0, w, h) = if horizontal {
+        ((from - start) as u32, 0u32, (to - from) as u32, piece.height)
+    } else {
+        (0u32, (from - start) as u32, piece.width, (to - from) as u32)
+    };
+    let mut out = empty_frame(w, h);
+    let row = (w * 4) as usize;
+    for y in 0..h {
+        let s = (((y0 + y) * piece.width + x0) * 4) as usize;
+        let d = (y * w * 4) as usize;
+        out.rgba[d..d + row].copy_from_slice(&piece.rgba[s..s + row]);
+    }
+    Some((
+        out,
+        if horizontal { (from, at.1) } else { (at.0, from) },
+    ))
+}
+
 /// The pieces of one layer composed into one picture about their union,
 /// or none when there are no pieces.
 fn compose(pieces: &[(Frame, (i32, i32))]) -> Option<(Frame, (i32, i32))> {
@@ -3692,15 +3750,26 @@ pub fn render_changer(
     } else {
         (0.0, pose.row_offset)
     };
+    // The well's span along the bar: from the first slot's edge to the
+    // last's; the discs show within it alone.
+    let half = d as i32 / 2;
+    let (well_lo, well_hi) = match (centres.first(), centres.last()) {
+        (Some(first), Some(last)) if spec.horizontal => {
+            (first.0.round() as i32 - half, last.0.round() as i32 + half)
+        }
+        (Some(first), Some(last)) => (first.1.round() as i32 - half, last.1.round() as i32 + half),
+        _ => (i32::MIN, i32::MAX),
+    };
+    let in_well = |piece: Frame, at: (i32, i32)| within_well(piece, at, spec.horizontal, well_lo, well_hi);
     // The disc leaving the row dissolves in its own slot, the row standing
     // one pitch off behind it until it is gone.
     if let (Some(disc_picture), Some((disc, slot, alpha))) = (&disc_picture, leaving) {
         if let Some((cx, cy)) = centres.get(slot) {
             let at = centred(disc_picture, *cx, *cy);
             if let Some(cover) = cache.cover(&disc.art_file, d, mask.as_ref()) {
-                under.push((faded(&cover, alpha), at));
+                under.extend(in_well(faded(&cover, alpha), at));
             }
-            under.push((faded(disc_picture, alpha), at));
+            under.extend(in_well(faded(disc_picture, alpha), at));
         }
     }
     if let Some(disc_picture) = &disc_picture {
@@ -3713,12 +3782,12 @@ pub fn render_changer(
             let cover = cache.cover(&disc.art_file, d, mask.as_ref());
             if turning_slot == Some(slot) {
                 turning = cover.map(|cover| (cover, (cx, cy)));
-                over.push((disc_picture.clone(), at));
+                over.extend(in_well(disc_picture.clone(), at));
             } else {
                 if let Some(cover) = cover {
-                    under.push((cover, at));
+                    under.extend(in_well(cover, at));
                 }
-                under.push((disc_picture.clone(), at));
+                under.extend(in_well(disc_picture.clone(), at));
             }
         }
     }
@@ -4075,6 +4144,57 @@ mod changer_tests {
         let blink = scene(&spec, window(1, 7), 0.0, DISC_SECONDS, true);
         let p = motion.advance(&blink, 13100);
         assert_eq!(p.along, 550.0, "no bounce toward the park");
+        // The player's short stop between two tracks is no stop: the arm
+        // stays and the disc keeps turning through it.
+        let gap = scene(&spec, window(1, 1), 0.0, DISC_SECONDS, false);
+        let p = motion.advance(&gap, 13400);
+        assert_eq!(p.along, 550.0, "the arm through the gap");
+        assert!(p.spinning, "the disc through the gap");
+        let p = motion.advance(&third, 13700);
+        assert!(p.spinning);
+        // While the row slides, a disc stands past the well's edge: nothing
+        // of it shows there.
+        let mut cache = ChangerCache::default();
+        let off = ChangerPose { along: 550.0, radius: 21.0, degrees: 0.0, spinning: false, row_offset: 150.0 };
+        let drawing = render_changer(&third, &mut cache, &off, None);
+        let (frame, at) = drawing.under;
+        let (x, y) = (700 + 50 + 20 - at.0, 300 - at.1);
+        let past_the_well = if x >= 0 && y >= 0 && x < frame.width as i32 && y < frame.height as i32 {
+            frame.rgba[((y as u32 * frame.width + x as u32) * 4 + 3) as usize]
+        } else {
+            0
+        };
+        assert_eq!(past_the_well, 0, "nothing past the well's edge");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_display_joining_a_playing_player_loads_and_settles() {
+        let (dir, spec) = theme("join");
+        let window = |first: i64, playing_slot: usize| -> Vec<lead::Disc> {
+            (0..3)
+                .map(|i| lead::Disc {
+                    index: first + i as i64,
+                    playing: i == playing_slot,
+                    ..Default::default()
+                })
+                .collect()
+        };
+        let mut motion = ChangerMotion::default();
+        // The state comes before the queue: engaged, no discs yet.
+        let blind = scene(&spec, Vec::new(), 0.2, DISC_SECONDS, true);
+        motion.advance(&blind, 0);
+        motion.advance(&blind, 100);
+        // The queue: the second track in the middle slot. Eight seconds on
+        // the arm is over it, the row in place, the disc turning.
+        let second = scene(&spec, window(0, 1), 0.2, DISC_SECONDS, true);
+        let mut p = motion.advance(&second, 200);
+        for t in 3..=80 {
+            p = motion.advance(&second, t * 100);
+        }
+        assert_eq!(p.along, 550.0, "the arm over the disc: {:?}", p);
+        assert_eq!(p.row_offset, 0.0, "the row in place: {:?}", p);
+        assert!(p.spinning);
         let _ = std::fs::remove_dir_all(dir);
     }
 
