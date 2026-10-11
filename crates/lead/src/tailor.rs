@@ -173,8 +173,6 @@ const RULES: &[(&str, Kind)] = &[
     ("changer.shift.duration", Kind::Keep),
     ("changer.fade.duration", Kind::Keep),
     ("changer.toc.duration", Kind::Keep),
-    ("changer.laser.filename", Kind::Picture),
-    ("changer.laser.offset", Kind::Point),
     ("changer.disc.filename", Kind::Picture),
     ("changer.label.mask", Kind::Picture),
     ("changer.head.filename", Kind::Picture),

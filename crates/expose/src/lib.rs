@@ -3778,13 +3778,14 @@ pub fn render_changer(
     let disc_picture = cache.picture(&spec.disc_file).map(|f| fit_art(&f, d, d));
     let mask = cache.picture(&spec.mask_file).map(|f| fit_art(&f, d, d));
     let head = cache.picture(&spec.head_file);
-    let sled = cache.picture(&spec.sled_file);
-    let rail = cache.picture(&spec.rail_file);
-    let laser = if pose.laser {
-        cache.picture(&spec.laser_file)
+    // The sled's second picture while the disc is read, the lens lit.
+    let sled_file = if pose.laser && !spec.sled_on_file.is_empty() {
+        spec.sled_on_file.as_str()
     } else {
-        None
+        spec.sled_file.as_str()
     };
+    let sled = cache.picture(sled_file);
+    let rail = cache.picture(&spec.rail_file);
     let centred = |picture: &Frame, cx: f32, cy: f32| -> (i32, i32) {
         (
             (cx - picture.width as f32 / 2.0).round() as i32,
@@ -3863,16 +3864,7 @@ pub fn render_changer(
             (spec.pos.0 as f32 - pose.radius, ay)
         };
         let at = centred(&sled, sx, sy);
-        shaded(moving, &spec.sled_file, sled, at);
-        // The laser, lit on the sled while the disc is read.
-        if let Some(laser) = laser {
-            let at = centred(
-                &laser,
-                sx + spec.laser_offset.0 as f32,
-                sy + spec.laser_offset.1 as f32,
-            );
-            moving.push((laser, at));
-        }
+        shaded(moving, sled_file, sled, at);
     }
     if let Some(head) = head {
         let at = centred(&head, ax, ay);
@@ -3953,7 +3945,7 @@ mod changer_tests {
         write_png(&dir.join("sled.png"), &solid_frame(60, 10, [10, 10, 200, 255])).unwrap();
         write_png(&dir.join("rail.png"), &solid_frame(600, 6, [200, 200, 10, 255])).unwrap();
         write_png(&dir.join("cover.png"), &solid_frame(30, 30, [220, 20, 20, 255])).unwrap();
-        write_png(&dir.join("laser.png"), &solid_frame(6, 6, [255, 0, 0, 255])).unwrap();
+        write_png(&dir.join("sled_on.png"), &solid_frame(60, 10, [200, 10, 10, 255])).unwrap();
         let file = |name: &str| dir.join(name).to_string_lossy().to_string();
         let spec = lead::ChangerSpec {
             slots: 3,
@@ -3971,8 +3963,7 @@ mod changer_tests {
             shift_s: 0.5,
             fade_s: 0.5,
             toc_s: 0.4,
-            laser_file: file("laser.png"),
-            laser_offset: (0, 0),
+            sled_on_file: file("sled_on.png"),
             disc_file: file("disc.png"),
             mask_file: file("mask.png"),
             head_file: file("head.png"),
@@ -4080,7 +4071,8 @@ mod changer_tests {
         assert_eq!(pixel(&out, at, 150, 240)[3], 0, "the park is clear");
         let r = sled_radius(&halfway);
         assert!(r > 21.0 && r < 48.0, "the sled out from home: {r}");
-        assert_eq!(pixel(&out, at, 550 + 22, 300 - r.round() as i32)[2], 200, "the sled at its radius");
+        let on_sled = pixel(&out, at, 550 + 22, 300 - r.round() as i32);
+        assert!(on_sled[0] == 200 || on_sled[2] == 200, "the sled at its radius, its lens lit: {on_sled:?}");
         // The sled's reach: a full disc's end is the edge; a short track's end
         // is short of it; a stream holds the sled home.
         let full = scene(&spec, playing.clone(), 1.0, DISC_SECONDS, true);

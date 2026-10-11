@@ -5063,11 +5063,10 @@ pub struct ChangerSpec {
     /// once the disc is up to speed, sweeping a little out and back with
     /// the laser on, before it seeks to the track.
     pub toc_s: f32,
-    /// `changer.laser.filename` and `changer.laser.offset`: the laser's
-    /// picture, lit on the sled while the disc is read, and where its
-    /// centre sits from the sled's centre.
-    pub laser_file: String,
-    pub laser_offset: (i32, i32),
+    /// The sled's second picture, from `changer.sled.filename`'s list,
+    /// shown in place of the first while the disc is read: the lens lit,
+    /// as the theme draws it. Empty for one picture throughout.
+    pub sled_on_file: String,
     /// `changer.disc.filename`, `changer.label.mask`, `changer.head.filename`,
     /// `changer.rail.filename`, `changer.sled.filename`: the theme's pictures
     /// as paths. The disc is drawn over the cover, which shows through the
@@ -5149,13 +5148,22 @@ pub fn meter_changer(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<C
         shift_s: seconds("changer.shift.duration", 0.6),
         fade_s: seconds("changer.fade.duration", 0.5),
         toc_s: seconds("changer.toc.duration", 0.8),
-        laser_file: path("changer.laser.filename"),
-        laser_offset: ipair("changer.laser.offset").unwrap_or((0, 0)),
+        sled_on_file: get("changer.sled.filename")
+            .and_then(|list| list.split(',').nth(1))
+            .map(str::trim)
+            .filter(|f| !f.is_empty())
+            .map(|f| if theme_dir.is_empty() { f.to_string() } else { format!("{}/{f}", theme_dir.trim_end_matches('/')) })
+            .unwrap_or_default(),
         disc_file: path("changer.disc.filename"),
         mask_file: path("changer.label.mask"),
         head_file: path("changer.head.filename"),
         rail_file: path("changer.rail.filename"),
-        sled_file: path("changer.sled.filename"),
+        sled_file: get("changer.sled.filename")
+            .and_then(|list| list.split(',').next())
+            .map(str::trim)
+            .filter(|f| !f.is_empty())
+            .map(|f| if theme_dir.is_empty() { f.to_string() } else { format!("{}/{f}", theme_dir.trim_end_matches('/')) })
+            .unwrap_or_default(),
     })
 }
 
