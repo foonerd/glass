@@ -3604,7 +3604,13 @@ pub fn render_changer(
     } else {
         (hx, pose.along)
     };
-    let playing = discs.iter().position(|disc| disc.playing);
+    // The disc that turns is the one under the arm, not the one the player
+    // names: at a change the arm is still over the old disc while it spins
+    // down, and over nothing while it travels.
+    let turning_slot = centres.iter().position(|(cx, cy)| {
+        let there = if spec.horizontal { *cx } else { *cy };
+        (there - pose.along).abs() < 0.5
+    });
     let disc_picture = cache.picture(&spec.disc_file).map(|f| fit_art(&f, d, d));
     let mask = cache.picture(&spec.mask_file).map(|f| fit_art(&f, d, d));
     let head = cache.picture(&spec.head_file);
@@ -3636,7 +3642,7 @@ pub fn render_changer(
             let (cx, cy) = (cx + row_dx, cy + row_dy);
             let at = centred(disc_picture, cx, cy);
             let cover = cache.cover(&disc.art_file, d, mask.as_ref());
-            if playing == Some(slot) {
+            if turning_slot == Some(slot) {
                 turning = cover.map(|cover| (cover, (cx, cy)));
                 over.push((disc_picture.clone(), at));
             } else {
