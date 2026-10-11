@@ -3290,7 +3290,10 @@ fn changer_key(changer: &plot::Changer, pose: &ChangerPose) -> String {
         key.push_str(&disc.title);
         key.push(if disc.playing { '*' } else { '.' });
     }
-    key.push_str(&format!("|{:.0}|{:.0}", pose.along, pose.radius));
+    key.push_str(&format!(
+        "|{:.0}|{:.0}|{:.0}",
+        pose.along, pose.radius, pose.row_offset
+    ));
     key
 }
 
@@ -3344,6 +3347,9 @@ pub struct ChangerPose {
     pub radius: f32,
     pub degrees: f32,
     pub spinning: bool,
+    /// How far the row of discs stands from its slots along the bar while
+    /// it slides under the arm; 0 at rest.
+    pub row_offset: f32,
 }
 
 /// One eased move of a part from one place to another over a duration:
@@ -3426,6 +3432,11 @@ pub struct ChangerMotion {
     last_ms: Option<u64>,
     travel: Option<Move>,
     seek: Option<Move>,
+    /// The queue index in the first slot, to see the window move on.
+    first_index: Option<i64>,
+    /// Slots the row has yet to slide, and the slide under way.
+    pending_shift: i32,
+    row: Option<Move>,
 }
 
 impl ChangerMotion {
@@ -3444,8 +3455,6 @@ impl ChangerMotion {
             .and_then(|slot| centres.get(slot).copied())
             .map(along_of);
         let engaged = changer.engaged && playing.is_some();
-        let target_along = playing.filter(|_| engaged).unwrap_or(park);
-        let target_radius = if engaged { sled_radius(changer) } else { home };
         let dt = self
             .last_ms
             .map_or(0.0, |last| (now_ms.saturating_sub(last) as f32 / 1000.0).min(0.5));
@@ -3455,9 +3464,29 @@ impl ChangerMotion {
         // travel, spin up and seek, as it would be.
         let along = *self.along.get_or_insert(park);
         let radius = *self.radius.get_or_insert(home);
+        // The park is for a pause or a stop alone: while the player plays
+        // on, a frame without its disc holds the arm where it is.
+        let target_along = if changer.engaged {
+            playing.unwrap_or(along)
+        } else {
+            park
+        };
+        let target_radius = if engaged { sled_radius(changer) } else { home };
+        // The window moving on by a slot or a few (the next track from the
+        // third on, or one back) slides the row under the arm; a window
+        // that jumps further is a new queue, in place at once.
+        let first_index = changer.discs.first().map(|disc| disc.index);
+        if let (Some(old), Some(new)) = (self.first_index, first_index) {
+            let delta = new - old;
+            if delta != 0 && delta.unsigned_abs() < u64::from(spec.slots.max(1)) {
+                self.pending_shift += delta as i32;
+            }
+        }
+        self.first_index = first_index;
+        let row_busy = self.pending_shift != 0 || self.row.is_some();
         let full_rpm = SPIN_HOME_RPM * home / radius.max(home);
         let in_place = (along - target_along).abs() < 0.5;
-        let want_spin = engaged && in_place;
+        let want_spin = engaged && in_place && !row_busy;
         let rate = |seconds: f32| if seconds > 0.0 { SPIN_HOME_RPM / seconds } else { f32::INFINITY };
         if want_spin {
             self.rpm = (self.rpm + rate(spec.spin_up_s) * dt).min(full_rpm);
@@ -3478,12 +3507,34 @@ impl ChangerMotion {
         } else {
             radius
         };
-        let want_along = if still && sled_home { target_along } else { along };
+        let pitch = spec.pitch.unsigned_abs().max(1) as f32;
+        // The row slides only with the disc still and the sled home, as the
+        // arm travels; the arm waits for the row.
+        if still && sled_home && self.pending_shift != 0 && self.row.is_none() {
+            let slots = self.pending_shift;
+            self.pending_shift = 0;
+            self.row = Some(Move {
+                from: slots as f32 * pitch,
+                to: 0.0,
+                start_ms: now_ms,
+                duration_ms: spec.shift_s * slots.unsigned_abs() as f32 * 1000.0,
+            });
+        }
+        let row_offset = match &self.row {
+            Some(m) => {
+                let at = m.at(now_ms);
+                if m.done(now_ms) {
+                    self.row = None;
+                }
+                at
+            }
+            None => 0.0,
+        };
+        let want_along = if still && sled_home && !row_busy { target_along } else { along };
         let span = (edge - home).max(1.0);
         let radius = glide(&mut self.seek, radius, want_radius, now_ms, |delta| {
             spec.seek_s * delta / span
         });
-        let pitch = spec.pitch.unsigned_abs().max(1) as f32;
         let along = glide(&mut self.travel, along, want_along, now_ms, |delta| {
             spec.travel_s * delta / pitch
         });
@@ -3494,6 +3545,7 @@ impl ChangerMotion {
             radius,
             degrees: self.angle,
             spinning: self.rpm > 0.0,
+            row_offset,
         }
     }
 }
@@ -3570,15 +3622,22 @@ pub fn render_changer(
     if let Some(rail) = rail {
         under.push((rail, spec.rail_pos));
     }
+    // The row of discs stands off its slots along the bar while it slides.
+    let (row_dx, row_dy) = if spec.horizontal {
+        (pose.row_offset, 0.0)
+    } else {
+        (0.0, pose.row_offset)
+    };
     if let Some(disc_picture) = &disc_picture {
         for (slot, (cx, cy)) in centres.iter().enumerate() {
             let Some(disc) = discs.get(slot) else {
                 continue;
             };
-            let at = centred(disc_picture, *cx, *cy);
+            let (cx, cy) = (cx + row_dx, cy + row_dy);
+            let at = centred(disc_picture, cx, cy);
             let cover = cache.cover(&disc.art_file, d, mask.as_ref());
             if playing == Some(slot) {
-                turning = cover.map(|cover| (cover, (*cx, *cy)));
+                turning = cover.map(|cover| (cover, (cx, cy)));
                 over.push((disc_picture.clone(), at));
             } else {
                 if let Some(cover) = cover {
@@ -3701,6 +3760,7 @@ mod changer_tests {
             seek_s: 1.0,
             spin_up_s: 0.5,
             spin_down_s: 0.5,
+            shift_s: 0.5,
             disc_file: file("disc.png"),
             mask_file: file("mask.png"),
             head_file: file("head.png"),
@@ -3881,6 +3941,55 @@ mod changer_tests {
         fresh.advance(&playing, 300);
         let p = fresh.advance(&playing, 600);
         assert!(p.along > 150.0 && p.along < 550.0, "the load under way: {}", p.along);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn the_window_moving_on_slides_the_row_under_the_staying_arm() {
+        let (dir, spec) = theme("shift");
+        let window = |first: i64, playing_slot: usize| -> Vec<lead::Disc> {
+            (0..3)
+                .map(|i| lead::Disc {
+                    index: first + i as i64,
+                    playing: i == playing_slot,
+                    ..Default::default()
+                })
+                .collect()
+        };
+        // The second track plays in the middle slot, loaded and settled.
+        let second = scene(&spec, window(0, 1), 0.3, DISC_SECONDS, true);
+        let mut motion = ChangerMotion::default();
+        let mut p = motion.advance(&second, 0);
+        for t in 1..=20 {
+            p = motion.advance(&second, t * 500);
+        }
+        assert_eq!(p.along, 550.0);
+        assert!(p.spinning && p.row_offset == 0.0);
+        // The third track: the window moves on one slot, the playing disc
+        // stays the middle one. The disc spins down, the sled homes, and
+        // then the row slides one pitch under the arm, which stays.
+        let third = scene(&spec, window(1, 1), 0.0, DISC_SECONDS, true);
+        let p = motion.advance(&third, 10200);
+        assert_eq!(p.along, 550.0, "the arm stays");
+        assert!(p.spinning, "the disc spins down first");
+        assert_eq!(p.row_offset, 0.0, "the row waits");
+        motion.advance(&third, 10700);
+        motion.advance(&third, 11200);
+        let p = motion.advance(&third, 11700);
+        assert!(!p.spinning);
+        assert!((p.radius - 50.0 * SLED_HOME).abs() < 0.6, "home: {}", p.radius);
+        let p = motion.advance(&third, 11900);
+        assert!(p.row_offset > 0.0 && p.row_offset < 150.0, "the row on its way: {}", p.row_offset);
+        assert_eq!(p.along, 550.0, "the arm still stays");
+        motion.advance(&third, 12500);
+        let p = motion.advance(&third, 13000);
+        assert_eq!(p.row_offset, 0.0, "the row in place");
+        assert!(p.spinning, "spun up again");
+        // A player that goes on playing but, for a frame, names no playing
+        // disc holds the arm where it is; the park is for a pause or a stop.
+        let blink = scene(&spec, window(1, 7), 0.0, DISC_SECONDS, true);
+        let p = motion.advance(&blink, 13100);
+        assert_eq!(p.along, 550.0, "no bounce toward the park");
         let _ = std::fs::remove_dir_all(dir);
     }
 
