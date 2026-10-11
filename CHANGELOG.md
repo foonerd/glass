@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.39] - 2026-10-11
+
+- **The Face tab's fanart keeps its place when the meter changes.** Since 0.8.71 the Face tab follows the player's own display to the meter it moves to, and it did so by building the meter's pipeline afresh, the artist's slideshow with it: the set was asked of the player again and the pictures started over at every change of meter, at every title in random mode. The player's screen had kept the slideshow across its meters since 0.8.26; the tab now changes its meter the same way, on the pipeline it has, so the picture on show stays and the set is asked no more than before. A test holds the page to it. Asked on the forum.
+
 ## [0.9.38] - 2026-10-11
 
 - **The first install is checked with the player's own tools.** `get-glass.sh` holds every zip it installs, downloaded or given, to the signature inside it, as the Manager's paths have since 0.9.23, using nothing but what every Volumio player has: miniunzip unpacks the zip, openssl checks `MANIFEST.sig` against the project's public key the script carries, sha256sum holds every file to `MANIFEST`, and a file the manifest does not name is refused. A zip that is not the release as published is refused and nothing is installed. The script takes a zip brought by hand, `--zip glass-<version>.zip`, for a player that cannot reach GitHub while another machine can, and `--check` verifies a zip and installs nothing. A release before 0.9.23, asked for by its version, goes in with a warning. Asked on the forum.

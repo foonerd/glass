@@ -229,38 +229,59 @@ impl Page {
             return Err(format!("no meters.txt under {}", skin.theme_dir));
         }
         let assets = MeterAssets::load(&skin);
-        let bins = skin
-            .spectra
-            .iter()
-            .map(|s| s.bins.max(1))
-            .max()
-            .unwrap_or(lead::DEFAULT_SPECTRUM_BINS);
-        let mut source = TapSource::new(bins, skin.meter_max)
-            .without_player()
-            .with_hops(Box::new(self.hops.clone()))
-            .with_skin(&skin);
-        for event in self
-            .last_state
-            .iter()
-            .chain(self.last_infinity.iter())
-            .chain(self.last_queue.iter())
-            .chain(self.last_weather.iter())
-            .cloned()
-            .chain(self.early.drain(..))
-        {
-            source.push_event(event);
-        }
         let rate = intake::installed_frame_rate();
-        self.showing = Some(Showing {
-            skin,
-            assets,
-            source,
-            motion: Motion::new(1, Some(rate)),
-            rate,
-            indicators: None,
-            input: Input::default(),
-            pictures: Pictures::default(),
-        });
+        match self.showing.as_mut() {
+            // Another meter under a page already on show: the source stays
+            // and takes the skin, as the display's does across its meters,
+            // so what the source carries across meters (the artist's
+            // fanart slideshow, at its place) carries on here too. A fresh
+            // source would ask the set again and start it over.
+            Some(showing) => {
+                showing.source.set_skin(&skin);
+                for event in self.early.drain(..) {
+                    showing.source.push_event(event);
+                }
+                showing.skin = skin;
+                showing.assets = assets;
+                showing.motion = Motion::new(1, Some(rate));
+                showing.rate = rate;
+                showing.indicators = None;
+                showing.pictures = Pictures::default();
+            }
+            None => {
+                let bins = skin
+                    .spectra
+                    .iter()
+                    .map(|s| s.bins.max(1))
+                    .max()
+                    .unwrap_or(lead::DEFAULT_SPECTRUM_BINS);
+                let mut source = TapSource::new(bins, skin.meter_max)
+                    .without_player()
+                    .with_hops(Box::new(self.hops.clone()))
+                    .with_skin(&skin);
+                for event in self
+                    .last_state
+                    .iter()
+                    .chain(self.last_infinity.iter())
+                    .chain(self.last_queue.iter())
+                    .chain(self.last_weather.iter())
+                    .cloned()
+                    .chain(self.early.drain(..))
+                {
+                    source.push_event(event);
+                }
+                self.showing = Some(Showing {
+                    skin,
+                    assets,
+                    source,
+                    motion: Motion::new(1, Some(rate)),
+                    rate,
+                    indicators: None,
+                    input: Input::default(),
+                    pictures: Pictures::default(),
+                });
+            }
+        }
         self.touch = Touch::new();
         Ok(())
     }
@@ -1344,6 +1365,71 @@ mod tests {
         face.fanart_answer(answer);
         face.frame(1540).expect("a frame");
         assert!(picture_asked(&face, "b.jpg"), "{:?}", face.wants());
+    }
+
+    /// The slideshow is the artist's, not the meter's: a page put on
+    /// another meter of the theme keeps the picture on show and asks for
+    /// no set, as the display does when its meter changes.
+    #[test]
+    fn a_change_of_meter_keeps_the_slideshow_at_its_place() {
+        let _serial = serial();
+        let mut face = Page::new();
+        face.configure(&config_json()).expect("a plan");
+        let keys = "fanart.pos = 0,0\nfanart.dimension = 120,80\n";
+        let mut meters = theme_into_table(&mut face, "480x320");
+        for name in ["[bar]", "[blue]"] {
+            let at = meters.find(name).expect("the meter");
+            let extended = format!("{name}\nconfig.extend = True\n{keys}");
+            meters = format!(
+                "{}{}{}",
+                &meters[..at],
+                extended,
+                &meters[at + name.len()..]
+            );
+        }
+        face.put_file("templates/480x320/meters.txt", meters.into_bytes());
+        assert!(face.event(
+            br#"{"kind":"state","state":{"status":"play","title":"A song","artist":"Carried","uri":"mnt/x/c.flac"}}"#
+        ));
+        face.start(Some("bar")).expect("the bar on show");
+        face.frame(40).expect("a frame");
+        let set = intake::wants::Want::Fanart {
+            artist: "Carried".into(),
+            uri: "mnt/x/c.flac".into(),
+        };
+        assert!(face.wants().contains(&set), "the set is asked");
+        let answer = r#"{"success":true,"images":["glass/fanart/carried/a.jpg","glass/fanart/carried/b.jpg"],"interval_ms":300,"transition":"none","transition_ms":600,"order":"sequential"}"#;
+        face.fanart_answer(answer);
+        face.frame(80).expect("a frame");
+        let picture_asked = |face: &Page, name: &str| {
+            face.wants()
+                .iter()
+                .any(|w| matches!(w, intake::wants::Want::File { url, .. } if url.contains(name)))
+        };
+        assert!(picture_asked(&face, "a.jpg"), "{:?}", face.wants());
+        // The interval passes: the second picture comes on show.
+        std::thread::sleep(std::time::Duration::from_millis(1400));
+        face.frame(1500).expect("a frame");
+        assert!(face.wants().contains(&set), "the set is asked again");
+        face.fanart_answer(answer);
+        face.frame(1540).expect("a frame");
+        assert!(picture_asked(&face, "b.jpg"), "{:?}", face.wants());
+        // The meter changes under the page: the second picture stays on
+        // show, and the set is not asked afresh.
+        face.start(Some("blue")).expect("the blue on show");
+        face.frame(1580).expect("a frame");
+        let wanted = face.wants();
+        assert!(
+            !wanted.contains(&set),
+            "no set asked at a change of meter: {wanted:?}"
+        );
+        assert!(
+            wanted.iter().any(
+                |w| matches!(w, intake::wants::Want::File { url, .. } if url.contains("b.jpg"))
+            ),
+            "the picture on show stays: {wanted:?}"
+        );
+        assert_eq!(face.showing.as_ref().unwrap().skin.name, "blue");
     }
 
     /// A face that draws a white square in the corner while it is told to,
