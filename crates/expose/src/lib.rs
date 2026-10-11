@@ -2557,11 +2557,16 @@ impl Pictures {
         match &scene.changer {
             Some(changer) => {
                 let pose = self.changer_motion.advance(changer, now_ms);
-                let key = changer_key(changer, &pose);
+                let leaving = self.changer_motion.leaving(now_ms);
+                let mut key = changer_key(changer, &pose);
+                if let Some((disc, slot, alpha)) = leaving {
+                    key.push_str(&format!("|leaving {} {slot} {:.2}", disc.index, alpha));
+                }
                 match &mut self.changer {
                     Some(drawn) if drawn.key == key => drawn.degrees = pose.degrees,
                     _ => {
-                        let drawing = render_changer(changer, &mut self.changer_cache, &pose);
+                        let drawing =
+                            render_changer(changer, &mut self.changer_cache, &pose, leaving);
                         self.changer = Some(ChangerPicture {
                             key,
                             drawing,
@@ -3432,11 +3437,17 @@ pub struct ChangerMotion {
     last_ms: Option<u64>,
     travel: Option<Move>,
     seek: Option<Move>,
-    /// The queue index in the first slot, to see the window move on.
+    /// The queue index in the first slot, to see the window move on, and
+    /// the discs as last seen, to know which one leaves.
     first_index: Option<i64>,
+    last_discs: Vec<lead::Disc>,
     /// Slots the row has yet to slide, and the slide under way.
     pending_shift: i32,
     row: Option<Move>,
+    /// The disc leaving the row at a shift, the slot it leaves from, and
+    /// its dissolve under way.
+    leaving: Option<(lead::Disc, usize)>,
+    fade: Option<Move>,
 }
 
 impl ChangerMotion {
@@ -3480,9 +3491,18 @@ impl ChangerMotion {
             let delta = new - old;
             if delta != 0 && delta.unsigned_abs() < u64::from(spec.slots.max(1)) {
                 self.pending_shift += delta as i32;
+                // The disc that leaves: the first of the old row when the
+                // window moves on, the last when it moves back.
+                if self.leaving.is_none() {
+                    let slot = if delta > 0 { 0 } else { self.last_discs.len().saturating_sub(1) };
+                    self.leaving = self.last_discs.get(slot).map(|disc| (disc.clone(), slot));
+                }
             }
         }
         self.first_index = first_index;
+        if !changer.discs.is_empty() || self.last_discs.is_empty() {
+            self.last_discs = changer.discs.clone();
+        }
         let row_busy = self.pending_shift != 0 || self.row.is_some();
         let full_rpm = SPIN_HOME_RPM * home / radius.max(home);
         let in_place = (along - target_along).abs() < 0.5;
@@ -3508,17 +3528,36 @@ impl ChangerMotion {
             radius
         };
         let pitch = spec.pitch.unsigned_abs().max(1) as f32;
-        // The row slides only with the disc still and the sled home, as the
-        // arm travels; the arm waits for the row.
+        // With the disc still and the sled home, the leaving disc dissolves
+        // in its slot first, then the row slides, as the arm travels only
+        // then; the arm waits for the row. Until the slide the new row
+        // stands one pitch off, where the old row was.
         if still && sled_home && self.pending_shift != 0 && self.row.is_none() {
-            let slots = self.pending_shift;
-            self.pending_shift = 0;
-            self.row = Some(Move {
-                from: slots as f32 * pitch,
-                to: 0.0,
-                start_ms: now_ms,
-                duration_ms: spec.shift_s * slots.unsigned_abs() as f32 * 1000.0,
-            });
+            let fading = match &self.fade {
+                Some(m) => !m.done(now_ms),
+                None if self.leaving.is_some() && spec.fade_s > 0.0 => {
+                    self.fade = Some(Move {
+                        from: 1.0,
+                        to: 0.0,
+                        start_ms: now_ms,
+                        duration_ms: spec.fade_s * 1000.0,
+                    });
+                    true
+                }
+                None => false,
+            };
+            if !fading {
+                let slots = self.pending_shift;
+                self.pending_shift = 0;
+                self.leaving = None;
+                self.fade = None;
+                self.row = Some(Move {
+                    from: slots as f32 * pitch,
+                    to: 0.0,
+                    start_ms: now_ms,
+                    duration_ms: spec.shift_s * slots.unsigned_abs() as f32 * 1000.0,
+                });
+            }
         }
         let row_offset = match &self.row {
             Some(m) => {
@@ -3528,7 +3567,7 @@ impl ChangerMotion {
                 }
                 at
             }
-            None => 0.0,
+            None => self.pending_shift as f32 * pitch,
         };
         let want_along = if still && sled_home && !row_busy { target_along } else { along };
         let span = (edge - home).max(1.0);
@@ -3548,6 +3587,24 @@ impl ChangerMotion {
             row_offset,
         }
     }
+
+    /// The disc leaving the row, the slot it leaves from, and how much of
+    /// it is still there, 1 before its dissolve and 0 at the end.
+    pub fn leaving(&self, now_ms: u64) -> Option<(&lead::Disc, usize, f32)> {
+        let (disc, slot) = self.leaving.as_ref()?;
+        let alpha = self.fade.as_ref().map_or(1.0, |m| m.at(now_ms)).clamp(0.0, 1.0);
+        Some((disc, *slot, alpha))
+    }
+}
+
+/// A picture with its alpha scaled by `share`, 0 to 1.
+fn faded(picture: &Frame, share: f32) -> Frame {
+    let mut out = picture.clone();
+    let share = share.clamp(0.0, 1.0);
+    for px in out.rgba.chunks_mut(4) {
+        px[3] = (f32::from(px[3]) * share).round() as u8;
+    }
+    out
 }
 
 /// The changer as composed for one pose: what lies under the turning
@@ -3591,6 +3648,7 @@ pub fn render_changer(
     changer: &plot::Changer,
     cache: &mut ChangerCache,
     pose: &ChangerPose,
+    leaving: Option<(&lead::Disc, usize, f32)>,
 ) -> ChangerDrawing {
     let spec = &changer.spec;
     let discs = &changer.discs;
@@ -3634,6 +3692,17 @@ pub fn render_changer(
     } else {
         (0.0, pose.row_offset)
     };
+    // The disc leaving the row dissolves in its own slot, the row standing
+    // one pitch off behind it until it is gone.
+    if let (Some(disc_picture), Some((disc, slot, alpha))) = (&disc_picture, leaving) {
+        if let Some((cx, cy)) = centres.get(slot) {
+            let at = centred(disc_picture, *cx, *cy);
+            if let Some(cover) = cache.cover(&disc.art_file, d, mask.as_ref()) {
+                under.push((faded(&cover, alpha), at));
+            }
+            under.push((faded(disc_picture, alpha), at));
+        }
+    }
     if let Some(disc_picture) = &disc_picture {
         for (slot, (cx, cy)) in centres.iter().enumerate() {
             let Some(disc) = discs.get(slot) else {
@@ -3767,6 +3836,7 @@ mod changer_tests {
             spin_up_s: 0.5,
             spin_down_s: 0.5,
             shift_s: 0.5,
+            fade_s: 0.5,
             disc_file: file("disc.png"),
             mask_file: file("mask.png"),
             head_file: file("head.png"),
@@ -3796,7 +3866,7 @@ mod changer_tests {
         for t in 1..=60 {
             pose = motion.advance(changer, t * 500);
         }
-        let drawing = render_changer(changer, cache, &pose);
+        let drawing = render_changer(changer, cache, &pose, None);
         let mut pieces = vec![drawing.under];
         if let Some((cover, centre)) = drawing.turning {
             let at = (
@@ -3867,7 +3937,7 @@ mod changer_tests {
         for t in 1..=60 {
             pose = settled.advance(&halfway, t * 500);
         }
-        let drawing = render_changer(&halfway, &mut cache, &pose);
+        let drawing = render_changer(&halfway, &mut cache, &pose, None);
         assert!(drawing.turning.is_some(), "the playing cover turns");
         let (out, at) = draw(&halfway, &mut cache);
         assert_eq!(pixel(&out, at, 550, 240)[1], 200, "the head over the playing disc");
@@ -3978,17 +4048,26 @@ mod changer_tests {
         let p = motion.advance(&third, 10200);
         assert_eq!(p.along, 550.0, "the arm stays");
         assert!(p.spinning, "the disc spins down first");
-        assert_eq!(p.row_offset, 0.0, "the row waits");
+        assert_eq!(p.row_offset, 150.0, "the new row stands where the old one was");
         motion.advance(&third, 10700);
         motion.advance(&third, 11200);
         let p = motion.advance(&third, 11700);
         assert!(!p.spinning);
         assert!((p.radius - 50.0 * SLED_HOME).abs() < 0.6, "home: {}", p.radius);
+        // The leaving disc dissolves in its slot first, the row held one
+        // pitch off behind it; then the row slides.
         let p = motion.advance(&third, 11900);
-        assert!(p.row_offset > 0.0 && p.row_offset < 150.0, "the row on its way: {}", p.row_offset);
+        assert_eq!(p.row_offset, 150.0, "the row held while the disc dissolves");
+        let (gone, slot, alpha) = motion.leaving(11900).expect("a disc leaving");
+        assert_eq!((gone.index, slot), (0, 0));
+        assert!(alpha < 1.0 && alpha > 0.0, "dissolving: {alpha}");
         assert_eq!(p.along, 550.0, "the arm still stays");
-        motion.advance(&third, 12500);
-        let p = motion.advance(&third, 13000);
+        motion.advance(&third, 12250);
+        let p = motion.advance(&third, 12450);
+        assert!(p.row_offset > 0.0 && p.row_offset < 150.0, "the row on its way: {}", p.row_offset);
+        assert!(motion.leaving(12450).is_none(), "the leaving disc gone");
+        motion.advance(&third, 12800);
+        let p = motion.advance(&third, 13100);
         assert_eq!(p.row_offset, 0.0, "the row in place");
         assert!(p.spinning, "spun up again");
         // A player that goes on playing but, for a frame, names no playing

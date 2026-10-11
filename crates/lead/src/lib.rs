@@ -5056,6 +5056,9 @@ pub struct ChangerSpec {
     /// `changer.shift.duration`: seconds the row takes to slide one slot
     /// under the staying arm when the queue's window moves on.
     pub shift_s: f32,
+    /// `changer.fade.duration`: seconds the disc that leaves the row takes
+    /// to dissolve in its slot before the row slides.
+    pub fade_s: f32,
     /// `changer.disc.filename`, `changer.label.mask`, `changer.head.filename`,
     /// `changer.rail.filename`, `changer.sled.filename`: the theme's pictures
     /// as paths. The disc is drawn over the cover, which shows through the
@@ -5135,6 +5138,7 @@ pub fn meter_changer(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<C
         spin_up_s: seconds("changer.spin.up", 1.5),
         spin_down_s: seconds("changer.spin.down", 2.0),
         shift_s: seconds("changer.shift.duration", 0.6),
+        fade_s: seconds("changer.fade.duration", 0.5),
         disc_file: path("changer.disc.filename"),
         mask_file: path("changer.label.mask"),
         head_file: path("changer.head.filename"),
