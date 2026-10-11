@@ -5059,6 +5059,15 @@ pub struct ChangerSpec {
     /// `changer.fade.duration`: seconds the disc that leaves the row takes
     /// to dissolve in its slot before the row slides.
     pub fade_s: f32,
+    /// `changer.toc.duration`: seconds the sled takes to read the lead-in
+    /// once the disc is up to speed, sweeping a little out and back with
+    /// the laser on, before it seeks to the track.
+    pub toc_s: f32,
+    /// `changer.laser.filename` and `changer.laser.offset`: the laser's
+    /// picture, lit on the sled while the disc is read, and where its
+    /// centre sits from the sled's centre.
+    pub laser_file: String,
+    pub laser_offset: (i32, i32),
     /// `changer.disc.filename`, `changer.label.mask`, `changer.head.filename`,
     /// `changer.rail.filename`, `changer.sled.filename`: the theme's pictures
     /// as paths. The disc is drawn over the cover, which shows through the
@@ -5139,6 +5148,9 @@ pub fn meter_changer(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<C
         spin_down_s: seconds("changer.spin.down", 2.0),
         shift_s: seconds("changer.shift.duration", 0.6),
         fade_s: seconds("changer.fade.duration", 0.5),
+        toc_s: seconds("changer.toc.duration", 0.8),
+        laser_file: path("changer.laser.filename"),
+        laser_offset: ipair("changer.laser.offset").unwrap_or((0, 0)),
         disc_file: path("changer.disc.filename"),
         mask_file: path("changer.label.mask"),
         head_file: path("changer.head.filename"),

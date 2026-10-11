@@ -720,12 +720,17 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
         changer: skin.changer.as_ref().map(|spec| Changer {
             spec: spec.clone(),
             discs: input.metadata.discs.clone(),
-            progress: if input.metadata.duration > 0.0 {
-                (input.metadata.seek.max(0.0) / input.metadata.duration).clamp(0.0, 1.0)
+            // The sled follows at the tonearm's scope: the whole queue when
+            // Queue progress mode says so, else the track.
+            progress: progress(&input.metadata).0 / 100.0,
+            duration: if input.metadata.queue_total_s > 0.0
+                && input.metadata.duration > 0.0
+                && input.metadata.volatile != Some(true)
+            {
+                input.metadata.queue_total_s
             } else {
-                0.0
+                input.metadata.duration.max(0.0)
             },
-            duration: input.metadata.duration.max(0.0),
             // Playing alone keeps the arm on the disc: a pause, like a stop,
             // brings the mechanism to rest while the display persists, as
             // the tonearm and the reels come to rest.

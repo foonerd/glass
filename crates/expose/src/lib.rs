@@ -3296,8 +3296,8 @@ fn changer_key(changer: &plot::Changer, pose: &ChangerPose) -> String {
         key.push(if disc.playing { '*' } else { '.' });
     }
     key.push_str(&format!(
-        "|{:.0}|{:.0}|{:.0}",
-        pose.along, pose.radius, pose.row_offset
+        "|{:.0}|{:.0}|{:.0}|{}",
+        pose.along, pose.radius, pose.row_offset, pose.laser
     ));
     key
 }
@@ -3355,7 +3355,21 @@ pub struct ChangerPose {
     /// How far the row of discs stands from its slots along the bar while
     /// it slides under the arm; 0 at rest.
     pub row_offset: f32,
+    /// The laser lit: the disc is being read, from the lead-in on.
+    pub laser: bool,
 }
+
+/// What the pickup is doing: nothing, reading the lead-in, or the track.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+enum Read {
+    #[default]
+    Idle,
+    Toc,
+    Track,
+}
+
+/// How far the sled sweeps out for the lead-in, as a share of its span.
+const TOC_REACH: f32 = 0.08;
 
 /// One eased move of a part from one place to another over a duration:
 /// slow at both ends, as a motor with a ramp.
@@ -3451,6 +3465,9 @@ pub struct ChangerMotion {
     /// When the player last stopped being engaged: a player reports a
     /// short stop between two tracks, which is no stop for the mechanism.
     disengaged_ms: Option<u64>,
+    /// What the pickup is doing, and the lead-in read under way.
+    read: Read,
+    toc: Option<Move>,
 }
 
 /// How long a player may report no play before the mechanism takes it for
@@ -3535,14 +3552,44 @@ impl ChangerMotion {
         }
         let still = self.rpm <= 0.0;
         let sled_home = (radius - home).abs() < 0.5;
-        // The sled follows the track once the disc is up to speed, goes
-        // home once the disc is still, and holds while it spins down.
-        let want_radius = if want_spin && self.rpm >= full_rpm * 0.9 {
-            target_radius
-        } else if still {
-            home
-        } else {
-            radius
+        let span = (edge - home).max(1.0);
+        // The read: the laser goes off the moment the arm has to move or
+        // the player leaves the disc; once the disc is up to speed with the
+        // sled home, the laser comes on and the sled sweeps the lead-in for
+        // the table of contents, then follows the track.
+        let up_to_speed = want_spin && self.rpm >= full_rpm * 0.9;
+        if !want_spin {
+            self.read = Read::Idle;
+            self.toc = None;
+        } else if self.read == Read::Idle && up_to_speed && sled_home {
+            self.read = Read::Toc;
+            self.toc = Some(Move {
+                from: 0.0,
+                to: 1.0,
+                start_ms: now_ms,
+                duration_ms: spec.toc_s.max(0.0) * 1000.0,
+            });
+        }
+        let toc_sweep = match (self.read, &self.toc) {
+            (Read::Toc, Some(m)) => {
+                if m.done(now_ms) {
+                    self.read = Read::Track;
+                    self.toc = None;
+                    0.0
+                } else {
+                    let t = (now_ms.saturating_sub(m.start_ms) as f32 / m.duration_ms.max(1.0)).clamp(0.0, 1.0);
+                    (t * std::f32::consts::PI).sin() * span * TOC_REACH
+                }
+            }
+            _ => 0.0,
+        };
+        // The sled follows the track once the lead-in is read, goes home
+        // once the disc is still, and holds while it spins down.
+        let want_radius = match self.read {
+            Read::Track => target_radius,
+            Read::Toc => home,
+            Read::Idle if still => home,
+            Read::Idle => radius,
         };
         let pitch = spec.pitch.unsigned_abs().max(1) as f32;
         // With the disc still and the sled home, the leaving disc dissolves
@@ -3587,7 +3634,6 @@ impl ChangerMotion {
             None => self.pending_shift as f32 * pitch,
         };
         let want_along = if still && sled_home && !row_busy { target_along } else { along };
-        let span = (edge - home).max(1.0);
         let radius = glide(&mut self.seek, radius, want_radius, now_ms, |delta| {
             spec.seek_s * delta / span
         });
@@ -3598,10 +3644,11 @@ impl ChangerMotion {
         self.along = Some(along);
         ChangerPose {
             along,
-            radius,
+            radius: radius + toc_sweep,
             degrees: self.angle,
             spinning: self.rpm > 0.0,
             row_offset,
+            laser: self.read != Read::Idle,
         }
     }
 
@@ -3733,6 +3780,11 @@ pub fn render_changer(
     let head = cache.picture(&spec.head_file);
     let sled = cache.picture(&spec.sled_file);
     let rail = cache.picture(&spec.rail_file);
+    let laser = if pose.laser {
+        cache.picture(&spec.laser_file)
+    } else {
+        None
+    };
     let centred = |picture: &Frame, cx: f32, cy: f32| -> (i32, i32) {
         (
             (cx - picture.width as f32 / 2.0).round() as i32,
@@ -3805,12 +3857,22 @@ pub fn render_changer(
     // The moving parts go over the turning cover when there is one.
     let moving: &mut Vec<(Frame, (i32, i32))> = if turning.is_some() { &mut over } else { &mut under };
     if let Some(sled) = sled {
-        let at = if spec.horizontal {
-            centred(&sled, ax, spec.pos.1 as f32 - pose.radius)
+        let (sx, sy) = if spec.horizontal {
+            (ax, spec.pos.1 as f32 - pose.radius)
         } else {
-            centred(&sled, spec.pos.0 as f32 - pose.radius, ay)
+            (spec.pos.0 as f32 - pose.radius, ay)
         };
+        let at = centred(&sled, sx, sy);
         shaded(moving, &spec.sled_file, sled, at);
+        // The laser, lit on the sled while the disc is read.
+        if let Some(laser) = laser {
+            let at = centred(
+                &laser,
+                sx + spec.laser_offset.0 as f32,
+                sy + spec.laser_offset.1 as f32,
+            );
+            moving.push((laser, at));
+        }
     }
     if let Some(head) = head {
         let at = centred(&head, ax, ay);
@@ -3891,6 +3953,7 @@ mod changer_tests {
         write_png(&dir.join("sled.png"), &solid_frame(60, 10, [10, 10, 200, 255])).unwrap();
         write_png(&dir.join("rail.png"), &solid_frame(600, 6, [200, 200, 10, 255])).unwrap();
         write_png(&dir.join("cover.png"), &solid_frame(30, 30, [220, 20, 20, 255])).unwrap();
+        write_png(&dir.join("laser.png"), &solid_frame(6, 6, [255, 0, 0, 255])).unwrap();
         let file = |name: &str| dir.join(name).to_string_lossy().to_string();
         let spec = lead::ChangerSpec {
             slots: 3,
@@ -3907,6 +3970,9 @@ mod changer_tests {
             spin_down_s: 0.5,
             shift_s: 0.5,
             fade_s: 0.5,
+            toc_s: 0.4,
+            laser_file: file("laser.png"),
+            laser_offset: (0, 0),
             disc_file: file("disc.png"),
             mask_file: file("mask.png"),
             head_file: file("head.png"),
@@ -4048,12 +4114,20 @@ mod changer_tests {
         assert!(!start.spinning);
         let p = motion.advance(&playing, 600);
         assert!(p.along > 150.0 && p.along < 550.0, "the arm on its way: {}", p.along);
+        assert!(!p.laser, "the laser off while the arm travels");
         motion.advance(&playing, 2000);
         let p = motion.advance(&playing, 2500);
         assert_eq!(p.along, 550.0, "the arm over the disc");
         assert!(p.spinning, "up to speed");
+        // Up to speed with the sled home: the laser on, the sled sweeping
+        // the lead-in a little out and back before it seeks.
+        let p = motion.advance(&playing, 2700);
+        assert!(p.laser, "the laser on for the lead-in");
+        assert!(p.radius > 21.0 && p.radius < 25.0, "the sweep: {}", p.radius);
+        motion.advance(&playing, 3000);
         let p = motion.advance(&playing, 4000);
-        assert!(p.radius > 21.0, "the sled sought out: {}", p.radius);
+        assert!(p.radius > 25.0, "the sled sought out: {}", p.radius);
+        assert!(p.laser, "the laser on while the track is read");
         let mid_radius = p.radius;
         // The player stops: the disc spins down first, nothing else moves.
         let mut stopped = discs.clone();
@@ -4063,6 +4137,7 @@ mod changer_tests {
         assert_eq!(p.along, 550.0, "the arm waits while the disc spins down");
         assert_eq!(p.radius, mid_radius, "the sled waits while the disc spins down");
         assert!(p.spinning);
+        assert!(!p.laser, "the laser off first");
         // The disc still (half a second), the sled glides home over the surface.
         motion.advance(&stopped, 4700);
         let p = motion.advance(&stopped, 4900);
@@ -4158,7 +4233,7 @@ mod changer_tests {
         // While the row slides, a disc stands past the well's edge: nothing
         // of it shows there.
         let mut cache = ChangerCache::default();
-        let off = ChangerPose { along: 550.0, radius: 21.0, degrees: 0.0, spinning: false, row_offset: 150.0 };
+        let off = ChangerPose { along: 550.0, radius: 21.0, degrees: 0.0, spinning: false, row_offset: 150.0, laser: false };
         let drawing = render_changer(&third, &mut cache, &off, None);
         let (frame, at) = drawing.under;
         let (x, y) = (700 + 50 + 20 - at.0, 300 - at.1);
@@ -4170,7 +4245,7 @@ mod changer_tests {
         assert_eq!(past_the_well, 0, "nothing past the well's edge");
         // With the row standing a pitch off, the disc drawn under the arm is
         // the window's first, the old playing one; it turns, not the next.
-        let held = ChangerPose { along: 550.0, radius: 21.0, degrees: 0.0, spinning: true, row_offset: 150.0 };
+        let held = ChangerPose { along: 550.0, radius: 21.0, degrees: 0.0, spinning: true, row_offset: 150.0, laser: false };
         let drawing = render_changer(&third, &mut cache, &held, None);
         let (_, centre) = drawing.turning.expect("a disc turns under the arm");
         assert_eq!(centre.0, 550.0, "the turning disc is the one drawn under the arm");
