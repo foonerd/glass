@@ -2,6 +2,11 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.37] - 2026-10-11
+
+- **The first install is checked.** `get-glass.sh` holds every zip it installs to the signature inside it, as the Manager's paths have since 0.9.23: `MANIFEST`, each file's digest, and `MANIFEST.sig`, checked with the project's public key the script carries, and every file against the manifest, with no network; a zip that is not the release as published is refused and nothing is installed. It also takes a zip brought by hand, `--zip glass-<version>.zip`, for a player that cannot reach GitHub while another machine can, the route a forum user had built for himself by editing the script. A release before 0.9.23, asked for by its version, goes in with a warning.
+- **No python anywhere in Glass.** The install script's way back to the stable release read the release zip with python3; the zip is now read by the player's own Node, and the release check refuses python in the source. The repository's own checks and the PeppyMeter-era test script that used it are Node or gone.
+
 ## [0.9.36] - 2026-10-11
 
 - **A test that could fail by chance.** The remote's port test bound a free port, let it go and expected a refused connect; once in a while the kernel picked that same port as the connect's source, the connect landed on itself and answered "open". The test takes a port below the range source ports come from.
