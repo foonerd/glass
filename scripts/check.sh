@@ -92,22 +92,26 @@ PAGE_SCRIPTS=""
 for page in $PAGES; do PAGE_SCRIPTS="$PAGE_SCRIPTS $page.check.js"; done
 # shellcheck disable=SC2086
 trap 'rm -f $PAGE_SCRIPTS' EXIT
+# Node runs the checks of the pages and the plugin's files: here where it
+# is installed, else in the node image.
+if command -v node >/dev/null 2>&1; then
+  with_node() { node "$@"; }
+else
+  # -i: a script given on standard input must reach the container.
+  with_node() { docker run -i --rm -v "$ROOT:/glass" -w /glass node:20-slim node "$@"; }
+fi
 # shellcheck disable=SC2086
-python3 - $PAGES <<'PY'
-import re, sys
-for path in sys.argv[1:]:
-    text = open(path, encoding='utf-8').read()
-    blocks = re.findall(r'<script>(.*?)</script>', text, re.S)
-    if not blocks:
-        print(f"check: {path} has no script", file=sys.stderr); sys.exit(1)
-    open(path + '.check.js', 'w', encoding='utf-8').write('\n'.join(blocks))
-PY
+with_node - $PAGES <<'JS'
+const fs = require('fs');
+for (const page of process.argv.slice(2)) {
+  const text = fs.readFileSync(page, 'utf8');
+  const blocks = [...text.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => m[1]);
+  if (!blocks.length) { console.error('check: ' + page + ' has no script'); process.exit(1); }
+  fs.writeFileSync(page + '.check.js', blocks.join('\n'));
+}
+JS
 for page in $PAGES; do
-  if command -v node >/dev/null 2>&1; then
-    node --check "$page.check.js" || { echo "check: the script of $page does not parse" >&2; exit 1; }
-  else
-    docker run --rm -v "$ROOT:/glass:ro" node:20-slim node --check "/glass/$page.check.js" || { echo "check: the script of $page does not parse" >&2; exit 1; }
-  fi
+  with_node --check "$page.check.js" || { echo "check: the script of $page does not parse" >&2; exit 1; }
 done
 
 echo "check: plugin files"
@@ -115,22 +119,44 @@ echo "check: plugin files"
 # takes the whole backend down, so every JSON the plugin ships must parse.
 # A key written twice in one object parses, and the later one silently
 # wins: that is refused too.
-python3 - plugin/package.json plugin/config.json plugin/UIConfig.json plugin/i18n/*.json <<'PY'
-import json, sys
-def once(pairs):
-    keys = [k for k, _ in pairs]
-    twice = sorted({k for k in keys if keys.count(k) > 1})
-    if twice:
-        raise SystemExit(f'{path}: written twice in one object: {", ".join(twice)}')
-    return dict(pairs)
-for path in sys.argv[1:]:
-    with open(path, encoding='utf-8') as f:
-        text = f.read()
-    json.loads(text, object_pairs_hook=once)
-    if not text.endswith('\n') or text.rstrip('\n') != text.rstrip():
-        raise SystemExit(f'{path}: must end with one newline and nothing after the JSON')
-print(f'{len(sys.argv) - 1} plugin files parse')
-PY
+with_node - plugin/package.json plugin/config.json plugin/UIConfig.json plugin/i18n/*.json <<'JS'
+const fs = require('fs');
+// Every key of every object as written, in order: a JSON parser keeps the
+// last of two, so the text is walked for the keys instead.
+function keysWrittenTwice(text) {
+  const twice = new Set();
+  const stack = [];
+  let i = 0;
+  const skipString = () => { i++; while (i < text.length && text[i] !== '"') { if (text[i] === '\\') i++; i++; } return text.slice(start + 1, i++); };
+  let start = 0;
+  while (i < text.length) {
+    const c = text[i];
+    if (c === '{') { stack.push({ keys: new Set(), expectKey: true }); i++; }
+    else if (c === '}') { stack.pop(); i++; }
+    else if (c === '[') { stack.push(null); i++; }
+    else if (c === ']') { stack.pop(); i++; }
+    else if (c === '"') {
+      start = i;
+      const s = skipString();
+      const top = stack[stack.length - 1];
+      if (top && top.expectKey) { if (top.keys.has(s)) twice.add(s); top.keys.add(s); top.expectKey = false; }
+    }
+    else if (c === ':') { i++; }
+    else if (c === ',') { const top = stack[stack.length - 1]; if (top) top.expectKey = true; i++; }
+    else i++;
+  }
+  return [...twice].sort();
+}
+const files = process.argv.slice(2);
+for (const file of files) {
+  const text = fs.readFileSync(file, 'utf8');
+  try { JSON.parse(text); } catch (e) { console.error(file + ': ' + e.message); process.exit(1); }
+  const twice = keysWrittenTwice(text);
+  if (twice.length) { console.error(file + ': written twice in one object: ' + twice.join(', ')); process.exit(1); }
+  if (!text.endsWith('\n') || text.replace(/\n+$/, '') !== text.trimEnd()) { console.error(file + ': must end with one newline and nothing after the JSON'); process.exit(1); }
+}
+console.log(files.length + ' plugin files parse');
+JS
 
 echo "check: plugin"
 if command -v node >/dev/null 2>&1; then
@@ -156,6 +182,27 @@ elif command -v docker >/dev/null 2>&1; then
     || { echo "check: a script uses a name nothing defines (or $ESLINT could not be fetched)" >&2; exit 1; }
 else
   echo "check: undefined names: neither node nor docker found, skipped" >&2
+fi
+
+# The install script carries the release signing key's public half: the
+# one in the repository, or the first install verifies against nothing.
+if ! grep -qF "$(sed -n '2p' keys/release-signing.pub)" get-glass.sh; then
+  echo "check: get-glass.sh does not carry keys/release-signing.pub" >&2
+  exit 1
+fi
+
+# No python anywhere in Glass: the product is Rust and Node, and a player
+# without python3 must install and run it. Looked for as a command run,
+# outside comments; this script's own words and the plugin's prose aside.
+python_runs() {
+  grep -rnE "(^|[^A-Za-z_\"'/.-])python3?( |$|-)" --include=*.sh --include=*.js --include=*.rs --include=*.yml . 2>/dev/null \
+    | grep -v "target/\|/\.sdl/\|/build/\|node_modules\|scripts/check.sh" \
+    | grep -vE ":[0-9]+:[[:space:]]*(#|//)"
+}
+if python_runs >/dev/null; then
+  echo "check: python is run in the source:" >&2
+  python_runs >&2
+  exit 1
 fi
 
 # No API key in the source: a 32-hex literal in the plugin is one.

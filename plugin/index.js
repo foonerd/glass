@@ -3492,7 +3492,7 @@ Glass.prototype.savePlaybackConf = function(data) {
     // Track if queue mode changed (needs restart to apply)
     var queueModeChanged = false;
     
-    // Save queue mode to MeterConfigFile (for Python handlers)
+    // The queue mode goes into the meter configuration the display reads.
     if (fs.existsSync(MeterConfigFile)) {
         if (meterConfig.current['queue.mode'] != queueMode) {
             meterConfig.current['queue.mode'] = queueMode;

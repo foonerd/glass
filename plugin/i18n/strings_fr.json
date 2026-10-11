@@ -264,8 +264,6 @@
     "PROFILING_TIMING_DOC": "Journaliser la répartition du temps pour chaque frame de rendu dans /tmp/peppy_debug.log<br /><br />Affiche: temps total du frame, compteur, rotation, blit, défilement et autres composants.<br /><br /><b>Faible surcharge</b> - sûr pour utilisation continue pendant les tests.",
     "PROFILING_INTERVAL": "Intervalle de journalisation",
     "PROFILING_INTERVAL_DOC": "Journaliser le timing tous les N frames.<br /><br /><b>1:</b> Chaque frame (verbeux)<br /><b>30:</b> Une fois par seconde à 30fps (défaut)<br /><b>300:</b> Toutes les 10 secondes<br /><br />Valeurs plus basses = plus de sortie journal",
-    "PROFILING_CPROFILE": "Activer cProfile",
-    "PROFILING_CPROFILE_DOC": "Profilage complet au niveau fonction Python.<br /><br /><b>ATTENTION:</b> Surcharge CPU significative (10-30%). Utiliser uniquement pour de courtes sessions de diagnostic.<br /><br />Crée /tmp/peppy_profile.prof et /tmp/peppy_profile_summary.txt à la fermeture.",
     "PROFILING_DURATION": "Durée du profilage (secondes)",
     "PROFILING_DURATION_DOC": "Arrêter automatiquement cProfile après ce délai.<br /><br /><b>0:</b> Exécuter jusqu'à l'arrêt du compteur (non recommandé)<br /><b>60:</b> Une minute (défaut)<br /><b>300:</b> Cinq minutes<br /><br />Empêche la croissance incontrôlée du fichier de profil.",
     "REMOTE_CONF": "Serveur d'affichage distant",

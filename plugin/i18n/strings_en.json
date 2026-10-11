@@ -264,8 +264,6 @@
     "PROFILING_TIMING_DOC": "Log time breakdown for each render frame to /tmp/peppy_debug.log<br /><br />Shows: total frame time, meter, rotation, blit, scroll, and other components.<br /><br /><b>Low overhead</b> - safe for continuous use during testing.",
     "PROFILING_INTERVAL": "Timing log interval",
     "PROFILING_INTERVAL_DOC": "Log timing every N frames.<br /><br /><b>1:</b> Every frame (verbose)<br /><b>30:</b> Once per second at 30fps (default)<br /><b>300:</b> Every 10 seconds<br /><br />Lower values = more log output",
-    "PROFILING_CPROFILE": "Enable cProfile",
-    "PROFILING_CPROFILE_DOC": "Full Python function-level profiling.<br /><br /><b>WARNING:</b> Significant CPU overhead (10-30%). Only use for short diagnostic sessions.<br /><br />Creates /tmp/peppy_profile.prof and /tmp/peppy_profile_summary.txt on exit.",
     "PROFILING_DURATION": "Profile duration (seconds)",
     "PROFILING_DURATION_DOC": "Auto-stop cProfile after this many seconds.<br /><br /><b>0:</b> Run until meter stops (not recommended)<br /><b>60:</b> One minute (default)<br /><b>300:</b> Five minutes<br /><br />Prevents runaway profile file growth.",
     "REMOTE_CONF": "Remote Display Server",
