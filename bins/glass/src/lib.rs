@@ -1083,7 +1083,7 @@ fn session(
             );
         }
         if surface.is_some() || write_file {
-            pictures.follow(&scene, &assets);
+            pictures.follow(&scene, &assets, started.elapsed().as_millis() as u64);
             if profiling {
                 motion.profile = Some(Vec::new());
             }

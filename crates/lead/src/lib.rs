@@ -5043,6 +5043,16 @@ pub struct ChangerSpec {
     /// softened by `blur` pixels, at `opacity` 0 to 1, and lays it under
     /// each, offset by `dx,dy`. None without the key.
     pub shadow: Option<(i32, i32, u32, f32)>,
+    /// `changer.travel.duration`: seconds the arm takes for one slot's pitch
+    /// along the rail, eased at both ends; a longer way takes longer.
+    pub travel_s: f32,
+    /// `changer.seek.duration`: seconds the sled takes from the inner stop
+    /// to the edge; a shorter way takes less.
+    pub seek_s: f32,
+    /// `changer.spin.up` and `changer.spin.down`: seconds the disc takes to
+    /// come up to speed, and to come to rest.
+    pub spin_up_s: f32,
+    pub spin_down_s: f32,
     /// `changer.disc.filename`, `changer.label.mask`, `changer.head.filename`,
     /// `changer.rail.filename`, `changer.sled.filename`: the theme's pictures
     /// as paths. The disc is drawn over the cover, which shows through the
@@ -5085,6 +5095,12 @@ pub fn meter_changer(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<C
             None => String::new(),
         }
     };
+    let seconds = |key: &str, default: f32| -> f32 {
+        get(key)
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|s| s.is_finite() && *s >= 0.0)
+            .unwrap_or(default)
+    };
     let pos = ipair("changer.pos")?;
     let pitch: i32 = get("changer.pitch")?.parse().ok()?;
     let disc_size: u32 = get("changer.disc.size")?.parse().ok()?;
@@ -5111,6 +5127,10 @@ pub fn meter_changer(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<C
             let opacity: f32 = parts.next()?.parse().ok()?;
             Some((dx, dy, blur, opacity.clamp(0.0, 1.0)))
         }),
+        travel_s: seconds("changer.travel.duration", 0.8),
+        seek_s: seconds("changer.seek.duration", 1.2),
+        spin_up_s: seconds("changer.spin.up", 1.5),
+        spin_down_s: seconds("changer.spin.down", 2.0),
         disc_file: path("changer.disc.filename"),
         mask_file: path("changer.label.mask"),
         head_file: path("changer.head.filename"),

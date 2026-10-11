@@ -417,7 +417,7 @@ impl Page {
         let mut scene = plot::step(&showing.skin, input);
         override_scene(touch, &mut scene);
         showing.indicators = scene.indicators.clone();
-        showing.pictures.follow(&scene, &showing.assets);
+        showing.pictures.follow(&scene, &showing.assets, now_ms);
         let assets = &showing.assets;
         let (base, moved): (&expose::Frame, bool) = {
             let stack = Stack {

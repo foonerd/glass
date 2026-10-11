@@ -609,8 +609,8 @@ pub struct Stack<'a> {
     pub indicators: Option<&'a IndicatorAssets>,
     /// The screen picture and meter face composed once; the frame starts as a copy of it.
     pub base: Option<&'a Frame>,
-    /// The changer's bar as last drawn, and where its top left goes.
-    pub changer: Option<(&'a Frame, (i32, i32))>,
+    /// The changer's layers as last drawn, with the turning disc's angle.
+    pub changer: Option<ChangerStack<'a>>,
 }
 
 /// Theme order: full-screen picture, meter face, album art, folder layers, needles, meter
@@ -852,10 +852,24 @@ pub fn raster_over<'m>(
             reach,
         });
     }
-    // The changer's bar, drawn once per change of its discs and laid over
-    // the base here; the head and the disc that turns come in their own ops.
-    if let Some((picture, at)) = stack.changer {
-        ops.push(blit_op(picture, at));
+    // The changer's layers, drawn once per change of pose, laid over the
+    // base here with the playing disc's cover turning between them.
+    if let Some(changer) = &stack.changer {
+        ops.push(blit_op(changer.under.0, changer.under.1));
+        if let Some((cover, centre, degrees)) = changer.turning {
+            let reach = reaches.reach(cover, centre_of(cover));
+            ops.push(Op::Turn {
+                src: cover,
+                pivot_image: centre_of(cover),
+                pivot_screen: centre,
+                degrees: -degrees,
+                smooth: false,
+                reach,
+            });
+        }
+        if let Some((over, at)) = changer.over {
+            ops.push(blit_op(over, at));
+        }
     }
     if let (Some(art), Some(place)) = (stack.art, &scene.art) {
         let color = [
@@ -2382,18 +2396,28 @@ pub struct Pictures {
     fanart: (PictureSlot, PictureSlot),
     vinyl: PlainSlot,
     reels: (PlainSlot, PlainSlot),
-    /// The changer's bar, drawn again when its spec or its discs change.
+    /// The changer's bar, drawn again when its spec, its discs or the pose
+    /// of its parts change; its pictures decoded once; its parts' motion.
     changer: Option<ChangerPicture>,
+    changer_cache: ChangerCache,
+    changer_motion: ChangerMotion,
 }
 
-/// The changer as drawn: what it was drawn from, the picture, where the
-/// picture's top left goes on the frame, and the theme's pictures decoded
-/// once by path, so the sled's every step is blits alone.
+/// The changer as drawn: what it was drawn from, the layers, and the
+/// disc's angle this frame.
 struct ChangerPicture {
     key: String,
-    frame: Frame,
-    at: (i32, i32),
-    cache: ChangerCache,
+    drawing: ChangerDrawing,
+    degrees: f32,
+}
+
+/// The changer's layers as `Stack` takes them: what lies under the
+/// turning cover, the cover with the centre it turns about and its angle,
+/// and what lies over it.
+pub struct ChangerStack<'a> {
+    pub under: (&'a Frame, (i32, i32)),
+    pub turning: Option<(&'a Frame, (f32, f32), f32)>,
+    pub over: Option<(&'a Frame, (i32, i32))>,
 }
 
 /// The changer's pictures decoded once by path: the theme's and the covers.
@@ -2458,7 +2482,7 @@ impl ChangerCache {
 impl Pictures {
     /// Follow the scene: decode what changed, drop what it no longer names.
     /// The art is decoded here and now; the rest as the slots do it.
-    pub fn follow(&mut self, scene: &Scene, assets: &MeterAssets) {
+    pub fn follow(&mut self, scene: &Scene, assets: &MeterAssets, now_ms: u64) {
         match &scene.art {
             Some(art) => {
                 let stale = self.art.as_ref().is_none_or(|(known, _)| known != art);
@@ -2532,20 +2556,18 @@ impl Pictures {
         }
         match &scene.changer {
             Some(changer) => {
-                let key = changer_key(changer);
-                if self.changer.as_ref().is_none_or(|c| c.key != key) {
-                    let mut cache = self
-                        .changer
-                        .take()
-                        .map(|c| c.cache)
-                        .unwrap_or_default();
-                    let (frame, at) = render_changer(changer, &mut cache);
-                    self.changer = Some(ChangerPicture {
-                        key,
-                        frame,
-                        at,
-                        cache,
-                    });
+                let pose = self.changer_motion.advance(changer, now_ms);
+                let key = changer_key(changer, &pose);
+                match &mut self.changer {
+                    Some(drawn) if drawn.key == key => drawn.degrees = pose.degrees,
+                    _ => {
+                        let drawing = render_changer(changer, &mut self.changer_cache, &pose);
+                        self.changer = Some(ChangerPicture {
+                            key,
+                            drawing,
+                            degrees: pose.degrees,
+                        });
+                    }
                 }
             }
             None => self.changer = None,
@@ -2618,8 +2640,16 @@ impl Pictures {
     }
 
     /// The changer's bar as drawn, and where it goes.
-    pub fn changer(&self) -> Option<(&Frame, (i32, i32))> {
-        self.changer.as_ref().map(|c| (&c.frame, c.at))
+    pub fn changer(&self) -> Option<ChangerStack<'_>> {
+        self.changer.as_ref().map(|c| ChangerStack {
+            under: (&c.drawing.under.0, c.drawing.under.1),
+            turning: c
+                .drawing
+                .turning
+                .as_ref()
+                .map(|(cover, centre)| (cover, *centre, c.degrees)),
+            over: c.drawing.over.as_ref().map(|(over, at)| (over, *at)),
+        })
     }
 
     /// The reels as `Stack` takes them: the album's where the scene names
@@ -3249,7 +3279,7 @@ fn turn_onto(
 
 /// What the changer's picture was drawn from: its spec and each slot's
 /// disc, by index and the cover file it had.
-fn changer_key(changer: &plot::Changer) -> String {
+fn changer_key(changer: &plot::Changer, pose: &ChangerPose) -> String {
     let mut key = format!("{:?}", changer.spec);
     for disc in &changer.discs {
         key.push('|');
@@ -3260,7 +3290,7 @@ fn changer_key(changer: &plot::Changer) -> String {
         key.push_str(&disc.title);
         key.push(if disc.playing { '*' } else { '.' });
     }
-    key.push_str(&format!("|{}|{:.0}", changer.engaged, sled_radius(changer)));
+    key.push_str(&format!("|{:.0}|{:.0}", pose.along, pose.radius));
     key
 }
 
@@ -3304,31 +3334,227 @@ fn slot_centres(spec: &lead::ChangerSpec) -> Vec<(f32, f32)> {
         .collect()
 }
 
+/// Where the changer's moving parts stand this frame, in the theme's
+/// pixels: the arm's place along the bar, the sled's radius from the
+/// disc's centre, the disc's angle, and whether it turns. From
+/// [`ChangerMotion`], which moves them as the device would.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ChangerPose {
+    pub along: f32,
+    pub radius: f32,
+    pub degrees: f32,
+    pub spinning: bool,
+}
+
+/// One eased move of a part from one place to another over a duration:
+/// slow at both ends, as a motor with a ramp.
+#[derive(Clone, Copy, Debug)]
+struct Move {
+    from: f32,
+    to: f32,
+    start_ms: u64,
+    duration_ms: f32,
+}
+
+impl Move {
+    fn at(&self, now_ms: u64) -> f32 {
+        if self.duration_ms <= 0.0 {
+            return self.to;
+        }
+        let t = (now_ms.saturating_sub(self.start_ms) as f32 / self.duration_ms).clamp(0.0, 1.0);
+        let eased = t * t * (3.0 - 2.0 * t);
+        self.from + (self.to - self.from) * eased
+    }
+
+    fn done(&self, now_ms: u64) -> bool {
+        now_ms.saturating_sub(self.start_ms) as f32 >= self.duration_ms
+    }
+}
+
+/// A part glides from where it is to `target`: a move under way towards
+/// the same target goes on; a new target starts a new move from where the
+/// part is now, its duration from `seconds_for` the distance.
+fn glide(
+    moving: &mut Option<Move>,
+    now: f32,
+    target: f32,
+    now_ms: u64,
+    seconds_for: impl Fn(f32) -> f32,
+) -> f32 {
+    if let Some(m) = moving {
+        if (m.to - target).abs() < 0.5 {
+            let at = m.at(now_ms);
+            if m.done(now_ms) {
+                *moving = None;
+            }
+            return at;
+        }
+    }
+    if (now - target).abs() < 0.5 {
+        *moving = None;
+        return target;
+    }
+    let seconds = seconds_for((target - now).abs()).max(0.0);
+    let m = Move {
+        from: now,
+        to: target,
+        start_ms: now_ms,
+        duration_ms: seconds * 1000.0,
+    };
+    let at = m.at(now_ms);
+    *moving = Some(m);
+    at
+}
+
+/// The scaled spin: 50 rpm at the inner stop, slowing as the sled goes
+/// out with one linear speed (a real disc's 500 to 200, a tenth of it so
+/// it reads at 30 frames a second).
+const SPIN_HOME_RPM: f32 = 50.0;
+
+/// The changer's parts between frames, moved as the device moves them.
+/// The arm travels only with the disc still and the sled home; the disc
+/// spins up only with the arm in place; the sled leaves home only with the
+/// disc up to speed. So a stop spins the disc down, homes the sled and
+/// returns the arm, in that order; a new disc spins down and homes before
+/// the arm travels, then spins up and seeks. Durations are the theme's.
+#[derive(Default)]
+pub struct ChangerMotion {
+    along: Option<f32>,
+    radius: Option<f32>,
+    rpm: f32,
+    angle: f32,
+    last_ms: Option<u64>,
+    travel: Option<Move>,
+    seek: Option<Move>,
+}
+
+impl ChangerMotion {
+    pub fn advance(&mut self, changer: &plot::Changer, now_ms: u64) -> ChangerPose {
+        let spec = &changer.spec;
+        let half = spec.disc_size as f32 / 2.0;
+        let home = half * SLED_HOME;
+        let edge = half * SLED_EDGE;
+        let centres = slot_centres(spec);
+        let along_of = |c: (f32, f32)| if spec.horizontal { c.0 } else { c.1 };
+        let park = along_of((spec.head_park.0 as f32, spec.head_park.1 as f32));
+        let playing = changer
+            .discs
+            .iter()
+            .position(|disc| disc.playing)
+            .and_then(|slot| centres.get(slot).copied())
+            .map(along_of);
+        let engaged = changer.engaged && playing.is_some();
+        let target_along = playing.filter(|_| engaged).unwrap_or(park);
+        let target_radius = if engaged { sled_radius(changer) } else { home };
+        let dt = self
+            .last_ms
+            .map_or(0.0, |last| (now_ms.saturating_sub(last) as f32 / 1000.0).min(0.5));
+        self.last_ms = Some(now_ms);
+        // First sight: every part in its place, the disc up to speed if playing.
+        let first = self.along.is_none();
+        let along = *self.along.get_or_insert(target_along);
+        let radius = *self.radius.get_or_insert(target_radius);
+        let full_rpm = SPIN_HOME_RPM * home / radius.max(home);
+        if first && engaged {
+            self.rpm = full_rpm;
+        }
+        let in_place = (along - target_along).abs() < 0.5;
+        let want_spin = engaged && in_place;
+        let rate = |seconds: f32| if seconds > 0.0 { SPIN_HOME_RPM / seconds } else { f32::INFINITY };
+        if want_spin {
+            self.rpm = (self.rpm + rate(spec.spin_up_s) * dt).min(full_rpm);
+        } else {
+            self.rpm = (self.rpm - rate(spec.spin_down_s) * dt).max(0.0);
+        }
+        if self.rpm > 0.0 {
+            self.angle = (self.angle + self.rpm * 6.0 * dt).rem_euclid(360.0);
+        }
+        let still = self.rpm <= 0.0;
+        let sled_home = (radius - home).abs() < 0.5;
+        // The sled follows the track once the disc is up to speed, goes
+        // home once the disc is still, and holds while it spins down.
+        let want_radius = if want_spin && self.rpm >= full_rpm * 0.9 {
+            target_radius
+        } else if still {
+            home
+        } else {
+            radius
+        };
+        let want_along = if still && sled_home { target_along } else { along };
+        let span = (edge - home).max(1.0);
+        let radius = glide(&mut self.seek, radius, want_radius, now_ms, |delta| {
+            spec.seek_s * delta / span
+        });
+        let pitch = spec.pitch.unsigned_abs().max(1) as f32;
+        let along = glide(&mut self.travel, along, want_along, now_ms, |delta| {
+            spec.travel_s * delta / pitch
+        });
+        self.radius = Some(radius);
+        self.along = Some(along);
+        ChangerPose {
+            along,
+            radius,
+            degrees: self.angle,
+            spinning: self.rpm > 0.0,
+        }
+    }
+}
+
+/// The changer as composed for one pose: what lies under the turning
+/// disc's cover, the cover itself with the centre it turns about, and what
+/// lies over it (the playing slot's disc, the sled, the arm). Each with its
+/// top left in the theme's pixels.
+pub struct ChangerDrawing {
+    pub under: (Frame, (i32, i32)),
+    pub turning: Option<(Frame, (f32, f32))>,
+    pub over: Option<(Frame, (i32, i32))>,
+}
+
+/// The pieces of one layer composed into one picture about their union,
+/// or none when there are no pieces.
+fn compose(pieces: &[(Frame, (i32, i32))]) -> Option<(Frame, (i32, i32))> {
+    let first = pieces.first()?;
+    let (mut x0, mut y0) = first.1;
+    let (mut x1, mut y1) = (x0, y0);
+    for (piece, at) in pieces {
+        x0 = x0.min(at.0);
+        y0 = y0.min(at.1);
+        x1 = x1.max(at.0 + piece.width as i32);
+        y1 = y1.max(at.1 + piece.height as i32);
+    }
+    let mut frame = empty_frame((x1 - x0).max(1) as u32, (y1 - y0).max(1) as u32);
+    for (piece, at) in pieces {
+        composite_over(&mut frame, piece, (at.0 - x0, at.1 - y0));
+    }
+    Some((frame, (x0, y0)))
+}
+
 /// The changer composed from the theme's pictures, as the tonearm and the
 /// reels are: the rail; in every slot with a disc, the cover fitted to the
 /// disc's size and cut by the theme's label mask under the theme's disc
-/// picture; the sled at its radius along the arm; the head over it, at its
-/// park or moved along the bar to the playing disc's slot, the housing's
-/// alpha showing the sled and the disc through. A picture the theme leaves
-/// out is not drawn; all that does not move is the theme's background.
-/// Answers the picture and where its top left goes.
-pub fn render_changer(changer: &plot::Changer, cache: &mut ChangerCache) -> (Frame, (i32, i32)) {
+/// picture; the sled at its radius along the arm; the arm over it, where
+/// the pose puts them, the housing's alpha showing the sled and the disc
+/// through; the playing disc's cover kept apart to turn. A picture the
+/// theme leaves out is not drawn; all that does not move is the theme's
+/// background.
+pub fn render_changer(
+    changer: &plot::Changer,
+    cache: &mut ChangerCache,
+    pose: &ChangerPose,
+) -> ChangerDrawing {
     let spec = &changer.spec;
     let discs = &changer.discs;
     let d = spec.disc_size;
     let centres = slot_centres(spec);
     let (hx, hy) = (spec.head_park.0 as f32, spec.head_park.1 as f32);
-    // The head travels along the bar only: to the playing slot's place
-    // along it, at its park's place across it.
-    let (ax, ay) = match discs
-        .iter()
-        .position(|disc| disc.playing)
-        .and_then(|slot| centres.get(slot).copied())
-    {
-        Some((cx, cy)) if spec.horizontal => (cx, hy),
-        Some((cx, cy)) => (hx, cy),
-        None => (hx, hy),
+    // The arm travels along the bar only: the pose's place along it, the
+    // park's place across it.
+    let (ax, ay) = if spec.horizontal {
+        (pose.along, hy)
+    } else {
+        (hx, pose.along)
     };
+    let playing = discs.iter().position(|disc| disc.playing);
     let disc_picture = cache.picture(&spec.disc_file).map(|f| fit_art(&f, d, d));
     let mask = cache.picture(&spec.mask_file).map(|f| fit_art(&f, d, d));
     let head = cache.picture(&spec.head_file);
@@ -3340,10 +3566,11 @@ pub fn render_changer(changer: &plot::Changer, cache: &mut ChangerCache) -> (Fra
             (cy - picture.height as f32 / 2.0).round() as i32,
         )
     };
-    // Every piece with its top left in the theme's pixels, in drawing order.
-    let mut pieces: Vec<(Frame, (i32, i32))> = Vec::new();
+    let mut under: Vec<(Frame, (i32, i32))> = Vec::new();
+    let mut over: Vec<(Frame, (i32, i32))> = Vec::new();
+    let mut turning = None;
     if let Some(rail) = rail {
-        pieces.push((rail, spec.rail_pos));
+        under.push((rail, spec.rail_pos));
     }
     if let Some(disc_picture) = &disc_picture {
         for (slot, (cx, cy)) in centres.iter().enumerate() {
@@ -3351,10 +3578,16 @@ pub fn render_changer(changer: &plot::Changer, cache: &mut ChangerCache) -> (Fra
                 continue;
             };
             let at = centred(disc_picture, *cx, *cy);
-            if let Some(cover) = cache.cover(&disc.art_file, d, mask.as_ref()) {
-                pieces.push((cover, at));
+            let cover = cache.cover(&disc.art_file, d, mask.as_ref());
+            if playing == Some(slot) {
+                turning = cover.map(|cover| (cover, (*cx, *cy)));
+                over.push((disc_picture.clone(), at));
+            } else {
+                if let Some(cover) = cover {
+                    under.push((cover, at));
+                }
+                under.push((disc_picture.clone(), at));
             }
-            pieces.push((disc_picture.clone(), at));
         }
     }
     // The light over the moving parts: each one's shadow under it, offset
@@ -3367,38 +3600,25 @@ pub fn render_changer(changer: &plot::Changer, cache: &mut ChangerCache) -> (Fra
         }
         pieces.push((picture, at));
     };
-    // The sled along the arm, from the slots' row outward towards the rail.
+    // The moving parts go over the turning cover when there is one.
+    let moving: &mut Vec<(Frame, (i32, i32))> = if turning.is_some() { &mut over } else { &mut under };
     if let Some(sled) = sled {
-        let r = sled_radius(changer);
         let at = if spec.horizontal {
-            centred(&sled, ax, spec.pos.1 as f32 - r)
+            centred(&sled, ax, spec.pos.1 as f32 - pose.radius)
         } else {
-            centred(&sled, spec.pos.0 as f32 - r, ay)
+            centred(&sled, spec.pos.0 as f32 - pose.radius, ay)
         };
-        shaded(&mut pieces, &spec.sled_file, sled, at);
+        shaded(moving, &spec.sled_file, sled, at);
     }
     if let Some(head) = head {
         let at = centred(&head, ax, ay);
-        shaded(&mut pieces, &spec.head_file, head, at);
+        shaded(moving, &spec.head_file, head, at);
     }
-    let Some(first) = pieces.first() else {
-        return (empty_frame(1, 1), spec.pos);
-    };
-    let mut x0 = first.1 .0;
-    let mut y0 = first.1 .1;
-    let mut x1 = x0;
-    let mut y1 = y0;
-    for (piece, at) in &pieces {
-        x0 = x0.min(at.0);
-        y0 = y0.min(at.1);
-        x1 = x1.max(at.0 + piece.width as i32);
-        y1 = y1.max(at.1 + piece.height as i32);
+    ChangerDrawing {
+        under: compose(&under).unwrap_or_else(|| (empty_frame(1, 1), spec.pos)),
+        turning,
+        over: compose(&over),
     }
-    let mut frame = empty_frame((x1 - x0).max(1) as u32, (y1 - y0).max(1) as u32);
-    for (piece, at) in &pieces {
-        composite_over(&mut frame, piece, (at.0 - x0, at.1 - y0));
-    }
-    (frame, (x0, y0))
 }
 
 /// `piece` laid over `frame` at `at` with its alpha, the frame's own alpha
@@ -3479,6 +3699,10 @@ mod changer_tests {
             head_park: (150, 240),
             rail_pos: (100, 160),
             shadow: None,
+            travel_s: 0.5,
+            seek_s: 1.0,
+            spin_up_s: 0.5,
+            spin_down_s: 0.5,
             disc_file: file("disc.png"),
             mask_file: file("mask.png"),
             head_file: file("head.png"),
@@ -3496,6 +3720,26 @@ mod changer_tests {
             duration,
             engaged,
         }
+    }
+
+    /// The changer drawn at first sight, every part in its place, as one
+    /// flat picture with its top left: the layers laid over each other,
+    /// the turning cover unturned.
+    fn draw(changer: &plot::Changer, cache: &mut ChangerCache) -> (Frame, (i32, i32)) {
+        let pose = ChangerMotion::default().advance(changer, 0);
+        let drawing = render_changer(changer, cache, &pose);
+        let mut pieces = vec![drawing.under];
+        if let Some((cover, centre)) = drawing.turning {
+            let at = (
+                (centre.0 - cover.width as f32 / 2.0).round() as i32,
+                (centre.1 - cover.height as f32 / 2.0).round() as i32,
+            );
+            pieces.push((cover, at));
+        }
+        if let Some(over) = drawing.over {
+            pieces.push(over);
+        }
+        compose(&pieces).unwrap()
     }
 
     fn pixel(frame: &Frame, at: (i32, i32), x: i32, y: i32) -> [u8; 4] {
@@ -3529,7 +3773,7 @@ mod changer_tests {
             },
         ];
         let mut cache = ChangerCache::default();
-        let (frame, at) = render_changer(&scene(&spec, discs.clone(), 0.0, 240.0, false), &mut cache);
+        let (frame, at) = draw(&scene(&spec, discs.clone(), 0.0, 240.0, false), &mut cache);
         // The rail lies where the theme puts it; the first slot shows the
         // cover through the disc's window and the disc's own rim; the third
         // slot is empty, the background's.
@@ -3542,14 +3786,17 @@ mod changer_tests {
         // the inner stop above the slots' row, 25/60 of the radius.
         assert_eq!(pixel(&frame, at, 150, 240)[1], 200, "the head at its park");
         let home = (150 + 22, 300 - 21);
-        assert_eq!(pixel(&frame, at, home.0, home.1)[2], 200, "the sled home: {:?}", pixel(&frame, at, home.0, home.1));
-        // Playing the second disc halfway, the head travels along the bar
-        // to its slot, the sled with it, out from home with r squared
-        // linear in progress; the park is clear.
+        assert_eq!(pixel(&frame, at, home.0, home.1)[2], 200, "the sled home");
+        // Playing the second disc halfway, seen first: the head over its
+        // slot, the sled out from home with r squared linear in progress,
+        // the park clear, and the cover kept apart to turn.
         let mut playing = discs.clone();
         playing[1].playing = true;
         let halfway = scene(&spec, playing.clone(), 0.5, 240.0, true);
-        let (out, at) = render_changer(&halfway, &mut cache);
+        let pose = ChangerMotion::default().advance(&halfway, 0);
+        let drawing = render_changer(&halfway, &mut cache, &pose);
+        assert!(drawing.turning.is_some(), "the playing cover turns");
+        let (out, at) = draw(&halfway, &mut cache);
         assert_eq!(pixel(&out, at, 550, 240)[1], 200, "the head over the playing disc");
         assert_eq!(pixel(&out, at, 150, 240)[3], 0, "the park is clear");
         let r = sled_radius(&halfway);
@@ -3563,15 +3810,61 @@ mod changer_tests {
         assert!(sled_radius(&short) < sled_radius(&full));
         let stream = scene(&spec, playing.clone(), 0.0, 0.0, true);
         assert!((sled_radius(&stream) - 50.0 * SLED_HOME).abs() < 0.01);
-        assert_ne!(changer_key(&halfway), changer_key(&full));
         // With a light given, the head casts a shadow under it: below its
         // foot, offset down, the frame is no longer clear.
         let mut lit = spec.clone();
         lit.shadow = Some((0, 12, 4, 0.5));
-        let (shadowed, at) = render_changer(&scene(&lit, discs.clone(), 0.0, 240.0, false), &mut cache);
+        let (shadowed, at) = draw(&scene(&lit, discs.clone(), 0.0, 240.0, false), &mut cache);
         let under_foot = (150, 240 + 80 + 8);
         assert!(pixel(&shadowed, at, under_foot.0, under_foot.1)[3] > 0, "a shadow under the foot");
         assert_eq!(pixel(&frame, at, under_foot.0, under_foot.1)[3], 0, "none without the key");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn a_stop_spins_down_then_homes_the_sled_then_returns_the_arm() {
+        let (dir, spec) = theme("motion");
+        let mut discs = vec![lead::Disc::default(), lead::Disc::default()];
+        discs[1].playing = true;
+        let playing = scene(&spec, discs.clone(), 0.5, DISC_SECONDS, true);
+        let mut motion = ChangerMotion::default();
+        let start = motion.advance(&playing, 0);
+        assert_eq!(start.along, 550.0, "first sight: the arm over the disc");
+        assert!(start.spinning && start.radius > 21.0, "first sight: spinning, the sled out");
+        let mid_radius = start.radius;
+        // The player stops: the disc spins down first, nothing else moves.
+        let mut stopped = discs.clone();
+        stopped[1].playing = false;
+        let stopped = scene(&spec, stopped, 0.0, DISC_SECONDS, false);
+        let p = motion.advance(&stopped, 200);
+        assert_eq!(p.along, 550.0, "the arm waits while the disc spins down");
+        assert_eq!(p.radius, mid_radius, "the sled waits while the disc spins down");
+        assert!(p.spinning);
+        // The disc still (half a second), the sled glides home over the surface.
+        motion.advance(&stopped, 700);
+        let p = motion.advance(&stopped, 900);
+        assert!(!p.spinning, "the disc has stopped");
+        assert!(p.radius < mid_radius && p.radius > 21.0, "the sled on its way home: {}", p.radius);
+        assert_eq!(p.along, 550.0, "the arm still waits");
+        // Home; then the arm returns along the rail, eased, not at once.
+        let p = motion.advance(&stopped, 1400);
+        assert!((p.radius - 50.0 * SLED_HOME).abs() < 0.6, "the sled home: {}", p.radius);
+        motion.advance(&stopped, 1800);
+        let p = motion.advance(&stopped, 2000);
+        assert!(p.along < 550.0 && p.along > 150.0, "the arm on its way: {}", p.along);
+        let p = motion.advance(&stopped, 6000);
+        assert_eq!(p.along, 150.0, "the arm parked");
+        // Play again: the arm travels first, then the disc spins up, then
+        // the sled seeks out.
+        motion.advance(&playing, 6100);
+        let p = motion.advance(&playing, 6300);
+        assert!(p.along > 150.0 && !p.spinning, "travelling, still: {} {}", p.along, p.spinning);
+        motion.advance(&playing, 8000);
+        let p = motion.advance(&playing, 8500);
+        assert_eq!(p.along, 550.0);
+        assert!(p.spinning, "up to speed");
+        let p = motion.advance(&playing, 11000);
+        assert!(p.radius > 21.0, "the sled sought out: {}", p.radius);
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -3584,7 +3877,7 @@ mod changer_tests {
         spec.rail_file = String::new();
         let discs = vec![lead::Disc::default(), lead::Disc::default(), lead::Disc::default()];
         let mut cache = ChangerCache::default();
-        let (frame, at) = render_changer(&scene(&spec, discs.clone(), 0.0, 0.0, false), &mut cache);
+        let (frame, at) = draw(&scene(&spec, discs.clone(), 0.0, 0.0, false), &mut cache);
         assert!(frame.height > frame.width, "taller than wide: {}x{}", frame.width, frame.height);
         assert!(at.1 <= 40 - 80, "the head at the top: {at:?}");
         let bare = lead::ChangerSpec {
@@ -3595,7 +3888,7 @@ mod changer_tests {
             sled_file: String::new(),
             ..spec
         };
-        let (none, _) = render_changer(&scene(&bare, discs, 0.0, 0.0, false), &mut cache);
+        let (none, _) = draw(&scene(&bare, discs, 0.0, 0.0, false), &mut cache);
         assert_eq!((none.width, none.height), (1, 1));
         let _ = std::fs::remove_dir_all(dir);
     }
