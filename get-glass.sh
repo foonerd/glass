@@ -6,15 +6,21 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/foonerd/glass/main/get-glass.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/foonerd/glass/main/get-glass.sh | sh -s -- 0.7.7
-#   curl -fsSL https://raw.githubusercontent.com/foonerd/glass/main/get-glass.sh | sh -s -- --zip glass-0.9.37.zip
+#   curl -fsSL https://raw.githubusercontent.com/foonerd/glass/main/get-glass.sh | sh -s -- --zip glass-0.9.38.zip
 #
 # Every zip, downloaded or given, is held to the signature it carries
 # inside before anything is installed: MANIFEST, each file's digest, and
 # MANIFEST.sig, the manifest's Ed25519 signature made in the release
-# workflow with the project's key, checked here with the public key below
-# and every file against the manifest, with no network. A zip that is not
-# the release as published is refused. A release before 0.9.23 carries no
+# workflow with the project's key. The check uses the player's own tools
+# and nothing else: miniunzip unpacks the zip, openssl checks the signature
+# with the public key below, sha256sum holds every file to the manifest,
+# and a file the manifest does not name is refused. A zip that is not the
+# release as published is refused. A release before 0.9.23 carries no
 # signature: asked for by its version, it goes in with a warning.
+#
+#   ... | sh -s -- --check --zip glass-0.9.38.zip
+#
+# With --check the zip is verified and nothing is installed.
 #
 # And on a player that has Glass, the way back to the stable release when
 # its manager does not come up to do it (the System tab's "Back to the
@@ -28,15 +34,22 @@
 # that the manager's Backups tab restores. glass-evo and whose the screen is
 # are left as they are: the manager, once it is back, has both.
 #
-# Run as the volumio user on the player. The plugin zip is downloaded from
-# GitHub into the place the player's plugin manager takes dropped files,
-# handed to that manager over the player's own socket, and enabled; the
-# player's backend is then restarted so the audio tap joins the sound path.
-# An installed Glass upgrades itself from its manager's System tab instead.
+# Run as the volumio user on the player. The zip goes into the place the
+# player's plugin manager takes dropped files, is handed to that manager
+# over the player's own socket, and enabled; the player's backend is then
+# restarted so the audio tap joins the sound path. An installed Glass
+# upgrades itself from its manager's System tab instead.
+#
+# The player's Node is used in two places only, each one short-lived
+# process with one job and a time limit: the settings plan of the way back,
+# made by the stable release's own code, and the hand-over to the plugin
+# manager, which is reachable over its socket alone. Everything before the
+# zip is verified is plain sh over the player's tools.
 set -eu
 
 REPO=foonerd/glass
 STABLE=no
+CHECK=no
 WANTED=
 GIVEN=
 TAKE_ZIP=no
@@ -46,6 +59,7 @@ for arg in "$@"; do
   fi
   case "$arg" in
     --stable) STABLE=yes ;;
+    --check) CHECK=yes ;;
     --zip) TAKE_ZIP=yes ;;
     --zip=*) GIVEN=${arg#--zip=} ;;
     -*) printf 'get-glass: unknown argument %s\n' "$arg" >&2; exit 2 ;;
@@ -64,174 +78,94 @@ BACKUPS=/data/INTERNAL/glass/backups
 DROP=/tmp/plugins
 NODE=/usr/bin/node
 SOCKET_CLIENT=/volumio/node_modules/socket.io-client
+PLUGINS_JSON=/data/configuration/plugins.json
 
 say() { printf '%s\n' "$*"; }
-fail() { printf 'get-glass: %s\n' "$*" >&2; exit 1; }
+warn() { printf 'get-glass: %s\n' "$*" >&2; }
+fail() { warn "$*"; exit 1; }
+
+# The "version" a package.json names, by its text alone.
+version_in() {
+  sed -n 's/^[[:space:]]*"version":[[:space:]]*"\([^"]*\)".*/\1/p' "$1" 2>/dev/null | head -n 1
+}
+
+# Whether the player's plugin registry says a plugin is enabled: the
+# plugin's own object, its whitespace squeezed, read for enabled.value.
+plugin_enabled() {
+  [ -f "$PLUGINS_JSON" ] || return 1
+  tr -d ' \n\t\r' < "$PLUGINS_JSON" | grep -o "\"$1\":{[^}]*\"enabled\":{[^}]*}" | grep -q '"value":true'
+}
 
 [ "$(id -un)" = volumio ] || fail "run this as the volumio user on the player"
 [ -d /volumio ] && [ -x "$NODE" ] && [ -d "$SOCKET_CLIENT" ] || fail "this is not a Volumio player"
+for tool in miniunzip openssl sha256sum find sort; do
+  command -v "$tool" >/dev/null 2>&1 || fail "$tool is needed and the player does not have it"
+done
 [ -n "$GIVEN" ] || command -v curl >/dev/null 2>&1 || fail "curl is needed"
 [ -z "$GIVEN" ] || [ -f "$GIVEN" ] || fail "$GIVEN is not a file"
 [ -z "$GIVEN" ] || [ -z "$WANTED" ] || fail "--zip installs the version the zip holds; it takes no version"
-
-# The release zip is read by the player's own Node and nothing else: its
-# directory walked, each file inflated and digested, the manifest's
-# signature held to the key above. Written once, used for the checks and
-# for the way back's files.
-ZIPCHECK=$(mktemp)
-trap 'rm -f "$ZIPCHECK"' EXIT
-cat > "$ZIPCHECK" <<'JS'
-// The release zip read by the player's own Node, nothing else: its central
-// directory walked, each file inflated and digested, the manifest and its
-// Ed25519 signature held to the project's key. Modes:
-//   verify ZIP PEM            prints "<version> <files>"; exit 2 for a zip with no
-//                             signature at all, 1 for one that is not as published
-//   version ZIP               prints the version package.json holds
-//   extract ZIP DIR NAME...   writes the named members under DIR
-'use strict';
-const fs = require('fs');
-const path = require('path');
-const zlib = require('zlib');
-const crypto = require('crypto');
-
-function fail(message, code) { process.stderr.write('get-glass: ' + message + '\n'); process.exit(code || 1); }
-
-// The entries of a zip from its central directory, read from the end.
-function entries(fd, size) {
-  const tail = Math.min(size, 65536 + 22);
-  const buf = Buffer.alloc(tail);
-  fs.readSync(fd, buf, 0, tail, size - tail);
-  let at = -1;
-  for (let i = tail - 22; i >= 0; i--) { if (buf.readUInt32LE(i) === 0x06054b50) { at = i; break; } }
-  if (at < 0) fail('not a zip: no end record');
-  const count = buf.readUInt16LE(at + 10);
-  const cdSize = buf.readUInt32LE(at + 12);
-  const cdOffset = buf.readUInt32LE(at + 16);
-  if (count === 0xffff || cdSize === 0xffffffff || cdOffset === 0xffffffff) fail('the zip is larger than this reader takes');
-  const cd = Buffer.alloc(cdSize);
-  fs.readSync(fd, cd, 0, cdSize, cdOffset);
-  const list = [];
-  let p = 0;
-  for (let i = 0; i < count; i++) {
-    if (p + 46 > cdSize || cd.readUInt32LE(p) !== 0x02014b50) fail('the zip\'s directory is damaged');
-    const method = cd.readUInt16LE(p + 10);
-    const crc = cd.readUInt32LE(p + 16);
-    const packed = cd.readUInt32LE(p + 20);
-    const unpacked = cd.readUInt32LE(p + 24);
-    const nameLen = cd.readUInt16LE(p + 28), extraLen = cd.readUInt16LE(p + 30), commentLen = cd.readUInt16LE(p + 32);
-    const offset = cd.readUInt32LE(p + 42);
-    const name = cd.toString('utf8', p + 46, p + 46 + nameLen);
-    list.push({ name, method, crc, packed, unpacked, offset, isDir: name.endsWith('/') });
-    p += 46 + nameLen + extraLen + commentLen;
-  }
-  return list;
-}
-
-function read(fd, entry) {
-  const head = Buffer.alloc(30);
-  fs.readSync(fd, head, 0, 30, entry.offset);
-  if (head.readUInt32LE(0) !== 0x04034b50) fail('the zip\'s entry ' + entry.name + ' is damaged');
-  const start = entry.offset + 30 + head.readUInt16LE(26) + head.readUInt16LE(28);
-  const packed = Buffer.alloc(entry.packed);
-  fs.readSync(fd, packed, 0, entry.packed, start);
-  let data;
-  if (entry.method === 0) data = packed;
-  else if (entry.method === 8) data = zlib.inflateRawSync(packed, { maxOutputLength: 256 * 1024 * 1024 });
-  else fail('the zip\'s entry ' + entry.name + ' uses an unsupported compression');
-  if (data.length !== entry.unpacked) fail('the zip\'s entry ' + entry.name + ' inflates to the wrong size');
-  return data;
-}
-
-function open(file) {
-  let fd, size;
-  try { fd = fs.openSync(file, 'r'); size = fs.fstatSync(fd).size; } catch (e) { fail('the zip could not be read: ' + e.message); }
-  return { fd, list: entries(fd, size) };
-}
-
-function versionOf(zip) {
-  const entry = zip.list.find((e) => e.name === 'package.json');
-  if (!entry) return '';
-  try { return String(JSON.parse(read(zip.fd, entry).toString('utf8')).version || ''); } catch (e) { return ''; }
-}
-
-const [mode, file, ...rest] = process.argv.slice(2);
-if (mode === 'version') {
-  process.stdout.write(versionOf(open(file)));
-} else if (mode === 'extract') {
-  const [dir, ...names] = rest;
-  const zip = open(file);
-  for (const entry of zip.list) {
-    const parts = entry.name.split('/');
-    if (entry.isDir || parts.includes('..') || !names.some((n) => n.endsWith('/') ? entry.name.startsWith(n) : entry.name === n)) continue;
-    const out = path.join(dir, entry.name);
-    fs.mkdirSync(path.dirname(out), { recursive: true });
-    fs.writeFileSync(out, read(zip.fd, entry));
-  }
-} else if (mode === 'verify') {
-  const pem = rest[0];
-  const zip = open(file);
-  const files = zip.list.filter((e) => !e.isDir);
-  const manifest = files.find((e) => e.name === 'MANIFEST');
-  const sig = files.find((e) => e.name === 'MANIFEST.sig');
-  if (!manifest && !sig) process.exit(2);
-  if (!manifest || !sig) fail('the zip carries half a signature; it is not the release as published');
-  if (manifest.unpacked > 4 * 1024 * 1024 || sig.unpacked !== 64) fail('the zip\'s manifest or signature has an unusable size');
-  const manifestBytes = read(zip.fd, manifest);
-  if (!crypto.verify(null, manifestBytes, pem, read(zip.fd, sig))) fail('the zip\'s signature does not verify; it is not the release as published');
-  const listed = new Map();
-  for (const line of manifestBytes.toString('utf8').split(/\r?\n/)) {
-    const m = /^([0-9a-fA-F]{64})\s+\*?(.+?)\s*$/.exec(line);
-    if (m) listed.set(m[2], m[1].toLowerCase());
-  }
-  if (!listed.size) fail('the zip\'s manifest names no file');
-  const seen = new Set();
-  for (const entry of files) {
-    if (entry.name === 'MANIFEST' || entry.name === 'MANIFEST.sig') continue;
-    const stated = listed.get(entry.name);
-    if (!stated) fail('the zip holds ' + entry.name + ', which its signed manifest does not name');
-    if (crypto.createHash('sha256').update(read(zip.fd, entry)).digest('hex') !== stated) fail(entry.name + ' does not match the zip\'s signed manifest');
-    seen.add(entry.name);
-  }
-  for (const name of listed.keys()) if (!seen.has(name)) fail('the zip lacks ' + name + ', which its signed manifest names');
-  process.stdout.write(versionOf(zip) + ' ' + seen.size);
-} else {
-  fail('zipcheck: verify|version|extract');
-}
-JS
-
-# A zip held to the signature it carries inside. Prints the version and
-# the file count; exit 2 for a zip with no signature at all (a release
-# before 0.9.23), 1 for one that is not the release as published.
-verify_zip() {
-  "$NODE" "$ZIPCHECK" verify "$1" "$PUBKEY"
-}
-
-# The version a zip holds, by its package.json.
-zip_version() {
-  "$NODE" "$ZIPCHECK" version "$1"
-}
 HERE=
-if [ -f "$PLUGIN/package.json" ]; then
-  HERE=$("$NODE" -e 'try { process.stdout.write(String(require(process.argv[1]).version || "")); } catch (e) {}' "$PLUGIN/package.json")
-fi
+[ ! -f "$PLUGIN/package.json" ] || HERE=$(version_in "$PLUGIN/package.json")
 if [ "$STABLE" = yes ]; then
   [ -z "$WANTED" ] || fail "--stable goes to the latest stable release; it takes no version"
-elif [ -d "$PLUGIN" ]; then
+  [ "$CHECK" = no ] || fail "--check verifies a zip and installs nothing; it does not go with --stable"
+elif [ -d "$PLUGIN" ] && [ "$CHECK" = no ]; then
   fail "Glass is installed already: upgrade it from its manager's System tab, run this with --stable to go back to the stable release, or uninstall it first"
 fi
-if [ -z "$HERE" ] && [ -f /data/configuration/plugins.json ] && "$NODE" -e '
-  const p = JSON.parse(require("fs").readFileSync("/data/configuration/plugins.json", "utf8"));
-  const s = (p.user_interface || {}).peppy_screensaver || {};
-  process.exit(s.enabled && s.enabled.value === true ? 0 : 1);
-'; then
+if [ -z "$HERE" ] && [ "$CHECK" = no ] && plugin_enabled peppy_screensaver; then
   fail "PeppyMeter Screensaver is enabled; disable it under Plugins, then run this again. Glass takes its themes and settings over"
 fi
+
+# The zip unpacked into a folder of its own, by the player's miniunzip;
+# the folder is removed when the script ends.
+UNPACKED=
+cleanup() { [ -z "$UNPACKED" ] || rm -rf "$UNPACKED"; }
+trap cleanup EXIT
+unpack_zip() {
+  UNPACKED=$(mktemp -d) || fail "no temporary folder could be made"
+  miniunzip -o "$1" -d "$UNPACKED" >/dev/null 2>&1 || return 1
+}
+
+# The unpacked zip held to the signature it carries inside. Prints the
+# version and the file count; exit 2 for a zip with no signature at all (a
+# release before 0.9.23), 1 for one that is not the release as published.
+verify_unpacked() {
+  dir=$1
+  if [ ! -f "$dir/MANIFEST" ] && [ ! -f "$dir/MANIFEST.sig" ]; then
+    return 2
+  fi
+  if [ ! -f "$dir/MANIFEST" ] || [ ! -f "$dir/MANIFEST.sig" ]; then
+    warn "the zip carries half a signature; it is not the release as published"; return 1
+  fi
+  keyfile=$(mktemp) || return 1
+  printf '%s\n' "$PUBKEY" > "$keyfile"
+  if ! openssl pkeyutl -verify -pubin -inkey "$keyfile" -rawin -in "$dir/MANIFEST" -sigfile "$dir/MANIFEST.sig" >/dev/null 2>&1; then
+    rm -f "$keyfile"
+    warn "the zip's signature does not verify; it is not the release as published"; return 1
+  fi
+  rm -f "$keyfile"
+  # Every file the manifest names is there and matches: the manifest is in
+  # sha256sum's own format.
+  if ! (cd "$dir" && sha256sum -c --quiet --strict MANIFEST >/dev/null 2>&1); then
+    bad=$(cd "$dir" && sha256sum -c --quiet --strict MANIFEST 2>/dev/null | head -n 1 | sed 's/: FAILED.*$//')
+    warn "${bad:-a file} does not match the zip's signed manifest"; return 1
+  fi
+  # And nothing the manifest does not name.
+  have=$(cd "$dir" && find . -type f ! -name MANIFEST ! -name MANIFEST.sig | sed 's|^\./||' | LC_ALL=C sort)
+  listed=$(sed 's/^[0-9a-fA-F]\{64\} *\**//' "$dir/MANIFEST" | sed 's/^ *//' | LC_ALL=C sort)
+  if [ "$have" != "$listed" ]; then
+    stray=$(printf '%s\n' "$have" | grep -vxF -e "$listed" | head -n 1)
+    warn "the zip holds ${stray:-a file}, which its signed manifest does not name"; return 1
+  fi
+  printf '%s %s\n' "$(version_in "$dir/package.json")" "$(printf '%s\n' "$listed" | wc -l | tr -d ' ')"
+}
 
 # The release: the zip given, the latest, or the one asked for.
 ASKED=$WANTED
 mkdir -p "$DROP"
 if [ -n "$GIVEN" ]; then
-  WANTED=$(zip_version "$GIVEN")
+  unpack_zip "$GIVEN" || fail "$GIVEN is not a zip that miniunzip can open"
+  WANTED=$(version_in "$UNPACKED/package.json")
   [ -n "$WANTED" ] || fail "$GIVEN is not a Glass release zip (it holds no package.json with a version)"
   ZIP="glass-$WANTED.zip"
   say "Taking $GIVEN, Glass $WANTED"
@@ -239,10 +173,7 @@ if [ -n "$GIVEN" ]; then
 else
   if [ -z "$WANTED" ]; then
     say "Looking up the latest release of Glass"
-    WANTED=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | "$NODE" -e '
-      let s = ""; process.stdin.on("data", d => s += d).on("end", () => {
-        const r = JSON.parse(s); process.stdout.write(String(r.tag_name || "").replace(/^v/, ""));
-      });')
+    WANTED=$(curl -fsSL "https://api.github.com/repos/$REPO/releases/latest" | sed -n 's/.*"tag_name":[[:space:]]*"v\{0,1\}\([^"]*\)".*/\1/p' | head -n 1)
     [ -n "$WANTED" ] || fail "the latest release could not be read from GitHub"
   fi
   WANTED=${WANTED#v}
@@ -250,12 +181,13 @@ else
   URL="https://github.com/$REPO/releases/download/v$WANTED/$ZIP"
   say "Downloading $ZIP"
   curl -fL --progress-bar -o "$DROP/$ZIP" "$URL" || fail "$URL could not be downloaded"
+  unpack_zip "$DROP/$ZIP" || { rm -f "$DROP/$ZIP"; fail "$ZIP is not a zip that miniunzip can open"; }
 fi
 
 # Held to the signature inside before anything else happens with it.
 say "Verifying $ZIP"
 VSTATUS=0
-VERIFIED=$(verify_zip "$DROP/$ZIP") || VSTATUS=$?
+VERIFIED=$(verify_unpacked "$UNPACKED") || VSTATUS=$?
 if [ "$VSTATUS" -eq 0 ]; then
   say "Verified: Glass ${VERIFIED% *}, ${VERIFIED#* } files held to the release's signature"
 elif [ "$VSTATUS" -eq 2 ]; then
@@ -269,15 +201,20 @@ else
   rm -f "$DROP/$ZIP"
   fail "nothing was installed"
 fi
+if [ "$CHECK" = yes ]; then
+  rm -f "$DROP/$ZIP"
+  say "Nothing installed (--check)."
+  exit 0
+fi
 
 # The way back to the stable release, on a player that has Glass: the
 # settings as they stand are backed up, and what they become is made by the
-# stable release's own plan (its manager/stable.js, out of its zip): its
-# defaults, with the screen's and the network's set-up kept.
+# stable release's own plan (its manager/stable.js, out of the unpacked
+# zip): its defaults, with the screen's and the network's set-up kept. One
+# Node process, one job, done before anything is touched.
 PLANNED=
 if [ "$STABLE" = yes ] && [ -n "$HERE" ]; then
-  WORK=$(mktemp -d)
-  "$NODE" "$ZIPCHECK" extract "$DROP/$ZIP" "$WORK" package.json config.json config/meter.txt.tmpl config/spectrum.txt.tmpl manager/stable.js node_modules/ini/ || fail "the release's zip could not be read"
+  WORK=$UNPACKED
   [ -f "$WORK/manager/stable.js" ] || fail "Glass $WANTED has no way back of its own (it is older than 0.8.52); install it from its manager instead"
   "$NODE" - "$WORK" "$PLUGIN" "$SETTINGS" "$BACKUPS" "$HERE" <<'JS' || fail "the settings could not be planned; nothing was changed"
 const fs = require('fs');
@@ -312,7 +249,8 @@ fi
 
 # The player's plugin manager installs it and enables it, as the
 # interface's plugin page would; a Glass that is here is replaced by its
-# update. The events it sends tell how it goes.
+# update. The events it sends tell how it goes. One Node process, one
+# request over the manager's own socket, a time limit, then it exits.
 HOW=installPlugin
 [ -z "$HERE" ] || HOW=updatePlugin
 if [ "$STABLE" = yes ] && [ "$HERE" = "$WANTED" ]; then
@@ -358,22 +296,13 @@ if [ -n "$PLANNED" ]; then
   cp "$PLANNED/meter.txt" "$PLUGIN/config/meter.txt"
   cp "$PLANNED/spectrum.txt" "$PLUGIN/config/spectrum.txt"
   cp "$PLANNED/config.json" "$SETTINGS"
-  rm -rf "$WORK"
 fi
 
 # The plugin manager writes its registry a moment after it enables the
 # plugin; a restart before that brings the player back with Glass installed
 # and off. The restart waits until the registry on disk says enabled.
-enabled() {
-  "$NODE" -e '
-    try {
-      const p = JSON.parse(require("fs").readFileSync("/data/configuration/plugins.json", "utf8"));
-      const g = (p.user_interface || {}).glass || {};
-      process.exit(g.enabled && g.enabled.value === true ? 0 : 1);
-    } catch (e) { process.exit(1); }'
-}
 waited=0
-until enabled; do
+until plugin_enabled glass; do
   waited=$((waited + 1))
   [ "$waited" -le 30 ] || fail "Glass is installed, but the player has not recorded it as enabled: enable it under Settings, Plugins, Installed Plugins"
   sleep 1
