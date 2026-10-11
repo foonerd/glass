@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.35] - 2026-10-11
+
+- **The Face tab and Anymote come up by themselves.** The page keeps every file it brings in the browser's own store, by checksum, and a store that did not answer, refused or was full could hold the page at loading, with nothing to do but reload. The store is now passed over after a moment and the file fetched from the player instead, a full store is emptied so it serves again, and a start that failed for any reason, a file the player could not give, a broken stream, is tried again every five seconds while the tab is shown, with the line saying what failed until the page comes up.
+
 ## [0.9.34] - 2026-10-10
 
 - **An uploaded font in the browser views again.** From 0.9.28 the Face tab and Anymote drew a style set to an uploaded font in the fallback font, so a title in a script the fallback lacks came out empty, while the player's screen and the remotes drew it. The 0.9.28 fix took the platform's word for a whole path, and in the browser's module the platform calls no slash-led path whole. A path that begins with a slash is whole on every target again, beside the platform's word for a drive's path on Windows. Asked on the forum.
