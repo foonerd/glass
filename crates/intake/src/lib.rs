@@ -2199,7 +2199,10 @@ impl TapSource {
     /// otherwise the slot before holds the track before, as prev, play,
     /// next; the window never runs past the queue's end while the queue
     /// fills it. Each disc's cover is fetched as the slots want it.
-    fn discs_for(&mut self, position: i64) -> Vec<lead::Disc> {
+    /// The queue's window of discs about `position`; the disc there is the
+    /// playing one only while the player is engaged with it (play or pause),
+    /// so a stopped player's head parks.
+    fn discs_for(&mut self, position: i64, engaged: bool) -> Vec<lead::Disc> {
         let slots = self.changer_slots as usize;
         if slots == 0 {
             return Vec::new();
@@ -2229,7 +2232,7 @@ impl TapSource {
             .zip(files)
             .map(|((index, item), art_file)| lead::Disc {
                 index: index as i64,
-                playing: index == position,
+                playing: engaged && index == position,
                 title: item.title,
                 artist: item.artist,
                 album: item.album,
@@ -2552,6 +2555,7 @@ impl Source for TapSource {
                 } else {
                     Default::default()
                 };
+                let engaged = matches!(playing.status.as_str(), "play" | "pause");
                 self.metadata_held = lead::Metadata {
                     title: playing.title,
                     artist: playing.artist,
@@ -2576,7 +2580,7 @@ impl Source for TapSource {
                     reel_files: self.reel_files_for(&playing.uri),
                     queue_before_s: self.queue_progress_for(playing.position).0,
                     queue_total_s: self.queue_progress_for(playing.position).1,
-                    discs: self.discs_for(playing.position),
+                    discs: self.discs_for(playing.position, engaged),
                     volatile: playing.volatile,
                     volume: playing.volume,
                     mute: playing.mute,
