@@ -165,6 +165,7 @@ const RULES: &[(&str, Kind)] = &[
     ("changer.disc.size", Kind::Len),
     ("changer.head.park", Kind::Point),
     ("changer.rail.pos", Kind::Point),
+    ("changer.shadow", Kind::Keep),
     ("changer.disc.filename", Kind::Picture),
     ("changer.label.mask", Kind::Picture),
     ("changer.head.filename", Kind::Picture),

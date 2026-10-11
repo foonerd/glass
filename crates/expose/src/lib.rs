@@ -2426,6 +2426,33 @@ impl ChangerCache {
             .or_insert_with(|| read_art(Path::new(path), d, d, mask))
             .clone()
     }
+
+    /// The shadow the picture at `path` casts: black under its own alpha at
+    /// `opacity`, softened by `blur` pixels, with room for the blur on every
+    /// side; made once per path and light.
+    fn shadow(&mut self, path: &str, blur: u32, opacity: f32) -> Option<Frame> {
+        if path.is_empty() {
+            return None;
+        }
+        let key = format!("{path}#shadow{blur},{opacity}");
+        if !self.frames.contains_key(&key) {
+            let made = self.picture(path).map(|picture| {
+                let (w, h) = (picture.width + 2 * blur, picture.height + 2 * blur);
+                let mut dark = empty_frame(w, h);
+                for y in 0..picture.height {
+                    for x in 0..picture.width {
+                        let from = ((y * picture.width + x) * 4) as usize;
+                        let to = (((y + blur) * w + x + blur) * 4) as usize;
+                        let a = (f32::from(picture.rgba[from + 3]) * opacity).round() as u8;
+                        dark.rgba[to..to + 4].copy_from_slice(&[0, 0, 0, a]);
+                    }
+                }
+                self::blur(&dark, blur)
+            });
+            self.frames.insert(key.clone(), made);
+        }
+        self.frames.get(&key).cloned().flatten()
+    }
 }
 
 impl Pictures {
@@ -3330,6 +3357,16 @@ pub fn render_changer(changer: &plot::Changer, cache: &mut ChangerCache) -> (Fra
             pieces.push((disc_picture.clone(), at));
         }
     }
+    // The light over the moving parts: each one's shadow under it, offset
+    // as the theme says, before the part itself.
+    let mut shaded = |pieces: &mut Vec<(Frame, (i32, i32))>, file: &str, picture: Frame, at: (i32, i32)| {
+        if let Some((dx, dy, blur, opacity)) = spec.shadow {
+            if let Some(shadow) = cache.shadow(file, blur, opacity) {
+                pieces.push((shadow, (at.0 + dx - blur as i32, at.1 + dy - blur as i32)));
+            }
+        }
+        pieces.push((picture, at));
+    };
     // The sled along the arm, from the slots' row outward towards the rail.
     if let Some(sled) = sled {
         let r = sled_radius(changer);
@@ -3338,11 +3375,11 @@ pub fn render_changer(changer: &plot::Changer, cache: &mut ChangerCache) -> (Fra
         } else {
             centred(&sled, spec.pos.0 as f32 - r, ay)
         };
-        pieces.push((sled, at));
+        shaded(&mut pieces, &spec.sled_file, sled, at);
     }
     if let Some(head) = head {
         let at = centred(&head, ax, ay);
-        pieces.push((head, at));
+        shaded(&mut pieces, &spec.head_file, head, at);
     }
     let Some(first) = pieces.first() else {
         return (empty_frame(1, 1), spec.pos);
@@ -3405,6 +3442,7 @@ mod changer_tests {
             disc_size: d,
             head_park: (150, 240),
             rail_pos: (100, 160),
+            shadow: None,
             disc_file: file("disc.png"),
             mask_file: file("mask.png"),
             head_file: file("head.png"),
@@ -3490,6 +3528,14 @@ mod changer_tests {
         let stream = scene(&spec, playing.clone(), 0.0, 0.0, true);
         assert!((sled_radius(&stream) - 50.0 * SLED_HOME).abs() < 0.01);
         assert_ne!(changer_key(&halfway), changer_key(&full));
+        // With a light given, the head casts a shadow under it: below its
+        // foot, offset down, the frame is no longer clear.
+        let mut lit = spec.clone();
+        lit.shadow = Some((0, 12, 4, 0.5));
+        let (shadowed, at) = render_changer(&scene(&lit, discs.clone(), 0.0, 240.0, false), &mut cache);
+        let under_foot = (150, 240 + 80 + 8);
+        assert!(pixel(&shadowed, at, under_foot.0, under_foot.1)[3] > 0, "a shadow under the foot");
+        assert_eq!(pixel(&frame, at, under_foot.0, under_foot.1)[3], 0, "none without the key");
         let _ = std::fs::remove_dir_all(dir);
     }
 

@@ -5038,6 +5038,11 @@ pub struct ChangerSpec {
     pub head_park: (i32, i32),
     /// `changer.rail.pos`: the rail picture's top left.
     pub rail_pos: (i32, i32),
+    /// `changer.shadow`: the light over the moving parts, as `dx,dy,blur,opacity`:
+    /// the engine makes a shadow from the head's and the sled's own alpha,
+    /// softened by `blur` pixels, at `opacity` 0 to 1, and lays it under
+    /// each, offset by `dx,dy`. None without the key.
+    pub shadow: Option<(i32, i32, u32, f32)>,
     /// `changer.disc.filename`, `changer.label.mask`, `changer.head.filename`,
     /// `changer.rail.filename`, `changer.sled.filename`: the theme's pictures
     /// as paths. The disc is drawn over the cover, which shows through the
@@ -5098,6 +5103,14 @@ pub fn meter_changer(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<C
         disc_size,
         head_park,
         rail_pos: ipair("changer.rail.pos").unwrap_or((0, 0)),
+        shadow: get("changer.shadow").and_then(|v| {
+            let mut parts = v.split(',').map(str::trim);
+            let dx: i32 = parts.next()?.parse().ok()?;
+            let dy: i32 = parts.next()?.parse().ok()?;
+            let blur: u32 = parts.next()?.parse().ok()?;
+            let opacity: f32 = parts.next()?.parse().ok()?;
+            Some((dx, dy, blur, opacity.clamp(0.0, 1.0)))
+        }),
         disc_file: path("changer.disc.filename"),
         mask_file: path("changer.label.mask"),
         head_file: path("changer.head.filename"),
