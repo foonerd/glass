@@ -3396,9 +3396,45 @@ pub fn render_changer(changer: &plot::Changer, cache: &mut ChangerCache) -> (Fra
     }
     let mut frame = empty_frame((x1 - x0).max(1) as u32, (y1 - y0).max(1) as u32);
     for (piece, at) in &pieces {
-        blit_op(piece, (at.0 - x0, at.1 - y0)).paint(&mut Band::whole(&mut frame));
+        composite_over(&mut frame, piece, (at.0 - x0, at.1 - y0));
     }
     (frame, (x0, y0))
+}
+
+/// `piece` laid over `frame` at `at` with its alpha, the frame's own alpha
+/// growing as the pieces stack: for a canvas that starts clear, where a
+/// painter for an opaque screen would turn every touched pixel solid.
+fn composite_over(frame: &mut Frame, piece: &Frame, at: (i32, i32)) {
+    for py in 0..piece.height {
+        let y = at.1 + py as i32;
+        if y < 0 || y >= frame.height as i32 {
+            continue;
+        }
+        for px in 0..piece.width {
+            let x = at.0 + px as i32;
+            if x < 0 || x >= frame.width as i32 {
+                continue;
+            }
+            let s = ((py * piece.width + px) * 4) as usize;
+            let a = f32::from(piece.rgba[s + 3]) / 255.0;
+            if a <= 0.0 {
+                continue;
+            }
+            let d = ((y as u32 * frame.width + x as u32) * 4) as usize;
+            let under = f32::from(frame.rgba[d + 3]) / 255.0;
+            let out_a = a + under * (1.0 - a);
+            for c in 0..3 {
+                let over = f32::from(piece.rgba[s + c]) * a;
+                let kept = f32::from(frame.rgba[d + c]) * under * (1.0 - a);
+                frame.rgba[d + c] = if out_a > 0.0 {
+                    ((over + kept) / out_a).round().clamp(0.0, 255.0) as u8
+                } else {
+                    0
+                };
+            }
+            frame.rgba[d + 3] = (out_a * 255.0).round().clamp(0.0, 255.0) as u8;
+        }
+    }
 }
 
 #[cfg(test)]
