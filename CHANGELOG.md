@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.36] - 2026-10-11
+
+- **A test that could fail by chance.** The remote's port test bound a free port, let it go and expected a refused connect; once in a while the kernel picked that same port as the connect's source, the connect landed on itself and answered "open". The test takes a port below the range source ports come from.
+
 ## [0.9.35] - 2026-10-11
 
 - **The Face tab and Anymote come up by themselves.** The page keeps every file it brings in the browser's own store, by checksum, and a store that did not answer, refused or was full could hold the page at loading, with nothing to do but reload. The store is now passed over after a moment and the file fetched from the player instead, a full store is emptied so it serves again, and a start that failed for any reason, a file the player could not give, a broken stream, is tried again every five seconds while the tab is shown, with the line saying what failed until the page comes up.
