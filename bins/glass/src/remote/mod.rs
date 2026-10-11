@@ -1417,10 +1417,14 @@ mod tests {
             "unreachable"
         );
         assert_eq!(tcp_state(&Error::from(ErrorKind::Other)), "error");
-        // A port nothing listens on, on this machine: refused, quickly.
-        let free = std::net::TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = free.local_addr().unwrap().port();
-        drop(free);
+        // A port nothing listens on, on this machine: refused, quickly. The
+        // port is taken below the range the kernel picks source ports from
+        // (32768 and up on Linux): a connect to a closed port of that range
+        // on the loopback can land on itself when the kernel picks the same
+        // port as the source, and then answers "open" to nothing.
+        let port = (20000..21000)
+            .find(|p| std::net::TcpListener::bind(("127.0.0.1", *p)).is_ok())
+            .expect("a free port below the ephemeral range");
         let path = try_tcp("channel", "127.0.0.1", port, Duration::from_secs(2));
         assert_eq!(
             (path.name.as_str(), path.state.as_str(), path.port),
