@@ -1527,6 +1527,71 @@ fn cover_to_show<'a>(
     }
 }
 
+/// The covers of a changer's discs: each location the player reports is
+/// fetched once, one at a time in the background, and the file it landed
+/// in is kept; a location not fetched yet answers empty. On a browser the
+/// host brings the pictures through its table, as the album art's.
+#[derive(Default)]
+struct DiscArt {
+    have: HashMap<String, String>,
+    #[cfg(not(target_arch = "wasm32"))]
+    pending: Option<(String, mpsc::Receiver<Option<PathBuf>>)>,
+}
+
+impl DiscArt {
+    /// The files for the wanted locations, in order, empty where not here yet.
+    fn files_for(&mut self, wanted: &[String]) -> Vec<String> {
+        if wants::host_pictures() {
+            return wanted
+                .iter()
+                .map(|reported| {
+                    if reported.is_empty() {
+                        return String::new();
+                    }
+                    let (relative, url) = picture_in_table(reported);
+                    table_file(&relative, &url).unwrap_or_default()
+                })
+                .collect();
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some((reported, rx)) = &self.pending {
+                match rx.try_recv() {
+                    Ok(result) => {
+                        let file = result
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        self.have.insert(reported.clone(), file);
+                        self.pending = None;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {}
+                    Err(mpsc::TryRecvError::Disconnected) => self.pending = None,
+                }
+            }
+            if self.pending.is_none() {
+                if let Some(next) = wanted
+                    .iter()
+                    .find(|r| !r.is_empty() && !self.have.contains_key(*r))
+                    .cloned()
+                {
+                    let (tx, rx) = mpsc::channel();
+                    let reported = next.clone();
+                    thread::spawn(move || {
+                        let _ = tx.send(fetch_art(&reported));
+                    });
+                    self.pending = Some((next, rx));
+                }
+            }
+            // What is no longer wanted is let go, the fetched files stay cached on disk.
+            self.have.retain(|k, _| wanted.iter().any(|w| w == k));
+        }
+        wanted
+            .iter()
+            .map(|r| self.have.get(r).cloned().unwrap_or_default())
+            .collect()
+    }
+}
+
 /// Fetches the picture for the current album art location in the background
 /// and remembers the file it landed in. One fetch runs at a time; a location
 /// that changes meanwhile is fetched once the running one returns.
@@ -1800,6 +1865,10 @@ pub struct TapSource {
     /// The queue as the plugin pushed it; none until it does, and then the
     /// player is not asked for it.
     queue_held: Option<Vec<QueueItem>>,
+    /// How many discs the meter's changer shows; 0 without a changer.
+    changer_slots: u32,
+    /// The discs' covers, fetched one at a time as the slots want them.
+    disc_art: DiscArt,
     /// The plugin's channel, when the player runs under it: the state
     /// arrives as it changes and the player is not asked.
     channel: Option<Channel>,
@@ -1974,6 +2043,8 @@ impl TapSource {
             queue_lengths: Vec::new(),
             queue_read_at: None,
             queue_held: None,
+            changer_slots: 0,
+            disc_art: DiscArt::default(),
             channel: Some(channel),
             channel_was_live: false,
             pushed: Vec::new(),
@@ -2111,6 +2182,54 @@ impl TapSource {
 
     /// The track after `position`: from the queue the plugin pushed, or
     /// asked of the player while none has been pushed.
+    /// The discs a changer shows around the playing track: a new play
+    /// (position 0) starts in the first slot with the next tracks after it;
+    /// otherwise the slot before holds the track before, as prev, play,
+    /// next; the window never runs past the queue's end while the queue
+    /// fills it. Each disc's cover is fetched as the slots want it.
+    fn discs_for(&mut self, position: i64) -> Vec<lead::Disc> {
+        let slots = self.changer_slots as usize;
+        if slots == 0 {
+            return Vec::new();
+        }
+        let Some(items) = self.queue_held.as_ref() else {
+            return Vec::new();
+        };
+        if items.is_empty() {
+            return Vec::new();
+        }
+        let position = position.max(0) as usize;
+        let start = if position == 0 { 0 } else { position - 1 };
+        let start = start.min(items.len().saturating_sub(slots));
+        let window: Vec<(usize, QueueItem)> = items
+            .iter()
+            .enumerate()
+            .skip(start)
+            .take(slots)
+            .map(|(i, item)| (i, item.clone()))
+            .collect();
+        let wanted: Vec<String> = window
+            .iter()
+            .map(|(_, item)| item.albumart.clone())
+            .collect();
+        let files = self.disc_art.files_for(&wanted);
+        window
+            .into_iter()
+            .zip(files)
+            .map(|((index, item), art_file)| lead::Disc {
+                index: index as i64,
+                playing: index == position,
+                title: item.title,
+                artist: item.artist,
+                album: item.album,
+                duration: item.duration,
+                uri: item.uri,
+                albumart: item.albumart,
+                art_file,
+            })
+            .collect()
+    }
+
     fn next_in_queue(&self, position: i64) -> (String, String, String) {
         match self.queue_held.as_ref() {
             Some(items) => usize::try_from(position + 1)
@@ -2190,6 +2309,7 @@ impl TapSource {
             || skin.next_artist.is_some()
             || skin.next_album.is_some()
             || skin.ticker.as_ref().is_some_and(|t| t.append_next);
+        self.changer_slots = skin.changer.as_ref().map_or(0, |c| c.slots);
         self.conditioner = Conditioner::new(skin.data_source.clone());
         self.icon_cache = (String::new(), String::new());
         self.rederive = true;
@@ -2445,6 +2565,7 @@ impl Source for TapSource {
                     reel_files: self.reel_files_for(&playing.uri),
                     queue_before_s: self.queue_progress_for(playing.position).0,
                     queue_total_s: self.queue_progress_for(playing.position).1,
+                    discs: self.discs_for(playing.position),
                     volatile: playing.volatile,
                     volume: playing.volume,
                     mute: playing.mute,
@@ -2587,6 +2708,7 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         skin.vinyl = meter_vinyl(&meters, &skin.name, &skin.theme_dir, &skin.rotation);
         skin.tonearm = meter_tonearm(&meters, &skin.name, &skin.theme_dir);
         skin.reels = meter_reels(&meters, &skin.name, &skin.theme_dir, &skin.rotation);
+        skin.changer = lead::meter_changer(&meters, &skin.name, &skin.theme_dir);
         skin.indicators = meter_indicators(&meters, &skin.name, &skin.theme_dir);
         skin.transition = transition_settings(&text);
         skin.run = run_settings(&text);

@@ -146,6 +146,17 @@ pub struct Scene {
     /// The indicators with their states for this frame.
     #[serde(default)]
     pub indicators: Option<Indicators>,
+    /// The CD changer and the discs in its slots for this frame.
+    #[serde(default)]
+    pub changer: Option<Changer>,
+}
+
+/// The changer of the scene: its spec and the discs the queue puts in
+/// its slots, each with its art where fetched.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Changer {
+    pub spec: lead::ChangerSpec,
+    pub discs: Vec<lead::Disc>,
 }
 
 /// The indicators of the scene: the volume 0 to 100, the state index of
@@ -230,6 +241,7 @@ impl Default for Scene {
             tonearm: None,
             reels: None,
             indicators: None,
+            changer: None,
         }
     }
 }
@@ -699,6 +711,10 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
             .indicators
             .as_ref()
             .map(|spec| indicators(spec, &input.metadata, progress(&input.metadata).0)),
+        changer: skin.changer.as_ref().map(|spec| Changer {
+            spec: spec.clone(),
+            discs: input.metadata.discs.clone(),
+        }),
     }
 }
 

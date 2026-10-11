@@ -325,6 +325,7 @@ pub fn raster(scene: &Scene) -> Frame {
             reels: (None, None),
             indicators: None,
             base: None,
+            changer: None,
         },
         &mut motion,
         0,
@@ -608,6 +609,8 @@ pub struct Stack<'a> {
     pub indicators: Option<&'a IndicatorAssets>,
     /// The screen picture and meter face composed once; the frame starts as a copy of it.
     pub base: Option<&'a Frame>,
+    /// The changer's bar as last drawn, and where its top left goes.
+    pub changer: Option<(&'a Frame, (i32, i32))>,
 }
 
 /// Theme order: full-screen picture, meter face, album art, folder layers, needles, meter
@@ -848,6 +851,11 @@ pub fn raster_over<'m>(
             smooth: false,
             reach,
         });
+    }
+    // The changer's bar, drawn once per change of its discs and laid over
+    // the base here; the head and the disc that turns come in their own ops.
+    if let Some((picture, at)) = stack.changer {
+        ops.push(blit_op(picture, at));
     }
     if let (Some(art), Some(place)) = (stack.art, &scene.art) {
         let color = [
@@ -2374,6 +2382,16 @@ pub struct Pictures {
     fanart: (PictureSlot, PictureSlot),
     vinyl: PlainSlot,
     reels: (PlainSlot, PlainSlot),
+    /// The changer's bar, drawn again when its spec or its discs change.
+    changer: Option<ChangerPicture>,
+}
+
+/// The changer as drawn: what it was drawn from, the picture, and where
+/// the picture's top left goes on the frame.
+struct ChangerPicture {
+    key: String,
+    frame: Frame,
+    at: (i32, i32),
 }
 
 impl Pictures {
@@ -2451,6 +2469,16 @@ impl Pictures {
             Some(vinyl) => self.vinyl.want(&vinyl.file, vinyl.spec.dimension),
             None => self.vinyl = PlainSlot::default(),
         }
+        match &scene.changer {
+            Some(changer) => {
+                let key = changer_key(changer);
+                if self.changer.as_ref().is_none_or(|c| c.key != key) {
+                    let (frame, at) = render_changer(&changer.spec, &changer.discs);
+                    self.changer = Some(ChangerPicture { key, frame, at });
+                }
+            }
+            None => self.changer = None,
+        }
         // A reel from the album is scaled to the theme reel's size; the
         // theme reel itself needs no slot.
         match &scene.reels {
@@ -2516,6 +2544,11 @@ impl Pictures {
     /// The record picture from the album, stretched to the theme's.
     pub fn vinyl(&self) -> Option<&Frame> {
         self.vinyl.frame.as_ref()
+    }
+
+    /// The changer's bar as drawn, and where it goes.
+    pub fn changer(&self) -> Option<(&Frame, (i32, i32))> {
+        self.changer.as_ref().map(|c| (&c.frame, c.at))
     }
 
     /// The reels as `Stack` takes them: the album's where the scene names
@@ -3139,6 +3172,279 @@ fn turn_onto(
             }
         }
     }
+}
+
+// ---- the CD changer, drawn as shapes -------------------------------------
+
+/// What the changer's picture was drawn from: its spec and each slot's
+/// disc, by index and the cover file it had.
+fn changer_key(changer: &plot::Changer) -> String {
+    let mut key = format!("{:?}", changer.spec);
+    for disc in &changer.discs {
+        key.push('|');
+        key.push_str(&disc.index.to_string());
+        key.push(':');
+        key.push_str(&disc.art_file);
+        key.push(':');
+        key.push_str(&disc.title);
+    }
+    key
+}
+
+/// Coverage of a point by a disc: 1 inside, 0 outside, a pixel's worth
+/// of edge between, for an edge without stairs.
+fn disc_coverage(dx: f32, dy: f32, r: f32) -> f32 {
+    let d = (dx * dx + dy * dy).sqrt();
+    (r + 0.5 - d).clamp(0.0, 1.0)
+}
+
+/// Coverage by a box with rounded corners, (x0, y0) to (x1, y1), corner radius `r`.
+fn round_box_coverage(px: f32, py: f32, x0: f32, y0: f32, x1: f32, y1: f32, r: f32) -> f32 {
+    let r = r.min((x1 - x0) / 2.0).min((y1 - y0) / 2.0).max(0.0);
+    let cx = px.clamp(x0 + r, x1 - r);
+    let cy = py.clamp(y0 + r, y1 - r);
+    let dx = px - cx;
+    let dy = py - cy;
+    let d = (dx * dx + dy * dy).sqrt();
+    (r + 0.5 - d).clamp(0.0, 1.0)
+}
+
+/// `color` laid over a pixel with `coverage` as its weight.
+fn lay(frame: &mut Frame, x: i32, y: i32, color: [u8; 3], coverage: f32) {
+    if coverage <= 0.0 || x < 0 || y < 0 || x >= frame.width as i32 || y >= frame.height as i32 {
+        return;
+    }
+    let i = ((y as u32 * frame.width + x as u32) * 4) as usize;
+    let a = coverage.min(1.0);
+    let px = &mut frame.rgba[i..i + 4];
+    let under = f32::from(px[3]) / 255.0;
+    let out_a = a + under * (1.0 - a);
+    for c in 0..3 {
+        let over = f32::from(color[c]) * a;
+        let kept = f32::from(px[c]) * under * (1.0 - a);
+        px[c] = if out_a > 0.0 {
+            ((over + kept) / out_a).round().clamp(0.0, 255.0) as u8
+        } else {
+            0
+        };
+    }
+    px[3] = (out_a * 255.0).round().clamp(0.0, 255.0) as u8;
+}
+
+fn disc_shape(frame: &mut Frame, cx: f32, cy: f32, r: f32, color: [u8; 3]) {
+    let (x0, x1) = ((cx - r - 1.0).floor() as i32, (cx + r + 1.0).ceil() as i32);
+    let (y0, y1) = ((cy - r - 1.0).floor() as i32, (cy + r + 1.0).ceil() as i32);
+    for y in y0..=y1 {
+        for x in x0..=x1 {
+            let c = disc_coverage(x as f32 + 0.5 - cx, y as f32 + 0.5 - cy, r);
+            lay(frame, x, y, color, c);
+        }
+    }
+}
+
+fn fill_round_box(frame: &mut Frame, x0: f32, y0: f32, x1: f32, y1: f32, r: f32, color: [u8; 3]) {
+    for y in (y0.floor() as i32 - 1)..=(y1.ceil() as i32 + 1) {
+        for x in (x0.floor() as i32 - 1)..=(x1.ceil() as i32 + 1) {
+            let c = round_box_coverage(x as f32 + 0.5, y as f32 + 0.5, x0, y0, x1, y1, r);
+            lay(frame, x, y, color, c);
+        }
+    }
+}
+
+/// The label's mask for a disc of diameter `d`: black where the cover
+/// shows, from the hub's ring to just inside the rim, white elsewhere, as
+/// `apply_mask` reads a mask.
+fn label_mask(d: u32) -> Frame {
+    let mut mask = solid_frame(d, d, [255, 255, 255, 255]);
+    let c = d as f32 / 2.0;
+    let outer = c * 0.97;
+    let inner = c * 0.24;
+    for y in 0..d {
+        for x in 0..d {
+            let dx = x as f32 + 0.5 - c;
+            let dy = y as f32 + 0.5 - c;
+            let keep = disc_coverage(dx, dy, outer) - disc_coverage(dx, dy, inner);
+            let v = (255.0 * (1.0 - keep.clamp(0.0, 1.0))).round() as u8;
+            let i = ((y * d + x) * 4) as usize;
+            mask.rgba[i..i + 3].copy_from_slice(&[v, v, v]);
+        }
+    }
+    mask
+}
+
+/// The slot centres along the bar, and the head's box about its park.
+fn changer_geometry(spec: &lead::ChangerSpec) -> (Vec<(f32, f32)>, (f32, f32, f32, f32)) {
+    let d = spec.disc_size as f32;
+    let centres: Vec<(f32, f32)> = (0..spec.slots)
+        .map(|i| {
+            let along = i as f32 * spec.pitch as f32;
+            if spec.horizontal {
+                (spec.pos.0 as f32 + along, spec.pos.1 as f32)
+            } else {
+                (spec.pos.0 as f32, spec.pos.1 as f32 + along)
+            }
+        })
+        .collect();
+    let (hw, hh) = if spec.horizontal {
+        (d * 0.34, d * 1.5)
+    } else {
+        (d * 1.5, d * 0.34)
+    };
+    let (hx, hy) = (spec.head_park.0 as f32, spec.head_park.1 as f32);
+    (
+        centres,
+        (hx - hw / 2.0, hy - hh / 2.0, hx + hw / 2.0, hy + hh / 2.0),
+    )
+}
+
+/// The changer's bar drawn as shapes in the theme's pixels: the body, the
+/// rail, a recess per slot, the discs with their covers as labels, and the
+/// head parked. Answers the picture and where its top left goes.
+pub fn render_changer(spec: &lead::ChangerSpec, discs: &[lead::Disc]) -> (Frame, (i32, i32)) {
+    let d = spec.disc_size as f32;
+    let (centres, head) = changer_geometry(spec);
+    let margin = d * 0.18;
+    let mut x0 = f32::MAX;
+    let mut y0 = f32::MAX;
+    let mut x1 = f32::MIN;
+    let mut y1 = f32::MIN;
+    for (cx, cy) in &centres {
+        x0 = x0.min(cx - d / 2.0 - margin);
+        y0 = y0.min(cy - d / 2.0 - margin);
+        x1 = x1.max(cx + d / 2.0 + margin);
+        y1 = y1.max(cy + d / 2.0 + margin);
+    }
+    let body = (x0, y0, x1, y1);
+    x0 = x0.min(head.0 - 2.0);
+    y0 = y0.min(head.1 - 2.0);
+    x1 = x1.max(head.2 + 2.0);
+    y1 = y1.max(head.3 + 2.0);
+    let at = (x0.floor() as i32 - 2, y0.floor() as i32 - 2);
+    let w = ((x1 - x0).ceil() as u32 + 4).max(1);
+    let h = ((y1 - y0).ceil() as u32 + 4).max(1);
+    let mut frame = empty_frame(w, h);
+    let ox = at.0 as f32;
+    let oy = at.1 as f32;
+    let body_color = spec.color;
+    let darker = |c: [u8; 3], by: u8| {
+        [
+            c[0].saturating_sub(by),
+            c[1].saturating_sub(by),
+            c[2].saturating_sub(by),
+        ]
+    };
+    let lighter = |c: [u8; 3], by: u8| {
+        [
+            c[0].saturating_add(by),
+            c[1].saturating_add(by),
+            c[2].saturating_add(by),
+        ]
+    };
+    // The body, and a shade along its lower edge.
+    fill_round_box(
+        &mut frame,
+        body.0 - ox,
+        body.1 - oy,
+        body.2 - ox,
+        body.3 - oy,
+        d * 0.12,
+        darker(body_color, 40),
+    );
+    fill_round_box(
+        &mut frame,
+        body.0 - ox,
+        body.1 - oy,
+        body.2 - ox,
+        body.3 - oy - d * 0.03,
+        d * 0.12,
+        body_color,
+    );
+    // The rail: a groove along the slot centres, from the park to the last slot.
+    let rail = d * 0.05;
+    if let (Some(first), Some(last)) = (centres.first(), centres.last()) {
+        let (hx, hy) = ((head.0 + head.2) / 2.0, (head.1 + head.3) / 2.0);
+        if spec.horizontal {
+            let (ax, bx) = (hx.min(first.0).min(last.0), hx.max(first.0).max(last.0));
+            fill_round_box(
+                &mut frame,
+                ax - ox,
+                first.1 - rail - oy,
+                bx - ox,
+                first.1 + rail - oy,
+                rail,
+                darker(body_color, 70),
+            );
+        } else {
+            let (ay, by) = (hy.min(first.1).min(last.1), hy.max(first.1).max(last.1));
+            fill_round_box(
+                &mut frame,
+                first.0 - rail - ox,
+                ay - oy,
+                first.0 + rail - ox,
+                by - oy,
+                rail,
+                darker(body_color, 70),
+            );
+        }
+    }
+    let mask = label_mask(spec.disc_size);
+    for (slot, (cx, cy)) in centres.iter().enumerate() {
+        let (cx, cy) = (cx - ox, cy - oy);
+        // The recess the disc sits in.
+        disc_shape(
+            &mut frame,
+            cx,
+            cy,
+            d / 2.0 + d * 0.035,
+            darker(body_color, 55),
+        );
+        disc_shape(
+            &mut frame,
+            cx,
+            cy,
+            d / 2.0 + d * 0.02,
+            darker(body_color, 20),
+        );
+        let Some(disc) = discs.get(slot) else {
+            continue;
+        };
+        // The disc: a silver base, the cover as its label, the hub and the hole.
+        disc_shape(&mut frame, cx, cy, d / 2.0, lighter(body_color, 18));
+        if !disc.art_file.is_empty() {
+            if let Some(label) = read_art(
+                Path::new(&disc.art_file),
+                spec.disc_size,
+                spec.disc_size,
+                Some(&mask),
+            ) {
+                let at = ((cx - d / 2.0).round() as i32, (cy - d / 2.0).round() as i32);
+                blit_op(&label, at).paint(&mut Band::whole(&mut frame));
+            }
+        }
+        disc_shape(&mut frame, cx, cy, d * 0.13, lighter(body_color, 10));
+        disc_shape(&mut frame, cx, cy, d * 0.075, darker(body_color, 30));
+        disc_shape(&mut frame, cx, cy, d * 0.035, darker(body_color, 90));
+    }
+    // The head, parked: a block with a darker rim and a lighter top.
+    fill_round_box(
+        &mut frame,
+        head.0 - ox,
+        head.1 - oy,
+        head.2 - ox,
+        head.3 - oy,
+        d * 0.07,
+        darker(body_color, 60),
+    );
+    fill_round_box(
+        &mut frame,
+        head.0 - ox + 2.0,
+        head.1 - oy + 2.0,
+        head.2 - ox - 2.0,
+        head.3 - oy - 2.0,
+        d * 0.06,
+        lighter(body_color, 22),
+    );
+    (frame, at)
 }
 
 /// Cut a picture to the ellipse inscribed in its box, as turning art is cut
@@ -8853,6 +9159,7 @@ mod tests {
                     reels: (None, None),
                     indicators: None,
                     base: None,
+                    changer: None,
                 },
                 &mut single,
                 now,
@@ -8879,6 +9186,7 @@ mod tests {
                     reels: (None, None),
                     indicators: None,
                     base: None,
+                    changer: None,
                 },
                 &mut several,
                 now,
@@ -8982,6 +9290,7 @@ mod tests {
                 reels: (None, None),
                 indicators: None,
                 base: Some(&base),
+                changer: None,
             };
             let a = raster_over(&scene, stack(), &mut changed, now)
                 .frame

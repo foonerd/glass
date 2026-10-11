@@ -1,0 +1,46 @@
+# CD changer, the showcase: a two-deck unit for a 1920x1080 screen. The CD
+# unit on top, a bar of three discs on a rail with the head parked at the
+# left; the control unit below with the track, the time, the format and the
+# volume. The engine draws the bar as shapes; a theme may bring pictures
+# for the disc, the label mask, the head, the rail and the sled instead.
+
+[CD Changer]
+meter.type = circular
+channels = 2
+ui.refresh.period = 0.033
+screen.bgr =
+
+changer.slots = 3
+changer.orientation = horizontal
+changer.pos = 760,300
+changer.pitch = 380
+changer.disc.size = 300
+changer.head.park = 330,300
+changer.color = 232,232,232
+
+font.size.light = 34
+font.size.regular = 40
+font.size.bold = 52
+font.size.italic = 34
+font.size.digi = 64
+font.color = 230,230,230
+
+playinfo.align = left
+playinfo.maxwidth = 1100
+playinfo.title.pos = 420,640,bold
+playinfo.artist.pos = 420,720,regular
+playinfo.album.pos = 420,775,light
+playinfo.next.title.pos = 420,830,italic
+playinfo.next.artist.pos = 420,875,italic
+
+playinfo.type.pos = 160,660
+playinfo.type.dimension = 200,200
+
+time.elapsed.pos = 1540,650,digi
+time.total.pos = 1540,730,digi
+time.elapsed.color = 230,230,230
+time.total.color = 150,150,150
+
+volume.value.pos = 1540,840,regular
+volume.value.format = VOL {}
+volume.value.mute = MUTE

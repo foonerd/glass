@@ -70,6 +70,10 @@ pub struct QueueItem {
     pub album: String,
     /// Seconds; 0 when the player does not say.
     pub duration: f32,
+    /// The track's location and its cover's, as the player reports them;
+    /// empty from a plugin before 0.9.39.
+    pub uri: String,
+    pub albumart: String,
 }
 
 fn queue_item(item: &Value) -> QueueItem {
@@ -94,6 +98,8 @@ fn queue_item(item: &Value) -> QueueItem {
             .and_then(Value::as_f64)
             .unwrap_or(0.0)
             .max(0.0) as f32,
+        uri: text("uri"),
+        albumart: text("albumart"),
     }
 }
 
@@ -805,7 +811,7 @@ mod tests {
     #[test]
     fn the_queue_is_parsed_with_the_name_for_a_title_and_no_duration_as_zero() {
         let event = decode(
-            br#"{"kind":"queue","items":[{"name":"One","artist":"A","album":"X","duration":12.5,"uri":"mnt/x"},{"title":"Two","name":"not this"}]}"#,
+            br#"{"kind":"queue","items":[{"name":"One","artist":"A","album":"X","duration":12.5,"uri":"mnt/x","albumart":"/albumart?x"},{"title":"Two","name":"not this"}]}"#,
         )
         .expect("a queue line");
         assert_eq!(
@@ -815,7 +821,9 @@ mod tests {
                     title: "One".into(),
                     artist: "A".into(),
                     album: "X".into(),
-                    duration: 12.5
+                    duration: 12.5,
+                    uri: "mnt/x".into(),
+                    albumart: "/albumart?x".into(),
                 },
                 QueueItem {
                     title: "Two".into(),

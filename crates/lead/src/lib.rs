@@ -384,6 +384,25 @@ pub struct Bins {
     pub onsets: u8,
 }
 
+/// One disc of a changer: a track of the queue in a slot.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Disc {
+    /// The track's place in the queue, from 0.
+    pub index: i64,
+    /// Whether it is the track playing.
+    pub playing: bool,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    /// Seconds; 0 when the player does not say.
+    pub duration: f32,
+    pub uri: String,
+    /// The cover's location as the player reports it, and the local file
+    /// holding it once fetched; empty until then.
+    pub albumart: String,
+    pub art_file: String,
+}
+
 /// Now-playing text and position for the surface.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Metadata {
@@ -469,6 +488,11 @@ pub struct Metadata {
     pub queue_before_s: f32,
     #[serde(default)]
     pub queue_total_s: f32,
+    /// The discs a changer shows: the queue's tracks around the playing
+    /// one, as many as the meter has slots, each with its art where it
+    /// has been fetched. Empty for a meter without a changer.
+    #[serde(default)]
+    pub discs: Vec<Disc>,
     /// The player's controls: volume 0 to 100, mute, random, repeat all, repeat single.
     #[serde(default)]
     pub volume: u32,
@@ -3642,6 +3666,9 @@ pub struct SkinDesc {
     pub rotation: RotationSettings,
     #[serde(default)]
     pub reels: Option<ReelsSpec>,
+    /// The CD changer: a bar of discs and a head that travels along them.
+    #[serde(default)]
+    pub changer: Option<ChangerSpec>,
     #[serde(default)]
     pub indicators: Option<IndicatorsSpec>,
     #[serde(default)]
@@ -3703,6 +3730,7 @@ impl SkinDesc {
             tonearm: None,
             rotation: RotationSettings::default(),
             reels: None,
+            changer: None,
             indicators: None,
             transition: TransitionSettings::default(),
             run: RunSettings::default(),
@@ -4985,6 +5013,89 @@ pub fn meter_reels(
             .unwrap_or(settings.spool_adaptive),
         spool_left: settings.spool_left,
         spool_right: settings.spool_right,
+    })
+}
+
+/// A CD changer: a bar of slots, a disc in each from the queue, and a head
+/// that travels along the bar to the disc that plays. Pixels of the theme.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct ChangerSpec {
+    /// `changer.slots`: how many discs the bar shows.
+    pub slots: u32,
+    /// `changer.orientation`: the bar runs along x (`horizontal`) or y.
+    pub horizontal: bool,
+    /// `changer.pos`: the first slot's centre.
+    pub pos: (i32, i32),
+    /// `changer.pitch`: from one slot's centre to the next, along the bar.
+    pub pitch: i32,
+    /// `changer.disc.size`: the disc's diameter.
+    pub disc_size: u32,
+    /// `changer.head.park`: the head's centre when it rests.
+    pub head_park: (i32, i32),
+    /// `changer.color`: the body's colour; the engine draws the body, the
+    /// rail, the discs and the head as shapes unless the theme brings pictures.
+    pub color: [u8; 3],
+    /// `changer.disc.filename`, `changer.label.mask`, `changer.head.filename`,
+    /// `changer.rail.filename`, `changer.sled.filename`: the theme's pictures
+    /// as paths, each empty for the engine's own drawing.
+    pub disc_file: String,
+    pub mask_file: String,
+    pub head_file: String,
+    pub rail_file: String,
+    pub sled_file: String,
+}
+
+/// `changer.*` of a meter: none without `changer.pos`, `changer.pitch`,
+/// `changer.disc.size` and `changer.head.park`.
+pub fn meter_changer(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<ChangerSpec> {
+    let values = section_values(meters_txt, meter);
+    let get = |key: &str| {
+        values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+    };
+    let ipair = |key: &str| -> Option<(i32, i32)> {
+        let mut parts = get(key)?.split(',');
+        Some((
+            parts.next()?.trim().parse().ok()?,
+            parts.next()?.trim().parse().ok()?,
+        ))
+    };
+    let path = |key: &str| -> String {
+        match get(key) {
+            Some(file) if theme_dir.is_empty() => file.to_string(),
+            Some(file) => format!("{}/{}", theme_dir.trim_end_matches('/'), file),
+            None => String::new(),
+        }
+    };
+    let pos = ipair("changer.pos")?;
+    let pitch: i32 = get("changer.pitch")?.parse().ok()?;
+    let disc_size: u32 = get("changer.disc.size")?.parse().ok()?;
+    let head_park = ipair("changer.head.park")?;
+    if pitch == 0 || disc_size == 0 {
+        return None;
+    }
+    Some(ChangerSpec {
+        slots: get("changer.slots")
+            .and_then(|v| v.parse::<u32>().ok())
+            .filter(|n| *n > 0)
+            .unwrap_or(3),
+        horizontal: !get("changer.orientation").is_some_and(|v| v.eq_ignore_ascii_case("vertical")),
+        pos,
+        pitch,
+        disc_size,
+        head_park,
+        color: get("changer.color")
+            .and_then(color_triplet)
+            .unwrap_or([232, 232, 232]),
+        disc_file: path("changer.disc.filename"),
+        mask_file: path("changer.label.mask"),
+        head_file: path("changer.head.filename"),
+        rail_file: path("changer.rail.filename"),
+        sled_file: path("changer.sled.filename"),
     })
 }
 

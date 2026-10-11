@@ -1,6 +1,8 @@
 'use strict';
 // The player's queue as the channel carries it: one item per track with the
-// four fields a display reads, whatever else the player sends with them.
+// fields a display reads, whatever else the player sends with them: the
+// four of the next-track rows and the queue's progress, and from 0.9.39
+// the track's location and its cover's, for a changer's discs.
 
 function text(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -17,7 +19,9 @@ function compact(queue) {
       title: text(it.title) || text(it.name),
       artist: text(it.artist),
       album: text(it.album),
-      duration: isFinite(duration) && duration > 0 ? duration : 0
+      duration: isFinite(duration) && duration > 0 ? duration : 0,
+      uri: text(it.uri),
+      albumart: text(it.albumart)
     };
   });
 }

@@ -438,6 +438,7 @@ impl Page {
                 reels: showing.pictures.reels(&scene, assets),
                 indicators: assets.indicators.as_ref(),
                 base: Some(&assets.base),
+                changer: showing.pictures.changer(),
             };
             let painted = raster_over(&scene, stack, &mut showing.motion, now_ms);
             (painted.frame, !painted.damage.is_empty())
