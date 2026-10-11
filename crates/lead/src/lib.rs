@@ -5059,6 +5059,13 @@ pub struct ChangerSpec {
     /// `changer.fade.duration`: seconds the disc that leaves the row takes
     /// to dissolve in its slot before the row slides.
     pub fade_s: f32,
+    /// `changer.sled.start` and `changer.sled.end`: the sled's travel, as
+    /// the tonearm's angles are the theme's: the radius from the disc's
+    /// centre where the read begins, and where a whole track or queue
+    /// ends. A real disc's programme area, 25/60 and 58/60 of the disc's
+    /// radius, when the theme leaves them out.
+    pub sled_start: Option<u32>,
+    pub sled_end: Option<u32>,
     /// `changer.toc.duration`: seconds the sled takes to read the lead-in
     /// once the disc is up to speed, sweeping a little out and back with
     /// the laser on, before it seeks to the track.
@@ -5147,6 +5154,8 @@ pub fn meter_changer(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<C
         spin_down_s: seconds("changer.spin.down", 2.0),
         shift_s: seconds("changer.shift.duration", 0.6),
         fade_s: seconds("changer.fade.duration", 0.5),
+        sled_start: get("changer.sled.start").and_then(|v| v.parse().ok()),
+        sled_end: get("changer.sled.end").and_then(|v| v.parse().ok()),
         toc_s: seconds("changer.toc.duration", 0.8),
         sled_on_file: get("changer.sled.filename")
             .and_then(|list| list.split(',').nth(1))

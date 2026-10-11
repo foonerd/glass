@@ -3302,29 +3302,34 @@ fn changer_key(changer: &plot::Changer, pose: &ChangerPose) -> String {
     key
 }
 
-/// A CD's geometry on the theme's disc: the programme area from about 25
-/// to at most about 58 mm of a 60 mm radius, read from the inside out.
+/// A CD's geometry on the theme's disc when the theme does not say: the
+/// programme area from about 25 to at most about 58 mm of a 60 mm radius,
+/// read from the inside out.
 const SLED_HOME: f32 = 25.0 / 60.0;
 const SLED_EDGE: f32 = 58.0 / 60.0;
-/// The longest disc, in seconds: a CD-R's 80 minutes.
-const DISC_SECONDS: f32 = 80.0 * 60.0;
+
+/// The sled's travel from the disc's centre, in the theme's pixels: where
+/// the read begins and where a whole track or queue ends, the theme's
+/// `changer.sled.start` and `changer.sled.end`, else the real disc's.
+fn sled_range(spec: &lead::ChangerSpec) -> (f32, f32) {
+    let radius = spec.disc_size as f32 / 2.0;
+    let home = spec.sled_start.map_or(radius * SLED_HOME, |r| r as f32);
+    let edge = spec.sled_end.map_or(radius * SLED_EDGE, |r| r as f32).max(home + 1.0);
+    (home, edge)
+}
 
 /// Where the sled is along the arm, from the disc's centre, in the theme's
 /// pixels: home at the inner stop while nothing plays or for a stream;
 /// while a track plays, out from home with r squared linear in progress,
-/// as one linear speed and one track pitch make it; a short disc's data
-/// ends short of the edge, so its end is where its length reaches.
+/// as one linear speed and one track pitch make it, the whole range for
+/// the whole track or queue.
 fn sled_radius(changer: &plot::Changer) -> f32 {
-    let radius = changer.spec.disc_size as f32 / 2.0;
-    let home = radius * SLED_HOME;
-    let edge = radius * SLED_EDGE;
+    let (home, edge) = sled_range(&changer.spec);
     let on_disc = changer.engaged && changer.discs.iter().any(|disc| disc.playing);
     if !on_disc || changer.duration <= 0.0 {
         return home;
     }
-    let share = (changer.duration / DISC_SECONDS).min(1.0);
-    let end2 = home * home + (edge * edge - home * home) * share;
-    let r2 = home * home + (end2 - home * home) * changer.progress.clamp(0.0, 1.0);
+    let r2 = home * home + (edge * edge - home * home) * changer.progress.clamp(0.0, 1.0);
     r2.sqrt()
 }
 
@@ -3477,9 +3482,7 @@ const DISENGAGE_GRACE_MS: u64 = 1500;
 impl ChangerMotion {
     pub fn advance(&mut self, changer: &plot::Changer, now_ms: u64) -> ChangerPose {
         let spec = &changer.spec;
-        let half = spec.disc_size as f32 / 2.0;
-        let home = half * SLED_HOME;
-        let edge = half * SLED_EDGE;
+        let (home, edge) = sled_range(spec);
         let centres = slot_centres(spec);
         let along_of = |c: (f32, f32)| if spec.horizontal { c.0 } else { c.1 };
         let park = along_of((spec.head_park.0 as f32, spec.head_park.1 as f32));
@@ -3962,6 +3965,8 @@ mod changer_tests {
             spin_down_s: 0.5,
             shift_s: 0.5,
             fade_s: 0.5,
+            sled_start: None,
+            sled_end: None,
             toc_s: 0.4,
             sled_on_file: file("sled_on.png"),
             disc_file: file("disc.png"),
@@ -4073,14 +4078,20 @@ mod changer_tests {
         assert!(r > 21.0 && r < 48.0, "the sled out from home: {r}");
         let on_sled = pixel(&out, at, 550 + 22, 300 - r.round() as i32);
         assert!(on_sled[0] == 200 || on_sled[2] == 200, "the sled at its radius, its lens lit: {on_sled:?}");
-        // The sled's reach: a full disc's end is the edge; a short track's end
-        // is short of it; a stream holds the sled home.
-        let full = scene(&spec, playing.clone(), 1.0, DISC_SECONDS, true);
+        // The sled's reach: a whole track ends at the edge whatever its
+        // length; a stream holds the sled home; a theme's own start and end
+        // are taken as given.
+        let full = scene(&spec, playing.clone(), 1.0, 4800.0, true);
         assert!((sled_radius(&full) - 50.0 * SLED_EDGE).abs() < 0.01);
         let short = scene(&spec, playing.clone(), 1.0, 240.0, true);
-        assert!(sled_radius(&short) < sled_radius(&full));
+        assert!((sled_radius(&short) - sled_radius(&full)).abs() < 0.01);
         let stream = scene(&spec, playing.clone(), 0.0, 0.0, true);
         assert!((sled_radius(&stream) - 50.0 * SLED_HOME).abs() < 0.01);
+        let mut own = spec.clone();
+        own.sled_start = Some(30);
+        own.sled_end = Some(45);
+        assert_eq!(sled_radius(&scene(&own, playing.clone(), 0.0, 240.0, true)), 30.0);
+        assert_eq!(sled_radius(&scene(&own, playing.clone(), 1.0, 240.0, true)), 45.0);
         // With a light given, the head casts a shadow under it: below its
         // foot, offset down, the frame is no longer clear.
         let mut lit = spec.clone();
@@ -4097,7 +4108,7 @@ mod changer_tests {
         let (dir, spec) = theme("motion");
         let mut discs = vec![lead::Disc::default(), lead::Disc::default()];
         discs[1].playing = true;
-        let playing = scene(&spec, discs.clone(), 0.5, DISC_SECONDS, true);
+        let playing = scene(&spec, discs.clone(), 0.5, 4800.0, true);
         let mut motion = ChangerMotion::default();
         // A start on a playing player is a load: the arm sets out from its
         // park, still; in place it spins up; up to speed, the sled seeks out.
@@ -4124,7 +4135,7 @@ mod changer_tests {
         // The player stops: the disc spins down first, nothing else moves.
         let mut stopped = discs.clone();
         stopped[1].playing = false;
-        let stopped = scene(&spec, stopped, 0.0, DISC_SECONDS, false);
+        let stopped = scene(&spec, stopped, 0.0, 4800.0, false);
         let p = motion.advance(&stopped, 4200);
         assert_eq!(p.along, 550.0, "the arm waits while the disc spins down");
         assert_eq!(p.radius, mid_radius, "the sled waits while the disc spins down");
@@ -4147,7 +4158,7 @@ mod changer_tests {
         // A display starting before the queue has reached it: the arm waits
         // parked, and loads the disc the moment the queue comes.
         let mut fresh = ChangerMotion::default();
-        let blind = scene(&spec, Vec::new(), 0.5, DISC_SECONDS, true);
+        let blind = scene(&spec, Vec::new(), 0.5, 4800.0, true);
         let p = fresh.advance(&blind, 0);
         assert_eq!(p.along, 150.0);
         assert!(!p.spinning);
@@ -4172,7 +4183,7 @@ mod changer_tests {
                 .collect()
         };
         // The second track plays in the middle slot, loaded and settled.
-        let second = scene(&spec, window(0, 1), 0.3, DISC_SECONDS, true);
+        let second = scene(&spec, window(0, 1), 0.3, 4800.0, true);
         let mut motion = ChangerMotion::default();
         let mut p = motion.advance(&second, 0);
         for t in 1..=20 {
@@ -4183,7 +4194,7 @@ mod changer_tests {
         // The third track: the window moves on one slot, the playing disc
         // stays the middle one. The disc spins down, the sled homes, and
         // then the row slides one pitch under the arm, which stays.
-        let third = scene(&spec, window(1, 1), 0.0, DISC_SECONDS, true);
+        let third = scene(&spec, window(1, 1), 0.0, 4800.0, true);
         let p = motion.advance(&third, 10200);
         assert_eq!(p.along, 550.0, "the arm stays");
         assert!(p.spinning, "the disc spins down first");
@@ -4211,12 +4222,12 @@ mod changer_tests {
         assert!(p.spinning, "spun up again");
         // A player that goes on playing but, for a frame, names no playing
         // disc holds the arm where it is; the park is for a pause or a stop.
-        let blink = scene(&spec, window(1, 7), 0.0, DISC_SECONDS, true);
+        let blink = scene(&spec, window(1, 7), 0.0, 4800.0, true);
         let p = motion.advance(&blink, 13100);
         assert_eq!(p.along, 550.0, "no bounce toward the park");
         // The player's short stop between two tracks is no stop: the arm
         // stays and the disc keeps turning through it.
-        let gap = scene(&spec, window(1, 1), 0.0, DISC_SECONDS, false);
+        let gap = scene(&spec, window(1, 1), 0.0, 4800.0, false);
         let p = motion.advance(&gap, 13400);
         assert_eq!(p.along, 550.0, "the arm through the gap");
         assert!(p.spinning, "the disc through the gap");
@@ -4258,12 +4269,12 @@ mod changer_tests {
         };
         let mut motion = ChangerMotion::default();
         // The state comes before the queue: engaged, no discs yet.
-        let blind = scene(&spec, Vec::new(), 0.2, DISC_SECONDS, true);
+        let blind = scene(&spec, Vec::new(), 0.2, 4800.0, true);
         motion.advance(&blind, 0);
         motion.advance(&blind, 100);
         // The queue: the second track in the middle slot. Eight seconds on
         // the arm is over it, the row in place, the disc turning.
-        let second = scene(&spec, window(0, 1), 0.2, DISC_SECONDS, true);
+        let second = scene(&spec, window(0, 1), 0.2, 4800.0, true);
         let mut p = motion.advance(&second, 200);
         for t in 3..=80 {
             p = motion.advance(&second, t * 100);
