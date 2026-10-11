@@ -89,33 +89,51 @@
   }
 
   // ---- files kept by checksum --------------------------------------------
+  // The browser's own store keeps every file brought, by its checksum, so
+  // a page opened again brings nothing twice. The store is a convenience
+  // and never a dependency: a store that does not answer within a moment,
+  // refuses, or is full is passed over and the file fetched from the
+  // player, and a full store is emptied so it can serve again.
   var db = null;
+  var STORE_WAIT_MS = 1500;
+  function withinAMoment(promise) {
+    return Promise.race([promise, new Promise(function (resolve) { setTimeout(function () { resolve(null); }, STORE_WAIT_MS); })]);
+  }
   function openDb() {
     if (db) return Promise.resolve(db);
-    return new Promise(function (resolve) {
+    return withinAMoment(new Promise(function (resolve) {
       var request;
       try { request = indexedDB.open('glass-face', 1); } catch (e) { return resolve(null); }
       request.onupgradeneeded = function () { request.result.createObjectStore('files'); };
-      request.onsuccess = function () { db = request.result; resolve(db); };
+      request.onsuccess = function () { db = request.result; db.onversionchange = function () { db.close(); db = null; }; resolve(db); };
       request.onerror = function () { resolve(null); };
       request.onblocked = function () { resolve(null); };
-    });
+    })).catch(function () { return null; });
   }
   function cached(sha) {
     return openDb().then(function (db) {
       if (!db || !sha) return null;
-      return new Promise(function (resolve) {
-        var tx = db.transaction('files', 'readonly').objectStore('files').get(sha);
+      return withinAMoment(new Promise(function (resolve) {
+        var tx;
+        try { tx = db.transaction('files', 'readonly').objectStore('files').get(sha); } catch (e) { return resolve(null); }
         tx.onsuccess = function () { resolve(tx.result ? new Uint8Array(tx.result) : null); };
         tx.onerror = function () { resolve(null); };
-      });
-    });
+      }));
+    }).catch(function () { return null; });
   }
   function keep(sha, bytes) {
     return openDb().then(function (db) {
       if (!db || !sha) return;
-      try { db.transaction('files', 'readwrite').objectStore('files').put(bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength), sha); } catch (e) { /* the browser refused: fetched next time */ }
-    });
+      var data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      try {
+        var store = db.transaction('files', 'readwrite').objectStore('files');
+        var put = store.put(data, sha);
+        put.onerror = function () {
+          // A full store is emptied, so the files brought from now on fit again.
+          if (put.error && put.error.name === 'QuotaExceededError') { try { db.transaction('files', 'readwrite').objectStore('files').clear(); } catch (e) { /* left as it is */ } }
+        };
+      } catch (e) { /* the browser refused: fetched next time */ }
+    }).catch(function () { /* the store is no dependency */ });
   }
 
   // Every file of a plan into the module, from the cache or the manager.
@@ -447,6 +465,7 @@
     truth();
     face.starting = loadModule().then(bringTheme).catch(function (err) {
       say(face.t('MANAGER_FACE_FAILED') + ' ' + String(err.message || err), true);
+      tryAgainLater();
     }).then(function () {
       face.starting = null;
       if (face.swap) { face.swap = false; swapModule(); } else if (face.restart) { face.restart = false; restart(); }
@@ -457,10 +476,24 @@
     if (face.starting) { face.restart = true; return; }
     face.starting = bringTheme().catch(function (err) {
       say(face.t('MANAGER_FACE_FAILED') + ' ' + String(err.message || err), true);
+      tryAgainLater();
     }).then(function () {
       face.starting = null;
       if (face.restart) { face.restart = false; restart(); }
     });
+  }
+
+  // A start that failed (a file the player could not give, a stream that
+  // broke, a store that misbehaved) is tried again by itself while the tab
+  // is shown, every few seconds, so a page never stays empty for want of
+  // a refresh; the line says what failed until it comes up.
+  var RETRY_MS = 5000;
+  function tryAgainLater() {
+    if (face.retry) return;
+    face.retry = setTimeout(function () {
+      face.retry = null;
+      if (face.shown && !face.ready && !face.starting) restart();
+    }, RETRY_MS);
   }
 
   // ---- frames at the theme's rate -----------------------------------------
@@ -551,6 +584,7 @@
     if (face.ready) { showing(); return; }
     face.starting = loadModule().then(bringTheme).catch(function (err) {
       say(face.t('MANAGER_FACE_FAILED') + ' ' + String(err.message || err), true);
+      tryAgainLater();
     }).then(function () {
       face.starting = null;
       if (face.restart) { face.restart = false; restart(); }
@@ -561,6 +595,7 @@
     if (!face.shown) return;
     face.shown = false;
     if (face.loop) { cancelAnimationFrame(face.loop); face.loop = null; }
+    if (face.retry) { clearTimeout(face.retry); face.retry = null; }
     disconnect();
   }
 
