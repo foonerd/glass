@@ -3297,22 +3297,27 @@ fn changer_geometry(spec: &lead::ChangerSpec) -> (Vec<(f32, f32)>, (f32, f32, f3
     )
 }
 
-/// The changer's bar drawn as shapes in the theme's pixels: the body, the
-/// rail, a recess per slot, the discs with their covers as labels, and the
-/// head parked. Answers the picture and where its top left goes.
+/// The changer's unit drawn as shapes in the theme's pixels: the slab with
+/// its bevel, the rail along its edge with the carriage, the recess the
+/// discs lie in with a spindle per slot, the discs with their covers as
+/// labels and a clear rim, the platter at the park with the head over it,
+/// hinged, with its lamp. Answers the picture and where its top left goes.
 pub fn render_changer(spec: &lead::ChangerSpec, discs: &[lead::Disc]) -> (Frame, (i32, i32)) {
     let d = spec.disc_size as f32;
     let (centres, head) = changer_geometry(spec);
+    let (hx, hy) = ((head.0 + head.2) / 2.0, (head.1 + head.3) / 2.0);
     let margin = d * 0.18;
+    let platter = d * 0.55;
     let mut x0 = f32::MAX;
     let mut y0 = f32::MAX;
     let mut x1 = f32::MIN;
     let mut y1 = f32::MIN;
-    for (cx, cy) in &centres {
-        x0 = x0.min(cx - d / 2.0 - margin);
-        y0 = y0.min(cy - d / 2.0 - margin);
-        x1 = x1.max(cx + d / 2.0 + margin);
-        y1 = y1.max(cy + d / 2.0 + margin);
+    for (cx, cy) in centres.iter().chain(std::iter::once(&(hx, hy))) {
+        let reach = if (*cx, *cy) == (hx, hy) { platter } else { d / 2.0 };
+        x0 = x0.min(cx - reach - margin);
+        y0 = y0.min(cy - reach - margin);
+        x1 = x1.max(cx + reach + margin);
+        y1 = y1.max(cy + reach + margin);
     }
     let body = (x0, y0, x1, y1);
     x0 = x0.min(head.0 - 2.0);
@@ -3340,14 +3345,15 @@ pub fn render_changer(spec: &lead::ChangerSpec, discs: &[lead::Disc]) -> (Frame,
             c[2].saturating_add(by),
         ]
     };
-    // The body, and a shade along its lower edge.
+    // The slab: a shade along its lower edge, the body, a light along its top.
+    let corner = d * 0.12;
     fill_round_box(
         &mut frame,
         body.0 - ox,
         body.1 - oy,
         body.2 - ox,
         body.3 - oy,
-        d * 0.12,
+        corner,
         darker(body_color, 40),
     );
     fill_round_box(
@@ -3356,60 +3362,107 @@ pub fn render_changer(spec: &lead::ChangerSpec, discs: &[lead::Disc]) -> (Frame,
         body.1 - oy,
         body.2 - ox,
         body.3 - oy - d * 0.03,
-        d * 0.12,
+        corner,
+        lighter(body_color, 14),
+    );
+    fill_round_box(
+        &mut frame,
+        body.0 - ox,
+        body.1 - oy + d * 0.012,
+        body.2 - ox,
+        body.3 - oy - d * 0.03,
+        corner,
         body_color,
     );
-    // The rail: a groove along the slot centres, from the park to the last slot.
-    let rail = d * 0.05;
+    // The rail along the slab's edge, from the park to the last slot, with
+    // the carriage over the park: on the top edge of a horizontal unit, on
+    // the left edge of a vertical one.
     if let (Some(first), Some(last)) = (centres.first(), centres.last()) {
-        let (hx, hy) = ((head.0 + head.2) / 2.0, (head.1 + head.3) / 2.0);
+        let strip = d * 0.028;
+        let inset = d * 0.03;
         if spec.horizontal {
             let (ax, bx) = (hx.min(first.0).min(last.0), hx.max(first.0).max(last.0));
+            let top = body.1 + inset;
             fill_round_box(
                 &mut frame,
-                ax - ox,
-                first.1 - rail - oy,
-                bx - ox,
-                first.1 + rail - oy,
-                rail,
+                ax - d * 0.2 - ox,
+                top - oy,
+                bx + d * 0.2 - ox,
+                top + strip - oy,
+                strip / 2.0,
                 darker(body_color, 70),
+            );
+            fill_round_box(
+                &mut frame,
+                hx - d * 0.24 - ox,
+                top - strip * 0.6 - oy,
+                hx + d * 0.24 - ox,
+                top + strip * 1.6 - oy,
+                strip,
+                darker(body_color, 25),
             );
         } else {
             let (ay, by) = (hy.min(first.1).min(last.1), hy.max(first.1).max(last.1));
+            let left = body.0 + inset;
             fill_round_box(
                 &mut frame,
-                first.0 - rail - ox,
-                ay - oy,
-                first.0 + rail - ox,
-                by - oy,
-                rail,
+                left - ox,
+                ay - d * 0.2 - oy,
+                left + strip - ox,
+                by + d * 0.2 - oy,
+                strip / 2.0,
                 darker(body_color, 70),
             );
+            fill_round_box(
+                &mut frame,
+                left - strip * 0.6 - ox,
+                hy - d * 0.24 - oy,
+                left + strip * 1.6 - ox,
+                hy + d * 0.24 - oy,
+                strip,
+                darker(body_color, 25),
+            );
         }
+    }
+    // The recess the discs lie in: one well around every slot, its lip a
+    // shade darker than its floor.
+    if let (Some(first), Some(last)) = (centres.first(), centres.last()) {
+        let lip = d / 2.0 + d * 0.06;
+        let (rx0, ry0) = (first.0.min(last.0) - lip, first.1.min(last.1) - lip);
+        let (rx1, ry1) = (first.0.max(last.0) + lip, first.1.max(last.1) + lip);
+        fill_round_box(
+            &mut frame,
+            rx0 - ox,
+            ry0 - oy,
+            rx1 - ox,
+            ry1 - oy,
+            lip,
+            darker(body_color, 45),
+        );
+        fill_round_box(
+            &mut frame,
+            rx0 + 2.0 - ox,
+            ry0 + 2.0 - oy,
+            rx1 - 2.0 - ox,
+            ry1 - 2.0 - oy,
+            lip - 2.0,
+            darker(body_color, 18),
+        );
     }
     let mask = label_mask(spec.disc_size);
     for (slot, (cx, cy)) in centres.iter().enumerate() {
         let (cx, cy) = (cx - ox, cy - oy);
-        // The recess the disc sits in.
-        disc_shape(
-            &mut frame,
-            cx,
-            cy,
-            d / 2.0 + d * 0.035,
-            darker(body_color, 55),
-        );
-        disc_shape(
-            &mut frame,
-            cx,
-            cy,
-            d / 2.0 + d * 0.02,
-            darker(body_color, 20),
-        );
+        // The spindle the disc sits on, seen whole in an empty slot.
+        disc_shape(&mut frame, cx, cy, d * 0.07, darker(body_color, 35));
+        disc_shape(&mut frame, cx, cy, d * 0.05, lighter(body_color, 6));
+        disc_shape(&mut frame, cx, cy, d * 0.02, darker(body_color, 80));
         let Some(disc) = discs.get(slot) else {
             continue;
         };
-        // The disc: a silver base, the cover as its label, the hub and the hole.
-        disc_shape(&mut frame, cx, cy, d / 2.0, lighter(body_color, 18));
+        // The disc: a dark edge, a silver base, the cover as its label inside
+        // a clear rim, the hub and the hole.
+        disc_shape(&mut frame, cx, cy, d / 2.0, darker(body_color, 50));
+        disc_shape(&mut frame, cx, cy, d / 2.0 - 1.5, lighter(body_color, 18));
         if !disc.art_file.is_empty() {
             if let Some(label) = read_art(
                 Path::new(&disc.art_file),
@@ -3425,7 +3478,20 @@ pub fn render_changer(spec: &lead::ChangerSpec, discs: &[lead::Disc]) -> (Frame,
         disc_shape(&mut frame, cx, cy, d * 0.075, darker(body_color, 30));
         disc_shape(&mut frame, cx, cy, d * 0.035, darker(body_color, 90));
     }
-    // The head, parked: a block with a darker rim and a lighter top.
+    // The platter at the park: a dark glass ring, the dish, its spindle.
+    {
+        let (px, py) = (hx - ox, hy - oy);
+        disc_shape(&mut frame, px, py, platter, darker(body_color, 120));
+        disc_shape(&mut frame, px, py, platter * 0.9, darker(body_color, 150));
+        disc_shape(&mut frame, px, py, platter * 0.74, lighter(body_color, 4));
+        disc_shape(&mut frame, px, py, platter * 0.7, body_color);
+        disc_shape(&mut frame, px, py, d * 0.07, darker(body_color, 35));
+        disc_shape(&mut frame, px, py, d * 0.05, lighter(body_color, 6));
+        disc_shape(&mut frame, px, py, d * 0.02, darker(body_color, 80));
+    }
+    // The head over the platter: a block with a darker rim and a lighter
+    // face, its hinge a line across the end nearest the rail, its lamp at
+    // the other end in the accent colour.
     fill_round_box(
         &mut frame,
         head.0 - ox,
@@ -3444,6 +3510,33 @@ pub fn render_changer(spec: &lead::ChangerSpec, discs: &[lead::Disc]) -> (Frame,
         d * 0.06,
         lighter(body_color, 22),
     );
+    if spec.horizontal {
+        let hinge = head.1 + (head.3 - head.1) * 0.2;
+        fill_round_box(
+            &mut frame,
+            head.0 - ox + 2.0,
+            hinge - oy,
+            head.2 - ox - 2.0,
+            hinge + 3.0 - oy,
+            1.0,
+            darker(body_color, 45),
+        );
+        let lamp = (hx - ox, head.3 - (head.3 - head.1) * 0.12 - oy);
+        disc_shape(&mut frame, lamp.0, lamp.1, d * 0.022, spec.accent);
+    } else {
+        let hinge = head.0 + (head.2 - head.0) * 0.2;
+        fill_round_box(
+            &mut frame,
+            hinge - ox,
+            head.1 - oy + 2.0,
+            hinge + 3.0 - ox,
+            head.3 - oy - 2.0,
+            1.0,
+            darker(body_color, 45),
+        );
+        let lamp = (head.2 - (head.2 - head.0) * 0.12 - ox, hy - oy);
+        disc_shape(&mut frame, lamp.0, lamp.1, d * 0.022, spec.accent);
+    }
     (frame, at)
 }
 
@@ -3460,6 +3553,7 @@ mod changer_tests {
             disc_size: 300,
             head_park: (330, 300),
             color: [232, 232, 232],
+            accent: [70, 140, 255],
             disc_file: String::new(),
             mask_file: String::new(),
             head_file: String::new(),
@@ -3508,7 +3602,7 @@ mod changer_tests {
         // A slot with a disc is lighter at its rim than the body; the empty slot shows the recess, darker.
         let (cx, cy) = (760 - at.0, 300 - at.1);
         let on_disc = pixel(&frame, cx + 120, cy);
-        let body = pixel(&frame, cx + 190 + 20, cy - 190);
+        let body = pixel(&frame, cx + 190 + 20, cy - 180);
         let empty = pixel(&frame, 760 + 2 * 380 - at.0 + 120, cy);
         assert!(
             on_disc[0] > body[0],
@@ -8044,6 +8138,35 @@ fn plan_arc_gauge(g: &GaugeSpec, value: u32, ops: &mut Vec<Op<'_>>) {
     }
     if value > 0 {
         let current = g.arc_start - value as f32 / 100.0 * (g.arc_start - g.arc_end);
+        // The glow: the lit arc's light spilling into the glass about it, two
+        // wider arcs in the colour faded towards the track's, under the arc.
+        if g.arc_glow > 0 {
+            let base = g.bg_color.unwrap_or([0, 0, 0]);
+            let faded = |share: f32| -> [u8; 3] {
+                let mut out = [0u8; 3];
+                for c in 0..3 {
+                    out[c] = (f32::from(base[c]) + (f32::from(g.color[c]) - f32::from(base[c])) * share)
+                        .round()
+                        .clamp(0.0, 255.0) as u8;
+                }
+                out
+            };
+            for (reach, share) in [(g.arc_glow, 0.2), (g.arc_glow / 2, 0.45)] {
+                if reach == 0 {
+                    continue;
+                }
+                ops.push(Op::Arc {
+                    x: g.x - reach as i32,
+                    y: g.y - reach as i32,
+                    w: g.w + 2 * reach,
+                    h: g.h + 2 * reach,
+                    start: current,
+                    stop: g.arc_start,
+                    ring: g.arc_width + 2 * reach,
+                    color: faded(share),
+                });
+            }
+        }
         ops.push(Op::Arc {
             x: g.x,
             y: g.y,

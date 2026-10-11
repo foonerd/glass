@@ -2531,6 +2531,9 @@ pub struct GaugeSpec {
     pub arc_width: u32,
     pub arc_start: f32,
     pub arc_end: f32,
+    /// `<name>.arc.glow`: how far the lit arc's light spills into the glass
+    /// about it, in pixels; 0 for none.
+    pub arc_glow: u32,
     pub track: String,
     pub tip: String,
     /// `vertical`, `horizontal`, or another word for detection from the box.
@@ -2871,6 +2874,7 @@ pub fn meter_indicators(meters_txt: &str, meter: &str, theme_dir: &str) -> Optio
             knob_start: number(&format!("{name}.knob.angle.start"), 225.0),
             knob_end: number(&format!("{name}.knob.angle.end"), -45.0),
             arc_width: number(&format!("{name}.arc.width"), 6.0).max(1.0) as u32,
+            arc_glow: number(&format!("{name}.arc.glow"), 0.0).max(0.0) as u32,
             arc_start: number(&format!("{name}.arc.angle.start"), 225.0),
             arc_end: number(&format!("{name}.arc.angle.end"), -45.0),
             track: get(&format!("{name}.slider.track"))
@@ -5035,6 +5039,8 @@ pub struct ChangerSpec {
     /// `changer.color`: the body's colour; the engine draws the body, the
     /// rail, the discs and the head as shapes unless the theme brings pictures.
     pub color: [u8; 3],
+    /// `changer.accent`: the colour of the head's lamp.
+    pub accent: [u8; 3],
     /// `changer.disc.filename`, `changer.label.mask`, `changer.head.filename`,
     /// `changer.rail.filename`, `changer.sled.filename`: the theme's pictures
     /// as paths, each empty for the engine's own drawing.
@@ -5091,6 +5097,9 @@ pub fn meter_changer(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<C
         color: get("changer.color")
             .and_then(color_triplet)
             .unwrap_or([232, 232, 232]),
+        accent: get("changer.accent")
+            .and_then(color_triplet)
+            .unwrap_or([70, 140, 255]),
         disc_file: path("changer.disc.filename"),
         mask_file: path("changer.label.mask"),
         head_file: path("changer.head.filename"),

@@ -1,46 +1,191 @@
-# CD changer, the showcase: a two-deck unit for a 1920x1080 screen. The CD
-# unit on top, a bar of three discs on a rail with the head parked at the
-# left; the control unit below with the track, the time, the format and the
-# volume. The engine draws the bar as shapes; a theme may bring pictures
-# for the disc, the label mask, the head, the rail and the sled instead.
+# CD changer, the showcase: a two-deck unit behind one sheet of touch glass
+# for a 1920x1080 screen, in a dark and a light finish. The CD unit on top,
+# three discs in a well on a slab, the head parked over the platter at the
+# left, all drawn by the engine from the changer.* keys. The control unit
+# below: the flat knob with its lit volume ring at the left, the round
+# album art inside its lit progress ring in the middle window, the track on
+# the touch screen at the right with the format, the rate and a spectrum,
+# and the column of ring buttons. The slab, the glass panes and the knob are
+# the theme's pictures; the rings, the discs and the text are drawn live.
 
-[CD Changer]
+[CD Changer Dark]
 meter.type = circular
 channels = 2
 ui.refresh.period = 0.033
+config.extend = True
+interactive = True
 screen.bgr =
+bgr.filename = bgr_dark.png
+fgr.filename = fgr.png
 
 changer.slots = 3
 changer.orientation = horizontal
-changer.pos = 760,300
+changer.pos = 860,300
 changer.pitch = 380
 changer.disc.size = 300
 changer.head.park = 330,300
-changer.color = 232,232,232
+changer.color = 38,38,42
+changer.accent = 240,240,245
 
-font.size.light = 34
-font.size.regular = 40
-font.size.bold = 52
-font.size.italic = 34
-font.size.digi = 64
-font.color = 230,230,230
+font.size.light = 30
+font.size.regular = 34
+font.size.bold = 44
+font.size.italic = 28
+font.size.digi = 28
+font.color = 236,236,240
+
+albumart.pos = 710,635
+albumart.dimension = 300,300
+albumart.mask = art_mask.png
+
+progress.pos = 688,613
+progress.dim = 344,344
+progress.style = arc
+progress.arc.width = 5
+progress.arc.glow = 9
+progress.color = 240,240,245
+progress.bg.color = 40,40,46
+
+time.elapsed.pos = 752,940,digi
+time.total.pos = 882,940,digi
+time.elapsed.color = 236,236,240
+time.total.color = 140,140,148
+
+volume.pos = 201,651
+volume.dim = 268,268
+volume.style = arc
+volume.arc.width = 5
+volume.arc.glow = 10
+volume.color = 240,240,245
+volume.bg.color = 40,40,46
+volume.value.pos = 335,762,regular
+volume.value.align = center
+volume.value.format = {}
+volume.value.mute = MUTE
 
 playinfo.align = left
-playinfo.maxwidth = 1100
-playinfo.title.pos = 420,640,bold
-playinfo.artist.pos = 420,720,regular
-playinfo.album.pos = 420,775,light
-playinfo.next.title.pos = 420,830,italic
-playinfo.next.artist.pos = 420,875,italic
+playinfo.maxwidth = 480
+playinfo.title.pos = 1190,618,bold
+playinfo.artist.pos = 1190,680,regular
+playinfo.album.pos = 1190,724,light
+playinfo.next.title.pos = 1190,796,italic
+playinfo.next.artist.pos = 1190,834,italic
+playinfo.type.pos = 1190,882
+playinfo.type.dimension = 110,44
+playinfo.samplerate.pos = 1320,890,light
 
-playinfo.type.pos = 160,660
-playinfo.type.dimension = 200,200
+spectrum.visible = True
+spectrum.name = cd-strip
+spectrum.x = 1190
+spectrum.y = 938
+spectrum.size = 480,36
 
-time.elapsed.pos = 1540,650,digi
-time.total.pos = 1540,730,digi
-time.elapsed.color = 230,230,230
-time.total.color = 150,150,150
+button.previous.pos = 1744,594
+button.previous.image = btn_previous.png
+button.previous.action = previous
+button.play.pos = 1744,660
+button.play.image = btn_play.png, btn_pause.png
+button.play.action = toggle
+button.next.pos = 1744,726
+button.next.image = btn_next.png
+button.next.action = next
+button.stop.pos = 1744,792
+button.stop.image = btn_stop.png
+button.stop.action = stop
+button.shuffle.pos = 1744,858
+button.shuffle.image = btn_shuffle.png
+button.shuffle.action = random
+button.repeat.pos = 1744,924
+button.repeat.image = btn_repeat.png
+button.repeat.action = repeat
 
-volume.value.pos = 1540,840,regular
-volume.value.format = VOL {}
+[CD Changer Light]
+meter.type = circular
+channels = 2
+ui.refresh.period = 0.033
+config.extend = True
+interactive = True
+screen.bgr =
+bgr.filename = bgr_light.png
+fgr.filename = fgr.png
+
+changer.slots = 3
+changer.orientation = horizontal
+changer.pos = 860,300
+changer.pitch = 380
+changer.disc.size = 300
+changer.head.park = 330,300
+changer.color = 236,236,238
+changer.accent = 70,140,255
+
+font.size.light = 30
+font.size.regular = 34
+font.size.bold = 44
+font.size.italic = 28
+font.size.digi = 28
+font.color = 236,236,240
+
+albumart.pos = 710,635
+albumart.dimension = 300,300
+albumart.mask = art_mask.png
+
+progress.pos = 688,613
+progress.dim = 344,344
+progress.style = arc
+progress.arc.width = 5
+progress.arc.glow = 9
+progress.color = 240,240,245
+progress.bg.color = 40,40,46
+
+time.elapsed.pos = 752,940,digi
+time.total.pos = 882,940,digi
+time.elapsed.color = 236,236,240
+time.total.color = 140,140,148
+
+volume.pos = 201,651
+volume.dim = 268,268
+volume.style = arc
+volume.arc.width = 5
+volume.arc.glow = 10
+volume.color = 240,240,245
+volume.bg.color = 40,40,46
+volume.value.pos = 335,762,regular
+volume.value.align = center
+volume.value.format = {}
 volume.value.mute = MUTE
+
+playinfo.align = left
+playinfo.maxwidth = 480
+playinfo.title.pos = 1190,618,bold
+playinfo.artist.pos = 1190,680,regular
+playinfo.album.pos = 1190,724,light
+playinfo.next.title.pos = 1190,796,italic
+playinfo.next.artist.pos = 1190,834,italic
+playinfo.type.pos = 1190,882
+playinfo.type.dimension = 110,44
+playinfo.samplerate.pos = 1320,890,light
+
+spectrum.visible = True
+spectrum.name = cd-strip
+spectrum.x = 1190
+spectrum.y = 938
+spectrum.size = 480,36
+
+button.previous.pos = 1744,594
+button.previous.image = btn_previous.png
+button.previous.action = previous
+button.play.pos = 1744,660
+button.play.image = btn_play.png, btn_pause.png
+button.play.action = toggle
+button.next.pos = 1744,726
+button.next.image = btn_next.png
+button.next.action = next
+button.stop.pos = 1744,792
+button.stop.image = btn_stop.png
+button.stop.action = stop
+button.shuffle.pos = 1744,858
+button.shuffle.image = btn_shuffle.png
+button.shuffle.action = random
+button.repeat.pos = 1744,924
+button.repeat.image = btn_repeat.png
+button.repeat.action = repeat

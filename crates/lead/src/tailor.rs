@@ -161,6 +161,7 @@ const RULES: &[(&str, Kind)] = &[
     ("changer.slots", Kind::Keep),
     ("changer.orientation", Kind::Keep),
     ("changer.color", Kind::Keep),
+    ("changer.accent", Kind::Keep),
     ("changer.pos", Kind::Point),
     ("changer.pitch", Kind::Len),
     ("changer.disc.size", Kind::Len),

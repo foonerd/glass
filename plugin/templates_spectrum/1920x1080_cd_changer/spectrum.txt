@@ -1,0 +1,14 @@
+# The strip on the CD changer's touch screen: a low row of rounded bars in
+# one colour, drawn by the engine.
+[cd-strip]
+spectrum.x = 1190
+spectrum.y = 938
+bgr.type = color
+bgr.color = 0,0,0,0
+style = bars
+bins = 48
+bar.round = True
+bar.space = 0.3
+palette = mono
+peaks.hold = 250
+gravity = 6
