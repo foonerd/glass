@@ -1527,6 +1527,18 @@ fn cover_to_show<'a>(
     }
 }
 
+/// The queue's places a changer's slots show: a new play (position 0)
+/// starts in the first slot with the next tracks after it; otherwise the
+/// slot before holds the track before, as prev, play, next; the window
+/// never runs past the queue's end while the queue can fill it.
+pub fn disc_window(len: usize, slots: usize, position: usize) -> std::ops::Range<usize> {
+    if len == 0 || slots == 0 {
+        return 0..0;
+    }
+    let start = position.saturating_sub(1).min(len.saturating_sub(slots));
+    start..(start + slots).min(len)
+}
+
 /// The covers of a changer's discs: each location the player reports is
 /// fetched once, one at a time in the background, and the file it landed
 /// in is kept; a location not fetched yet answers empty. On a browser the
@@ -2199,13 +2211,12 @@ impl TapSource {
             return Vec::new();
         }
         let position = position.max(0) as usize;
-        let start = if position == 0 { 0 } else { position - 1 };
-        let start = start.min(items.len().saturating_sub(slots));
+        let range = disc_window(items.len(), slots, position);
         let window: Vec<(usize, QueueItem)> = items
             .iter()
             .enumerate()
-            .skip(start)
-            .take(slots)
+            .skip(range.start)
+            .take(range.len())
             .map(|(i, item)| (i, item.clone()))
             .collect();
         let wanted: Vec<String> = window
@@ -3329,6 +3340,25 @@ mod tests {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn a_changers_slots_show_the_queue_around_the_playing_track() {
+        // A new play: the first slot, the next tracks after it.
+        assert_eq!(disc_window(10, 3, 0), 0..3);
+        // Playing on: the track before, the one playing, the next.
+        assert_eq!(disc_window(10, 3, 1), 0..3);
+        assert_eq!(disc_window(10, 3, 5), 4..7);
+        // Near the end the window stays on the queue.
+        assert_eq!(disc_window(10, 3, 9), 7..10);
+        assert_eq!(disc_window(10, 3, 8), 7..10);
+        // A queue shorter than the bar: every track, slots left empty.
+        assert_eq!(disc_window(2, 3, 1), 0..2);
+        assert_eq!(disc_window(1, 3, 0), 0..1);
+        assert_eq!(disc_window(0, 3, 0), 0..0);
+        assert_eq!(disc_window(5, 0, 2), 0..0);
+        // Five slots, the playing track second from the left.
+        assert_eq!(disc_window(20, 5, 7), 6..11);
+    }
+
     #[test]
     fn album_art_a_server_sends_unlabelled_is_taken_by_its_content() {
         let jpeg = [0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, b'J', b'F', b'I', b'F'];

@@ -3447,6 +3447,121 @@ pub fn render_changer(spec: &lead::ChangerSpec, discs: &[lead::Disc]) -> (Frame,
     (frame, at)
 }
 
+#[cfg(test)]
+mod changer_tests {
+    use super::*;
+
+    fn spec() -> lead::ChangerSpec {
+        lead::ChangerSpec {
+            slots: 3,
+            horizontal: true,
+            pos: (760, 300),
+            pitch: 380,
+            disc_size: 300,
+            head_park: (330, 300),
+            color: [232, 232, 232],
+            disc_file: String::new(),
+            mask_file: String::new(),
+            head_file: String::new(),
+            rail_file: String::new(),
+            sled_file: String::new(),
+        }
+    }
+
+    fn pixel(frame: &Frame, x: i32, y: i32) -> [u8; 4] {
+        let i = ((y as u32 * frame.width + x as u32) * 4) as usize;
+        [
+            frame.rgba[i],
+            frame.rgba[i + 1],
+            frame.rgba[i + 2],
+            frame.rgba[i + 3],
+        ]
+    }
+
+    #[test]
+    fn the_bar_is_drawn_about_its_slots_and_head_with_a_disc_where_the_queue_has_one() {
+        let spec = spec();
+        let discs = vec![
+            lead::Disc {
+                index: 3,
+                playing: true,
+                title: "A".into(),
+                ..Default::default()
+            },
+            lead::Disc {
+                index: 4,
+                title: "B".into(),
+                ..Default::default()
+            },
+        ];
+        let (frame, at) = render_changer(&spec, &discs);
+        // The picture reaches from before the head to past the last slot's recess.
+        assert!(
+            at.0 < 330 - 51 && at.1 < 300 - 150 - 54,
+            "the top left is before the head and above the discs: {at:?}"
+        );
+        assert!(
+            frame.width as i32 + at.0 >= 760 + 2 * 380 + 150 + 54,
+            "the bar reaches past the last slot"
+        );
+        assert!(frame.height as i32 + at.1 >= 300 + 150 + 54);
+        // A slot with a disc is lighter at its rim than the body; the empty slot shows the recess, darker.
+        let (cx, cy) = (760 - at.0, 300 - at.1);
+        let on_disc = pixel(&frame, cx + 120, cy);
+        let body = pixel(&frame, cx + 190 + 20, cy - 190);
+        let empty = pixel(&frame, 760 + 2 * 380 - at.0 + 120, cy);
+        assert!(
+            on_disc[0] > body[0],
+            "a disc is lighter than the body: {on_disc:?} over {body:?}"
+        );
+        assert!(
+            empty[0] < body[0],
+            "an empty slot is a recess, darker than the body: {empty:?} under {body:?}"
+        );
+        // The hole in the hub shows the darkest ring of the hub.
+        let hole = pixel(&frame, cx, cy);
+        assert!(hole[0] < on_disc[0]);
+        // The head is drawn at its park, lighter than the body around it.
+        let head = pixel(&frame, 330 - at.0, 300 - at.1 - 150);
+        assert!(
+            head[0] > body[0],
+            "the head is the lightest block: {head:?} over {body:?}"
+        );
+        // Nothing outside the drawn shapes: the corner is clear.
+        assert_eq!(pixel(&frame, 0, 0)[3], 0);
+    }
+
+    #[test]
+    fn a_vertical_bar_runs_down_and_the_picture_is_drawn_again_only_on_a_change() {
+        let mut spec = spec();
+        spec.horizontal = false;
+        spec.pos = (300, 400);
+        spec.head_park = (300, 120);
+        let (frame, at) = render_changer(&spec, &[]);
+        assert!(
+            frame.height > frame.width,
+            "a vertical bar is taller than wide: {}x{}",
+            frame.width,
+            frame.height
+        );
+        assert!(at.1 < 120 - 51);
+        let one = plot::Changer {
+            spec: spec.clone(),
+            discs: vec![],
+        };
+        let two = plot::Changer {
+            spec: spec.clone(),
+            discs: vec![lead::Disc {
+                index: 0,
+                art_file: "/x.png".into(),
+                ..Default::default()
+            }],
+        };
+        assert_ne!(changer_key(&one), changer_key(&two));
+        assert_eq!(changer_key(&one), changer_key(&one.clone()));
+    }
+}
+
 /// Cut a picture to the ellipse inscribed in its box, as turning art is cut
 /// when it has no mask of its own.
 pub fn apply_circle(frame: &Frame) -> Frame {
