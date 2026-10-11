@@ -726,7 +726,10 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
                 0.0
             },
             duration: input.metadata.duration.max(0.0),
-            engaged: matches!(input.metadata.status.as_str(), "play" | "pause"),
+            // Playing alone keeps the arm on the disc: a pause, like a stop,
+            // brings the mechanism to rest while the display persists, as
+            // the tonearm and the reels come to rest.
+            engaged: input.metadata.status == "play",
         }),
     }
 }
