@@ -3720,11 +3720,12 @@ pub fn render_changer(
     } else {
         (hx, pose.along)
     };
-    // The disc that turns is the one under the arm, not the one the player
-    // names: at a change the arm is still over the old disc while it spins
-    // down, and over nothing while it travels.
+    // The disc that turns is the one drawn under the arm, not the one the
+    // player names: at a change the arm is still over the old disc while
+    // it spins down, with the row standing a pitch off, and over nothing
+    // while it travels or the row slides.
     let turning_slot = centres.iter().position(|(cx, cy)| {
-        let there = if spec.horizontal { *cx } else { *cy };
+        let there = if spec.horizontal { *cx } else { *cy } + pose.row_offset;
         (there - pose.along).abs() < 0.5
     });
     let disc_picture = cache.picture(&spec.disc_file).map(|f| fit_art(&f, d, d));
@@ -4092,11 +4093,13 @@ mod changer_tests {
     #[test]
     fn the_window_moving_on_slides_the_row_under_the_staying_arm() {
         let (dir, spec) = theme("shift");
+        let cover = dir.join("cover.png").to_string_lossy().to_string();
         let window = |first: i64, playing_slot: usize| -> Vec<lead::Disc> {
             (0..3)
                 .map(|i| lead::Disc {
                     index: first + i as i64,
                     playing: i == playing_slot,
+                    art_file: cover.clone(),
                     ..Default::default()
                 })
                 .collect()
@@ -4165,6 +4168,12 @@ mod changer_tests {
             0
         };
         assert_eq!(past_the_well, 0, "nothing past the well's edge");
+        // With the row standing a pitch off, the disc drawn under the arm is
+        // the window's first, the old playing one; it turns, not the next.
+        let held = ChangerPose { along: 550.0, radius: 21.0, degrees: 0.0, spinning: true, row_offset: 150.0 };
+        let drawing = render_changer(&third, &mut cache, &held, None);
+        let (_, centre) = drawing.turning.expect("a disc turns under the arm");
+        assert_eq!(centre.0, 550.0, "the turning disc is the one drawn under the arm");
         let _ = std::fs::remove_dir_all(dir);
     }
 
