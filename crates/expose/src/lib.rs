@@ -3450,8 +3450,19 @@ impl ChangerMotion {
             .last_ms
             .map_or(0.0, |last| (now_ms.saturating_sub(last) as f32 / 1000.0).min(0.5));
         self.last_ms = Some(now_ms);
-        // First sight: every part in its place, the disc up to speed if playing.
+        // First sight: every part in its place, the disc up to speed if
+        // playing. A player engaged whose queue has not reached the display
+        // yet is not a first sight: the arm waits parked, still, so that it
+        // starts on the disc when the queue comes, not from a travel.
         let first = self.along.is_none();
+        if first && changer.engaged && changer.discs.is_empty() {
+            return ChangerPose {
+                along: park,
+                radius: home,
+                degrees: self.angle,
+                spinning: false,
+            };
+        }
         let along = *self.along.get_or_insert(target_along);
         let radius = *self.radius.get_or_insert(target_radius);
         let full_rpm = SPIN_HOME_RPM * home / radius.max(home);
@@ -3865,6 +3876,17 @@ mod changer_tests {
         assert!(p.spinning, "up to speed");
         let p = motion.advance(&playing, 11000);
         assert!(p.radius > 21.0, "the sled sought out: {}", p.radius);
+        // A display starting on a player already playing, before the queue
+        // has reached it: the arm waits parked, and starts on the disc the
+        // moment the queue comes, with no travel.
+        let mut fresh = ChangerMotion::default();
+        let blind = scene(&spec, Vec::new(), 0.5, DISC_SECONDS, true);
+        let p = fresh.advance(&blind, 0);
+        assert_eq!(p.along, 150.0);
+        assert!(!p.spinning);
+        let p = fresh.advance(&playing, 300);
+        assert_eq!(p.along, 550.0, "on the disc at once");
+        assert!(p.spinning);
         let _ = std::fs::remove_dir_all(dir);
     }
 

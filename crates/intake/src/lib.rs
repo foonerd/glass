@@ -1551,6 +1551,34 @@ struct DiscArt {
 }
 
 impl DiscArt {
+    /// Whether a fetch under way has landed since the last look: its file
+    /// goes into the table, and the caller derives the scene again so the
+    /// disc wears its cover and the next fetch starts, without waiting for
+    /// the player's next state.
+    fn landed(&mut self) -> bool {
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            if let Some((reported, rx)) = &self.pending {
+                match rx.try_recv() {
+                    Ok(result) => {
+                        let file = result
+                            .map(|p| p.to_string_lossy().into_owned())
+                            .unwrap_or_default();
+                        self.have.insert(reported.clone(), file);
+                        self.pending = None;
+                        return true;
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {}
+                    Err(mpsc::TryRecvError::Disconnected) => {
+                        self.pending = None;
+                        return true;
+                    }
+                }
+            }
+        }
+        false
+    }
+
     /// The files for the wanted locations, in order, empty where not here yet.
     fn files_for(&mut self, wanted: &[String]) -> Vec<String> {
         if wants::host_pictures() {
@@ -2523,6 +2551,11 @@ impl Source for TapSource {
         // What the skin needs from the state is derived when a state arrives
         // and again when the skin changes.
         {
+            // A disc's cover that landed meanwhile: derived again now, so the
+            // slots fill at a start without waiting for the player's next state.
+            if self.disc_art.landed() {
+                self.rederive = true;
+            }
             if self.rederive {
                 self.rederive = false;
                 let playing = self.playing_held.clone();
