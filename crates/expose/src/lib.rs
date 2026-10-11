@@ -3450,25 +3450,12 @@ impl ChangerMotion {
             .last_ms
             .map_or(0.0, |last| (now_ms.saturating_sub(last) as f32 / 1000.0).min(0.5));
         self.last_ms = Some(now_ms);
-        // First sight: every part in its place, the disc up to speed if
-        // playing. A player engaged whose queue has not reached the display
-        // yet is not a first sight: the arm waits parked, still, so that it
-        // starts on the disc when the queue comes, not from a travel.
-        let first = self.along.is_none();
-        if first && changer.engaged && changer.discs.is_empty() {
-            return ChangerPose {
-                along: park,
-                radius: home,
-                degrees: self.angle,
-                spinning: false,
-            };
-        }
-        let along = *self.along.get_or_insert(target_along);
-        let radius = *self.radius.get_or_insert(target_radius);
+        // First sight: the arm parked, the sled home, the disc still, as a
+        // device switched on; a player already playing is loaded from there,
+        // travel, spin up and seek, as it would be.
+        let along = *self.along.get_or_insert(park);
+        let radius = *self.radius.get_or_insert(home);
         let full_rpm = SPIN_HOME_RPM * home / radius.max(home);
-        if first && engaged {
-            self.rpm = full_rpm;
-        }
         let in_place = (along - target_along).abs() < 0.5;
         let want_spin = engaged && in_place;
         let rate = |seconds: f32| if seconds > 0.0 { SPIN_HOME_RPM / seconds } else { f32::INFINITY };
@@ -3737,7 +3724,12 @@ mod changer_tests {
     /// flat picture with its top left: the layers laid over each other,
     /// the turning cover unturned.
     fn draw(changer: &plot::Changer, cache: &mut ChangerCache) -> (Frame, (i32, i32)) {
-        let pose = ChangerMotion::default().advance(changer, 0);
+        // Long enough for a load from the park to be over.
+        let mut motion = ChangerMotion::default();
+        let mut pose = motion.advance(changer, 0);
+        for t in 1..=60 {
+            pose = motion.advance(changer, t * 500);
+        }
         let drawing = render_changer(changer, cache, &pose);
         let mut pieces = vec![drawing.under];
         if let Some((cover, centre)) = drawing.turning {
@@ -3804,7 +3796,11 @@ mod changer_tests {
         let mut playing = discs.clone();
         playing[1].playing = true;
         let halfway = scene(&spec, playing.clone(), 0.5, 240.0, true);
-        let pose = ChangerMotion::default().advance(&halfway, 0);
+        let mut settled = ChangerMotion::default();
+        let mut pose = settled.advance(&halfway, 0);
+        for t in 1..=60 {
+            pose = settled.advance(&halfway, t * 500);
+        }
         let drawing = render_changer(&halfway, &mut cache, &pose);
         assert!(drawing.turning.is_some(), "the playing cover turns");
         let (out, at) = draw(&halfway, &mut cache);
@@ -3839,54 +3835,52 @@ mod changer_tests {
         discs[1].playing = true;
         let playing = scene(&spec, discs.clone(), 0.5, DISC_SECONDS, true);
         let mut motion = ChangerMotion::default();
+        // A start on a playing player is a load: the arm sets out from its
+        // park, still; in place it spins up; up to speed, the sled seeks out.
         let start = motion.advance(&playing, 0);
-        assert_eq!(start.along, 550.0, "first sight: the arm over the disc");
-        assert!(start.spinning && start.radius > 21.0, "first sight: spinning, the sled out");
-        let mid_radius = start.radius;
+        assert_eq!(start.along, 150.0, "a start: the arm at its park");
+        assert!(!start.spinning);
+        let p = motion.advance(&playing, 600);
+        assert!(p.along > 150.0 && p.along < 550.0, "the arm on its way: {}", p.along);
+        motion.advance(&playing, 2000);
+        let p = motion.advance(&playing, 2500);
+        assert_eq!(p.along, 550.0, "the arm over the disc");
+        assert!(p.spinning, "up to speed");
+        let p = motion.advance(&playing, 4000);
+        assert!(p.radius > 21.0, "the sled sought out: {}", p.radius);
+        let mid_radius = p.radius;
         // The player stops: the disc spins down first, nothing else moves.
         let mut stopped = discs.clone();
         stopped[1].playing = false;
         let stopped = scene(&spec, stopped, 0.0, DISC_SECONDS, false);
-        let p = motion.advance(&stopped, 200);
+        let p = motion.advance(&stopped, 4200);
         assert_eq!(p.along, 550.0, "the arm waits while the disc spins down");
         assert_eq!(p.radius, mid_radius, "the sled waits while the disc spins down");
         assert!(p.spinning);
         // The disc still (half a second), the sled glides home over the surface.
-        motion.advance(&stopped, 700);
-        let p = motion.advance(&stopped, 900);
+        motion.advance(&stopped, 4700);
+        let p = motion.advance(&stopped, 4900);
         assert!(!p.spinning, "the disc has stopped");
         assert!(p.radius < mid_radius && p.radius > 21.0, "the sled on its way home: {}", p.radius);
         assert_eq!(p.along, 550.0, "the arm still waits");
         // Home; then the arm returns along the rail, eased, not at once.
-        let p = motion.advance(&stopped, 1400);
+        let p = motion.advance(&stopped, 5400);
         assert!((p.radius - 50.0 * SLED_HOME).abs() < 0.6, "the sled home: {}", p.radius);
-        motion.advance(&stopped, 1800);
-        let p = motion.advance(&stopped, 2000);
-        assert!(p.along < 550.0 && p.along > 150.0, "the arm on its way: {}", p.along);
+        motion.advance(&stopped, 5800);
         let p = motion.advance(&stopped, 6000);
+        assert!(p.along < 550.0 && p.along > 150.0, "the arm on its way: {}", p.along);
+        let p = motion.advance(&stopped, 10000);
         assert_eq!(p.along, 150.0, "the arm parked");
-        // Play again: the arm travels first, then the disc spins up, then
-        // the sled seeks out.
-        motion.advance(&playing, 6100);
-        let p = motion.advance(&playing, 6300);
-        assert!(p.along > 150.0 && !p.spinning, "travelling, still: {} {}", p.along, p.spinning);
-        motion.advance(&playing, 8000);
-        let p = motion.advance(&playing, 8500);
-        assert_eq!(p.along, 550.0);
-        assert!(p.spinning, "up to speed");
-        let p = motion.advance(&playing, 11000);
-        assert!(p.radius > 21.0, "the sled sought out: {}", p.radius);
-        // A display starting on a player already playing, before the queue
-        // has reached it: the arm waits parked, and starts on the disc the
-        // moment the queue comes, with no travel.
+        // A display starting before the queue has reached it: the arm waits
+        // parked, and loads the disc the moment the queue comes.
         let mut fresh = ChangerMotion::default();
         let blind = scene(&spec, Vec::new(), 0.5, DISC_SECONDS, true);
         let p = fresh.advance(&blind, 0);
         assert_eq!(p.along, 150.0);
         assert!(!p.spinning);
-        let p = fresh.advance(&playing, 300);
-        assert_eq!(p.along, 550.0, "on the disc at once");
-        assert!(p.spinning);
+        fresh.advance(&playing, 300);
+        let p = fresh.advance(&playing, 600);
+        assert!(p.along > 150.0 && p.along < 550.0, "the load under way: {}", p.along);
         let _ = std::fs::remove_dir_all(dir);
     }
 
