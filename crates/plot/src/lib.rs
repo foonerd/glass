@@ -157,6 +157,12 @@ pub struct Scene {
 pub struct Changer {
     pub spec: lead::ChangerSpec,
     pub discs: Vec<lead::Disc>,
+    /// How far into the track the player is, 0 to 1; 0 without a length.
+    pub progress: f32,
+    /// The track's length in seconds, 0 for a stream.
+    pub duration: f32,
+    /// The player is on the disc: playing or paused.
+    pub engaged: bool,
 }
 
 /// The indicators of the scene: the volume 0 to 100, the state index of
@@ -714,6 +720,13 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
         changer: skin.changer.as_ref().map(|spec| Changer {
             spec: spec.clone(),
             discs: input.metadata.discs.clone(),
+            progress: if input.metadata.duration > 0.0 {
+                (input.metadata.seek.max(0.0) / input.metadata.duration).clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
+            duration: input.metadata.duration.max(0.0),
+            engaged: matches!(input.metadata.status.as_str(), "play" | "pause"),
         }),
     }
 }

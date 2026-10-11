@@ -5036,14 +5036,17 @@ pub struct ChangerSpec {
     pub disc_size: u32,
     /// `changer.head.park`: the head's centre when it rests.
     pub head_park: (i32, i32),
-    /// `changer.color`: the body's colour; the engine draws the body, the
-    /// rail, the discs and the head as shapes unless the theme brings pictures.
-    pub color: [u8; 3],
-    /// `changer.accent`: the colour of the head's lamp.
-    pub accent: [u8; 3],
+    /// `changer.rail.pos`: the rail picture's top left.
+    pub rail_pos: (i32, i32),
     /// `changer.disc.filename`, `changer.label.mask`, `changer.head.filename`,
     /// `changer.rail.filename`, `changer.sled.filename`: the theme's pictures
-    /// as paths, each empty for the engine's own drawing.
+    /// as paths. The disc is drawn over the cover, which shows through the
+    /// mask (black keeps); the rail is drawn under the head; the head, the
+    /// arm's housing with alpha where its inner parts show, travels along
+    /// the bar to the playing disc; the sled is the pickup under the
+    /// housing, moved radially from the disc's centre outward as the track
+    /// plays. A picture the theme leaves out is not drawn. All that does
+    /// not move is the theme's background.
     pub disc_file: String,
     pub mask_file: String,
     pub head_file: String,
@@ -5094,12 +5097,7 @@ pub fn meter_changer(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<C
         pitch,
         disc_size,
         head_park,
-        color: get("changer.color")
-            .and_then(color_triplet)
-            .unwrap_or([232, 232, 232]),
-        accent: get("changer.accent")
-            .and_then(color_triplet)
-            .unwrap_or([70, 140, 255]),
+        rail_pos: ipair("changer.rail.pos").unwrap_or((0, 0)),
         disc_file: path("changer.disc.filename"),
         mask_file: path("changer.label.mask"),
         head_file: path("changer.head.filename"),

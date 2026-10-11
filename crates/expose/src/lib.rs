@@ -2386,12 +2386,46 @@ pub struct Pictures {
     changer: Option<ChangerPicture>,
 }
 
-/// The changer as drawn: what it was drawn from, the picture, and where
-/// the picture's top left goes on the frame.
+/// The changer as drawn: what it was drawn from, the picture, where the
+/// picture's top left goes on the frame, and the theme's pictures decoded
+/// once by path, so the sled's every step is blits alone.
 struct ChangerPicture {
     key: String,
     frame: Frame,
     at: (i32, i32),
+    cache: ChangerCache,
+}
+
+/// The changer's pictures decoded once by path: the theme's and the covers.
+#[derive(Default)]
+pub struct ChangerCache {
+    frames: HashMap<String, Option<Frame>>,
+}
+
+impl ChangerCache {
+    /// The picture at `path` as decoded, or none; decoded on the first ask.
+    fn picture(&mut self, path: &str) -> Option<Frame> {
+        if path.is_empty() {
+            return None;
+        }
+        self.frames
+            .entry(path.to_string())
+            .or_insert_with(|| read_png(Path::new(path)))
+            .clone()
+    }
+
+    /// The cover at `path` fitted to `d` and cut by the mask, decoded once
+    /// per path and size.
+    fn cover(&mut self, path: &str, d: u32, mask: Option<&Frame>) -> Option<Frame> {
+        if path.is_empty() {
+            return None;
+        }
+        let key = format!("{path}@{d}");
+        self.frames
+            .entry(key)
+            .or_insert_with(|| read_art(Path::new(path), d, d, mask))
+            .clone()
+    }
 }
 
 impl Pictures {
@@ -2473,8 +2507,18 @@ impl Pictures {
             Some(changer) => {
                 let key = changer_key(changer);
                 if self.changer.as_ref().is_none_or(|c| c.key != key) {
-                    let (frame, at) = render_changer(&changer.spec, &changer.discs);
-                    self.changer = Some(ChangerPicture { key, frame, at });
+                    let mut cache = self
+                        .changer
+                        .take()
+                        .map(|c| c.cache)
+                        .unwrap_or_default();
+                    let (frame, at) = render_changer(changer, &mut cache);
+                    self.changer = Some(ChangerPicture {
+                        key,
+                        frame,
+                        at,
+                        cache,
+                    });
                 }
             }
             None => self.changer = None,
@@ -3187,95 +3231,41 @@ fn changer_key(changer: &plot::Changer) -> String {
         key.push_str(&disc.art_file);
         key.push(':');
         key.push_str(&disc.title);
+        key.push(if disc.playing { '*' } else { '.' });
     }
+    key.push_str(&format!("|{}|{:.0}", changer.engaged, sled_radius(changer)));
     key
 }
 
-/// Coverage of a point by a disc: 1 inside, 0 outside, a pixel's worth
-/// of edge between, for an edge without stairs.
-fn disc_coverage(dx: f32, dy: f32, r: f32) -> f32 {
-    let d = (dx * dx + dy * dy).sqrt();
-    (r + 0.5 - d).clamp(0.0, 1.0)
-}
+/// A CD's geometry on the theme's disc: the programme area from about 25
+/// to at most about 58 mm of a 60 mm radius, read from the inside out.
+const SLED_HOME: f32 = 25.0 / 60.0;
+const SLED_EDGE: f32 = 58.0 / 60.0;
+/// The longest disc, in seconds: a CD-R's 80 minutes.
+const DISC_SECONDS: f32 = 80.0 * 60.0;
 
-/// Coverage by a box with rounded corners, (x0, y0) to (x1, y1), corner radius `r`.
-fn round_box_coverage(px: f32, py: f32, x0: f32, y0: f32, x1: f32, y1: f32, r: f32) -> f32 {
-    let r = r.min((x1 - x0) / 2.0).min((y1 - y0) / 2.0).max(0.0);
-    let cx = px.clamp(x0 + r, x1 - r);
-    let cy = py.clamp(y0 + r, y1 - r);
-    let dx = px - cx;
-    let dy = py - cy;
-    let d = (dx * dx + dy * dy).sqrt();
-    (r + 0.5 - d).clamp(0.0, 1.0)
-}
-
-/// `color` laid over a pixel with `coverage` as its weight.
-fn lay(frame: &mut Frame, x: i32, y: i32, color: [u8; 3], coverage: f32) {
-    if coverage <= 0.0 || x < 0 || y < 0 || x >= frame.width as i32 || y >= frame.height as i32 {
-        return;
+/// Where the sled is along the arm, from the disc's centre, in the theme's
+/// pixels: home at the inner stop while nothing plays or for a stream;
+/// while a track plays, out from home with r squared linear in progress,
+/// as one linear speed and one track pitch make it; a short disc's data
+/// ends short of the edge, so its end is where its length reaches.
+fn sled_radius(changer: &plot::Changer) -> f32 {
+    let radius = changer.spec.disc_size as f32 / 2.0;
+    let home = radius * SLED_HOME;
+    let edge = radius * SLED_EDGE;
+    let on_disc = changer.engaged && changer.discs.iter().any(|disc| disc.playing);
+    if !on_disc || changer.duration <= 0.0 {
+        return home;
     }
-    let i = ((y as u32 * frame.width + x as u32) * 4) as usize;
-    let a = coverage.min(1.0);
-    let px = &mut frame.rgba[i..i + 4];
-    let under = f32::from(px[3]) / 255.0;
-    let out_a = a + under * (1.0 - a);
-    for c in 0..3 {
-        let over = f32::from(color[c]) * a;
-        let kept = f32::from(px[c]) * under * (1.0 - a);
-        px[c] = if out_a > 0.0 {
-            ((over + kept) / out_a).round().clamp(0.0, 255.0) as u8
-        } else {
-            0
-        };
-    }
-    px[3] = (out_a * 255.0).round().clamp(0.0, 255.0) as u8;
+    let share = (changer.duration / DISC_SECONDS).min(1.0);
+    let end2 = home * home + (edge * edge - home * home) * share;
+    let r2 = home * home + (end2 - home * home) * changer.progress.clamp(0.0, 1.0);
+    r2.sqrt()
 }
 
-fn disc_shape(frame: &mut Frame, cx: f32, cy: f32, r: f32, color: [u8; 3]) {
-    let (x0, x1) = ((cx - r - 1.0).floor() as i32, (cx + r + 1.0).ceil() as i32);
-    let (y0, y1) = ((cy - r - 1.0).floor() as i32, (cy + r + 1.0).ceil() as i32);
-    for y in y0..=y1 {
-        for x in x0..=x1 {
-            let c = disc_coverage(x as f32 + 0.5 - cx, y as f32 + 0.5 - cy, r);
-            lay(frame, x, y, color, c);
-        }
-    }
-}
-
-fn fill_round_box(frame: &mut Frame, x0: f32, y0: f32, x1: f32, y1: f32, r: f32, color: [u8; 3]) {
-    for y in (y0.floor() as i32 - 1)..=(y1.ceil() as i32 + 1) {
-        for x in (x0.floor() as i32 - 1)..=(x1.ceil() as i32 + 1) {
-            let c = round_box_coverage(x as f32 + 0.5, y as f32 + 0.5, x0, y0, x1, y1, r);
-            lay(frame, x, y, color, c);
-        }
-    }
-}
-
-/// The label's mask for a disc of diameter `d`: black where the cover
-/// shows, from the hub's ring to just inside the rim, white elsewhere, as
-/// `apply_mask` reads a mask.
-fn label_mask(d: u32) -> Frame {
-    let mut mask = solid_frame(d, d, [255, 255, 255, 255]);
-    let c = d as f32 / 2.0;
-    let outer = c * 0.97;
-    let inner = c * 0.24;
-    for y in 0..d {
-        for x in 0..d {
-            let dx = x as f32 + 0.5 - c;
-            let dy = y as f32 + 0.5 - c;
-            let keep = disc_coverage(dx, dy, outer) - disc_coverage(dx, dy, inner);
-            let v = (255.0 * (1.0 - keep.clamp(0.0, 1.0))).round() as u8;
-            let i = ((y * d + x) * 4) as usize;
-            mask.rgba[i..i + 3].copy_from_slice(&[v, v, v]);
-        }
-    }
-    mask
-}
-
-/// The slot centres along the bar, and the head's box about its park.
-fn changer_geometry(spec: &lead::ChangerSpec) -> (Vec<(f32, f32)>, (f32, f32, f32, f32)) {
-    let d = spec.disc_size as f32;
-    let centres: Vec<(f32, f32)> = (0..spec.slots)
+/// The slot centres along the bar.
+fn slot_centres(spec: &lead::ChangerSpec) -> Vec<(f32, f32)> {
+    (0..spec.slots)
         .map(|i| {
             let along = i as f32 * spec.pitch as f32;
             if spec.horizontal {
@@ -3284,294 +3274,161 @@ fn changer_geometry(spec: &lead::ChangerSpec) -> (Vec<(f32, f32)>, (f32, f32, f3
                 (spec.pos.0 as f32, spec.pos.1 as f32 + along)
             }
         })
-        .collect();
-    let (hw, hh) = if spec.horizontal {
-        (d * 0.34, d * 1.5)
-    } else {
-        (d * 1.5, d * 0.34)
-    };
-    let (hx, hy) = (spec.head_park.0 as f32, spec.head_park.1 as f32);
-    (
-        centres,
-        (hx - hw / 2.0, hy - hh / 2.0, hx + hw / 2.0, hy + hh / 2.0),
-    )
+        .collect()
 }
 
-/// The changer's unit drawn as shapes in the theme's pixels: the slab with
-/// its bevel, the rail along its edge with the carriage, the recess the
-/// discs lie in with a spindle per slot, the discs with their covers as
-/// labels and a clear rim, the platter at the park with the head over it,
-/// hinged, with its lamp. Answers the picture and where its top left goes.
-pub fn render_changer(spec: &lead::ChangerSpec, discs: &[lead::Disc]) -> (Frame, (i32, i32)) {
-    let d = spec.disc_size as f32;
-    let (centres, head) = changer_geometry(spec);
-    let (hx, hy) = ((head.0 + head.2) / 2.0, (head.1 + head.3) / 2.0);
-    let margin = d * 0.18;
-    let platter = d * 0.55;
-    let mut x0 = f32::MAX;
-    let mut y0 = f32::MAX;
-    let mut x1 = f32::MIN;
-    let mut y1 = f32::MIN;
-    for (cx, cy) in centres.iter().chain(std::iter::once(&(hx, hy))) {
-        let reach = if (*cx, *cy) == (hx, hy) { platter } else { d / 2.0 };
-        x0 = x0.min(cx - reach - margin);
-        y0 = y0.min(cy - reach - margin);
-        x1 = x1.max(cx + reach + margin);
-        y1 = y1.max(cy + reach + margin);
-    }
-    let body = (x0, y0, x1, y1);
-    x0 = x0.min(head.0 - 2.0);
-    y0 = y0.min(head.1 - 2.0);
-    x1 = x1.max(head.2 + 2.0);
-    y1 = y1.max(head.3 + 2.0);
-    let at = (x0.floor() as i32 - 2, y0.floor() as i32 - 2);
-    let w = ((x1 - x0).ceil() as u32 + 4).max(1);
-    let h = ((y1 - y0).ceil() as u32 + 4).max(1);
-    let mut frame = empty_frame(w, h);
-    let ox = at.0 as f32;
-    let oy = at.1 as f32;
-    let body_color = spec.color;
-    let darker = |c: [u8; 3], by: u8| {
-        [
-            c[0].saturating_sub(by),
-            c[1].saturating_sub(by),
-            c[2].saturating_sub(by),
-        ]
-    };
-    let lighter = |c: [u8; 3], by: u8| {
-        [
-            c[0].saturating_add(by),
-            c[1].saturating_add(by),
-            c[2].saturating_add(by),
-        ]
-    };
-    // The slab: a shade along its lower edge, the body, a light along its top.
-    let corner = d * 0.12;
-    fill_round_box(
-        &mut frame,
-        body.0 - ox,
-        body.1 - oy,
-        body.2 - ox,
-        body.3 - oy,
-        corner,
-        darker(body_color, 40),
-    );
-    fill_round_box(
-        &mut frame,
-        body.0 - ox,
-        body.1 - oy,
-        body.2 - ox,
-        body.3 - oy - d * 0.03,
-        corner,
-        lighter(body_color, 14),
-    );
-    fill_round_box(
-        &mut frame,
-        body.0 - ox,
-        body.1 - oy + d * 0.012,
-        body.2 - ox,
-        body.3 - oy - d * 0.03,
-        corner,
-        body_color,
-    );
-    // The rail along the slab's edge, from the park to the last slot, with
-    // the carriage over the park: on the top edge of a horizontal unit, on
-    // the left edge of a vertical one.
-    if let (Some(first), Some(last)) = (centres.first(), centres.last()) {
-        let strip = d * 0.028;
-        let inset = d * 0.03;
-        if spec.horizontal {
-            let (ax, bx) = (hx.min(first.0).min(last.0), hx.max(first.0).max(last.0));
-            let top = body.1 + inset;
-            fill_round_box(
-                &mut frame,
-                ax - d * 0.2 - ox,
-                top - oy,
-                bx + d * 0.2 - ox,
-                top + strip - oy,
-                strip / 2.0,
-                darker(body_color, 70),
-            );
-            fill_round_box(
-                &mut frame,
-                hx - d * 0.24 - ox,
-                top - strip * 0.6 - oy,
-                hx + d * 0.24 - ox,
-                top + strip * 1.6 - oy,
-                strip,
-                darker(body_color, 25),
-            );
-        } else {
-            let (ay, by) = (hy.min(first.1).min(last.1), hy.max(first.1).max(last.1));
-            let left = body.0 + inset;
-            fill_round_box(
-                &mut frame,
-                left - ox,
-                ay - d * 0.2 - oy,
-                left + strip - ox,
-                by + d * 0.2 - oy,
-                strip / 2.0,
-                darker(body_color, 70),
-            );
-            fill_round_box(
-                &mut frame,
-                left - strip * 0.6 - ox,
-                hy - d * 0.24 - oy,
-                left + strip * 1.6 - ox,
-                hy + d * 0.24 - oy,
-                strip,
-                darker(body_color, 25),
-            );
-        }
-    }
-    // The recess the discs lie in: one well around every slot, its lip a
-    // shade darker than its floor.
-    if let (Some(first), Some(last)) = (centres.first(), centres.last()) {
-        let lip = d / 2.0 + d * 0.06;
-        let (rx0, ry0) = (first.0.min(last.0) - lip, first.1.min(last.1) - lip);
-        let (rx1, ry1) = (first.0.max(last.0) + lip, first.1.max(last.1) + lip);
-        fill_round_box(
-            &mut frame,
-            rx0 - ox,
-            ry0 - oy,
-            rx1 - ox,
-            ry1 - oy,
-            lip,
-            darker(body_color, 45),
-        );
-        fill_round_box(
-            &mut frame,
-            rx0 + 2.0 - ox,
-            ry0 + 2.0 - oy,
-            rx1 - 2.0 - ox,
-            ry1 - 2.0 - oy,
-            lip - 2.0,
-            darker(body_color, 18),
-        );
-    }
-    let mask = label_mask(spec.disc_size);
-    // A disc drawn about a centre: a dark edge, a silver base, the cover as
-    // its label inside a clear rim, the hub and the hole.
-    let draw_disc = |frame: &mut Frame, cx: f32, cy: f32, disc: &lead::Disc| {
-        disc_shape(frame, cx, cy, d / 2.0, darker(body_color, 50));
-        disc_shape(frame, cx, cy, d / 2.0 - 1.5, lighter(body_color, 18));
-        if !disc.art_file.is_empty() {
-            if let Some(label) = read_art(
-                Path::new(&disc.art_file),
-                spec.disc_size,
-                spec.disc_size,
-                Some(&mask),
-            ) {
-                let at = ((cx - d / 2.0).round() as i32, (cy - d / 2.0).round() as i32);
-                blit_op(&label, at).paint(&mut Band::whole(frame));
-            }
-        }
-        disc_shape(frame, cx, cy, d * 0.13, lighter(body_color, 10));
-        disc_shape(frame, cx, cy, d * 0.075, darker(body_color, 30));
-        disc_shape(frame, cx, cy, d * 0.035, darker(body_color, 90));
-    };
-    // The spindle a slot holds its disc on, seen whole when the slot is
-    // empty: no disc in the queue for it, or its disc out on the platter.
-    let spindle = |frame: &mut Frame, cx: f32, cy: f32| {
-        disc_shape(frame, cx, cy, d * 0.07, darker(body_color, 35));
-        disc_shape(frame, cx, cy, d * 0.05, lighter(body_color, 6));
-        disc_shape(frame, cx, cy, d * 0.02, darker(body_color, 80));
-    };
-    for (slot, (cx, cy)) in centres.iter().enumerate() {
-        let (cx, cy) = (cx - ox, cy - oy);
-        spindle(&mut frame, cx, cy);
-        match discs.get(slot) {
-            Some(disc) if !disc.playing => draw_disc(&mut frame, cx, cy, disc),
-            _ => {}
-        }
-    }
-    // The platter at the park: a dark glass ring, the dish, its spindle, and
-    // the playing disc on it, out of its slot, under the head.
+/// The changer composed from the theme's pictures, as the tonearm and the
+/// reels are: the rail; in every slot with a disc, the cover fitted to the
+/// disc's size and cut by the theme's label mask under the theme's disc
+/// picture; the sled at its radius along the arm; the head over it, at its
+/// park or moved along the bar to the playing disc's slot, the housing's
+/// alpha showing the sled and the disc through. A picture the theme leaves
+/// out is not drawn; all that does not move is the theme's background.
+/// Answers the picture and where its top left goes.
+pub fn render_changer(changer: &plot::Changer, cache: &mut ChangerCache) -> (Frame, (i32, i32)) {
+    let spec = &changer.spec;
+    let discs = &changer.discs;
+    let d = spec.disc_size;
+    let centres = slot_centres(spec);
+    let (hx, hy) = (spec.head_park.0 as f32, spec.head_park.1 as f32);
+    // The head travels along the bar only: to the playing slot's place
+    // along it, at its park's place across it.
+    let (ax, ay) = match discs
+        .iter()
+        .position(|disc| disc.playing)
+        .and_then(|slot| centres.get(slot).copied())
     {
-        let (px, py) = (hx - ox, hy - oy);
-        disc_shape(&mut frame, px, py, platter, darker(body_color, 120));
-        disc_shape(&mut frame, px, py, platter * 0.9, darker(body_color, 150));
-        disc_shape(&mut frame, px, py, platter * 0.74, lighter(body_color, 4));
-        disc_shape(&mut frame, px, py, platter * 0.7, body_color);
-        spindle(&mut frame, px, py);
-        if let Some(disc) = discs.iter().find(|disc| disc.playing) {
-            draw_disc(&mut frame, px, py, disc);
+        Some((cx, cy)) if spec.horizontal => (cx, hy),
+        Some((cx, cy)) => (hx, cy),
+        None => (hx, hy),
+    };
+    let disc_picture = cache.picture(&spec.disc_file).map(|f| fit_art(&f, d, d));
+    let mask = cache.picture(&spec.mask_file).map(|f| fit_art(&f, d, d));
+    let head = cache.picture(&spec.head_file);
+    let sled = cache.picture(&spec.sled_file);
+    let rail = cache.picture(&spec.rail_file);
+    let centred = |picture: &Frame, cx: f32, cy: f32| -> (i32, i32) {
+        (
+            (cx - picture.width as f32 / 2.0).round() as i32,
+            (cy - picture.height as f32 / 2.0).round() as i32,
+        )
+    };
+    // Every piece with its top left in the theme's pixels, in drawing order.
+    let mut pieces: Vec<(Frame, (i32, i32))> = Vec::new();
+    if let Some(rail) = rail {
+        pieces.push((rail, spec.rail_pos));
+    }
+    if let Some(disc_picture) = &disc_picture {
+        for (slot, (cx, cy)) in centres.iter().enumerate() {
+            let Some(disc) = discs.get(slot) else {
+                continue;
+            };
+            let at = centred(disc_picture, *cx, *cy);
+            if let Some(cover) = cache.cover(&disc.art_file, d, mask.as_ref()) {
+                pieces.push((cover, at));
+            }
+            pieces.push((disc_picture.clone(), at));
         }
     }
-    // The head over the platter: a block with a darker rim and a lighter
-    // face, its hinge a line across the end nearest the rail, its lamp at
-    // the other end in the accent colour.
-    fill_round_box(
-        &mut frame,
-        head.0 - ox,
-        head.1 - oy,
-        head.2 - ox,
-        head.3 - oy,
-        d * 0.07,
-        darker(body_color, 60),
-    );
-    fill_round_box(
-        &mut frame,
-        head.0 - ox + 2.0,
-        head.1 - oy + 2.0,
-        head.2 - ox - 2.0,
-        head.3 - oy - 2.0,
-        d * 0.06,
-        lighter(body_color, 22),
-    );
-    if spec.horizontal {
-        let hinge = head.1 + (head.3 - head.1) * 0.2;
-        fill_round_box(
-            &mut frame,
-            head.0 - ox + 2.0,
-            hinge - oy,
-            head.2 - ox - 2.0,
-            hinge + 3.0 - oy,
-            1.0,
-            darker(body_color, 45),
-        );
-        let lamp = (hx - ox, head.3 - (head.3 - head.1) * 0.12 - oy);
-        disc_shape(&mut frame, lamp.0, lamp.1, d * 0.022, spec.accent);
-    } else {
-        let hinge = head.0 + (head.2 - head.0) * 0.2;
-        fill_round_box(
-            &mut frame,
-            hinge - ox,
-            head.1 - oy + 2.0,
-            hinge + 3.0 - ox,
-            head.3 - oy - 2.0,
-            1.0,
-            darker(body_color, 45),
-        );
-        let lamp = (head.2 - (head.2 - head.0) * 0.12 - ox, hy - oy);
-        disc_shape(&mut frame, lamp.0, lamp.1, d * 0.022, spec.accent);
+    // The sled along the arm, from the slots' row outward towards the rail.
+    if let Some(sled) = sled {
+        let r = sled_radius(changer);
+        let at = if spec.horizontal {
+            centred(&sled, ax, spec.pos.1 as f32 - r)
+        } else {
+            centred(&sled, spec.pos.0 as f32 - r, ay)
+        };
+        pieces.push((sled, at));
     }
-    (frame, at)
+    if let Some(head) = head {
+        let at = centred(&head, ax, ay);
+        pieces.push((head, at));
+    }
+    let Some(first) = pieces.first() else {
+        return (empty_frame(1, 1), spec.pos);
+    };
+    let mut x0 = first.1 .0;
+    let mut y0 = first.1 .1;
+    let mut x1 = x0;
+    let mut y1 = y0;
+    for (piece, at) in &pieces {
+        x0 = x0.min(at.0);
+        y0 = y0.min(at.1);
+        x1 = x1.max(at.0 + piece.width as i32);
+        y1 = y1.max(at.1 + piece.height as i32);
+    }
+    let mut frame = empty_frame((x1 - x0).max(1) as u32, (y1 - y0).max(1) as u32);
+    for (piece, at) in &pieces {
+        blit_op(piece, (at.0 - x0, at.1 - y0)).paint(&mut Band::whole(&mut frame));
+    }
+    (frame, (x0, y0))
 }
 
 #[cfg(test)]
 mod changer_tests {
     use super::*;
 
-    fn spec() -> lead::ChangerSpec {
-        lead::ChangerSpec {
+    /// A theme's pictures in a folder of their own: a disc that is a grey
+    /// ring with a clear window, a mask that keeps the window, a solid head,
+    /// a solid sled, a rail, and a red cover.
+    fn theme(name: &str) -> (std::path::PathBuf, lead::ChangerSpec) {
+        let dir = std::env::temp_dir().join(format!("glass-changer-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let d = 100u32;
+        let mut disc = empty_frame(d, d);
+        let mut mask = solid_frame(d, d, [255, 255, 255, 255]);
+        for y in 0..d {
+            for x in 0..d {
+                let (dx, dy) = (x as f32 + 0.5 - 50.0, y as f32 + 0.5 - 50.0);
+                let r = (dx * dx + dy * dy).sqrt();
+                let i = ((y * d + x) * 4) as usize;
+                if r <= 50.0 && r > 44.0 {
+                    disc.rgba[i..i + 4].copy_from_slice(&[128, 128, 128, 255]);
+                }
+                if r <= 44.0 {
+                    mask.rgba[i..i + 3].copy_from_slice(&[0, 0, 0]);
+                }
+            }
+        }
+        write_png(&dir.join("disc.png"), &disc).unwrap();
+        write_png(&dir.join("mask.png"), &mask).unwrap();
+        write_png(&dir.join("head.png"), &solid_frame(20, 160, [10, 200, 10, 255])).unwrap();
+        write_png(&dir.join("sled.png"), &solid_frame(60, 10, [10, 10, 200, 255])).unwrap();
+        write_png(&dir.join("rail.png"), &solid_frame(600, 6, [200, 200, 10, 255])).unwrap();
+        write_png(&dir.join("cover.png"), &solid_frame(30, 30, [220, 20, 20, 255])).unwrap();
+        let file = |name: &str| dir.join(name).to_string_lossy().to_string();
+        let spec = lead::ChangerSpec {
             slots: 3,
             horizontal: true,
-            pos: (760, 300),
-            pitch: 380,
-            disc_size: 300,
-            head_park: (330, 300),
-            color: [232, 232, 232],
-            accent: [70, 140, 255],
-            disc_file: String::new(),
-            mask_file: String::new(),
-            head_file: String::new(),
-            rail_file: String::new(),
-            sled_file: String::new(),
+            pos: (400, 300),
+            pitch: 150,
+            disc_size: d,
+            head_park: (150, 240),
+            rail_pos: (100, 160),
+            disc_file: file("disc.png"),
+            mask_file: file("mask.png"),
+            head_file: file("head.png"),
+            rail_file: file("rail.png"),
+            sled_file: file("sled.png"),
+        };
+        (dir, spec)
+    }
+
+    fn scene(spec: &lead::ChangerSpec, discs: Vec<lead::Disc>, progress: f32, duration: f32, engaged: bool) -> plot::Changer {
+        plot::Changer {
+            spec: spec.clone(),
+            discs,
+            progress,
+            duration,
+            engaged,
         }
     }
 
-    fn pixel(frame: &Frame, x: i32, y: i32) -> [u8; 4] {
+    fn pixel(frame: &Frame, at: (i32, i32), x: i32, y: i32) -> [u8; 4] {
+        let (x, y) = (x - at.0, y - at.1);
+        if x < 0 || y < 0 || x >= frame.width as i32 || y >= frame.height as i32 {
+            return [0, 0, 0, 0];
+        }
         let i = ((y as u32 * frame.width + x as u32) * 4) as usize;
         [
             frame.rgba[i],
@@ -3582,99 +3439,83 @@ mod changer_tests {
     }
 
     #[test]
-    fn the_bar_is_drawn_about_its_slots_and_head_with_a_disc_where_the_queue_has_one() {
-        let spec = spec();
+    fn the_themes_pictures_make_the_bar_and_the_head_rests_or_travels() {
+        let (dir, spec) = theme("bar");
+        let cover = dir.join("cover.png").to_string_lossy().to_string();
         let discs = vec![
             lead::Disc {
                 index: 3,
-                title: "A".into(),
+                art_file: cover.clone(),
                 ..Default::default()
             },
             lead::Disc {
                 index: 4,
-                title: "B".into(),
+                art_file: cover,
                 ..Default::default()
             },
         ];
-        let (frame, at) = render_changer(&spec, &discs);
-        // The playing disc leaves its slot for the platter under the head:
-        // beside the head's block the platter shows the disc, not its ring.
+        let mut cache = ChangerCache::default();
+        let (frame, at) = render_changer(&scene(&spec, discs.clone(), 0.0, 240.0, false), &mut cache);
+        // The rail lies where the theme puts it; the first slot shows the
+        // cover through the disc's window and the disc's own rim; the third
+        // slot is empty, the background's.
+        assert_eq!(pixel(&frame, at, 400, 163)[0], 200, "the rail");
+        assert_eq!(pixel(&frame, at, 400 + 20, 300)[0], 220, "the cover in the window");
+        assert_eq!(pixel(&frame, at, 400 + 47, 300), [128, 128, 128, 255], "the disc's rim");
+        assert_eq!(pixel(&frame, at, 700, 300)[3], 0, "an empty slot is the background's");
+        assert_eq!(pixel(&frame, at, 400 + 47, 300 + 47)[3], 0, "the cover is cut by the mask");
+        // At rest the head stands at its park, the sled home under it: at
+        // the inner stop above the slots' row, 25/60 of the radius.
+        assert_eq!(pixel(&frame, at, 150, 240)[1], 200, "the head at its park");
+        let home = (150 + 22, 300 - 21);
+        assert_eq!(pixel(&frame, at, home.0, home.1)[2], 200, "the sled home: {:?}", pixel(&frame, at, home.0, home.1));
+        // Playing the second disc halfway, the head travels along the bar
+        // to its slot, the sled with it, out from home with r squared
+        // linear in progress; the park is clear.
         let mut playing = discs.clone();
-        playing[0].playing = true;
-        let (out, _) = render_changer(&spec, &playing);
-        let beside_head = (330 + 126 - at.0, 300 - at.1);
-        assert!(
-            pixel(&out, beside_head.0, beside_head.1)[0] > pixel(&frame, beside_head.0, beside_head.1)[0],
-            "the playing disc lies on the platter"
-        );
-        assert!(
-            pixel(&out, 760 + 120 - at.0, 300 - at.1)[0] < pixel(&frame, 760 + 120 - at.0, 300 - at.1)[0],
-            "its slot is empty meanwhile"
-        );
-        // The picture reaches from before the head to past the last slot's recess.
-        assert!(
-            at.0 < 330 - 51 && at.1 < 300 - 150 - 54,
-            "the top left is before the head and above the discs: {at:?}"
-        );
-        assert!(
-            frame.width as i32 + at.0 >= 760 + 2 * 380 + 150 + 54,
-            "the bar reaches past the last slot"
-        );
-        assert!(frame.height as i32 + at.1 >= 300 + 150 + 54);
-        // A slot with a disc is lighter at its rim than the body; the empty slot shows the recess, darker.
-        let (cx, cy) = (760 - at.0, 300 - at.1);
-        let on_disc = pixel(&frame, cx + 120, cy);
-        let body = pixel(&frame, cx + 190 + 20, cy - 180);
-        let empty = pixel(&frame, 760 + 2 * 380 - at.0 + 120, cy);
-        assert!(
-            on_disc[0] > body[0],
-            "a disc is lighter than the body: {on_disc:?} over {body:?}"
-        );
-        assert!(
-            empty[0] < body[0],
-            "an empty slot is a recess, darker than the body: {empty:?} under {body:?}"
-        );
-        // The hole in the hub shows the darkest ring of the hub.
-        let hole = pixel(&frame, cx, cy);
-        assert!(hole[0] < on_disc[0]);
-        // The head is drawn at its park, lighter than the body around it.
-        let head = pixel(&frame, 330 - at.0, 300 - at.1 - 150);
-        assert!(
-            head[0] > body[0],
-            "the head is the lightest block: {head:?} over {body:?}"
-        );
-        // Nothing outside the drawn shapes: the corner is clear.
-        assert_eq!(pixel(&frame, 0, 0)[3], 0);
+        playing[1].playing = true;
+        let halfway = scene(&spec, playing.clone(), 0.5, 240.0, true);
+        let (out, at) = render_changer(&halfway, &mut cache);
+        assert_eq!(pixel(&out, at, 550, 240)[1], 200, "the head over the playing disc");
+        assert_eq!(pixel(&out, at, 150, 240)[3], 0, "the park is clear");
+        let r = sled_radius(&halfway);
+        assert!(r > 21.0 && r < 48.0, "the sled out from home: {r}");
+        assert_eq!(pixel(&out, at, 550 + 22, 300 - r.round() as i32)[2], 200, "the sled at its radius");
+        // The sled's reach: a full disc's end is the edge; a short track's end
+        // is short of it; a stream holds the sled home.
+        let full = scene(&spec, playing.clone(), 1.0, DISC_SECONDS, true);
+        assert!((sled_radius(&full) - 50.0 * SLED_EDGE).abs() < 0.01);
+        let short = scene(&spec, playing.clone(), 1.0, 240.0, true);
+        assert!(sled_radius(&short) < sled_radius(&full));
+        let stream = scene(&spec, playing.clone(), 0.0, 0.0, true);
+        assert!((sled_radius(&stream) - 50.0 * SLED_HOME).abs() < 0.01);
+        assert_ne!(changer_key(&halfway), changer_key(&full));
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]
-    fn a_vertical_bar_runs_down_and_the_picture_is_drawn_again_only_on_a_change() {
-        let mut spec = spec();
+    fn a_vertical_bar_runs_down_and_without_pictures_nothing_is_drawn() {
+        let (dir, mut spec) = theme("vertical");
         spec.horizontal = false;
-        spec.pos = (300, 400);
-        spec.head_park = (300, 120);
-        let (frame, at) = render_changer(&spec, &[]);
-        assert!(
-            frame.height > frame.width,
-            "a vertical bar is taller than wide: {}x{}",
-            frame.width,
-            frame.height
-        );
-        assert!(at.1 < 120 - 51);
-        let one = plot::Changer {
-            spec: spec.clone(),
-            discs: vec![],
+        spec.pos = (300, 100);
+        spec.head_park = (240, 40);
+        spec.rail_file = String::new();
+        let discs = vec![lead::Disc::default(), lead::Disc::default(), lead::Disc::default()];
+        let mut cache = ChangerCache::default();
+        let (frame, at) = render_changer(&scene(&spec, discs.clone(), 0.0, 0.0, false), &mut cache);
+        assert!(frame.height > frame.width, "taller than wide: {}x{}", frame.width, frame.height);
+        assert!(at.1 <= 40 - 80, "the head at the top: {at:?}");
+        let bare = lead::ChangerSpec {
+            disc_file: String::new(),
+            mask_file: String::new(),
+            head_file: String::new(),
+            rail_file: String::new(),
+            sled_file: String::new(),
+            ..spec
         };
-        let two = plot::Changer {
-            spec: spec.clone(),
-            discs: vec![lead::Disc {
-                index: 0,
-                art_file: "/x.png".into(),
-                ..Default::default()
-            }],
-        };
-        assert_ne!(changer_key(&one), changer_key(&two));
-        assert_eq!(changer_key(&one), changer_key(&one.clone()));
+        let (none, _) = render_changer(&scene(&bare, discs, 0.0, 0.0, false), &mut cache);
+        assert_eq!((none.width, none.height), (1, 1));
+        let _ = std::fs::remove_dir_all(dir);
     }
 }
 
