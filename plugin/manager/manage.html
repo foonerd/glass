@@ -1755,8 +1755,7 @@
         <div class="about-list">
           <article class="about-entry">
             <div>
-              <h3 data-about-string="MANAGER_ABOUT_CREDITS_LABEL">Credits</h3>
-              <p id="about-credit"></p>
+              <h3 data-about-string="MANAGER_ABOUT_CREDITS_LABEL">Glass Themes</h3>
               <p id="about-theme-credit"></p><a id="about-themes-credit-link"
                 href="https://github.com/foonerd/glass_templates/graphs/contributors" target="_blank"
                 rel="noreferrer"></a>
@@ -1767,6 +1766,7 @@
           <article class="about-entry">
             <div>
               <h3 data-about-string="MANAGER_ABOUT_GLASS_LABEL">Glass</h3>
+              <p id="about-glass-credit"></p>
               <p id="about-glass-desc"></p><a href="https://github.com/foonerd/glass" target="_blank"
                 rel="noreferrer">github.com/foonerd/glass</a>
             </div>
@@ -1775,7 +1775,8 @@
           </article>
           <article class="about-entry">
             <div>
-              <h3 data-about-string="MANAGER_ABOUT_EVO_LABEL">glass-evo</h3>
+              <h3 data-about-string="MANAGER_ABOUT_EVO_LABEL">Glass-evo</h3>
+              <p id="about-evo-credit"></p>
               <p id="about-evo-desc"></p><a href="https://github.com/foonerd/glass-evo" target="_blank"
                 rel="noreferrer">github.com/foonerd/glass-evo</a>
             </div>
@@ -1785,6 +1786,7 @@
           <article class="about-entry">
             <div>
               <h3 data-about-string="MANAGER_ABOUT_FRAMEWORK_LABEL">Evo framework</h3>
+              <p id="about-framework-credit"></p>
               <p id="about-framework-desc"></p><a href="https://evoframework.org" target="_blank"
                 rel="noreferrer">evoframework.org</a>
             </div>
@@ -1990,7 +1992,9 @@
         $('about-title').textContent = t('MANAGER_ABOUT_TITLE');
         $('about-tagline').textContent = t('MANAGER_ABOUT_TAGLINE');
         $('about-project-title').textContent = t('MANAGER_ABOUT_PROJECT');
-        $('about-credit').textContent = t('MANAGER_ABOUT_CREDIT');
+        $('about-glass-credit').textContent = t('MANAGER_ABOUT_GLASS_CREDIT');
+        $('about-evo-credit').textContent = t('MANAGER_ABOUT_EVO_CREDIT');
+        $('about-framework-credit').textContent = t('MANAGER_ABOUT_FRAMEWORK_CREDIT');
         $('about-theme-credit').textContent = t('MANAGER_ABOUT_THEME_CREDIT');
         $('about-themes-credit-link').textContent = t('MANAGER_ABOUT_THEME_CONTRIBUTORS');
         $('about-glass-desc').textContent = t('MANAGER_ABOUT_GLASS_DESC');
