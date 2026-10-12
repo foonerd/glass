@@ -693,6 +693,7 @@
     "MANAGER_ABOUT_FRAMEWORK_LABEL": "Evo framework",
     "MANAGER_ABOUT_KOFI_LABEL": "Ko-fi",
     "MANAGER_ABOUT_SPONSORS_LABEL": "GitHub Sponsors",
+    "MANAGER_ABOUT_LOGO_LICENCE": "Der Glass-Phönix ist lizenziertes Bildmaterial. Er darf nur mit Bezug auf Glass, glass-evo oder das evo-Framework verwendet werden, für nichts anderes.",
     "MANAGER_ABOUT_VIEW_LOGO": "Glass-Logo im Vollbild anzeigen",
     "MANAGER_ABOUT_SHOW_QR": "QR-Code für {name} anzeigen",
     "MANAGER_UPLOAD": "Theme-Zip hochladen",

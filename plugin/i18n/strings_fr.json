@@ -693,6 +693,7 @@
     "MANAGER_ABOUT_FRAMEWORK_LABEL": "Framework evo",
     "MANAGER_ABOUT_KOFI_LABEL": "Ko-fi",
     "MANAGER_ABOUT_SPONSORS_LABEL": "GitHub Sponsors",
+    "MANAGER_ABOUT_LOGO_LICENCE": "Le phénix de Glass est une illustration sous licence. Il ne peut être utilisé qu'en référence à Glass, glass-evo ou au framework evo, et à rien d'autre.",
     "MANAGER_ABOUT_VIEW_LOGO": "Afficher le logo Glass en plein écran",
     "MANAGER_ABOUT_SHOW_QR": "Afficher le QR code pour {name}",
     "MANAGER_UPLOAD": "Envoyer un zip de thème",
