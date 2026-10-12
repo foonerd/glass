@@ -403,7 +403,7 @@ const FANART_TTL_MS = 14 * 24 * 60 * 60 * 1000;
 const FANART_IMAGE_EXTS = ['.png', '.jpg', '.jpeg', '.webp'];
 const FANART_MAX_IMAGES = 30;
 
-var minmax = new Array(16);
+var minmax = new Array(17);
 var meterConfig, base_folder_P;
 var spectrum_config, base_folder_S;
 var availMeters = '';
@@ -3243,6 +3243,10 @@ Glass.prototype.getUIConfig = function () {
             if (isNaN(rotationSpeed)) { rotationSpeed = 1.0; }
             C('rotationSpeed').value = rotationSpeed;
             minmax[12] = [C('rotationSpeed').attributes[2].min, C('rotationSpeed').attributes[3].max, C('rotationSpeed').attributes[0].placeholder];
+            var changerSpeed = parseFloat(meterConfig.current['changer.speed']);
+            if (isNaN(changerSpeed)) { changerSpeed = 1.0; }
+            C('changerSpeed').value = changerSpeed;
+            minmax[16] = [C('changerSpeed').attributes[2].min, C('changerSpeed').attributes[3].max, C('changerSpeed').attributes[0].placeholder];
             var spoolLeftSpeed = parseFloat(meterConfig.current['spool.left.speed']);
             if (isNaN(spoolLeftSpeed)) { spoolLeftSpeed = 1.0; }
             C('spoolLeftSpeed').value = spoolLeftSpeed;
@@ -3904,6 +3908,20 @@ Glass.prototype.saveRotationConf = function (confData) {
         }
     }
     
+    // write the CD changer's disc speed (the changer's own multiplier)
+    if (Number.isNaN(parseFloat(confData.changerSpeed)) || !isFinite(confData.changerSpeed)) {
+        uiNeedsUpdate = true;
+        setTimeout(function () {
+            self.commandRouter.pushToastMessage('error', self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'), self.commandRouter.getI18nString('GLASS.CHANGER_SPEED') + self.commandRouter.getI18nString('GLASS.NAN'));
+        }, 500);
+    } else {
+        confData.changerSpeed = self.minmax('CHANGER_SPEED', confData.changerSpeed, minmax[16], true);
+        if (meterConfig.current['changer.speed'] != confData.changerSpeed) {
+            meterConfig.current['changer.speed'] = confData.changerSpeed;
+            noChanges = false;
+        }
+    }
+
     // write spool left speed (cassette multiplier)
     if (Number.isNaN(parseFloat(confData.spoolLeftSpeed)) || !isFinite(confData.spoolLeftSpeed)) {
         uiNeedsUpdate = true;

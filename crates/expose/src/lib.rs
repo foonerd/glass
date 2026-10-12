@@ -3516,12 +3516,11 @@ fn glide(
     at
 }
 
-/// The scaled spin: 50 rpm at the inner stop, slowing as the sled goes
-/// out with one linear speed (a real disc's 500 to 200, a tenth of it so
-/// it reads at 30 frames a second).
-const SPIN_HOME_RPM: f32 = 50.0;
-
 /// The changer's parts between frames, moved as the device moves them.
+/// The disc spins at the theme's `changer.rotation.speed` at the inner
+/// stop (50 rpm when it does not say: a real disc's 500 to 200, a tenth of
+/// it so it reads at 30 frames a second), slowing as the sled goes out
+/// with one linear speed.
 /// The arm travels only with the disc still and the sled home; the disc
 /// spins up only with the arm in place; the sled leaves home only with the
 /// disc up to speed. So a stop spins the disc down, homes the sled and
@@ -3625,12 +3624,12 @@ impl ChangerMotion {
             self.last_discs = changer.discs.clone();
         }
         let row_busy = self.pending_shift != 0 || self.row.is_some();
-        let full_rpm = SPIN_HOME_RPM * home / radius.max(home);
+        let full_rpm = spec.rpm * home / radius.max(home);
         let in_place = (along - target_along).abs() < 0.5;
         let want_spin = engaged && in_place && !row_busy;
         let rate = |seconds: f32| {
             if seconds > 0.0 {
-                SPIN_HOME_RPM / seconds
+                spec.rpm / seconds
             } else {
                 f32::INFINITY
             }
@@ -4103,6 +4102,7 @@ mod changer_tests {
             sled_start: None,
             sled_end: None,
             toc_s: 0.4,
+            rpm: 50.0,
             sled_on_file: file("sled_on.png"),
             disc_file: file("disc.png"),
             mask_file: file("mask.png"),
@@ -4158,6 +4158,38 @@ mod changer_tests {
             }
         }
         compose(&pieces).unwrap()
+    }
+
+    /// The theme's rotation speed is the disc's spin at the inner stop: at
+    /// 100 rpm the cover turns 600 degrees a second there, twice the 50 of
+    /// a theme that does not say.
+    #[test]
+    fn the_themes_rotation_speed_is_the_discs_spin_at_the_inner_stop() {
+        let (dir, mut spec) = theme("speed");
+        spec.rpm = 100.0;
+        let cover = dir.join("cover.png").to_string_lossy().to_string();
+        let discs = vec![lead::Disc {
+            index: 0,
+            playing: true,
+            art_file: cover,
+            ..Default::default()
+        }];
+        // A long track at its start: the sled stays by the inner stop.
+        let changer = scene(&spec, discs, 0.0, 3600.0, true);
+        let mut motion = ChangerMotion::default();
+        let mut pose = motion.advance(&changer, 0);
+        for t in 1..=400u64 {
+            pose = motion.advance(&changer, t * 20);
+        }
+        assert!(pose.spinning);
+        let before = pose.degrees;
+        let after = motion.advance(&changer, 8_100).degrees;
+        let turned = (after - before).rem_euclid(360.0);
+        assert!(
+            (turned - 60.0).abs() < 3.0,
+            "600 degrees a second at 100 rpm: {turned} in a tenth"
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// A move of the sled or the arm composes nothing again: from the park
@@ -4259,6 +4291,7 @@ mod changer_tests {
             sled_start: Some(70),
             sled_end: Some(164),
             toc_s: 0.8,
+            rpm: 50.0,
             sled_on_file: file("sled_dark_on.png"),
             disc_file: file("disc.png"),
             mask_file: file("label_mask.png"),

@@ -66,7 +66,7 @@ const METER = [
   // The board's word on frost is the plugin's, noted again at every start.
   ['face.frost.suits', DEFAULT], ['face.*', 'look'],
   ['exit.on.touch', 'behaviour'], ['stop.display.on.touch', 'behaviour'], ['touch.interactive', 'behaviour'],
-  ['frame.rate', 'tuning'], ['frame.rate.*', 'tuning'], ['rotation.*', 'tuning'], ['reel.direction', 'tuning'], ['spool.*', 'tuning'], ['scrolling.*', 'tuning'],
+  ['frame.rate', 'tuning'], ['frame.rate.*', 'tuning'], ['rotation.*', 'tuning'], ['reel.direction', 'tuning'], ['spool.*', 'tuning'], ['changer.*', 'tuning'], ['scrolling.*', 'tuning'],
   ['start.animation', 'tuning'], ['transition.*', 'tuning'], ['debug.*', 'tuning'], ['use.logging', 'tuning'], ['use.cache', 'tuning'], ['cache.size', 'tuning'], ['color.depth', 'tuning'],
   // Where the themes are and what the display is for: the release's own.
   ['base.folder', DEFAULT], ['output.*', DEFAULT]

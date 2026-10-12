@@ -718,7 +718,12 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
             .as_ref()
             .map(|spec| indicators(spec, &input.metadata, progress(&input.metadata).0)),
         changer: skin.changer.as_ref().map(|spec| Changer {
-            spec: spec.clone(),
+            // The disc's speed is the theme's times the player's own
+            // multiplier for the changer, nothing shared with the vinyl's.
+            spec: lead::ChangerSpec {
+                rpm: spec.rpm * skin.rotation.changer_speed,
+                ..spec.clone()
+            },
             discs: input.metadata.discs.clone(),
             // The sled follows at the tonearm's scope: the whole queue when
             // Queue progress mode says so, else the track.

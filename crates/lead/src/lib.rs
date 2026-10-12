@@ -4848,6 +4848,12 @@ pub struct RotationSettings {
     /// `queue.mode = queue`: progress runs over the whole queue.
     #[serde(default)]
     pub queue_mode: bool,
+    /// `changer.speed`: the player's multiplier for the CD changer's disc
+    /// over the theme's `changer.rotation.speed`, the changer's own and
+    /// applied under every rotation quality; nothing shared with the
+    /// vinyl's or the spools'.
+    #[serde(default = "one")]
+    pub changer_speed: f32,
 }
 
 fn one() -> f32 {
@@ -4865,6 +4871,7 @@ impl Default for RotationSettings {
             spool_right: 1.0,
             spool_adaptive: false,
             queue_mode: false,
+            changer_speed: 1.0,
         }
     }
 }
@@ -4913,6 +4920,10 @@ pub fn rotation_settings(text: &str) -> RotationSettings {
         queue_mode: current_value(text, "queue.mode")
             .map(|v| v.eq_ignore_ascii_case("queue"))
             .unwrap_or(false),
+        changer_speed: current_value(text, "changer.speed")
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|speed| *speed > 0.0)
+            .unwrap_or(1.0),
     }
 }
 
@@ -5070,6 +5081,11 @@ pub struct ChangerSpec {
     /// once the disc is up to speed, sweeping a little out and back with
     /// the laser on, before it seeks to the track.
     pub toc_s: f32,
+    /// `changer.rotation.speed`: turns per minute at the lead-in, the disc
+    /// slowing as the sled moves outward as a CD does; 50 when the theme
+    /// does not say. Times the player's multiplier, as the reels and the
+    /// turning art are.
+    pub rpm: f32,
     /// The sled's second picture, from `changer.sled.filename`'s list,
     /// shown in place of the first while the disc is read: the lens lit,
     /// as the theme draws it. Empty for one picture throughout.
@@ -5157,6 +5173,10 @@ pub fn meter_changer(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<C
         sled_start: get("changer.sled.start").and_then(|v| v.parse().ok()),
         sled_end: get("changer.sled.end").and_then(|v| v.parse().ok()),
         toc_s: seconds("changer.toc.duration", 0.8),
+        rpm: get("changer.rotation.speed")
+            .and_then(|v| v.parse::<f32>().ok())
+            .filter(|rpm| *rpm > 0.0)
+            .unwrap_or(50.0),
         sled_on_file: get("changer.sled.filename")
             .and_then(|list| list.split(',').nth(1))
             .map(str::trim)
@@ -5369,6 +5389,24 @@ pub fn frame_period(rate: u32) -> std::time::Duration {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `changer.rotation.speed` is the disc's turns per minute at the
+    /// lead-in, 50 when the theme does not say or says nothing usable.
+    #[test]
+    fn the_changers_rotation_speed_is_the_themes_or_fifty() {
+        let base = "[m]\nchanger.pos = 10,20\nchanger.pitch = 100\nchanger.disc.size = 80\nchanger.head.park = 0,0\n";
+        let said = meter_changer(&format!("{base}changer.rotation.speed = 100\n"), "m", "")
+            .expect("a changer");
+        assert_eq!(said.rpm, 100.0);
+        let unsaid = meter_changer(base, "m", "").expect("a changer");
+        assert_eq!(unsaid.rpm, 50.0);
+        let unusable = meter_changer(&format!("{base}changer.rotation.speed = fast\n"), "m", "")
+            .expect("a changer");
+        assert_eq!(unusable.rpm, 50.0);
+        let zero = meter_changer(&format!("{base}changer.rotation.speed = 0\n"), "m", "")
+            .expect("a changer");
+        assert_eq!(zero.rpm, 50.0);
+    }
 
     #[test]
     fn a_bounded_folder_drops_what_was_asked_for_longest_ago() {
@@ -5942,8 +5980,20 @@ mod tests {
                 spool_left: 1.5,
                 spool_right: 1.0,
                 spool_adaptive: true,
-                queue_mode: true
+                queue_mode: true,
+                changer_speed: 1.0
             }
+        );
+        // The changer's multiplier is its own: read under every quality,
+        // and not touched by the vinyl's.
+        let changer = rotation_settings(
+            "[current]\nrotation.quality = high\nrotation.speed = 3\nchanger.speed = 2\n",
+        );
+        assert_eq!(changer.speed, 1.0);
+        assert_eq!(changer.changer_speed, 2.0);
+        assert_eq!(
+            rotation_settings("[current]\nchanger.speed = 0\n").changer_speed,
+            1.0
         );
         assert_eq!(rotation_settings("[current]\nrotation.quality = high\nrotation.speed = 3\nspool.left.speed = 4\nreel.direction = cw\n"), RotationSettings { fps: 15, step: 3, speed: 1.0, direction: "cw".into(), ..RotationSettings::default() });
         let m = "[t]\nalbumart.pos = 195,235\nalbumart.dimension = 198,198\nalbumart.rotation = True\nalbumart.rotation.speed = 30\n\
