@@ -100,7 +100,7 @@ test('a Glass about to be installed asks for a newer component, or cannot be', (
   assert.deepEqual(pairPlan(here, { version: '0.8.1', least: '0.1.9' }), { action: 'none' });
   assert.deepEqual(pairPlan(here, { version: '0.8.1', least: null }), { action: 'none' });
   assert.deepEqual(pairPlan(here, { version: '0.9.0', least: '0.2.0' }), { action: 'update', least: '0.2.0' });
-  assert.deepEqual(pairPlan(here, { version: '0.7.97', least: null }), { action: 'refuse', needs: '0.8.0' }, 'a step back of Glass below what the component needs');
+  assert.deepEqual(pairPlan(here, { version: '0.7.97', least: null }), { action: 'back', needs: '0.8.0' }, 'a step back of Glass below what the component needs: the component goes back with it');
 });
 
 test('getting the component: checked, unpacked for this player, and kept through an update and a way back', async () => {
@@ -242,7 +242,7 @@ test('a Glass about to go in brings the component with it, or does not go in', a
 
   assert.equal(await pair(component, staged('0.8.1', '0.1.9'), job()), false, 'the one here already goes with it');
   assert.equal(await pair(component, staged('0.8.1', null), job()), false, 'a Glass that names none');
-  await assert.rejects(pair(component, staged('0.7.97', null), job()), { code: 'pair', message: /needs Glass 0\.8\.0 or later/ });
+  await assert.rejects(pair(component, staged('0.7.97', null), job()), { code: 'pair', message: /needs Glass 0\.8\.0 or later, and the glass-evo kept before it does not go with Glass 0\.7\.97/ }, 'nothing kept before it: refused');
 
   // The Glass needs 0.2.0; the latest released is still 0.1.9.
   await assert.rejects(pair(component, staged('0.9.0', '0.2.0'), job()), { code: 'pair', message: /needs glass-evo 0\.2\.0 or later.*latest glass-evo released is 0\.1\.9.*nothing was changed/ });
@@ -252,6 +252,20 @@ test('a Glass about to go in brings the component with it, or does not go in', a
   offer('0.2.0', { requires: '0.9.0' });
   assert.equal(await pair(component, staged('0.9.0', '0.2.0'), job()), true);
   assert.deepEqual([component.view().installed.version, component.view().previous.version], ['0.2.0', '0.1.9']);
+  // A Glass going back below what 0.2.0 needs, with 0.2.0 running and naming 0.2.0 as its least:
+  // the way back of glass-evo alone is refused against the running pair, and goes with the
+  // Glass when held to the pair about to run; the one that came forward is kept for the way up.
+  component.least = '0.2.0';
+  component.glass = '0.9.0';
+  await assert.rejects(component.rollback(), { code: 'too-old' }, 'against the running pair, refused');
+  assert.equal(await pair(component, staged('0.8.5', '0.1.9'), job()), true, 'the pair moves back together');
+  assert.deepEqual([component.view().installed.version, component.view().previous.version], ['0.1.9', '0.2.0']);
+  // And forward again: the Glass that needs 0.2.0 brings it back.
+  assert.equal(await pair(component, staged('0.9.0', '0.2.0'), job()), true);
+  assert.deepEqual([component.view().installed.version, component.view().previous.version], ['0.2.0', '0.1.9']);
+  // A Glass below what even the kept one needs: refused, nothing changed.
+  await assert.rejects(pair(component, staged('0.7.97', null), job()), { code: 'pair', message: /kept before it does not go with Glass 0\.7\.97/ });
+  assert.equal(component.view().installed.version, '0.2.0');
   // The Glass then failed to go in: the component goes back to the one that runs with this Glass.
   component.least = '0.1.9';
   assert.deepEqual(await component.rollback(), { from: '0.2.0', to: '0.1.9' });

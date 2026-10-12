@@ -107,11 +107,12 @@ function installedAt(dir, arch) {
 }
 
 // What a Glass about to be installed asks of the component that is here:
-// nothing, a newer component first, or that it cannot be, the component
-// needing a newer Glass than that one (a step back of Glass).
+// nothing, a newer component first, or the component's way back to the
+// one kept before it, the one here needing a newer Glass than that one (a
+// step back of Glass). The pair moves together both ways.
 function pairPlan(installed, target) {
   if (!installed || !installed.installed) return { action: 'none' };
-  if (installed.requires && compareVersions(target.version, installed.requires) < 0) return { action: 'refuse', needs: installed.requires };
+  if (installed.requires && compareVersions(target.version, installed.requires) < 0) return { action: 'back', needs: installed.requires };
   if (target.least && compareVersions(installed.version, target.least) < 0) return { action: 'update', least: target.least };
   return { action: 'none' };
 }
@@ -139,8 +140,15 @@ async function pair(component, staged, job, options) {
   }
   const plan = pairPlan(here, { version: staged.version, least: least });
   if (plan.action === 'none') return false;
-  if (plan.action === 'refuse') {
-    throw new ComponentError('pair', 'glass-evo ' + here.version + ' needs Glass ' + plan.needs + ' or later; put glass-evo back to its previous version first');
+  if (plan.action === 'back') {
+    // The one kept before it goes back in, held to the Glass that will run
+    // and the least that Glass names, not to the pair running now.
+    try {
+      await component.rollback({ glass: staged.version, least: least });
+      return true;
+    } catch (e) {
+      throw new ComponentError('pair', 'glass-evo ' + here.version + ' needs Glass ' + plan.needs + ' or later, and the glass-evo kept before it does not go with Glass ' + staged.version + ' (' + (e && e.message ? e.message : e) + '); nothing was changed');
+    }
   }
   if (options.file) {
     try {
@@ -431,7 +439,10 @@ class Component {
 
   // The one before back in place, and the one in place kept as the one
   // before. Only where it goes with this Glass.
-  async rollback() {
+  // The one kept before put back, held to the pair it must go with: the
+  // Glass and the least glass-evo given (a Glass about to go in), else the
+  // ones running now.
+  async rollback(target) {
     const arch = this.arch();
     const prev = this.dir + '.prev';
     let manifest;
@@ -440,7 +451,9 @@ class Component {
     } catch (e) {
       throw new ComponentError('no-previous', 'no previous version is kept');
     }
-    const problem = misfit(manifest, this.glass, arch, this.least);
+    const glass = target && target.glass ? target.glass : this.glass;
+    const least = target && target.least !== undefined ? target.least : this.least;
+    const problem = misfit(manifest, glass, arch, least);
     if (problem) throw new ComponentError(problem.error, misfitMessage(manifest, problem), problem);
     const now = this.installed();
     const aside = this.dir + '.swap';
