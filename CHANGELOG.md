@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.41] - 2026-10-12
+
+- **The chosen theme comes back at once after a plugin update.** Volumio's plugin manager replaces the plugin's folder on an update, through the Manager's Update button as through its own page, and the engine's configuration in that folder came back from the template, naming the template's own 800x480 folder: the display and the Manager stood on it until the player's next state push put the chosen theme back, and a player standing still stayed on it. At its start the plugin now puts the chosen theme back the moment the configuration names another folder, the same way a theme tag changes the folder, the choice itself untouched. A test holds the rule.
+
 ## [0.9.40] - 2026-10-12
 
 - **Two trace lines are gone from the player's journal.** Since 0.9.27 the display and the remotes printed two lines of their own at every persist event the plugin pushes, `TRACE decode persist` and `TRACE arm persist`, left from the work on the persist countdown, and the plugin carried them into the player's journal at every pause and at every countdown's end. Both are gone, and the release check now refuses a print that names itself a trace, so none ships again.
