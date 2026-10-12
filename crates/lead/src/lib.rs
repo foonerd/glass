@@ -5161,7 +5161,13 @@ pub fn meter_changer(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<C
             .and_then(|list| list.split(',').nth(1))
             .map(str::trim)
             .filter(|f| !f.is_empty())
-            .map(|f| if theme_dir.is_empty() { f.to_string() } else { format!("{}/{f}", theme_dir.trim_end_matches('/')) })
+            .map(|f| {
+                if theme_dir.is_empty() {
+                    f.to_string()
+                } else {
+                    format!("{}/{f}", theme_dir.trim_end_matches('/'))
+                }
+            })
             .unwrap_or_default(),
         disc_file: path("changer.disc.filename"),
         mask_file: path("changer.label.mask"),
@@ -5171,7 +5177,13 @@ pub fn meter_changer(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<C
             .and_then(|list| list.split(',').next())
             .map(str::trim)
             .filter(|f| !f.is_empty())
-            .map(|f| if theme_dir.is_empty() { f.to_string() } else { format!("{}/{f}", theme_dir.trim_end_matches('/')) })
+            .map(|f| {
+                if theme_dir.is_empty() {
+                    f.to_string()
+                } else {
+                    format!("{}/{f}", theme_dir.trim_end_matches('/'))
+                }
+            })
             .unwrap_or_default(),
     })
 }

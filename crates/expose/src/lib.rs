@@ -870,6 +870,9 @@ pub fn raster_over<'m>(
         if let Some((over, at)) = changer.over {
             ops.push(blit_op(over, at));
         }
+        for (part, at) in &changer.parts {
+            ops.push(blit_op(part, *at));
+        }
     }
     if let (Some(art), Some(place)) = (stack.art, &scene.art) {
         let color = [
@@ -2403,21 +2406,33 @@ pub struct Pictures {
     changer_motion: ChangerMotion,
 }
 
-/// The changer as drawn: what it was drawn from, the layers, and the
-/// disc's angle this frame.
+/// The changer as drawn: what the composed layers were drawn from, the
+/// layers, the disc's angle this frame, and the moving parts where they
+/// stand this frame.
 struct ChangerPicture {
     key: String,
     drawing: ChangerDrawing,
     degrees: f32,
+    parts: Vec<ChangerPart>,
+}
+
+/// A part that moves every frame, the sled or the head or a shadow of
+/// theirs: the cache's key of its picture and its top left. Laid over the
+/// composed layers by the painter, so a move composes nothing.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ChangerPart {
+    pub key: String,
+    pub at: (i32, i32),
 }
 
 /// The changer's layers as `Stack` takes them: what lies under the
 /// turning cover, the cover with the centre it turns about and its angle,
-/// and what lies over it.
+/// what lies over it, and the moving parts over all of it.
 pub struct ChangerStack<'a> {
     pub under: (&'a Frame, (i32, i32)),
     pub turning: Option<(&'a Frame, (f32, f32), f32)>,
     pub over: Option<(&'a Frame, (i32, i32))>,
+    pub parts: Vec<(&'a Frame, (i32, i32))>,
 }
 
 /// The changer's pictures decoded once by path: the theme's and the covers.
@@ -2451,10 +2466,37 @@ impl ChangerCache {
             .clone()
     }
 
-    /// The shadow the picture at `path` casts: black under its own alpha at
-    /// `opacity`, softened by `blur` pixels, with room for the blur on every
-    /// side; made once per path and light.
-    fn shadow(&mut self, path: &str, blur: u32, opacity: f32) -> Option<Frame> {
+    /// The picture at `path` fitted to `d` by `d`, made once per path and
+    /// size: the theme's disc and its mask at the slots' size.
+    fn fitted(&mut self, path: &str, d: u32) -> Option<Frame> {
+        if path.is_empty() {
+            return None;
+        }
+        let key = format!("{path}@fit{d}");
+        if !self.frames.contains_key(&key) {
+            let made = self.picture(path).map(|f| fit_art(&f, d, d));
+            self.frames.insert(key.clone(), made);
+        }
+        self.frames.get(&key).cloned().flatten()
+    }
+
+    /// The picture at `path` decoded and held: its key when there is one.
+    fn ensure(&mut self, path: &str) -> Option<String> {
+        if path.is_empty() {
+            return None;
+        }
+        self.frames
+            .entry(path.to_string())
+            .or_insert_with(|| read_png(Path::new(path)))
+            .as_ref()
+            .map(|_| path.to_string())
+    }
+
+    /// The shadow the picture at `path` casts, made and held: its key when
+    /// there is one. Black under the picture's own alpha at `opacity`,
+    /// softened by `blur` pixels, with room for the blur on every side;
+    /// made once per path and light.
+    fn ensure_shadow(&mut self, path: &str, blur: u32, opacity: f32) -> Option<String> {
         if path.is_empty() {
             return None;
         }
@@ -2475,7 +2517,12 @@ impl ChangerCache {
             });
             self.frames.insert(key.clone(), made);
         }
-        self.frames.get(&key).cloned().flatten()
+        self.frames.get(&key)?.as_ref().map(|_| key)
+    }
+
+    /// The picture held under `key`, as `ensure` and `ensure_shadow` gave it.
+    pub fn frame(&self, key: &str) -> Option<&Frame> {
+        self.frames.get(key).and_then(Option::as_ref)
     }
 }
 
@@ -2558,12 +2605,19 @@ impl Pictures {
             Some(changer) => {
                 let pose = self.changer_motion.advance(changer, now_ms);
                 let leaving = self.changer_motion.leaving(now_ms);
+                // The composed layers are drawn again only when what is in
+                // them changes; the sled and the head move over them every
+                // frame at no cost but their blit.
                 let mut key = changer_key(changer, &pose);
                 if let Some((disc, slot, alpha)) = leaving {
                     key.push_str(&format!("|leaving {} {slot} {:.2}", disc.index, alpha));
                 }
+                let parts = moving_parts(&changer.spec, &mut self.changer_cache, &pose);
                 match &mut self.changer {
-                    Some(drawn) if drawn.key == key => drawn.degrees = pose.degrees,
+                    Some(drawn) if drawn.key == key => {
+                        drawn.degrees = pose.degrees;
+                        drawn.parts = parts;
+                    }
                     _ => {
                         let drawing =
                             render_changer(changer, &mut self.changer_cache, &pose, leaving);
@@ -2571,6 +2625,7 @@ impl Pictures {
                             key,
                             drawing,
                             degrees: pose.degrees,
+                            parts,
                         });
                     }
                 }
@@ -2654,6 +2709,11 @@ impl Pictures {
                 .as_ref()
                 .map(|(cover, centre)| (cover, *centre, c.degrees)),
             over: c.drawing.over.as_ref().map(|(over, at)| (over, *at)),
+            parts: c
+                .parts
+                .iter()
+                .filter_map(|part| Some((self.changer_cache.frame(&part.key)?, part.at)))
+                .collect(),
         })
     }
 
@@ -3284,6 +3344,10 @@ fn turn_onto(
 
 /// What the changer's picture was drawn from: its spec and each slot's
 /// disc, by index and the cover file it had.
+/// What the composed layers are drawn from: the theme's changer, the discs
+/// in the slots, which slot's disc turns under the arm, and where the row
+/// stands. Not the arm's or the sled's place, nor the laser: those are the
+/// moving parts, laid over the layers every frame.
 fn changer_key(changer: &plot::Changer, pose: &ChangerPose) -> String {
     let mut key = format!("{:?}", changer.spec);
     for disc in &changer.discs {
@@ -3296,10 +3360,23 @@ fn changer_key(changer: &plot::Changer, pose: &ChangerPose) -> String {
         key.push(if disc.playing { '*' } else { '.' });
     }
     key.push_str(&format!(
-        "|{:.0}|{:.0}|{:.0}|{}",
-        pose.along, pose.radius, pose.row_offset, pose.laser
+        "|{:?}|{:.0}",
+        turning_slot(&changer.spec, pose),
+        pose.row_offset
     ));
     key
+}
+
+/// The slot whose disc stands under the arm, drawn where the row stands:
+/// none while the arm travels or the row slides. The disc that turns is
+/// the one drawn under the arm, not the one the player names: at a change
+/// the arm is still over the old disc while it spins down, with the row
+/// standing a pitch off.
+fn turning_slot(spec: &lead::ChangerSpec, pose: &ChangerPose) -> Option<usize> {
+    slot_centres(spec).iter().position(|(cx, cy)| {
+        let there = if spec.horizontal { *cx } else { *cy } + pose.row_offset;
+        (there - pose.along).abs() < 0.5
+    })
 }
 
 /// A CD's geometry on the theme's disc when the theme does not say: the
@@ -3314,7 +3391,10 @@ const SLED_EDGE: f32 = 58.0 / 60.0;
 fn sled_range(spec: &lead::ChangerSpec) -> (f32, f32) {
     let radius = spec.disc_size as f32 / 2.0;
     let home = spec.sled_start.map_or(radius * SLED_HOME, |r| r as f32);
-    let edge = spec.sled_end.map_or(radius * SLED_EDGE, |r| r as f32).max(home + 1.0);
+    let edge = spec
+        .sled_end
+        .map_or(radius * SLED_EDGE, |r| r as f32)
+        .max(home + 1.0);
     (home, edge)
 }
 
@@ -3503,9 +3583,9 @@ impl ChangerMotion {
             now_ms.saturating_sub(since) < DISENGAGE_GRACE_MS
         };
         let engaged = player_engaged && playing.is_some();
-        let dt = self
-            .last_ms
-            .map_or(0.0, |last| (now_ms.saturating_sub(last) as f32 / 1000.0).min(0.5));
+        let dt = self.last_ms.map_or(0.0, |last| {
+            (now_ms.saturating_sub(last) as f32 / 1000.0).min(0.5)
+        });
         self.last_ms = Some(now_ms);
         // First sight: the arm parked, the sled home, the disc still, as a
         // device switched on; a player already playing is loaded from there,
@@ -3531,7 +3611,11 @@ impl ChangerMotion {
                 // The disc that leaves: the first of the old row when the
                 // window moves on, the last when it moves back.
                 if self.leaving.is_none() {
-                    let slot = if delta > 0 { 0 } else { self.last_discs.len().saturating_sub(1) };
+                    let slot = if delta > 0 {
+                        0
+                    } else {
+                        self.last_discs.len().saturating_sub(1)
+                    };
                     self.leaving = self.last_discs.get(slot).map(|disc| (disc.clone(), slot));
                 }
             }
@@ -3544,7 +3628,13 @@ impl ChangerMotion {
         let full_rpm = SPIN_HOME_RPM * home / radius.max(home);
         let in_place = (along - target_along).abs() < 0.5;
         let want_spin = engaged && in_place && !row_busy;
-        let rate = |seconds: f32| if seconds > 0.0 { SPIN_HOME_RPM / seconds } else { f32::INFINITY };
+        let rate = |seconds: f32| {
+            if seconds > 0.0 {
+                SPIN_HOME_RPM / seconds
+            } else {
+                f32::INFINITY
+            }
+        };
         if want_spin {
             self.rpm = (self.rpm + rate(spec.spin_up_s) * dt).min(full_rpm);
         } else {
@@ -3580,7 +3670,8 @@ impl ChangerMotion {
                     self.toc = None;
                     0.0
                 } else {
-                    let t = (now_ms.saturating_sub(m.start_ms) as f32 / m.duration_ms.max(1.0)).clamp(0.0, 1.0);
+                    let t = (now_ms.saturating_sub(m.start_ms) as f32 / m.duration_ms.max(1.0))
+                        .clamp(0.0, 1.0);
                     (t * std::f32::consts::PI).sin() * span * TOC_REACH
                 }
             }
@@ -3636,7 +3727,11 @@ impl ChangerMotion {
             }
             None => self.pending_shift as f32 * pitch,
         };
-        let want_along = if still && sled_home && !row_busy { target_along } else { along };
+        let want_along = if still && sled_home && !row_busy {
+            target_along
+        } else {
+            along
+        };
         let radius = glide(&mut self.seek, radius, want_radius, now_ms, |delta| {
             spec.seek_s * delta / span
         });
@@ -3659,7 +3754,11 @@ impl ChangerMotion {
     /// it is still there, 1 before its dissolve and 0 at the end.
     pub fn leaving(&self, now_ms: u64) -> Option<(&lead::Disc, usize, f32)> {
         let (disc, slot) = self.leaving.as_ref()?;
-        let alpha = self.fade.as_ref().map_or(1.0, |m| m.at(now_ms)).clamp(0.0, 1.0);
+        let alpha = self
+            .fade
+            .as_ref()
+            .map_or(1.0, |m| m.at(now_ms))
+            .clamp(0.0, 1.0);
         Some((disc, *slot, alpha))
     }
 }
@@ -3708,7 +3807,12 @@ fn within_well(
         return Some((piece, at));
     }
     let (x0, y0, w, h) = if horizontal {
-        ((from - start) as u32, 0u32, (to - from) as u32, piece.height)
+        (
+            (from - start) as u32,
+            0u32,
+            (to - from) as u32,
+            piece.height,
+        )
     } else {
         (0u32, (from - start) as u32, piece.width, (to - from) as u32)
     };
@@ -3721,7 +3825,11 @@ fn within_well(
     }
     Some((
         out,
-        if horizontal { (from, at.1) } else { (at.0, from) },
+        if horizontal {
+            (from, at.1)
+        } else {
+            (at.0, from)
+        },
     ))
 }
 
@@ -3744,14 +3852,13 @@ fn compose(pieces: &[(Frame, (i32, i32))]) -> Option<(Frame, (i32, i32))> {
     Some((frame, (x0, y0)))
 }
 
-/// The changer composed from the theme's pictures, as the tonearm and the
-/// reels are: the rail; in every slot with a disc, the cover fitted to the
-/// disc's size and cut by the theme's label mask under the theme's disc
-/// picture; the sled at its radius along the arm; the arm over it, where
-/// the pose puts them, the housing's alpha showing the sled and the disc
-/// through; the playing disc's cover kept apart to turn. A picture the
-/// theme leaves out is not drawn; all that does not move is the theme's
-/// background.
+/// The changer's composed layers from the theme's pictures, as the tonearm
+/// and the reels are: the rail; in every slot with a disc, the cover fitted
+/// to the disc's size and cut by the theme's label mask under the theme's
+/// disc picture; the playing disc's cover kept apart to turn. The sled and
+/// the head are not here: they move every frame and are laid over these
+/// layers by `moving_parts`. A picture the theme leaves out is not drawn;
+/// all that does not move is the theme's background.
 pub fn render_changer(
     changer: &plot::Changer,
     cache: &mut ChangerCache,
@@ -3762,32 +3869,9 @@ pub fn render_changer(
     let discs = &changer.discs;
     let d = spec.disc_size;
     let centres = slot_centres(spec);
-    let (hx, hy) = (spec.head_park.0 as f32, spec.head_park.1 as f32);
-    // The arm travels along the bar only: the pose's place along it, the
-    // park's place across it.
-    let (ax, ay) = if spec.horizontal {
-        (pose.along, hy)
-    } else {
-        (hx, pose.along)
-    };
-    // The disc that turns is the one drawn under the arm, not the one the
-    // player names: at a change the arm is still over the old disc while
-    // it spins down, with the row standing a pitch off, and over nothing
-    // while it travels or the row slides.
-    let turning_slot = centres.iter().position(|(cx, cy)| {
-        let there = if spec.horizontal { *cx } else { *cy } + pose.row_offset;
-        (there - pose.along).abs() < 0.5
-    });
-    let disc_picture = cache.picture(&spec.disc_file).map(|f| fit_art(&f, d, d));
-    let mask = cache.picture(&spec.mask_file).map(|f| fit_art(&f, d, d));
-    let head = cache.picture(&spec.head_file);
-    // The sled's second picture while the disc is read, the lens lit.
-    let sled_file = if pose.laser && !spec.sled_on_file.is_empty() {
-        spec.sled_on_file.as_str()
-    } else {
-        spec.sled_file.as_str()
-    };
-    let sled = cache.picture(sled_file);
+    let turning_slot = turning_slot(spec, pose);
+    let disc_picture = cache.fitted(&spec.disc_file, d);
+    let mask = cache.fitted(&spec.mask_file, d);
     let rail = cache.picture(&spec.rail_file);
     let centred = |picture: &Frame, cx: f32, cy: f32| -> (i32, i32) {
         (
@@ -3817,7 +3901,8 @@ pub fn render_changer(
         (Some(first), Some(last)) => (first.1.round() as i32 - half, last.1.round() as i32 + half),
         _ => (i32::MIN, i32::MAX),
     };
-    let in_well = |piece: Frame, at: (i32, i32)| within_well(piece, at, spec.horizontal, well_lo, well_hi);
+    let in_well =
+        |piece: Frame, at: (i32, i32)| within_well(piece, at, spec.horizontal, well_lo, well_hi);
     // The disc leaving the row dissolves in its own slot, the row standing
     // one pitch off behind it until it is gone.
     if let (Some(disc_picture), Some((disc, slot, alpha))) = (&disc_picture, leaving) {
@@ -3848,36 +3933,66 @@ pub fn render_changer(
             }
         }
     }
-    // The light over the moving parts: each one's shadow under it, offset
-    // as the theme says, before the part itself.
-    let mut shaded = |pieces: &mut Vec<(Frame, (i32, i32))>, file: &str, picture: Frame, at: (i32, i32)| {
-        if let Some((dx, dy, blur, opacity)) = spec.shadow {
-            if let Some(shadow) = cache.shadow(file, blur, opacity) {
-                pieces.push((shadow, (at.0 + dx - blur as i32, at.1 + dy - blur as i32)));
-            }
-        }
-        pieces.push((picture, at));
-    };
-    // The moving parts go over the turning cover when there is one.
-    let moving: &mut Vec<(Frame, (i32, i32))> = if turning.is_some() { &mut over } else { &mut under };
-    if let Some(sled) = sled {
-        let (sx, sy) = if spec.horizontal {
-            (ax, spec.pos.1 as f32 - pose.radius)
-        } else {
-            (spec.pos.0 as f32 - pose.radius, ay)
-        };
-        let at = centred(&sled, sx, sy);
-        shaded(moving, sled_file, sled, at);
-    }
-    if let Some(head) = head {
-        let at = centred(&head, ax, ay);
-        shaded(moving, &spec.head_file, head, at);
-    }
     ChangerDrawing {
         under: compose(&under).unwrap_or_else(|| (empty_frame(1, 1), spec.pos)),
         turning,
         over: compose(&over),
     }
+}
+
+/// The parts that move every frame, where the pose puts them, in the order
+/// they are laid over the composed layers: the sled's shadow and the sled
+/// at its radius along the arm, with its second picture while the laser is
+/// lit; the head's shadow and the head, the housing's alpha showing the
+/// sled and the disc through. The light over them as the theme's shadow
+/// says. Each part is a picture the cache holds, so a move costs its blit
+/// and nothing is composed again.
+pub fn moving_parts(
+    spec: &lead::ChangerSpec,
+    cache: &mut ChangerCache,
+    pose: &ChangerPose,
+) -> Vec<ChangerPart> {
+    let (hx, hy) = (spec.head_park.0 as f32, spec.head_park.1 as f32);
+    // The arm travels along the bar only: the pose's place along it, the
+    // park's place across it.
+    let (ax, ay) = if spec.horizontal {
+        (pose.along, hy)
+    } else {
+        (hx, pose.along)
+    };
+    let sled_file = if pose.laser && !spec.sled_on_file.is_empty() {
+        spec.sled_on_file.as_str()
+    } else {
+        spec.sled_file.as_str()
+    };
+    let (sx, sy) = if spec.horizontal {
+        (ax, spec.pos.1 as f32 - pose.radius)
+    } else {
+        (spec.pos.0 as f32 - pose.radius, ay)
+    };
+    let mut parts = Vec::with_capacity(4);
+    for (file, cx, cy) in [(sled_file, sx, sy), (spec.head_file.as_str(), ax, ay)] {
+        let Some(key) = cache.ensure(file) else {
+            continue;
+        };
+        let (w, h) = cache
+            .frame(&key)
+            .map_or((0, 0), |picture| (picture.width, picture.height));
+        let at = (
+            (cx - w as f32 / 2.0).round() as i32,
+            (cy - h as f32 / 2.0).round() as i32,
+        );
+        if let Some((dx, dy, blur, opacity)) = spec.shadow {
+            if let Some(shadow) = cache.ensure_shadow(file, blur, opacity) {
+                parts.push(ChangerPart {
+                    key: shadow,
+                    at: (at.0 + dx - blur as i32, at.1 + dy - blur as i32),
+                });
+            }
+        }
+        parts.push(ChangerPart { key, at });
+    }
+    parts
 }
 
 /// `piece` laid over `frame` at `at` with its alpha, the frame's own alpha
@@ -3944,11 +4059,31 @@ mod changer_tests {
         }
         write_png(&dir.join("disc.png"), &disc).unwrap();
         write_png(&dir.join("mask.png"), &mask).unwrap();
-        write_png(&dir.join("head.png"), &solid_frame(20, 160, [10, 200, 10, 255])).unwrap();
-        write_png(&dir.join("sled.png"), &solid_frame(60, 10, [10, 10, 200, 255])).unwrap();
-        write_png(&dir.join("rail.png"), &solid_frame(600, 6, [200, 200, 10, 255])).unwrap();
-        write_png(&dir.join("cover.png"), &solid_frame(30, 30, [220, 20, 20, 255])).unwrap();
-        write_png(&dir.join("sled_on.png"), &solid_frame(60, 10, [200, 10, 10, 255])).unwrap();
+        write_png(
+            &dir.join("head.png"),
+            &solid_frame(20, 160, [10, 200, 10, 255]),
+        )
+        .unwrap();
+        write_png(
+            &dir.join("sled.png"),
+            &solid_frame(60, 10, [10, 10, 200, 255]),
+        )
+        .unwrap();
+        write_png(
+            &dir.join("rail.png"),
+            &solid_frame(600, 6, [200, 200, 10, 255]),
+        )
+        .unwrap();
+        write_png(
+            &dir.join("cover.png"),
+            &solid_frame(30, 30, [220, 20, 20, 255]),
+        )
+        .unwrap();
+        write_png(
+            &dir.join("sled_on.png"),
+            &solid_frame(60, 10, [200, 10, 10, 255]),
+        )
+        .unwrap();
         let file = |name: &str| dir.join(name).to_string_lossy().to_string();
         let spec = lead::ChangerSpec {
             slots: 3,
@@ -3978,7 +4113,13 @@ mod changer_tests {
         (dir, spec)
     }
 
-    fn scene(spec: &lead::ChangerSpec, discs: Vec<lead::Disc>, progress: f32, duration: f32, engaged: bool) -> plot::Changer {
+    fn scene(
+        spec: &lead::ChangerSpec,
+        discs: Vec<lead::Disc>,
+        progress: f32,
+        duration: f32,
+        engaged: bool,
+    ) -> plot::Changer {
         plot::Changer {
             spec: spec.clone(),
             discs,
@@ -3999,6 +4140,7 @@ mod changer_tests {
             pose = motion.advance(changer, t * 500);
         }
         let drawing = render_changer(changer, cache, &pose, None);
+        let parts = moving_parts(&changer.spec, cache, &pose);
         let mut pieces = vec![drawing.under];
         if let Some((cover, centre)) = drawing.turning {
             let at = (
@@ -4010,7 +4152,68 @@ mod changer_tests {
         if let Some(over) = drawing.over {
             pieces.push(over);
         }
+        for part in parts {
+            if let Some(frame) = cache.frame(&part.key) {
+                pieces.push((frame.clone(), part.at));
+            }
+        }
         compose(&pieces).unwrap()
+    }
+
+    /// A move of the sled or the arm composes nothing again: from the park
+    /// to the disc and through the read, the layers' key changes once, when
+    /// the arm arrives over a slot, while the parts stand at many places.
+    #[test]
+    fn a_move_of_the_sled_or_the_arm_composes_nothing_again() {
+        let (dir, spec) = theme("moves");
+        let cover = dir.join("cover.png").to_string_lossy().to_string();
+        let discs = vec![
+            lead::Disc {
+                index: 0,
+                playing: true,
+                art_file: cover.clone(),
+                ..Default::default()
+            },
+            lead::Disc {
+                index: 1,
+                art_file: cover,
+                ..Default::default()
+            },
+        ];
+        let changer = scene(&spec, discs, 0.0, 300.0, true);
+        let mut motion = ChangerMotion::default();
+        let mut cache = ChangerCache::default();
+        let mut keys = std::collections::HashSet::new();
+        let mut sled_places = std::collections::HashSet::new();
+        let mut head_places = std::collections::HashSet::new();
+        for t in 0..=400u64 {
+            let pose = motion.advance(&changer, t * 20);
+            keys.insert(changer_key(&changer, &pose));
+            let parts = moving_parts(&spec, &mut cache, &pose);
+            assert_eq!(
+                parts.len(),
+                2,
+                "the sled and the head, no shadow in this theme"
+            );
+            sled_places.insert(parts[0].at);
+            head_places.insert(parts[1].at);
+        }
+        assert_eq!(
+            keys.len(),
+            2,
+            "parked and travelling, then over the disc: {keys:?}"
+        );
+        assert!(
+            head_places.len() > 10,
+            "the head travelled: {}",
+            head_places.len()
+        );
+        assert!(
+            sled_places.len() > 10,
+            "the sled sought and read: {}",
+            sled_places.len()
+        );
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     fn pixel(frame: &Frame, at: (i32, i32), x: i32, y: i32) -> [u8; 4] {
@@ -4025,6 +4228,80 @@ mod changer_tests {
             frame.rgba[i + 2],
             frame.rgba[i + 3],
         ]
+    }
+
+    /// How long one frame of the changer costs while the sled moves, with
+    /// a real theme's pictures: `GLASS_CHANGER_THEME=<folder> cargo test
+    /// -p expose --release -- --ignored --nocapture a_frame_of_the_showcase`.
+    /// Prints the mean per render; nothing is asserted.
+    #[test]
+    #[ignore]
+    fn a_frame_of_the_showcase_changer_while_the_sled_moves() {
+        let Ok(folder) = std::env::var("GLASS_CHANGER_THEME") else {
+            return;
+        };
+        let file = |name: &str| Path::new(&folder).join(name).to_string_lossy().to_string();
+        let spec = lead::ChangerSpec {
+            slots: 3,
+            horizontal: true,
+            pos: (759, 286),
+            pitch: 420,
+            disc_size: 340,
+            head_park: (308, 229),
+            rail_pos: (190, 26),
+            shadow: Some((0, 6, 8, 0.22)),
+            travel_s: 0.8,
+            seek_s: 1.2,
+            spin_up_s: 1.5,
+            spin_down_s: 2.0,
+            shift_s: 0.6,
+            fade_s: 0.5,
+            sled_start: Some(70),
+            sled_end: Some(164),
+            toc_s: 0.8,
+            sled_on_file: file("sled_dark_on.png"),
+            disc_file: file("disc.png"),
+            mask_file: file("label_mask.png"),
+            head_file: file("head_dark.png"),
+            rail_file: file("rail.png"),
+            sled_file: file("sled_dark.png"),
+        };
+        let cover = file("fgr.png");
+        let discs: Vec<lead::Disc> = (0..3)
+            .map(|i| lead::Disc {
+                index: i,
+                playing: i == 1,
+                art_file: cover.clone(),
+                ..Default::default()
+            })
+            .collect();
+        let mut cache = ChangerCache::default();
+        let mut motion = ChangerMotion::default();
+        // Loaded and reading at the second disc, the sled following.
+        let mut changer = scene(&spec, discs, 0.1, 300.0, true);
+        let mut pose = motion.advance(&changer, 0);
+        for t in 1..=40 {
+            pose = motion.advance(&changer, t * 250);
+        }
+        let _ = render_changer(&changer, &mut cache, &pose, None);
+        let mut keys = std::collections::HashSet::new();
+        let runs = 20u64;
+        let first = pose.radius;
+        let started = std::time::Instant::now();
+        for i in 0..runs {
+            changer.progress = 0.1 + i as f32 * 0.04;
+            pose = motion.advance(&changer, 10_000 + i * 33);
+            keys.insert(changer_key(&changer, &pose));
+            let _ = render_changer(&changer, &mut cache, &pose, None);
+        }
+        let per = started.elapsed().as_secs_f64() * 1000.0 / runs as f64;
+        eprintln!(
+            "changer: {per:.1} ms per render, {} keys over {runs} frames, radius {first:.1} to {:.1}, laser {}, spinning {}",
+            keys.len(),
+            pose.radius,
+            pose.laser,
+            pose.spinning
+        );
     }
 
     #[test]
@@ -4049,10 +4326,26 @@ mod changer_tests {
         // cover through the disc's window and the disc's own rim; the third
         // slot is empty, the background's.
         assert_eq!(pixel(&frame, at, 400, 163)[0], 200, "the rail");
-        assert_eq!(pixel(&frame, at, 400 + 20, 300)[0], 220, "the cover in the window");
-        assert_eq!(pixel(&frame, at, 400 + 47, 300), [128, 128, 128, 255], "the disc's rim");
-        assert_eq!(pixel(&frame, at, 700, 300)[3], 0, "an empty slot is the background's");
-        assert_eq!(pixel(&frame, at, 400 + 47, 300 + 47)[3], 0, "the cover is cut by the mask");
+        assert_eq!(
+            pixel(&frame, at, 400 + 20, 300)[0],
+            220,
+            "the cover in the window"
+        );
+        assert_eq!(
+            pixel(&frame, at, 400 + 47, 300),
+            [128, 128, 128, 255],
+            "the disc's rim"
+        );
+        assert_eq!(
+            pixel(&frame, at, 700, 300)[3],
+            0,
+            "an empty slot is the background's"
+        );
+        assert_eq!(
+            pixel(&frame, at, 400 + 47, 300 + 47)[3],
+            0,
+            "the cover is cut by the mask"
+        );
         // At rest the head stands at its park, the sled home under it: at
         // the inner stop above the slots' row, 25/60 of the radius.
         assert_eq!(pixel(&frame, at, 150, 240)[1], 200, "the head at its park");
@@ -4072,12 +4365,19 @@ mod changer_tests {
         let drawing = render_changer(&halfway, &mut cache, &pose, None);
         assert!(drawing.turning.is_some(), "the playing cover turns");
         let (out, at) = draw(&halfway, &mut cache);
-        assert_eq!(pixel(&out, at, 550, 240)[1], 200, "the head over the playing disc");
+        assert_eq!(
+            pixel(&out, at, 550, 240)[1],
+            200,
+            "the head over the playing disc"
+        );
         assert_eq!(pixel(&out, at, 150, 240)[3], 0, "the park is clear");
         let r = sled_radius(&halfway);
         assert!(r > 21.0 && r < 48.0, "the sled out from home: {r}");
         let on_sled = pixel(&out, at, 550 + 22, 300 - r.round() as i32);
-        assert!(on_sled[0] == 200 || on_sled[2] == 200, "the sled at its radius, its lens lit: {on_sled:?}");
+        assert!(
+            on_sled[0] == 200 || on_sled[2] == 200,
+            "the sled at its radius, its lens lit: {on_sled:?}"
+        );
         // The sled's reach: a whole track ends at the edge whatever its
         // length; a stream holds the sled home; a theme's own start and end
         // are taken as given.
@@ -4090,16 +4390,29 @@ mod changer_tests {
         let mut own = spec.clone();
         own.sled_start = Some(30);
         own.sled_end = Some(45);
-        assert_eq!(sled_radius(&scene(&own, playing.clone(), 0.0, 240.0, true)), 30.0);
-        assert_eq!(sled_radius(&scene(&own, playing.clone(), 1.0, 240.0, true)), 45.0);
+        assert_eq!(
+            sled_radius(&scene(&own, playing.clone(), 0.0, 240.0, true)),
+            30.0
+        );
+        assert_eq!(
+            sled_radius(&scene(&own, playing.clone(), 1.0, 240.0, true)),
+            45.0
+        );
         // With a light given, the head casts a shadow under it: below its
         // foot, offset down, the frame is no longer clear.
         let mut lit = spec.clone();
         lit.shadow = Some((0, 12, 4, 0.5));
         let (shadowed, at) = draw(&scene(&lit, discs.clone(), 0.0, 240.0, false), &mut cache);
         let under_foot = (150, 240 + 80 + 8);
-        assert!(pixel(&shadowed, at, under_foot.0, under_foot.1)[3] > 0, "a shadow under the foot");
-        assert_eq!(pixel(&frame, at, under_foot.0, under_foot.1)[3], 0, "none without the key");
+        assert!(
+            pixel(&shadowed, at, under_foot.0, under_foot.1)[3] > 0,
+            "a shadow under the foot"
+        );
+        assert_eq!(
+            pixel(&frame, at, under_foot.0, under_foot.1)[3],
+            0,
+            "none without the key"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -4116,7 +4429,11 @@ mod changer_tests {
         assert_eq!(start.along, 150.0, "a start: the arm at its park");
         assert!(!start.spinning);
         let p = motion.advance(&playing, 600);
-        assert!(p.along > 150.0 && p.along < 550.0, "the arm on its way: {}", p.along);
+        assert!(
+            p.along > 150.0 && p.along < 550.0,
+            "the arm on its way: {}",
+            p.along
+        );
         assert!(!p.laser, "the laser off while the arm travels");
         motion.advance(&playing, 2000);
         let p = motion.advance(&playing, 2500);
@@ -4126,7 +4443,11 @@ mod changer_tests {
         // the lead-in a little out and back before it seeks.
         let p = motion.advance(&playing, 2700);
         assert!(p.laser, "the laser on for the lead-in");
-        assert!(p.radius > 21.0 && p.radius < 25.0, "the sweep: {}", p.radius);
+        assert!(
+            p.radius > 21.0 && p.radius < 25.0,
+            "the sweep: {}",
+            p.radius
+        );
         motion.advance(&playing, 3000);
         let p = motion.advance(&playing, 4000);
         assert!(p.radius > 25.0, "the sled sought out: {}", p.radius);
@@ -4138,21 +4459,36 @@ mod changer_tests {
         let stopped = scene(&spec, stopped, 0.0, 4800.0, false);
         let p = motion.advance(&stopped, 4200);
         assert_eq!(p.along, 550.0, "the arm waits while the disc spins down");
-        assert_eq!(p.radius, mid_radius, "the sled waits while the disc spins down");
+        assert_eq!(
+            p.radius, mid_radius,
+            "the sled waits while the disc spins down"
+        );
         assert!(p.spinning);
         assert!(!p.laser, "the laser off first");
         // The disc still (half a second), the sled glides home over the surface.
         motion.advance(&stopped, 4700);
         let p = motion.advance(&stopped, 4900);
         assert!(!p.spinning, "the disc has stopped");
-        assert!(p.radius < mid_radius && p.radius > 21.0, "the sled on its way home: {}", p.radius);
+        assert!(
+            p.radius < mid_radius && p.radius > 21.0,
+            "the sled on its way home: {}",
+            p.radius
+        );
         assert_eq!(p.along, 550.0, "the arm still waits");
         // Home; then the arm returns along the rail, eased, not at once.
         let p = motion.advance(&stopped, 5400);
-        assert!((p.radius - 50.0 * SLED_HOME).abs() < 0.6, "the sled home: {}", p.radius);
+        assert!(
+            (p.radius - 50.0 * SLED_HOME).abs() < 0.6,
+            "the sled home: {}",
+            p.radius
+        );
         motion.advance(&stopped, 5800);
         let p = motion.advance(&stopped, 6000);
-        assert!(p.along < 550.0 && p.along > 150.0, "the arm on its way: {}", p.along);
+        assert!(
+            p.along < 550.0 && p.along > 150.0,
+            "the arm on its way: {}",
+            p.along
+        );
         let p = motion.advance(&stopped, 10000);
         assert_eq!(p.along, 150.0, "the arm parked");
         // A display starting before the queue has reached it: the arm waits
@@ -4164,7 +4500,11 @@ mod changer_tests {
         assert!(!p.spinning);
         fresh.advance(&playing, 300);
         let p = fresh.advance(&playing, 600);
-        assert!(p.along > 150.0 && p.along < 550.0, "the load under way: {}", p.along);
+        assert!(
+            p.along > 150.0 && p.along < 550.0,
+            "the load under way: {}",
+            p.along
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -4198,12 +4538,19 @@ mod changer_tests {
         let p = motion.advance(&third, 10200);
         assert_eq!(p.along, 550.0, "the arm stays");
         assert!(p.spinning, "the disc spins down first");
-        assert_eq!(p.row_offset, 150.0, "the new row stands where the old one was");
+        assert_eq!(
+            p.row_offset, 150.0,
+            "the new row stands where the old one was"
+        );
         motion.advance(&third, 10700);
         motion.advance(&third, 11200);
         let p = motion.advance(&third, 11700);
         assert!(!p.spinning);
-        assert!((p.radius - 50.0 * SLED_HOME).abs() < 0.6, "home: {}", p.radius);
+        assert!(
+            (p.radius - 50.0 * SLED_HOME).abs() < 0.6,
+            "home: {}",
+            p.radius
+        );
         // The leaving disc dissolves in its slot first, the row held one
         // pitch off behind it; then the row slides.
         let p = motion.advance(&third, 11900);
@@ -4214,7 +4561,11 @@ mod changer_tests {
         assert_eq!(p.along, 550.0, "the arm still stays");
         motion.advance(&third, 12250);
         let p = motion.advance(&third, 12450);
-        assert!(p.row_offset > 0.0 && p.row_offset < 150.0, "the row on its way: {}", p.row_offset);
+        assert!(
+            p.row_offset > 0.0 && p.row_offset < 150.0,
+            "the row on its way: {}",
+            p.row_offset
+        );
         assert!(motion.leaving(12450).is_none(), "the leaving disc gone");
         motion.advance(&third, 12800);
         let p = motion.advance(&third, 13100);
@@ -4236,11 +4587,19 @@ mod changer_tests {
         // While the row slides, a disc stands past the well's edge: nothing
         // of it shows there.
         let mut cache = ChangerCache::default();
-        let off = ChangerPose { along: 550.0, radius: 21.0, degrees: 0.0, spinning: false, row_offset: 150.0, laser: false };
+        let off = ChangerPose {
+            along: 550.0,
+            radius: 21.0,
+            degrees: 0.0,
+            spinning: false,
+            row_offset: 150.0,
+            laser: false,
+        };
         let drawing = render_changer(&third, &mut cache, &off, None);
         let (frame, at) = drawing.under;
         let (x, y) = (700 + 50 + 20 - at.0, 300 - at.1);
-        let past_the_well = if x >= 0 && y >= 0 && x < frame.width as i32 && y < frame.height as i32 {
+        let past_the_well = if x >= 0 && y >= 0 && x < frame.width as i32 && y < frame.height as i32
+        {
             frame.rgba[((y as u32 * frame.width + x as u32) * 4 + 3) as usize]
         } else {
             0
@@ -4248,10 +4607,20 @@ mod changer_tests {
         assert_eq!(past_the_well, 0, "nothing past the well's edge");
         // With the row standing a pitch off, the disc drawn under the arm is
         // the window's first, the old playing one; it turns, not the next.
-        let held = ChangerPose { along: 550.0, radius: 21.0, degrees: 0.0, spinning: true, row_offset: 150.0, laser: false };
+        let held = ChangerPose {
+            along: 550.0,
+            radius: 21.0,
+            degrees: 0.0,
+            spinning: true,
+            row_offset: 150.0,
+            laser: false,
+        };
         let drawing = render_changer(&third, &mut cache, &held, None);
         let (_, centre) = drawing.turning.expect("a disc turns under the arm");
-        assert_eq!(centre.0, 550.0, "the turning disc is the one drawn under the arm");
+        assert_eq!(
+            centre.0, 550.0,
+            "the turning disc is the one drawn under the arm"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
@@ -4292,10 +4661,19 @@ mod changer_tests {
         spec.pos = (300, 100);
         spec.head_park = (240, 40);
         spec.rail_file = String::new();
-        let discs = vec![lead::Disc::default(), lead::Disc::default(), lead::Disc::default()];
+        let discs = vec![
+            lead::Disc::default(),
+            lead::Disc::default(),
+            lead::Disc::default(),
+        ];
         let mut cache = ChangerCache::default();
         let (frame, at) = draw(&scene(&spec, discs.clone(), 0.0, 0.0, false), &mut cache);
-        assert!(frame.height > frame.width, "taller than wide: {}x{}", frame.width, frame.height);
+        assert!(
+            frame.height > frame.width,
+            "taller than wide: {}x{}",
+            frame.width,
+            frame.height
+        );
         assert!(at.1 <= 40 - 80, "the head at the top: {at:?}");
         let bare = lead::ChangerSpec {
             disc_file: String::new(),
@@ -8800,7 +9178,8 @@ fn plan_arc_gauge(g: &GaugeSpec, value: u32, ops: &mut Vec<Op<'_>>) {
             let faded = |share: f32| -> [u8; 3] {
                 let mut out = [0u8; 3];
                 for c in 0..3 {
-                    out[c] = (f32::from(base[c]) + (f32::from(g.color[c]) - f32::from(base[c])) * share)
+                    out[c] = (f32::from(base[c])
+                        + (f32::from(g.color[c]) - f32::from(base[c])) * share)
                         .round()
                         .clamp(0.0, 255.0) as u8;
                 }
