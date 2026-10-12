@@ -35,6 +35,7 @@ const facelook = require('./manager/facelook');
 const component = require('./manager/component');
 const { compact: compactQueue } = require('./manager/queue');
 const themefolder = require('./manager/themefolder');
+const enginefiles = require('./manager/enginefiles');
 const legacyThemes = require('./manager/legacy');
 const { safeFolderName, sections: configSections } = require('./manager/zip');
 
@@ -51,7 +52,11 @@ const LaunchScript = PluginPath + '/run_glass.sh';
 const logging = require('./manager/logging');
 const spawn = require('child_process').spawn;
 const performance = require('./manager/performance');
-const ConfigDir = PluginPath + '/config';
+// The engine's configuration lives under the player's own data folder, out
+// of the plugin's folder that every install replaces; the templates stay
+// in the plugin's folder.
+const TemplatesDir = PluginPath + '/config';
+const ConfigDir = DATA_DIR + '/config';
 const MeterConfigFile = ConfigDir + '/meter.txt';
 const SpectrumConfigFile = ConfigDir + '/spectrum.txt';
 const meterFolderStr = 'meter.folder';
@@ -1021,6 +1026,7 @@ Glass.prototype.launchEnv = function () {
     var env = Object.assign({}, process.env, {
         DISPLAY: ':' + display,
         GLASS_HOME: PluginPath,
+        GLASS_CONFIG: MeterConfigFile,
         GLASS_DISMISS_FILE: dismissFile,
         GLASS_CHANNEL: channelPath,
         GLASS_LOG: log.level,
@@ -1156,6 +1162,16 @@ Glass.prototype.onStart = function () {
     // The board's word on frost is kept for the face, on a player that has one.
     try { if (self.screenOwnerState().here) { self.noteFrostSuits(); } } catch (e) { self.logger.warn(id + 'face: the board not noted: ' + (e && e.message ? e.message : e)); }
 
+    // The engine's files under the data folder: made from a live file an
+    // older release kept in the plugin's folder, else from the template.
+    try {
+        var made = enginefiles.ensure(ConfigDir, TemplatesDir, TemplatesDir);
+        if (made.meter !== 'kept' || made.spectrum !== 'kept') {
+            self.logger.info(id + 'engine files under ' + ConfigDir + ': meter ' + made.meter + ', spectrum ' + made.spectrum);
+        }
+    } catch (e) {
+        self.logger.error(id + 'engine files: ' + (e && e.message ? e.message : e));
+    }
     self.loadConfigs();
     if (!meterConfig) {
         self.commandRouter.pushToastMessage('error', self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'), self.commandRouter.getI18nString('GLASS.NO_PEPPYCONFIG'));
@@ -5812,6 +5828,7 @@ Glass.prototype.managerPaths = function () {
     self.loadConfigs();
     return {
         pluginPath: PluginPath,
+        configDir: ConfigDir,
         dataDir: DATA_DIR,
         evoDir: EVO_DIR,
         meterBase: String(base_folder_P || (DATA_DIR + '/templates/')).replace(/\/$/, ''),

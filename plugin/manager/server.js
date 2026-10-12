@@ -91,6 +91,7 @@ class Manager {
       dir: path.join(paths.dataDir, 'upgrade'),
       version: paths.version,
       pluginPath: paths.pluginPath,
+      configDir: paths.configDir,
       plugin: plugin,
       test: function () { return plugin.testReleases(); },
       logger: this.logger

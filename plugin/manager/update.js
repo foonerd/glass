@@ -282,6 +282,10 @@ class Updater {
     this.dir = options.dir;
     this.version = options.version;
     this.pluginPath = options.pluginPath;
+    // Where the engine's configuration files live: under the player's data
+    // folder since 0.9.42, so an install leaves them alone; kept and put
+    // back across an update all the same.
+    this.configDir = options.configDir || path.join(options.pluginPath, 'config');
     this.plugin = options.plugin;
     this.logger = options.logger || console;
     this.releasesUrl = options.releasesUrl || RELEASES_URL;
@@ -452,7 +456,7 @@ class Updater {
       try { self.plugin.backupPruneAutomatic(KEEP_AUTOMATIC_BACKUPS); } catch (e) { /* said in the log */ }
     }
     for (const name of CONFIG_FILES) {
-      try { await fsp.copyFile(path.join(self.pluginPath, 'config', name), path.join(self.dir, 'config', name)); } catch (e) { /* not there */ }
+      try { await fsp.copyFile(path.join(self.configDir, name), path.join(self.dir, 'config', name)); } catch (e) { /* not there */ }
     }
     const kept = path.join(self.dir, 'previous-' + self.version + '.zip');
     const before = self.state.previous && self.state.previous.zip;
@@ -477,7 +481,7 @@ class Updater {
     // The install script copied fresh templates over an empty config/;
     // the player's own files go back before the new code reads them.
     for (const name of CONFIG_FILES) {
-      try { await fsp.copyFile(path.join(self.dir, 'config', name), path.join(self.pluginPath, 'config', name)); } catch (e) { /* none kept */ }
+      try { await fsp.copyFile(path.join(self.dir, 'config', name), path.join(self.configDir, name)); } catch (e) { /* none kept */ }
     }
     self.state.last.phase = 'restarting';
     await self.saveState();

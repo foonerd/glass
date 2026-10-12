@@ -87,12 +87,18 @@ ln -sf "$PLUGIN_DIR/lib/$ARCH/libglasstap.so" "$PLUGIN_DIR/lib/libglasstap.so"
 echo "Tap: $PLUGIN_DIR/lib/$ARCH/libglasstap.so"
 
 # =============================================================================
-# SETUP: configuration files, kept across upgrades
+# SETUP: the engine's configuration files, under the data folder every
+# install leaves alone; made from the templates only when absent. A live
+# file an older release kept in the plugin folder is taken over by the
+# plugin at its start.
 # =============================================================================
-mkdir -p "$PLUGIN_DIR/config" "$PLUGIN_DIR/asound"
+mkdir -p "$DATA_DIR/config" "$PLUGIN_DIR/asound"
 for name in meter spectrum; do
-  if [ ! -f "$PLUGIN_DIR/config/$name.txt" ]; then
-    cp "$PLUGIN_DIR/config/$name.txt.tmpl" "$PLUGIN_DIR/config/$name.txt"
+  if [ ! -f "$DATA_DIR/config/$name.txt" ] && [ -f "$PLUGIN_DIR/config/$name.txt" ] && ! cmp -s "$PLUGIN_DIR/config/$name.txt" "$PLUGIN_DIR/config/$name.txt.tmpl"; then
+    cp "$PLUGIN_DIR/config/$name.txt" "$DATA_DIR/config/$name.txt"
+  fi
+  if [ ! -f "$DATA_DIR/config/$name.txt" ]; then
+    cp "$PLUGIN_DIR/config/$name.txt.tmpl" "$DATA_DIR/config/$name.txt"
   fi
 done
 
