@@ -21,7 +21,7 @@ const MAX_RELEASE_BYTES = 1024 * 1024;
 const MAX_ZIP_BYTES = 256 * 1024 * 1024;
 const DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 const ASSET = /^glass-(\d+\.\d+\.\d+)\.zip$/;
-const CONFIG_FILES = ['meter.txt', 'spectrum.txt'];
+const enginefiles = require('./enginefiles');
 // The automatic settings backups kept: the newest five.
 const KEEP_AUTOMATIC_BACKUPS = 5;
 
@@ -286,6 +286,7 @@ class Updater {
     // folder since 0.9.42, so an install leaves them alone; kept and put
     // back across an update all the same.
     this.configDir = options.configDir || path.join(options.pluginPath, 'config');
+    this.dataDir = options.dataDir || path.dirname(this.configDir);
     this.plugin = options.plugin;
     this.logger = options.logger || console;
     this.releasesUrl = options.releasesUrl || RELEASES_URL;
@@ -455,9 +456,7 @@ class Updater {
     if (typeof self.plugin.backupPruneAutomatic === 'function') {
       try { self.plugin.backupPruneAutomatic(KEEP_AUTOMATIC_BACKUPS); } catch (e) { /* said in the log */ }
     }
-    for (const name of CONFIG_FILES) {
-      try { await fsp.copyFile(path.join(self.configDir, name), path.join(self.dir, 'config', name)); } catch (e) { /* not there */ }
-    }
+    enginefiles.keep(self.configDir, path.join(self.dir, 'config'));
     const kept = path.join(self.dir, 'previous-' + self.version + '.zip');
     const before = self.state.previous && self.state.previous.zip;
     const wrote = await zipDirectory(self.pluginPath, kept, {
@@ -478,11 +477,10 @@ class Updater {
       await self.saveState();
       throw new UpdateError('apply', self.state.last.error);
     }
-    // The install script copied fresh templates over an empty config/;
-    // the player's own files go back before the new code reads them.
-    for (const name of CONFIG_FILES) {
-      try { await fsp.copyFile(path.join(self.dir, 'config', name), path.join(self.configDir, name)); } catch (e) { /* none kept */ }
-    }
+    // The player's own files go back where the release just installed
+    // reads them, before the new code starts: the data folder from 0.9.42,
+    // the plugin folder for an older release on the way back.
+    enginefiles.restore(path.join(self.dir, 'config'), enginefiles.place(staged.version, self.pluginPath, self.dataDir));
     self.state.last.phase = 'restarting';
     await self.saveState();
     job.state = 'restarting';

@@ -92,6 +92,7 @@ class Manager {
       version: paths.version,
       pluginPath: paths.pluginPath,
       configDir: paths.configDir,
+      dataDir: paths.dataDir,
       plugin: plugin,
       test: function () { return plugin.testReleases(); },
       logger: this.logger

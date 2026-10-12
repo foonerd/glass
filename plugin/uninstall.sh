@@ -9,6 +9,9 @@
 clear_data() {
   local dir=$1
   [ -d "$dir" ] || return 0
+  # The engine's configuration goes with the plugin's config.json, which
+  # Volumio removes at the same moment: a settings pair does not survive in halves.
+  rm -rf "$dir/config"
   if [ -f "$dir/.preserve" ]; then
     echo "Keeping the themes and backups under $dir (user setting)"
     return 0
