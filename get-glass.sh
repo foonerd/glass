@@ -224,7 +224,14 @@ const ini = require(path.join(work, 'node_modules/ini'));
 const stable = require(path.join(work, 'manager/stable.js'));
 const text = (file) => { try { return fs.readFileSync(file, 'utf8'); } catch (e) { return null; } };
 const parsed = (value, parse) => { try { return value === null ? {} : parse(value); } catch (e) { return {}; } };
-const now = { config: text(settings), meter: text(path.join(plugin, 'config/meter.txt')), spectrum: text(path.join(plugin, 'config/spectrum.txt')) };
+// The files as they stand: under the data folder from 0.9.42, in the plugin folder before.
+const data = path.join(path.dirname(backups), 'config');
+const standing = (name) => text(path.join(data, name)) !== null ? path.join(data, name) : path.join(plugin, 'config', name);
+const now = { config: text(settings), meter: text(standing('meter.txt')), spectrum: text(standing('spectrum.txt')) };
+// Where the stable release reads them, for the planned files to go after its install.
+const stableVersion = (() => { try { return JSON.parse(text(path.join(work, 'package.json'))).version; } catch (e) { return ''; } })();
+const before = (v) => { const m = /^(\d+)\.(\d+)\.(\d+)/.exec(String(v || '')); if (!m) return false; const [a, b, c] = m.slice(1).map(Number); return a < 0 || (a === 0 && (b < 9 || (b === 9 && c < 42))); };
+fs.writeFileSync(path.join(work, 'place'), before(stableVersion) ? path.join(plugin, 'config') : data);
 // The backup, as the manager's own are: three files and a manifest.
 let name = 'before-stable';
 if (fs.existsSync(path.join(backups, name))) name += '-' + new Date().toISOString().replace(/[-:]/g, '').slice(0, 15).replace('T', '-');
@@ -292,9 +299,10 @@ JS
 # The planned settings go in once the plugin is in place: its update lays
 # fresh files of its own, and the player's own go over them.
 if [ -n "$PLANNED" ]; then
-  mkdir -p "$PLUGIN/config" "$(dirname "$SETTINGS")"
-  cp "$PLANNED/meter.txt" "$PLUGIN/config/meter.txt"
-  cp "$PLANNED/spectrum.txt" "$PLUGIN/config/spectrum.txt"
+  PLACE=$(cat "$WORK/place")
+  mkdir -p "$PLACE" "$(dirname "$SETTINGS")"
+  cp "$PLANNED/meter.txt" "$PLACE/meter.txt"
+  cp "$PLANNED/spectrum.txt" "$PLACE/spectrum.txt"
   cp "$PLANNED/config.json" "$SETTINGS"
 fi
 

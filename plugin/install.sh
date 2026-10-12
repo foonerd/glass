@@ -87,14 +87,13 @@ ln -sf "$PLUGIN_DIR/lib/$ARCH/libglasstap.so" "$PLUGIN_DIR/lib/libglasstap.so"
 echo "Tap: $PLUGIN_DIR/lib/$ARCH/libglasstap.so"
 
 # =============================================================================
-# SETUP: configuration files, kept across upgrades
+# SETUP: the engine's configuration files live under the data folder, which
+# every install leaves alone. They are not made here: the plugin makes them
+# at its start, from a live file an older release kept in the plugin folder
+# (the Manager's update puts those back only after this script has run),
+# else from the templates.
 # =============================================================================
-mkdir -p "$PLUGIN_DIR/config" "$PLUGIN_DIR/asound"
-for name in meter spectrum; do
-  if [ ! -f "$PLUGIN_DIR/config/$name.txt" ]; then
-    cp "$PLUGIN_DIR/config/$name.txt.tmpl" "$PLUGIN_DIR/config/$name.txt"
-  fi
-done
+mkdir -p "$DATA_DIR/config" "$PLUGIN_DIR/asound"
 
 # =============================================================================
 # SETUP: themes. Adopt what PeppyMeter Screensaver left, then add the bundled ones.
