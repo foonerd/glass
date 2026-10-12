@@ -191,6 +191,22 @@ if ! grep -qF "$(sed -n '2p' keys/release-signing.pub)" get-glass.sh; then
   exit 1
 fi
 
+# No trace print left in the source: a line printed to find a fault once
+# ships to every player's journal at every event it marks (0.9.27 left two
+# at the persist event, found in 0.9.39). A print that names itself a trace
+# is refused, outside comments.
+echo "check: traces"
+trace_prints() {
+  grep -rnE "(eprintln!|println!|console\.(log|error|warn))\(\s*['\"]TRACE" --include=*.rs --include=*.js . 2>/dev/null \
+    | grep -v "target/\|node_modules\|scripts/check.sh" \
+    | grep -vE ":[0-9]+:[[:space:]]*(#|//)"
+}
+if trace_prints >/dev/null; then
+  echo "check: a trace print is left in the source:" >&2
+  trace_prints >&2
+  exit 1
+fi
+
 # No python anywhere in Glass: the product is Rust and Node, and a player
 # without python3 must install and run it. Looked for as a command run,
 # outside comments; this script's own words and the plugin's prose aside.
