@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.44] - 2026-10-12
+
+- **An About tab in the Manager.** The Glass phoenix, the projects and their credits (Glass, glass-evo and the evo framework, each with its address and a QR code to scan from a phone), the theme contributors credited through Glass Templates, and the ways to support the work. The phoenix is licensed artwork and may be used only in reference to Glass, glass-evo or the evo framework, and for nothing else; the tab says so. This Glass names glass-evo 0.2.44 as the least it works with.
+
 ## [0.9.43] - 2026-10-12
 
 - **The pair goes back together.** 0.9.42 held Glass and glass-evo to each other, and the way back then stuck: a Glass going back refused while the glass-evo here needed the newer Glass, and glass-evo's own way back refused while the running Glass named the newer least. A Glass going back now takes glass-evo back with it to the one kept before, held to the pair about to run and not to the one running; only a kept glass-evo that fits no Glass that old is refused, and nothing changes then. This Glass names glass-evo 0.2.43 as its least, and 0.2.43 names this Glass.
