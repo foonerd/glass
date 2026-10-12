@@ -2,6 +2,14 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.41] - 2026-10-12
+
+- **The chosen theme comes back at once after a plugin update.** Volumio's plugin manager replaces the plugin's folder on an update, through the Manager's Update button as through its own page, and the engine's configuration in that folder came back from the template, naming the template's own 800x480 folder: the display and the Manager stood on it until the player's next state push put the chosen theme back, and a player standing still stayed on it. At its start the plugin now puts the chosen theme back the moment the configuration names another folder, the same way a theme tag changes the folder, the choice itself untouched. A test holds the rule.
+
+## [0.9.40] - 2026-10-12
+
+- **Two trace lines are gone from the player's journal.** Since 0.9.27 the display and the remotes printed two lines of their own at every persist event the plugin pushes, `TRACE decode persist` and `TRACE arm persist`, left from the work on the persist countdown, and the plugin carried them into the player's journal at every pause and at every countdown's end. Both are gone, and the release check now refuses a print that names itself a trace, so none ships again.
+
 ## [0.9.39] - 2026-10-11
 
 - **The Face tab's fanart keeps its place when the meter changes.** Since 0.8.71 the Face tab follows the player's own display to the meter it moves to, and it did so by building the meter's pipeline afresh, the artist's slideshow with it: the set was asked of the player again and the pictures started over at every change of meter, at every title in random mode. The player's screen had kept the slideshow across its meters since 0.8.26; the tab now changes its meter the same way, on the pipeline it has, so the picture on show stays and the set is asked no more than before. A test holds the page to it. Asked on the forum.

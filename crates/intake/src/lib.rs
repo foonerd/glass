@@ -2583,9 +2583,6 @@ impl Source for TapSource {
                     seconds,
                     started_ms,
                 } => {
-                    eprintln!(
-                        "TRACE arm persist: mode={mode:?} seconds={seconds} started={started_ms}"
-                    );
                     self.persist_held = (!mode.is_empty()).then_some((mode, seconds, started_ms));
                 }
                 Event::Calibrate { points } => self.calibrate_asked = Some(points),
