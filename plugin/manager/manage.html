@@ -1061,6 +1061,7 @@
       cursor: zoom-in;
     }
 
+    .about-licence { margin: 18px 0 4px; color: #9a9aa0; font-size: 12px; line-height: 1.5; }
     .about-logo img {
       display: block;
       width: 100%;
@@ -1815,6 +1816,7 @@
           </article>
         </div>
       </section>
+      <p class="about-licence" id="about-licence"></p>
     </section>
   </div>
 
@@ -1995,6 +1997,7 @@
         $('about-evo-desc').textContent = t('MANAGER_ABOUT_EVO_DESC');
         $('about-framework-desc').textContent = t('MANAGER_ABOUT_FRAMEWORK_DESC');
         $('about-support-title').textContent = t('MANAGER_ABOUT_SUPPORT');
+        $('about-licence').textContent = t('MANAGER_ABOUT_LOGO_LICENCE');
         $('about-kofi-desc').textContent = t('MANAGER_ABOUT_KOFI_DESC');
         $('about-sponsors-desc').textContent = t('MANAGER_ABOUT_SPONSORS_DESC');
         document.querySelectorAll('[data-about-string]').forEach(function (el) { el.textContent = t(el.dataset.aboutString); });

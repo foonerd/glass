@@ -691,6 +691,7 @@
     "MANAGER_ABOUT_FRAMEWORK_LABEL": "Evo framework",
     "MANAGER_ABOUT_KOFI_LABEL": "Ko-fi",
     "MANAGER_ABOUT_SPONSORS_LABEL": "GitHub Sponsors",
+    "MANAGER_ABOUT_LOGO_LICENCE": "The Glass phoenix is licensed artwork. It may be used only in reference to Glass, glass-evo or the evo framework, and for nothing else.",
     "MANAGER_ABOUT_VIEW_LOGO": "View Glass logo full screen",
     "MANAGER_ABOUT_SHOW_QR": "Show QR code for {name}",
     "MANAGER_UPLOAD": "Upload a theme zip",
