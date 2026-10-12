@@ -32,6 +32,7 @@ const picture = require('./picture');
 const { zipDirectory } = require('./zipwrite');
 const tailor = require('./tailor');
 const { SYMPTOMS, diagnose } = require('./diagnose');
+const about = require('./about');
 
 // What a release's zip says of itself: its package, and the three files
 // its settings start from. One that is missing is left out.
@@ -203,7 +204,7 @@ class Manager {
   // Work on the theme trees runs one job at a time.
   exclusive(fn) {
     const run = this.lock.then(fn, fn);
-    this.lock = run.then(function () {}, function () {});
+    this.lock = run.then(function () { }, function () { });
     return run;
   }
 
@@ -221,6 +222,16 @@ class Manager {
     app.get(['/', '/manage'], function (req, res) {
       res.sendFile(page);
     });
+
+    app.get('/about/glass-phoenix.png', function (req, res) {
+      res.sendFile(path.join(__dirname, 'glass-phoenix.png'), { maxAge: 86400000 });
+    });
+
+    app.get('/api/about/qr/:name', wrap(async function (req, res) {
+      const svg = await about.qrSvg(req.params.name);
+      if (!svg) return res.status(404).end();
+      res.type('image/svg+xml').send(svg);
+    }));
 
     app.get('/api/i18n', function (req, res) {
       const lang = String(req.query.lang || self.plugin.managerLanguage() || 'en').replace(/[^a-z]/gi, '').slice(0, 5) || 'en';
@@ -839,7 +850,7 @@ class Manager {
       const tmp = path.join(self.catalog.downloadsDir, 'backup-' + Date.now() + '.zip');
       await zipDirectory(found.dir, tmp);
       res.download(tmp, 'glass-backup-' + found.name + '.zip', function () {
-        fsp.rm(tmp, { force: true }).catch(function () {});
+        fsp.rm(tmp, { force: true }).catch(function () { });
       });
     }));
 
@@ -1472,7 +1483,7 @@ class Manager {
       this.logger.warn('glass: manager ' + job.kind + ' ' + job.name + ' failed: ' + job.error.message);
     } else {
       job.state = 'done';
-      if (!error && job.kind !== 'upgrade' && job.kind !== 'component' && this.plugin && typeof this.plugin.themesWritten === 'function') { try { this.plugin.themesWritten(); } catch (e) {} }
+      if (!error && job.kind !== 'upgrade' && job.kind !== 'component' && this.plugin && typeof this.plugin.themesWritten === 'function') { try { this.plugin.themesWritten(); } catch (e) { } }
       this.logger.info('glass: manager ' + job.kind + ' ' + job.name + ' done: ' + job.folders.map(function (f) { return f.install + '/' + f.folder; }).join(', '));
     }
   }
@@ -1887,7 +1898,7 @@ async function readRings() {
         live: ago !== null && ago >= 0n && ago < RING_LIVE_NS
       });
     } catch (e) { /* a ring going away */ } finally {
-      if (fd) await fd.close().catch(function () {});
+      if (fd) await fd.close().catch(function () { });
     }
   }
   rings.sort(function (a, b) { return (a.writtenAgoMs === null ? Infinity : a.writtenAgoMs) - (b.writtenAgoMs === null ? Infinity : b.writtenAgoMs); });
