@@ -26,4 +26,13 @@ function compact(queue) {
   });
 }
 
-module.exports = { compact };
+// Whether `address` is the cover of an item of the queue as compacted:
+// a page may ask the player's Manager for a queue item's cover at an
+// address the player itself reported, and for no other.
+function hasCover(items, address) {
+  var wanted = String(address || '');
+  if (!wanted || !Array.isArray(items)) return false;
+  return items.some(function (item) { return item && item.albumart === wanted; });
+}
+
+module.exports = { compact, hasCover };

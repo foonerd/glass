@@ -1909,6 +1909,9 @@ pub struct TapSource {
     changer_slots: u32,
     /// The discs' covers, fetched one at a time as the slots want them.
     disc_art: DiscArt,
+    /// The player's own disc, for a track not in the queue: the track's
+    /// key and the index given to it, one more at every new track.
+    own_disc: (String, i64),
     /// The plugin's channel, when the player runs under it: the state
     /// arrives as it changes and the player is not asked.
     channel: Option<Channel>,
@@ -2085,6 +2088,7 @@ impl TapSource {
             queue_held: None,
             changer_slots: 0,
             disc_art: DiscArt::default(),
+            own_disc: (String::new(), -1),
             channel: Some(channel),
             channel_was_live: false,
             pushed: Vec::new(),
@@ -2230,18 +2234,84 @@ impl TapSource {
     /// The queue's window of discs about `position`; the disc there is the
     /// playing one only while the player is engaged with it (play or pause),
     /// so a stopped player's head parks.
-    fn discs_for(&mut self, position: i64, engaged: bool) -> Vec<lead::Disc> {
+    /// Where in the queue the track the player names stands: at the
+    /// position the player gives when the item there is that track; else
+    /// where its location is found; else where its title and artist are;
+    /// else at the position given, if any. None when the track is not in
+    /// the queue: a Connect or UPnP source playing a list of its own, a
+    /// radio, a player with no queue.
+    fn playing_index(playing: &NowPlaying, items: &[QueueItem]) -> Option<usize> {
+        if items.is_empty() {
+            return None;
+        }
+        let given = playing
+            .has_position
+            .then(|| playing.position.max(0) as usize)
+            .filter(|p| *p < items.len());
+        let same_track = |item: &QueueItem| {
+            (!playing.uri.is_empty() && item.uri == playing.uri)
+                || (!playing.title.is_empty()
+                    && item.title == playing.title
+                    && item.artist == playing.artist)
+        };
+        if let Some(p) = given {
+            if same_track(&items[p]) {
+                return Some(p);
+            }
+        }
+        if !playing.uri.is_empty() {
+            if let Some(i) = items.iter().position(|item| item.uri == playing.uri) {
+                return Some(i);
+            }
+        }
+        if !playing.title.is_empty() {
+            if let Some(i) = items
+                .iter()
+                .position(|item| item.title == playing.title && item.artist == playing.artist)
+            {
+                return Some(i);
+            }
+        }
+        given
+    }
+
+    /// The changer's discs: the queue's window about the track the player
+    /// names, as the tonearm takes that track from the state and not from
+    /// a position; or, when the track is not in the queue, the player's own
+    /// disc alone, with an index of its own that moves on with every new
+    /// track, so the row moves on as it does for a queue.
+    fn discs_for(&mut self, playing: &NowPlaying, engaged: bool) -> Vec<lead::Disc> {
         let slots = self.changer_slots as usize;
         if slots == 0 {
             return Vec::new();
         }
-        let Some(items) = self.queue_held.as_ref() else {
-            return Vec::new();
+        let items = self.queue_held.clone().unwrap_or_default();
+        let Some(position) = Self::playing_index(playing, &items) else {
+            if playing.title.is_empty() && playing.uri.is_empty() {
+                return Vec::new();
+            }
+            let key = format!(
+                "{}\0{}\0{}\0{}",
+                playing.uri, playing.title, playing.artist, playing.album
+            );
+            if self.own_disc.0 != key {
+                self.own_disc = (key, self.own_disc.1 + 1);
+            }
+            let files = self
+                .disc_art
+                .files_for(std::slice::from_ref(&playing.albumart));
+            return vec![lead::Disc {
+                index: self.own_disc.1,
+                playing: engaged,
+                title: playing.title.clone(),
+                artist: playing.artist.clone(),
+                album: playing.album.clone(),
+                duration: playing.duration,
+                uri: playing.uri.clone(),
+                albumart: playing.albumart.clone(),
+                art_file: files.into_iter().next().unwrap_or_default(),
+            }];
         };
-        if items.is_empty() {
-            return Vec::new();
-        }
-        let position = position.max(0) as usize;
         let range = disc_window(items.len(), slots, position);
         let window: Vec<(usize, QueueItem)> = items
             .iter()
@@ -2589,6 +2659,7 @@ impl Source for TapSource {
                     Default::default()
                 };
                 let engaged = matches!(playing.status.as_str(), "play" | "pause");
+                let discs = self.discs_for(&playing, engaged);
                 self.metadata_held = lead::Metadata {
                     title: playing.title,
                     artist: playing.artist,
@@ -2613,7 +2684,7 @@ impl Source for TapSource {
                     reel_files: self.reel_files_for(&playing.uri),
                     queue_before_s: self.queue_progress_for(playing.position).0,
                     queue_total_s: self.queue_progress_for(playing.position).1,
-                    discs: self.discs_for(playing.position, engaged),
+                    discs,
                     volatile: playing.volatile,
                     volume: playing.volume,
                     mute: playing.mute,
@@ -2890,8 +2961,12 @@ pub struct NowPlaying {
     pub albumart: String,
     pub track_type: String,
     pub bitrate: String,
-    /// Index of the playing item in the queue.
+    /// Index of the playing item in the queue; 0 where the player gives
+    /// none, which `has_position` tells apart.
     pub position: i64,
+    /// Whether the player gave a position at all: a Connect or UPnP
+    /// source playing a list of its own gives none.
+    pub has_position: bool,
     /// The channels the player reports for what plays, 0 where it says none:
     /// a radio received in mono says 1.
     pub channels: u8,
@@ -2947,6 +3022,7 @@ impl NowPlaying {
                 .map(|c| c.clamp(0.0, 255.0) as u8)
                 .unwrap_or(0),
             position: number("position").map(|p| p as i64).unwrap_or(0),
+            has_position: number("position").is_some(),
         }
     }
 }
@@ -3010,6 +3086,123 @@ pub fn input_from_records(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn queued(title: &str, uri: &str) -> QueueItem {
+        QueueItem {
+            title: title.into(),
+            artist: "A".into(),
+            album: "X".into(),
+            duration: 100.0,
+            uri: uri.into(),
+            albumart: String::new(),
+        }
+    }
+
+    fn changer_source(queue: Option<Vec<QueueItem>>) -> TapSource {
+        let mut source = TapSource::new(1, 100.0).without_player();
+        source.changer_slots = 3;
+        source.queue_held = queue;
+        source
+    }
+
+    /// With no position from the player, the playing disc is found in the
+    /// queue by its location, and the window stands about it.
+    #[test]
+    fn the_playing_disc_is_found_in_the_queue_by_its_location_without_a_position() {
+        let mut source = changer_source(Some(
+            (0..6)
+                .map(|i| queued(&format!("T{i}"), &format!("u:{i}")))
+                .collect(),
+        ));
+        let playing = NowPlaying::from_value(&serde_json::json!({
+            "status": "play", "title": "T3", "artist": "A", "uri": "u:3"
+        }));
+        assert!(!playing.has_position);
+        let discs = source.discs_for(&playing, true);
+        assert_eq!(
+            discs.iter().map(|d| d.index).collect::<Vec<_>>(),
+            vec![2, 3, 4]
+        );
+        assert_eq!(
+            discs.iter().map(|d| d.playing).collect::<Vec<_>>(),
+            vec![false, true, false]
+        );
+    }
+
+    /// A position the player gives is taken when the item there is the
+    /// track, which tells two queuings of one track apart; a position that
+    /// names another item is passed over for the track's location.
+    #[test]
+    fn a_position_the_player_gives_is_taken_when_its_item_is_the_track() {
+        let mut items: Vec<QueueItem> = (0..6)
+            .map(|i| queued(&format!("T{i}"), &format!("u:{i}")))
+            .collect();
+        items[4] = queued("T1", "u:1");
+        let mut source = changer_source(Some(items));
+        let at_four = NowPlaying::from_value(&serde_json::json!({
+            "status": "play", "title": "T1", "artist": "A", "uri": "u:1", "position": 4
+        }));
+        let discs = source.discs_for(&at_four, true);
+        assert_eq!(
+            discs.iter().map(|d| d.index).collect::<Vec<_>>(),
+            vec![3, 4, 5]
+        );
+        assert!(discs[1].playing);
+        let stale = NowPlaying::from_value(&serde_json::json!({
+            "status": "play", "title": "T1", "artist": "A", "uri": "u:1", "position": 5
+        }));
+        let discs = source.discs_for(&stale, true);
+        assert_eq!(
+            discs.iter().map(|d| d.index).collect::<Vec<_>>(),
+            vec![0, 1, 2]
+        );
+        assert!(discs[1].playing);
+    }
+
+    /// The player's own disc stands in when its track is not in the queue:
+    /// one disc from the state, playing while the player is engaged, with
+    /// an index that stays for the same track and moves on for a new one,
+    /// with a queue of other tracks and with no queue at all.
+    #[test]
+    fn the_players_own_disc_stands_in_when_its_track_is_not_in_the_queue() {
+        let mut source = changer_source(Some(
+            (0..3)
+                .map(|i| queued(&format!("Local {i}"), &format!("mnt/{i}.flac")))
+                .collect(),
+        ));
+        let iris = NowPlaying::from_value(&serde_json::json!({
+            "status": "play", "title": "Iris", "artist": "The Goo Goo Dolls",
+            "album": "Dizzy Up the Girl", "uri": "spotify:track:1",
+            "albumart": "", "service": "soloist_connect"
+        }));
+        let discs = source.discs_for(&iris, true);
+        assert_eq!(discs.len(), 1, "{discs:?}");
+        assert_eq!(discs[0].title, "Iris");
+        assert_eq!(discs[0].uri, "spotify:track:1");
+        assert!(discs[0].playing);
+        let first = discs[0].index;
+        assert_eq!(
+            source.discs_for(&iris, true)[0].index,
+            first,
+            "the same track keeps its index"
+        );
+        assert!(
+            !source.discs_for(&iris, false)[0].playing,
+            "paused or stopped: not playing"
+        );
+        let next = NowPlaying::from_value(&serde_json::json!({
+            "status": "play", "title": "Slide", "artist": "The Goo Goo Dolls",
+            "uri": "spotify:track:2", "albumart": ""
+        }));
+        let discs = source.discs_for(&next, true);
+        assert_eq!(discs[0].index, first + 1, "a new track moves the row on");
+        let mut without_queue = changer_source(None);
+        let discs = without_queue.discs_for(&iris, true);
+        assert_eq!(discs.len(), 1);
+        assert_eq!(discs[0].title, "Iris");
+        let nothing = NowPlaying::from_value(&serde_json::json!({"status": "stop"}));
+        assert!(without_queue.discs_for(&nothing, false).is_empty());
+    }
 
     #[test]
     fn folder_pictures_come_from_the_manager_on_a_remote() {
