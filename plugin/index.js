@@ -34,6 +34,7 @@ const automaticBackup = require('./manager/update').automaticBackup;
 const facelook = require('./manager/facelook');
 const component = require('./manager/component');
 const { compact: compactQueue } = require('./manager/queue');
+const themefolder = require('./manager/themefolder');
 const legacyThemes = require('./manager/legacy');
 const { safeFolderName, sections: configSections } = require('./manager/zip');
 
@@ -1159,6 +1160,13 @@ Glass.prototype.onStart = function () {
     if (!meterConfig) {
         self.commandRouter.pushToastMessage('error', self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'), self.commandRouter.getI18nString('GLASS.NO_PEPPYCONFIG'));
         return libQ.reject(new Error('meter configuration missing'));
+    }
+    // After a plugin update Volumio replaces the plugin's folder, and the
+    // engine's configuration in it comes back from the template, naming the
+    // template's own folder: the display would stand on it until the
+    // player's next state push. The chosen theme goes back now.
+    try { self.restoreChosenTheme(); } catch (e) {
+        self.logger.warn(id + 'theme: the chosen theme not put back at start: ' + (e && e.message ? e.message : e));
     }
     try { self.importLegacySettings(); } catch (e) {
         self.logger.warn(id + 'settings import: ' + (e && e.message ? e.message : e));
@@ -4460,6 +4468,24 @@ Glass.prototype.applyThemeTag = function (state) {
     self.logger.info(id + 'theme tag -> ' + target);
   }
   self.themeTagOverride = !!(picked && target === picked);
+};
+
+// The chosen theme put back when the engine's configuration names another
+// folder, as it does after a plugin update made it afresh from the template:
+// the same path a theme tag takes, the choice in config.json left as it is.
+Glass.prototype.restoreChosenTheme = function () {
+  var self = this;
+  if (!meterConfig || !meterConfig.current) return false;
+  var chosen = self.config.get('activeFolder');
+  var named = meterConfig.current[meterFolderStr];
+  if (!themefolder.wanted(named, chosen)) return false;
+  var result = self.applyActiveThemeFolder(String(chosen).trim(), { keepHome: true, allowBuiltin: true });
+  if (result && result.changed) {
+    self.logger.info(id + 'theme: the configuration named ' + (named || 'nothing') + '; the chosen ' + chosen + ' put back');
+  } else if (result && result.error) {
+    self.logger.warn(id + 'theme: the chosen ' + chosen + ' not put back: ' + result.error);
+  }
+  return !!(result && result.changed);
 };
 
 Glass.prototype.applyActiveThemeFolder = function (folder, opts) {
