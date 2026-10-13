@@ -865,7 +865,8 @@ fn session(
     // The face over the picture, on its copy kept from frame to frame: the
     // same laying as in a browser's page.
     let mut laid = Laid::default();
-    // Move to another meter of the theme: its skin, pictures and motion start afresh.
+    // Move to another meter of the theme: its skin and pictures start afresh,
+    // the motion too but for the turn of the record and the reels.
     macro_rules! switch_meter {
         ($name:expr) => {{
             let name: String = $name;
@@ -873,7 +874,7 @@ fn session(
             source.set_skin(&skin);
             assets = MeterAssets::load(&skin);
             pictures.clear();
-            motion = Motion::new(threads, adaptive);
+            motion = Motion::carrying_turn(threads, adaptive, std::mem::take(&mut motion));
             motion.bench_delay = bench_delay;
             let now = started.elapsed().as_millis() as u64;
             if skin.transition.fade && fade_lock_free(skin.transition.duration_s) {

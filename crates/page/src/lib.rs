@@ -243,7 +243,8 @@ impl Page {
                 }
                 showing.skin = skin;
                 showing.assets = assets;
-                showing.motion = Motion::new(1, Some(rate));
+                showing.motion =
+                    Motion::carrying_turn(1, Some(rate), std::mem::take(&mut showing.motion));
                 showing.rate = rate;
                 showing.indicators = None;
                 showing.pictures = Pictures::default();

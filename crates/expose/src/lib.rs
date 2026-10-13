@@ -3359,11 +3359,22 @@ fn changer_key(changer: &plot::Changer, pose: &ChangerPose) -> String {
         key.push_str(&disc.title);
         key.push(if disc.playing { '*' } else { '.' });
     }
+    let turning = turning_slot(&changer.spec, pose);
     key.push_str(&format!(
-        "|{:?}|{:.0}",
-        turning_slot(&changer.spec, pose),
-        pose.row_offset
+        "|{:?}|{:.0}|{}",
+        turning,
+        pose.row_offset,
+        u8::from(pose.travelling)
     ));
+    // The still discs' angles are in the layers; the turning disc's is
+    // the live layer's, no part of them.
+    for (slot, angle) in pose.angles.iter().enumerate() {
+        if turning == Some(slot) {
+            key.push_str("|t");
+        } else {
+            key.push_str(&format!("|{:.0}", angle.rem_euclid(360.0)));
+        }
+    }
     key
 }
 
@@ -3371,8 +3382,12 @@ fn changer_key(changer: &plot::Changer, pose: &ChangerPose) -> String {
 /// none while the arm travels or the row slides. The disc that turns is
 /// the one drawn under the arm, not the one the player names: at a change
 /// the arm is still over the old disc while it spins down, with the row
-/// standing a pitch off.
+/// standing a pitch off. An arm on its way is over no slot, whatever
+/// centre a frame of its travel happens to land on.
 fn turning_slot(spec: &lead::ChangerSpec, pose: &ChangerPose) -> Option<usize> {
+    if pose.travelling {
+        return None;
+    }
     slot_centres(spec).iter().position(|(cx, cy)| {
         let there = if spec.horizontal { *cx } else { *cy } + pose.row_offset;
         (there - pose.along).abs() < 0.5
@@ -3431,10 +3446,11 @@ fn slot_centres(spec: &lead::ChangerSpec) -> Vec<(f32, f32)> {
 /// pixels: the arm's place along the bar, the sled's radius from the
 /// disc's centre, the disc's angle, and whether it turns. From
 /// [`ChangerMotion`], which moves them as the device would.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ChangerPose {
     pub along: f32,
     pub radius: f32,
+    /// The angle of the disc under the arm, the one the live layer turns.
     pub degrees: f32,
     pub spinning: bool,
     /// How far the row of discs stands from its slots along the bar while
@@ -3442,6 +3458,14 @@ pub struct ChangerPose {
     pub row_offset: f32,
     /// The laser lit: the disc is being read, from the lead-in on.
     pub laser: bool,
+    /// The arm on its way along the bar. A travelling arm turns nothing:
+    /// a disc it passes over is not under it, however close a frame lands.
+    pub travelling: bool,
+    /// Every disc's angle, slot by slot: a disc is drawn at its own angle
+    /// whether it turns under the arm or lies still.
+    pub angles: Vec<f32>,
+    /// The angle of the disc leaving the row, for its dissolve.
+    pub leaving_angle: f32,
 }
 
 /// What the pickup is doing: nothing, reading the lead-in, or the track.
@@ -3531,7 +3555,12 @@ pub struct ChangerMotion {
     along: Option<f32>,
     radius: Option<f32>,
     rpm: f32,
-    angle: f32,
+    /// Each disc's angle, by its queue index: a disc turns only under the
+    /// arm and lies where it stopped the rest of the time, as a real disc
+    /// does; one never under the arm lies at 0. The angle is the disc's,
+    /// not the arm's: at a change the disc that leaves the arm keeps its
+    /// angle, and the one that arrives turns on from its own.
+    angles: HashMap<i64, f32>,
     last_ms: Option<u64>,
     travel: Option<Move>,
     seek: Option<Move>,
@@ -3542,9 +3571,9 @@ pub struct ChangerMotion {
     /// Slots the row has yet to slide, and the slide under way.
     pending_shift: i32,
     row: Option<Move>,
-    /// The disc leaving the row at a shift, the slot it leaves from, and
-    /// its dissolve under way.
-    leaving: Option<(lead::Disc, usize)>,
+    /// The disc leaving the row at a shift, the slot it leaves from, the
+    /// angle it lay at, and its dissolve under way.
+    leaving: Option<(lead::Disc, usize, f32)>,
     fade: Option<Move>,
     /// When the player last stopped being engaged: a player reports a
     /// short stop between two tracks, which is no stop for the mechanism.
@@ -3615,7 +3644,10 @@ impl ChangerMotion {
                     } else {
                         self.last_discs.len().saturating_sub(1)
                     };
-                    self.leaving = self.last_discs.get(slot).map(|disc| (disc.clone(), slot));
+                    self.leaving = self.last_discs.get(slot).map(|disc| {
+                        let angle = self.angles.get(&disc.index).copied().unwrap_or(0.0);
+                        (disc.clone(), slot, angle)
+                    });
                 }
             }
         }
@@ -3639,9 +3671,32 @@ impl ChangerMotion {
         } else {
             self.rpm = (self.rpm - rate(spec.spin_down_s) * dt).max(0.0);
         }
+        // The disc under the arm this frame turns; its angle is its own.
+        // During the slide the row carries the discs with their angles,
+        // none of them turning, so none of them moves. An arm on its way
+        // is over no disc.
+        let row_offset_now = match &self.row {
+            Some(m) => m.at(now_ms),
+            None => self.pending_shift as f32 * spec.pitch.unsigned_abs().max(1) as f32,
+        };
+        let under_arm = if self.travel.is_some() {
+            None
+        } else {
+            centres
+                .iter()
+                .position(|c| (along_of(*c) + row_offset_now - along).abs() < 0.5)
+                .and_then(|slot| changer.discs.get(slot))
+                .map(|disc| disc.index)
+        };
         if self.rpm > 0.0 {
-            self.angle = (self.angle + self.rpm * 6.0 * dt).rem_euclid(360.0);
+            if let Some(index) = under_arm {
+                let a = self.angles.entry(index).or_insert(0.0);
+                *a = (*a + self.rpm * 6.0 * dt).rem_euclid(360.0);
+            }
         }
+        // Discs no longer in the row are forgotten.
+        self.angles
+            .retain(|index, _| changer.discs.iter().any(|disc| disc.index == *index));
         let still = self.rpm <= 0.0;
         let sled_home = (radius - home).abs() < 0.5;
         let span = (edge - home).max(1.0);
@@ -3739,20 +3794,42 @@ impl ChangerMotion {
         });
         self.radius = Some(radius);
         self.along = Some(along);
+        // The arm has arrived when its glide has let go of it.
+        let travelling = self.travel.is_some();
+        // The pose's angle is the angle of the disc under the arm where
+        // the pose puts the arm, with this frame's row: the disc the
+        // drawing turns. None while the arm travels.
+        let degrees = if travelling {
+            0.0
+        } else {
+            centres
+                .iter()
+                .position(|c| (along_of(*c) + row_offset - along).abs() < 0.5)
+                .and_then(|slot| changer.discs.get(slot))
+                .and_then(|disc| self.angles.get(&disc.index).copied())
+                .unwrap_or(0.0)
+        };
         ChangerPose {
             along,
             radius: radius + toc_sweep,
-            degrees: self.angle,
+            degrees,
             spinning: self.rpm > 0.0,
             row_offset,
             laser: self.read != Read::Idle,
+            travelling,
+            angles: changer
+                .discs
+                .iter()
+                .map(|disc| self.angles.get(&disc.index).copied().unwrap_or(0.0))
+                .collect(),
+            leaving_angle: self.leaving.as_ref().map_or(0.0, |(_, _, a)| *a),
         }
     }
 
     /// The disc leaving the row, the slot it leaves from, and how much of
     /// it is still there, 1 before its dissolve and 0 at the end.
     pub fn leaving(&self, now_ms: u64) -> Option<(&lead::Disc, usize, f32)> {
-        let (disc, slot) = self.leaving.as_ref()?;
+        let (disc, slot, _) = self.leaving.as_ref()?;
         let alpha = self
             .fade
             .as_ref()
@@ -3851,10 +3928,37 @@ fn compose(pieces: &[(Frame, (i32, i32))]) -> Option<(Frame, (i32, i32))> {
     Some((frame, (x0, y0)))
 }
 
+/// A cover lying still at `degrees` about the screen point `centre`,
+/// drawn into a picture of the disc's size whose top left is returned:
+/// the live cover's own turn, the same primitive about the same
+/// fractional pivot with the same sampling, so the frame a disc stops or
+/// starts turning shows the cover where the frame before did. The disc's
+/// top left is placed as the disc picture is, so the two line up; the
+/// cover inside it is turned about `centre` exactly, not about the
+/// rounded corner.
+fn cover_still(cover: &Frame, centre: (f32, f32), degrees: f32, d: u32) -> (Frame, (i32, i32)) {
+    let at = (
+        (centre.0 - d as f32 / 2.0).round() as i32,
+        (centre.1 - d as f32 / 2.0).round() as i32,
+    );
+    let mut out = empty_frame(d, d);
+    turn_onto(
+        &mut Band::whole(&mut out),
+        cover,
+        centre_of(cover),
+        (centre.0 - at.0 as f32, centre.1 - at.1 as f32),
+        -degrees,
+        false,
+        true,
+    );
+    (out, at)
+}
+
 /// The changer's composed layers from the theme's pictures, as the tonearm
 /// and the reels are: the rail; in every slot with a disc, the cover fitted
 /// to the disc's size and cut by the theme's label mask under the theme's
-/// disc picture; the playing disc's cover kept apart to turn. The sled and
+/// disc picture, at the disc's own angle; the playing disc's cover kept
+/// apart to turn. The sled and
 /// the head are not here: they move every frame and are laid over these
 /// layers by `moving_parts`. A picture the theme leaves out is not drawn;
 /// all that does not move is the theme's background.
@@ -3908,7 +4012,8 @@ pub fn render_changer(
         if let Some((cx, cy)) = centres.get(slot) {
             let at = centred(disc_picture, *cx, *cy);
             if let Some(cover) = cache.cover(&disc.art_file, d, mask.as_ref()) {
-                under.extend(in_well(faded(&cover, alpha), at));
+                let (still, at) = cover_still(&cover, (*cx, *cy), pose.leaving_angle, d);
+                under.extend(in_well(faded(&still, alpha), at));
             }
             under.extend(in_well(faded(disc_picture, alpha), at));
         }
@@ -3926,7 +4031,9 @@ pub fn render_changer(
                 over.extend(in_well(disc_picture.clone(), at));
             } else {
                 if let Some(cover) = cover {
-                    under.extend(in_well(cover, at));
+                    let angle = pose.angles.get(slot).copied().unwrap_or(0.0);
+                    let (still, at) = cover_still(&cover, (cx, cy), angle, d);
+                    under.extend(in_well(still, at));
                 }
                 under.extend(in_well(disc_picture.clone(), at));
             }
@@ -4541,6 +4648,359 @@ mod changer_tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 
+    /// The angle is the disc's. Through a one-slot shift, the disc the arm
+    /// leaves stops turning and then stands at the one angle it reached,
+    /// in every frame of the slide and after; the disc that arrives under
+    /// the arm turns on from its own angle, 0, not from the other's; and
+    /// a disc never under the arm is drawn exactly as it always was.
+    /// A cover drawn still and the same cover drawn turning, at one angle
+    /// about one centre, paint the same pixels: the frame on which a disc
+    /// stops or starts turning shows nothing move. At a fractional centre,
+    /// where a rounded corner and an exact pivot would differ by a pixel.
+    #[test]
+    fn a_cover_still_and_a_cover_turning_paint_the_same_pixels() {
+        let (dir, spec) = theme("same-pixels");
+        let mut marked = solid_frame(30, 30, [220, 20, 20, 255]);
+        for y in 0..15u32 {
+            for x in 15..30u32 {
+                let i = ((y * 30 + x) * 4) as usize;
+                marked.rgba[i..i + 3].copy_from_slice(&[250, 250, 250]);
+            }
+        }
+        write_png(&dir.join("marked.png"), &marked).unwrap();
+        let cover = dir.join("marked.png").to_string_lossy().to_string();
+        let discs = vec![lead::Disc {
+            index: 0,
+            playing: true,
+            art_file: cover,
+            ..Default::default()
+        }];
+        let changer = scene(&spec, discs, 0.0, 300.0, true);
+        let mut cache = ChangerCache::default();
+        let d = spec.disc_size;
+        // A fractional centre: the row half a pixel off, as a scaled
+        // remote or an odd theme gives.
+        let offset = 0.5;
+        let centre = (spec.pos.0 as f32 + offset, spec.pos.1 as f32);
+        for angle in [0.0f32, 37.25, 90.0, 213.7] {
+            let turning_pose = ChangerPose {
+                along: centre.0,
+                radius: 21.0,
+                degrees: angle,
+                spinning: true,
+                row_offset: offset,
+                laser: false,
+                travelling: false,
+                angles: vec![angle],
+                leaving_angle: 0.0,
+            };
+            let still_pose = ChangerPose {
+                // The arm elsewhere, so no slot turns and the disc is
+                // drawn still at its angle.
+                along: spec.head_park.0 as f32,
+                spinning: false,
+                ..turning_pose.clone()
+            };
+            let turning = render_changer(&changer, &mut cache, &turning_pose, None);
+            let still = render_changer(&changer, &mut cache, &still_pose, None);
+            assert!(turning.turning.is_some(), "the disc turns under the arm");
+            assert!(still.turning.is_none(), "the disc lies still");
+            let paint = |drawing: &ChangerDrawing, degrees: f32| -> Frame {
+                let parts: Vec<(&Frame, (i32, i32))> = Vec::new();
+                let stack = Stack {
+                    screen: None,
+                    face: None,
+                    front: None,
+                    needle: None,
+                    needle_right: None,
+                    face_at: (0, 0),
+                    fonts: None,
+                    art: None,
+                    icon: None,
+                    spectra: &[],
+                    folder_pictures: &[],
+                    fanart: (None, None),
+                    vinyl: None,
+                    tonearm: None,
+                    reels: (None, None),
+                    indicators: None,
+                    base: None,
+                    changer: Some(ChangerStack {
+                        under: (&drawing.under.0, drawing.under.1),
+                        turning: drawing
+                            .turning
+                            .as_ref()
+                            .map(|(cover, centre)| (cover, *centre, degrees)),
+                        over: drawing.over.as_ref().map(|(f, at)| (f, *at)),
+                        parts,
+                    }),
+                };
+                let scene = Scene {
+                    width: 1000,
+                    height: 600,
+                    ..Scene::default()
+                };
+                let mut motion = Motion::new(1, None);
+                motion.paint_all = true;
+                raster_over(&scene, stack, &mut motion, 0).frame.clone()
+            };
+            let a = paint(&turning, angle);
+            let b = paint(&still, angle);
+            // The disc's box, a pixel wider than the disc all round.
+            let (x0, y0) = (
+                (centre.0 - d as f32 / 2.0).floor() as u32 - 1,
+                (centre.1 - d as f32 / 2.0).floor() as u32 - 1,
+            );
+            let mut differ = 0usize;
+            for y in y0..y0 + d + 2 {
+                for x in x0..x0 + d + 2 {
+                    let i = ((y * a.width + x) * 4) as usize;
+                    if a.rgba[i..i + 4] != b.rgba[i..i + 4] {
+                        differ += 1;
+                    }
+                }
+            }
+            assert_eq!(
+                differ, 0,
+                "at {angle} degrees, {differ} pixels of the disc differ between still and turning"
+            );
+        }
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A cold load to the middle slot: the arm leaves the park and crosses
+    /// the first slot on its way. Whatever frame of its travel lands on
+    /// the first slot's centre, nothing turns there: an arm on its way is
+    /// over no disc. Swept across every phase of the frame clock, since
+    /// which frame lands where depends on when the travel began.
+    #[test]
+    fn an_arm_on_its_way_turns_no_disc_it_passes_over() {
+        let (dir, spec) = theme("passing");
+        let cover = dir.join("cover.png").to_string_lossy().to_string();
+        let discs: Vec<lead::Disc> = (0..3)
+            .map(|i| lead::Disc {
+                index: i as i64 + 1,
+                playing: i == 1,
+                art_file: cover.clone(),
+                ..Default::default()
+            })
+            .collect();
+        let middle = scene(&spec, discs, 0.0, 4800.0, true);
+        let first_slot = slot_centres(&spec)[0].0;
+        // The travel is one eased move from the park to the middle slot;
+        // solve it for the instant the arm is over the first slot, and
+        // sample that instant as a frame, so the rule is tested where the
+        // arm is exactly on the centre it passes, not only near it.
+        let park = spec.head_park.0 as f32;
+        let target = slot_centres(&spec)[1].0;
+        let duration_ms = spec.travel_s * (target - park) / spec.pitch as f32 * 1000.0;
+        let share = (first_slot - park) / (target - park);
+        // Invert smoothstep s = t*t*(3-2t) by bisection.
+        let (mut lo, mut hi) = (0.0f32, 1.0f32);
+        for _ in 0..40 {
+            let mid = (lo + hi) / 2.0;
+            if mid * mid * (3.0 - 2.0 * mid) < share {
+                lo = mid;
+            } else {
+                hi = mid;
+            }
+        }
+        let over_first_ms = (lo * duration_ms).round() as u64;
+        let mut landed_on_first = 0;
+        for phase in 0..33u64 {
+            let mut motion = ChangerMotion::default();
+            let mut arrived = false;
+            // The first advance starts the travel; the sample instants are
+            // then the frame clock from that start, with one frame placed
+            // on the instant the arm is over the first slot.
+            let start = phase;
+            let mut instants: Vec<u64> = (0..200).map(|k| start + k * 33).collect();
+            instants.push(start + over_first_ms);
+            instants.sort_unstable();
+            instants.dedup();
+            for t in instants {
+                let p = motion.advance(&middle, t);
+                let slot = turning_slot(&spec, &p);
+                if (p.along - first_slot).abs() < 0.5 && p.travelling {
+                    landed_on_first += 1;
+                }
+                // Arrived the frame the glide lets go of the arm at the slot.
+                if !p.travelling && (p.along - 550.0).abs() < 0.5 {
+                    arrived = true;
+                }
+                if !arrived {
+                    assert_eq!(
+                        slot, None,
+                        "phase {phase}, t={t}: a slot turns while the arm travels (along {})",
+                        p.along
+                    );
+                    assert!(
+                        !p.travelling || p.degrees == 0.0,
+                        "phase {phase}, t={t}: a live angle while the arm travels"
+                    );
+                } else {
+                    assert_eq!(
+                        slot,
+                        Some(1),
+                        "phase {phase}, t={t}: once arrived the middle slot turns, and no other"
+                    );
+                }
+            }
+            assert!(arrived, "phase {phase}: the arm arrived");
+        }
+        // The sweep is only a test of the rule if some frame did land on
+        // the first slot's centre while travelling.
+        assert!(
+            landed_on_first > 0,
+            "no phase put a travelling frame on the first slot's centre; widen the sweep"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn through_a_shift_each_disc_keeps_its_own_angle() {
+        let (dir, spec) = theme("own-angle");
+        // A cover with a mark: red with one white quadrant, so a turn moves
+        // pixels a probe can see; the fixture's flat red would not.
+        let mut marked = solid_frame(30, 30, [220, 20, 20, 255]);
+        for y in 0..15u32 {
+            for x in 15..30u32 {
+                let i = ((y * 30 + x) * 4) as usize;
+                marked.rgba[i..i + 3].copy_from_slice(&[250, 250, 250]);
+            }
+        }
+        write_png(&dir.join("marked.png"), &marked).unwrap();
+        let cover = dir.join("marked.png").to_string_lossy().to_string();
+        let window = |first: i64, playing_slot: usize| -> Vec<lead::Disc> {
+            (0..3)
+                .map(|i| lead::Disc {
+                    index: first + i as i64,
+                    playing: i == playing_slot,
+                    art_file: cover.clone(),
+                    ..Default::default()
+                })
+                .collect()
+        };
+        let mut cache = ChangerCache::default();
+        // The second track plays in the middle slot, loaded and settled,
+        // disc 1 turning under the arm.
+        let second = scene(&spec, window(0, 1), 0.3, 4800.0, true);
+        let mut motion = ChangerMotion::default();
+        let mut p = motion.advance(&second, 0);
+        for t in 1..=20 {
+            p = motion.advance(&second, t * 500);
+        }
+        assert!(p.spinning && p.along == 550.0);
+        assert_eq!(p.angles[0], 0.0, "disc 0 never turned");
+        assert_eq!(p.angles[2], 0.0, "disc 2 never turned");
+        // The window moves on: discs 1,2,3, disc 2 (new slot 1) plays. The
+        // old disc 1 is now slot 0; it spins down under the arm, the row
+        // held a pitch off, then slides.
+        let third = scene(&spec, window(1, 1), 0.0, 4800.0, true);
+        let mut settled: Option<f32> = None;
+        let mut slid = false;
+        let mut angles_of_1_while_still = Vec::new();
+        let mut angles_of_3 = Vec::new();
+        for t in (10200..16000).step_by(50) {
+            p = motion.advance(&third, t);
+            // Slot 0 is disc 1 (the one that was turning), slot 1 disc 2,
+            // slot 2 disc 3.
+            if !p.spinning && settled.is_none() {
+                settled = Some(p.angles[0]);
+            }
+            if let Some(a) = settled {
+                if p.row_offset > 0.0 || p.row_offset == 0.0 && !p.spinning {
+                    angles_of_1_while_still.push((t, p.angles[0]));
+                    assert_eq!(
+                        p.angles[0], a,
+                        "disc 1 stands at the one angle it reached, at {t} ms"
+                    );
+                }
+            }
+            if p.row_offset > 0.0 && p.row_offset < 150.0 {
+                slid = true;
+            }
+            angles_of_3.push(p.angles[2]);
+            if slid && p.row_offset == 0.0 && p.spinning {
+                break;
+            }
+        }
+        let settled = settled.expect("disc 1 came to rest");
+        assert!(slid, "the row slid");
+        assert!(
+            settled.rem_euclid(360.0) != 0.0,
+            "disc 1 lies off the mark where it stopped: {settled}"
+        );
+        assert!(
+            angles_of_1_while_still.len() > 10,
+            "many frames of disc 1 standing still: {}",
+            angles_of_1_while_still.len()
+        );
+        assert!(
+            angles_of_3.iter().all(|a| *a == 0.0),
+            "disc 3, never under the arm, lies at 0 throughout"
+        );
+        // After the slide disc 2 is under the arm, turning on from its own
+        // 0: within the first frames of spin-up its angle is small, and it
+        // is not disc 1's angle.
+        assert!(p.spinning && p.row_offset == 0.0);
+        assert!(
+            p.degrees < 90.0,
+            "disc 2 turns on from 0, not from disc 1's {settled}: {}",
+            p.degrees
+        );
+        assert_eq!(p.angles[1], p.degrees, "the live angle is disc 2's own");
+        assert_eq!(p.angles[0], settled, "disc 1 still where it stopped");
+        // Drawn: disc 1's cover in the under layer is the plain cover
+        // turned to its angle, not the plain cover; disc 3's is the plain
+        // cover, byte for byte, as a disc that never turned.
+        let d = spec.disc_size;
+        let mask = cache.fitted(&spec.mask_file, d);
+        let plain = cache.cover(&cover, d, mask.as_ref()).expect("the cover");
+        let (turned, _) = cover_still(&plain, (50.0, 50.0), settled, d);
+        assert_ne!(
+            turned.rgba, plain.rgba,
+            "turned off the mark differs from plain"
+        );
+        let drawing = render_changer(&third, &mut cache, &p, None);
+        let (under, at) = &drawing.under;
+        let centres = slot_centres(&spec);
+        let sample = |frame: &Frame, at: (i32, i32), cx: f32, cy: f32| -> Vec<u8> {
+            let y = (cy - d as f32 * 0.25).round() as i32 - at.1;
+            (-20..20)
+                .flat_map(|dx| {
+                    let x = cx.round() as i32 + dx - at.0;
+                    let i = ((y as u32 * frame.width + x as u32) * 4) as usize;
+                    frame.rgba[i..i + 3].to_vec()
+                })
+                .collect()
+        };
+        let disc1_drawn = sample(under, *at, centres[0].0, centres[0].1);
+        let disc3_drawn = sample(under, *at, centres[2].0, centres[2].1);
+        // What the same row looks like with every disc at 0: a motion that
+        // never turned, settled on the same scene.
+        let mut never = ChangerMotion::default();
+        let mut p0 = never.advance(&third, 0);
+        for t in 1..=20 {
+            p0 = never.advance(&third, t * 500);
+        }
+        let p0 = ChangerPose {
+            angles: vec![0.0; 3],
+            leaving_angle: 0.0,
+            ..p0
+        };
+        let before = render_changer(&third, &mut cache, &p0, None);
+        let (b_under, b_at) = &before.under;
+        let disc1_plain = sample(b_under, *b_at, centres[0].0, centres[0].1);
+        let disc3_plain = sample(b_under, *b_at, centres[2].0, centres[2].1);
+        assert_ne!(
+            disc1_drawn, disc1_plain,
+            "disc 1 drawn at its angle, not at 0"
+        );
+        assert_eq!(disc3_drawn, disc3_plain, "disc 3 drawn as it always was");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn the_window_moving_on_slides_the_row_under_the_staying_arm() {
         let (dir, spec) = theme("shift");
@@ -4627,6 +5087,9 @@ mod changer_tests {
             spinning: false,
             row_offset: 150.0,
             laser: false,
+            travelling: false,
+            angles: Vec::new(),
+            leaving_angle: 0.0,
         };
         let drawing = render_changer(&third, &mut cache, &off, None);
         let (frame, at) = drawing.under;
@@ -4647,6 +5110,9 @@ mod changer_tests {
             spinning: true,
             row_offset: 150.0,
             laser: false,
+            travelling: false,
+            angles: Vec::new(),
+            leaving_angle: 0.0,
         };
         let drawing = render_changer(&third, &mut cache, &held, None);
         let (_, centre) = drawing.turning.expect("a disc turns under the arm");
@@ -5259,6 +5725,19 @@ impl Motion {
         Self {
             painters: Painters::new(threads, frame_rate),
             ..Self::default()
+        }
+    }
+
+    /// Motion for another meter, with the record and the reels where the
+    /// one before left them: a platter does not jump back to its mark
+    /// because the track, and with it the meter, moved on. Everything else
+    /// starts afresh, the tonearm included, since its angles are the new
+    /// meter's.
+    pub fn carrying_turn(threads: usize, frame_rate: Option<u32>, from: Motion) -> Self {
+        Self {
+            vinyl: from.vinyl,
+            reels: from.reels,
+            ..Self::new(threads, frame_rate)
         }
     }
 
@@ -10125,6 +10604,54 @@ mod tests {
         let mut ccw = VinylMotion::default();
         ccw.advance(60.0, false, true, false, false, 1.0, 0);
         assert!((ccw.advance(60.0, false, true, false, false, 1.0, 100) - 324.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn a_meter_switch_keeps_the_record_and_the_reels_turning() {
+        let spec = TonearmSpec {
+            file: String::new(),
+            pivot_screen: (0, 0),
+            pivot_image: (0, 0),
+            rest: 0.0,
+            start: -20.0,
+            end: -40.0,
+            drop_s: 1.0,
+            lift_s: 1.0,
+        };
+        let mut before = Motion::new(2, Some(30));
+        before.vinyl.advance(60.0, true, true, false, false, 1.0, 0);
+        before
+            .vinyl
+            .advance(60.0, true, true, false, false, 1.0, 500);
+        before.reels.0.advance(30.0, true, true, 0);
+        before.reels.0.advance(30.0, true, true, 500);
+        before.reels.1.advance(30.0, false, true, 0);
+        before.reels.1.advance(30.0, false, true, 500);
+        before.tonearm.update(&spec, true, 50.0, Some(100.0), 500);
+        let (record, left, right) = (
+            before.vinyl.angle(),
+            before.reels.0.advance(30.0, true, true, 500),
+            before.reels.1.advance(30.0, false, true, 500),
+        );
+        assert!(
+            record > 0.0 && left > 0.0 && right > 0.0,
+            "turned before the switch"
+        );
+
+        let mut after = Motion::carrying_turn(1, Some(30), before);
+        assert_eq!(after.vinyl.angle(), record, "the record stays where it was");
+        assert_eq!(after.reels.0.advance(30.0, true, true, 500), left);
+        assert_eq!(after.reels.1.advance(30.0, false, true, 500), right);
+        assert_eq!(after.painters(), 1, "the painters are the new meter's");
+        assert!(!after.tonearm.is_animating(), "the tonearm starts afresh");
+        // It goes on turning from there, with no jump.
+        let on = after
+            .vinyl
+            .advance(60.0, true, true, false, false, 1.0, 600);
+        assert!(
+            (on - (record + 36.0).rem_euclid(360.0)).abs() < 0.01,
+            "{record} -> {on}"
+        );
     }
 
     #[test]
