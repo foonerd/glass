@@ -16,6 +16,12 @@ test('the probe\'s line is read, whatever else the display wrote', () => {
   assert.equal(parseProbe('libEGL warning: something\n' + BROKEN + '\n').failed, 'egl-display');
   assert.equal(parseProbe(BROKEN).steps[0].detail, 'EGL gave no display for /dev/dri/card1 (EGL_SUCCESS)');
   assert.equal(parseProbe(NO_SCREEN).applies, false);
+  // The two facts a display from 0.10.1 adds; an older one leaves the render node unsaid.
+  const facts = parseProbe('{"applies":true,"ok":false,"failed":"card","reason":"/dev/dri/card0 could not be opened: Permission denied (os error 13)","driver":"drm-rp1-dsi","render_node":false,"card_error":"permission","steps":[]}');
+  assert.deepEqual([facts.renderNode, facts.cardError], [false, 'permission']);
+  assert.deepEqual([parseProbe(WORKS).renderNode, parseProbe(WORKS).cardError], [null, '']);
+  assert.equal(summary({ probe: facts }).renderNode, false);
+  assert.equal(summary({ probe: parseProbe(WORKS) }).renderNode, null);
   // A display that does not know the switch prints its usage or nothing.
   assert.equal(parseProbe('glass: unknown argument --probe-graphics'), null);
   assert.equal(parseProbe(''), null);
@@ -47,7 +53,7 @@ test('the kiosk\'s X server says in its log whether it draws with the GPU', () =
 });
 
 test('Mesa\'s parts are of one version, or it is said which are not', () => {
-  const one = 'libegl-mesa0 24.2.8-1~bpo12+rpt5\nlibgbm1 24.2.8-1~bpo12+rpt5\nlibgl1-mesa-dri 24.2.8-1~bpo12+rpt5\nlibglapi-mesa 24.2.8-1~bpo12+rpt5\nlibglx-mesa0 24.2.8-1~bpo12+rpt5\n';
+  const one = 'libegl-mesa0 24.2.8-1~bpo12+rpt5\nlibgbm1 24.2.8-1~bpo12+rpt5\nlibgl1-mesa-dri 24.2.8-1~bpo12+rpt5\nlibglapi-mesa 24.2.8-1~bpo12+rpt5\nlibglx-mesa0 24.2.8-1~bpo12+rpt5\nmesa-libgallium 24.2.8-1~bpo12+rpt5\n';
   const got = mesaParts(one);
   assert.equal(got.agree, true);
   assert.equal(got.version, '24.2.8-1~bpo12+rpt5');
@@ -56,6 +62,15 @@ test('Mesa\'s parts are of one version, or it is said which are not', () => {
   assert.equal(mixed.agree, false);
   assert.equal(mixed.version, '');
   assert.equal(mixed.versions['libglapi-mesa'], '23.2.1-1');
+  // The Pi 5 with an older Touch Display: the five agree, libgallium alone
+  // is the older one, and libEGL_mesa will not load for want of its own.
+  const gallium = mesaParts(one.replace('mesa-libgallium 24.2.8-1~bpo12+rpt5', 'mesa-libgallium 24.2.8-1~bpo12+rpt3'));
+  assert.equal(gallium.agree, false);
+  assert.equal(gallium.versions['mesa-libgallium'], '24.2.8-1~bpo12+rpt3');
+  // A system without the package at all (Mesa before 24.2) still agrees on the rest.
+  const older = mesaParts(one.replace(/mesa-libgallium [^\n]*\n/, ''));
+  assert.equal(older.agree, true);
+  assert.equal(Object.keys(older.versions).length, MESA_PARTS.length - 1);
   // What is not Mesa's is passed over; nothing installed agrees with itself.
   assert.deepEqual(mesaParts('libdrm2 2.4.123\n').versions, {});
   assert.equal(mesaParts('').agree, true);

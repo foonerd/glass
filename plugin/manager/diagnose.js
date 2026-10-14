@@ -10,6 +10,7 @@
 // and the Manager's tab where it is set, when there is one.
 
 const SYMPTOMS = ['no-meters', 'not-moving', 'restarts', 'touch', 'screen', 'artwork', 'remotes', 'face', 'look', 'forecast', 'slow', 'other'];
+const graphicsFault = require('./graphics').fault;
 
 const cause = (check, key, fill, go) => ({ check, kind: 'cause', key, with: fill || {}, go: go || null });
 const note = (check, key, fill, go) => ({ check, kind: 'note', key, with: fill || {}, go: go || null });
@@ -127,7 +128,17 @@ const CHECKS = [
     run(f) {
       const g = f.screen && f.screen.graphics;
       if (!g || !g.asked) return null;
-      if (g.applies && g.ok === false) return cause('graphics', 'DIAG_GRAPHICS_BROKEN', { reason: g.reason }, 'screen');
+      if (g.applies && g.ok === false) {
+        // The system faults the Troubleshooting page knows, each with its cure, before the plain verdict.
+        const which = graphicsFault(g);
+        if (which === 'no-gpu') return cause('graphics', 'DIAG_GRAPHICS_NO_GPU', { driver: g.driver, reason: g.reason }, 'screen');
+        if (which === 'no-right') return cause('graphics', 'DIAG_GRAPHICS_NO_RIGHT', { reason: g.reason }, 'screen');
+        if (which === 'mesa') {
+          const parts = Object.keys(g.mesa.versions).map(function (k) { return k + ' ' + g.mesa.versions[k]; }).join(', ');
+          return cause('graphics', 'DIAG_GRAPHICS_MESA', { reason: g.reason, parts: parts }, 'screen');
+        }
+        return cause('graphics', 'DIAG_GRAPHICS_BROKEN', { reason: g.reason }, 'screen');
+      }
       if (g.x && g.x.state === 'software') return note('graphics', 'DIAG_GRAPHICS_X_SOFTWARE', { detail: g.x.detail });
       if (g.applies && g.ok && g.software) return note('graphics', 'DIAG_GRAPHICS_SOFTWARE', { renderer: g.renderer });
       return g.applies && g.ok ? ok('graphics', 'DIAG_GRAPHICS_OK', { reason: g.reason }) : null;

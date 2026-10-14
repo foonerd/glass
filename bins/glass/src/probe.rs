@@ -45,6 +45,14 @@ pub struct Probe {
     /// and whether that is the CPU.
     pub renderer: String,
     pub software: bool,
+    /// Whether the kernel offers a render node (`/dev/dri/renderD*`), the
+    /// GPU driver's own door: a panel's driver alone (`drm-rp1-dsi`) opens
+    /// none, and that is a GPU driver not loaded, not a library at fault.
+    pub render_node: bool,
+    /// Why the card would not open, as a kind the Manager can act on and not
+    /// the loader's words: `permission` where the display's user lacks the
+    /// right to it, else empty.
+    pub card_error: String,
     pub steps: Vec<Step>,
 }
 
@@ -78,6 +86,19 @@ pub fn software_renderer(name: &str) -> bool {
     ["llvmpipe", "softpipe", "swrast", "software rasterizer"]
         .iter()
         .any(|word| name.contains(word))
+}
+
+/// Whether the names under `/dev/dri` hold a render node.
+pub fn render_node_among<I: IntoIterator<Item = String>>(names: I) -> bool {
+    names.into_iter().any(|name| name.starts_with("renderD"))
+}
+
+/// The kind of a card that would not open, for `Probe::card_error`.
+pub fn card_error_kind(error: &std::io::Error) -> &'static str {
+    match error.kind() {
+        std::io::ErrorKind::PermissionDenied => "permission",
+        _ => "",
+    }
 }
 
 /// The connector of `card` that is connected, by its own name (`DSI-2`,
@@ -220,8 +241,8 @@ fn run() -> Probe {
 #[cfg(target_os = "linux")]
 mod linux {
     use super::{
-        conclude, connected_of, egl_error_name, no_card_reason, pick_card, vendor_library, Probe,
-        Step,
+        card_error_kind, conclude, connected_of, egl_error_name, no_card_reason, pick_card,
+        render_node_among, vendor_library, Probe, Step,
     };
     use std::ffi::{c_char, c_int, c_void, CStr, CString};
     use std::os::fd::AsRawFd;
@@ -310,7 +331,19 @@ mod linux {
             .and_then(|link| link.file_name().map(|n| n.to_string_lossy().into_owned()))
             .unwrap_or_default();
         let connector = connected_of(&listed, &card);
-        let told = |probe: Probe, renderer: &str| probe.told(&driver, &connector, renderer);
+        let render_node = std::fs::read_dir("/dev/dri")
+            .map(|entries| {
+                render_node_among(
+                    entries
+                        .filter_map(|e| e.ok())
+                        .map(|e| e.file_name().to_string_lossy().into_owned()),
+                )
+            })
+            .unwrap_or(false);
+        let told = |mut probe: Probe, renderer: &str| {
+            probe.render_node = render_node;
+            probe.told(&driver, &connector, renderer)
+        };
         let node = format!("/dev/dri/{card}");
         let file = match std::fs::OpenOptions::new()
             .read(true)
@@ -325,7 +358,9 @@ mod linux {
                     false,
                     format!("{node} could not be opened: {e}"),
                 );
-                return told(conclude(true, steps), "");
+                let mut probe = told(conclude(true, steps), "");
+                probe.card_error = card_error_kind(&e).to_string();
+                return probe;
             }
         };
         step(
@@ -718,6 +753,30 @@ mod tests {
             "the kernel drives no screen here: nothing to draw on without an X server"
         );
         assert_eq!(no_card_reason(Some("  ")), no_card_reason(None));
+    }
+
+    #[test]
+    fn the_render_node_and_the_cards_refusal_are_facts_of_their_own() {
+        // A Pi 5 with its GPU: the panel's card, the GPU's card, the render node.
+        let names = |list: &[&str]| list.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert!(render_node_among(names(&[
+            "card0",
+            "card0-DSI-2",
+            "card1",
+            "card1-HDMI-A-1",
+            "renderD128"
+        ])));
+        // The same Pi 5 without vc4-kms-v3d: the panel's card alone.
+        assert!(!render_node_among(names(&["card0", "card0-DSI-2"])));
+        assert!(!render_node_among(names(&[])));
+        // The card's refusal by kind, not by the loader's words.
+        let denied = std::io::Error::from(std::io::ErrorKind::PermissionDenied);
+        assert_eq!(card_error_kind(&denied), "permission");
+        let missing = std::io::Error::from(std::io::ErrorKind::NotFound);
+        assert_eq!(card_error_kind(&missing), "");
+        // A probe that was never asked for them says neither.
+        let probe = conclude(true, vec![step("gbm", false, "no GBM device")]);
+        assert!(!probe.render_node && probe.card_error.is_empty());
     }
 
     fn step(step: &'static str, ok: bool, detail: &str) -> Step {

@@ -255,6 +255,43 @@ test('graphics that cannot draw on the screen itself are named as the cause, wit
   for (const key of ['DIAG_GRAPHICS_BROKEN', 'DIAG_GRAPHICS_X_SOFTWARE', 'DIAG_GRAPHICS_SOFTWARE', 'DIAG_GRAPHICS_OK']) assert.ok(strings['MANAGER_' + key], key);
 });
 
+test('the three system faults the Troubleshooting page knows are each named with their cure', () => {
+  const find = function (graphics) {
+    const f = healthy();
+    f.screen = Object.assign({}, f.screen || {}, { graphics: graphics });
+    return diagnose('screen', f).findings.find(function (x) { return x.check === 'graphics'; });
+  };
+  const x = { state: 'unknown', detail: '' };
+  const agree = { versions: { 'libegl-mesa0': '24.2.8-1~bpo12+rpt5' }, agree: true, version: '24.2.8-1~bpo12+rpt5' };
+  // A Pi 5 with a DSI panel and no vc4-kms-v3d: the panel's card alone, no render node.
+  const noGpu = find({ asked: true, applies: true, ok: false, failed: 'card', driver: 'drm-rp1-dsi', connector: 'DSI-2', renderNode: false, cardError: 'permission', reason: '/dev/dri/card0 could not be opened: Permission denied (os error 13)', mesa: agree, x: x });
+  assert.deepStrictEqual([noGpu.kind, noGpu.key, noGpu.with.driver, noGpu.go], ['cause', 'DIAG_GRAPHICS_NO_GPU', 'drm-rp1-dsi', 'screen']);
+  assert.ok(strings.MANAGER_DIAG_GRAPHICS_NO_GPU.indexOf('vc4-kms-v3d-pi5') !== -1);
+  // The GPU is there and the user's right to the card is not: a failed install took the render group.
+  const noRight = find({ asked: true, applies: true, ok: false, failed: 'card', driver: 'vc4', connector: 'HDMI-A-1', renderNode: true, cardError: 'permission', reason: '/dev/dri/card1 could not be opened: Permission denied (os error 13)', mesa: agree, x: x });
+  assert.deepStrictEqual([noRight.kind, noRight.key], ['cause', 'DIAG_GRAPHICS_NO_RIGHT']);
+  assert.ok(strings.MANAGER_DIAG_GRAPHICS_NO_RIGHT.indexOf('render') !== -1);
+  // Mesa out of step: libEGL_mesa will not load for want of its own libgallium.
+  const mixed = { versions: { 'libegl-mesa0': '24.2.8-1~bpo12+rpt5', 'mesa-libgallium': '24.2.8-1~bpo12+rpt3' }, agree: false, version: '' };
+  const mesa = find({ asked: true, applies: true, ok: false, failed: 'egl-vendor', driver: 'vc4', renderNode: true, cardError: '', reason: 'EGL gave no display for /dev/dri/card1; the EGL vendor library libEGL_mesa.so.0 would not load: libgallium-24.2.8-1~bpo12+rpt5.so: cannot open shared object file', mesa: mixed, x: x });
+  assert.deepStrictEqual([mesa.kind, mesa.key], ['cause', 'DIAG_GRAPHICS_MESA']);
+  assert.strictEqual(mesa.with.parts, 'libegl-mesa0 24.2.8-1~bpo12+rpt5, mesa-libgallium 24.2.8-1~bpo12+rpt3');
+  assert.ok(strings.MANAGER_DIAG_GRAPHICS_MESA.indexOf('mesa-libgallium') !== -1);
+  // The vendor library fails and Mesa agrees with itself: not that fault, the plain verdict.
+  const other = find({ asked: true, applies: true, ok: false, failed: 'egl-vendor', driver: 'vc4', renderNode: true, cardError: '', reason: 'libEGL_mesa.so.0 would not load: libxshmfence.so.1: cannot open shared object file', mesa: agree, x: x });
+  assert.strictEqual(other.key, 'DIAG_GRAPHICS_BROKEN');
+  // A display before 0.10.1 says neither fact: the plain verdict, as before.
+  const older = find({ asked: true, applies: true, ok: false, failed: 'card', driver: 'drm-rp1-dsi', renderNode: null, cardError: '', reason: '/dev/dri/card0 could not be opened: Permission denied (os error 13)', mesa: agree, x: x });
+  assert.strictEqual(older.key, 'DIAG_GRAPHICS_BROKEN');
+  // The strings exist in every language, with their holes.
+  for (const lang of ['en', 'de', 'fr']) {
+    const s = require('../../i18n/strings_' + lang + '.json').GLASS;
+    assert.ok(s.MANAGER_DIAG_GRAPHICS_NO_GPU.indexOf('{driver}') !== -1, lang);
+    assert.ok(s.MANAGER_DIAG_GRAPHICS_NO_RIGHT.indexOf('{reason}') !== -1, lang);
+    assert.ok(s.MANAGER_DIAG_GRAPHICS_MESA.indexOf('{parts}') !== -1, lang);
+  }
+});
+
 test('a window the display could not open is found by what the display really writes', () => {
   const at = '2026-10-01T04:58:0';
   const line = (n, words) => at + n + '+0100 player volumio[9]: info: glass: ' + words;

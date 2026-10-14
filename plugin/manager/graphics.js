@@ -21,8 +21,10 @@ const { execFile } = require('child_process');
 const fs = require('fs');
 
 // Mesa's parts on a Debian system: one source, one version, or the
-// libraries do not fit each other.
-const MESA_PARTS = ['libegl-mesa0', 'libgbm1', 'libgl1-mesa-dri', 'libglapi-mesa', 'libglx-mesa0'];
+// libraries do not fit each other. libEGL_mesa is linked to a libgallium of
+// its own version, so mesa-libgallium left behind is the loader's "cannot
+// open shared object file" (seen on a Pi 5 with an older Touch Display).
+const MESA_PARTS = ['libegl-mesa0', 'libgbm1', 'libgl1-mesa-dri', 'libglapi-mesa', 'libglx-mesa0', 'mesa-libgallium'];
 
 // What the probe printed, as an object, or null when it printed nothing
 // that reads as one (an older display that does not know the switch).
@@ -41,6 +43,9 @@ function parseProbe(stdout) {
       connector: String(probe.connector || ''),
       renderer: String(probe.renderer || ''),
       software: probe.software === true,
+      // Two facts a display from 0.10.1 adds; an older one leaves them unsaid.
+      renderNode: probe.render_node === true ? true : (probe.render_node === false ? false : null),
+      cardError: String(probe.card_error || ''),
       steps: Array.isArray(probe.steps) ? probe.steps.map(function (s) { return { step: String(s.step || ''), ok: s.ok === true, detail: String(s.detail || '') }; }) : []
     };
   } catch (e) {
@@ -95,6 +100,8 @@ function summary(found) {
     connector: probe ? probe.connector : '',
     renderer: probe ? probe.renderer : '',
     software: probe ? probe.software : false,
+    renderNode: probe ? probe.renderNode : null,
+    cardError: probe ? probe.cardError : '',
     x: x,
     mesa: mesa,
     at: f.at || 0
@@ -108,6 +115,21 @@ function summary(found) {
 function blocksTake(mode, graphics) {
   const g = graphics || {};
   return mode === 'kms' && g.asked === true && g.applies === true && g.ok === false;
+}
+
+// The drivers of a screen that is a panel's own card and no GPU: without a
+// render node beside it, the GPU driver (vc4-kms-v3d) is not loaded.
+const PANEL_DRIVERS = ['drm-rp1-dsi', 'drm-rp1-dpi', 'panel-mipi-dbi'];
+
+// Which of the system faults the Troubleshooting page knows a failed probe
+// is, from the probe's facts and Mesa's versions: `no-gpu`, `no-right`,
+// `mesa`, or null where none of them is told apart from the rest.
+function fault(g) {
+  if (!g || !g.applies || g.ok !== false) return null;
+  if (g.renderNode === false && PANEL_DRIVERS.indexOf(g.driver) !== -1) return 'no-gpu';
+  if (g.failed === 'card' && g.cardError === 'permission') return 'no-right';
+  if (g.failed === 'egl-vendor' && g.mesa && g.mesa.agree === false) return 'mesa';
+  return null;
 }
 
 // Run the probe as the display's user and read the X log and Mesa's
@@ -134,4 +156,4 @@ function check(options) {
   });
 }
 
-module.exports = { MESA_PARTS: MESA_PARTS, parseProbe: parseProbe, xVerdict: xVerdict, mesaParts: mesaParts, summary: summary, blocksTake: blocksTake, check: check };
+module.exports = { MESA_PARTS: MESA_PARTS, PANEL_DRIVERS: PANEL_DRIVERS, parseProbe: parseProbe, xVerdict: xVerdict, mesaParts: mesaParts, summary: summary, blocksTake: blocksTake, fault: fault, check: check };
