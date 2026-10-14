@@ -247,7 +247,7 @@ impl Page {
                     Motion::carrying_turn(1, Some(rate), std::mem::take(&mut showing.motion));
                 showing.rate = rate;
                 showing.indicators = None;
-                showing.pictures = Pictures::default();
+                showing.pictures.clear();
             }
             None => {
                 let bins = skin

@@ -866,7 +866,8 @@ fn session(
     // same laying as in a browser's page.
     let mut laid = Laid::default();
     // Move to another meter of the theme: its skin and pictures start afresh,
-    // the motion too but for the turn of the record and the reels.
+    // the motion too but for the turn of the record and the reels, and the
+    // changer's mechanism, which carries on where it stands.
     macro_rules! switch_meter {
         ($name:expr) => {{
             let name: String = $name;

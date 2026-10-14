@@ -2666,9 +2666,16 @@ impl Pictures {
         }
     }
 
-    /// Forget everything, for a change of meter.
+    /// Forget the pictures, for a change of meter. The changer's mechanism
+    /// is not a picture: it carries on where it stands, and takes the next
+    /// meter's geometry at its first frame, a meter without a changer
+    /// leaving it as it is.
     pub fn clear(&mut self) {
-        *self = Self::default();
+        let changer_motion = std::mem::take(&mut self.changer_motion);
+        *self = Self {
+            changer_motion,
+            ..Self::default()
+        };
     }
 
     /// The album art stretched to its box.
@@ -3550,8 +3557,12 @@ fn glide(
 /// disc up to speed. So a stop spins the disc down, homes the sled and
 /// returns the arm, in that order; a new disc spins down and homes before
 /// the arm travels, then spins up and seeks. Durations are the theme's.
+/// The mechanism outlives a meter: handed the next meter's spec, it goes
+/// on where it stands, its parts re-placed in that meter's pixels.
 #[derive(Default)]
 pub struct ChangerMotion {
+    /// The spec the parts stand in: a frame with another re-places them.
+    spec: Option<lead::ChangerSpec>,
     along: Option<f32>,
     radius: Option<f32>,
     rpm: f32,
@@ -3589,6 +3600,14 @@ const DISENGAGE_GRACE_MS: u64 = 1500;
 
 impl ChangerMotion {
     pub fn advance(&mut self, changer: &plot::Changer, now_ms: u64) -> ChangerPose {
+        // The next meter of the theme: the parts re-placed in its pixels,
+        // the mechanism going on where it stands.
+        if self.spec.as_ref() != Some(&changer.spec) {
+            if let Some(known) = self.spec.take() {
+                self.retarget(&known, changer);
+            }
+            self.spec = Some(changer.spec.clone());
+        }
         let spec = &changer.spec;
         let (home, edge) = sled_range(spec);
         let centres = slot_centres(spec);
@@ -3823,6 +3842,93 @@ impl ChangerMotion {
                 .map(|disc| self.angles.get(&disc.index).copied().unwrap_or(0.0))
                 .collect(),
             leaving_angle: self.leaving.as_ref().map_or(0.0, |(_, _, a)| *a),
+        }
+    }
+
+    /// The parts re-placed from the pixels of `old` into those of the
+    /// changer on show, what they were doing going on. The arm keeps its
+    /// slot along the bar, the park staying the park, a travel under way
+    /// going on between its re-placed ends at its own pace; the sled keeps
+    /// its share of the sled's travel, a seek likewise. A bar of as many
+    /// slots shows the same window of the queue, so a slide of the row goes
+    /// on at the new pitch; a bar of other slots shows another window,
+    /// which is no move of the queue: the arm stays over the disc it was
+    /// over, in that disc's new slot, and the row stands at rest, nothing
+    /// leaving. The discs' angles, the spin, the read and the player's
+    /// grace are the mechanism's own and stay as they are.
+    fn retarget(&mut self, old: &lead::ChangerSpec, changer: &plot::Changer) {
+        let new = &changer.spec;
+        let bar = |spec: &lead::ChangerSpec| {
+            let along_of = |x: i32, y: i32| if spec.horizontal { x as f32 } else { y as f32 };
+            (
+                along_of(spec.pos.0, spec.pos.1),
+                spec.pitch as f32,
+                along_of(spec.head_park.0, spec.head_park.1),
+            )
+        };
+        let (old_bar, new_bar) = (bar(old), bar(new));
+        let slot_of = |x: f32, bar: (f32, f32, f32)| {
+            if bar.1 == 0.0 {
+                0.0
+            } else {
+                (x - bar.0) / bar.1
+            }
+        };
+        let map_along = |x: f32| {
+            if (x - old_bar.2).abs() < 0.5 {
+                new_bar.2
+            } else {
+                new_bar.0 + slot_of(x, old_bar) * new_bar.1
+            }
+        };
+        // Another window of the queue: the arm by the disc it stands over,
+        // with the arm at rest over a slot and that disc in the new window.
+        let over_disc = if old.slots != new.slots && self.travel.is_none() {
+            self.along
+                .filter(|along| (along - old_bar.2).abs() >= 0.5)
+                .map(|along| slot_of(along, old_bar))
+                .filter(|slot| (slot - slot.round()).abs() < 0.01 && *slot >= 0.0)
+                .and_then(|slot| self.last_discs.get(slot.round() as usize))
+                .and_then(|disc| changer.discs.iter().position(|d| d.index == disc.index))
+                .map(|slot| new_bar.0 + slot as f32 * new_bar.1)
+        } else {
+            None
+        };
+        if let Some(along) = over_disc {
+            self.along = Some(along);
+        } else if old_bar != new_bar {
+            self.along = self.along.map(map_along);
+            if let Some(m) = &mut self.travel {
+                m.from = map_along(m.from);
+                m.to = map_along(m.to);
+            }
+        }
+        let (old_home, old_edge) = sled_range(old);
+        let (new_home, new_edge) = sled_range(new);
+        if (old_home, old_edge) != (new_home, new_edge) {
+            let map_radius = |r: f32| {
+                new_home + (r - old_home) / (old_edge - old_home).max(1.0) * (new_edge - new_home)
+            };
+            self.radius = self.radius.map(map_radius);
+            if let Some(m) = &mut self.seek {
+                m.from = map_radius(m.from);
+                m.to = map_radius(m.to);
+            }
+        }
+        if old.slots != new.slots {
+            self.first_index = None;
+            self.last_discs.clear();
+            self.pending_shift = 0;
+            self.row = None;
+            self.leaving = None;
+            self.fade = None;
+        } else if old.pitch != new.pitch {
+            let scale =
+                new.pitch.unsigned_abs().max(1) as f32 / old.pitch.unsigned_abs().max(1) as f32;
+            if let Some(m) = &mut self.row {
+                m.from *= scale;
+                m.to *= scale;
+            }
         }
     }
 
@@ -4265,6 +4371,200 @@ mod changer_tests {
             }
         }
         compose(&pieces).unwrap()
+    }
+
+    /// The next meter of the theme with the changer at the same place: the
+    /// mechanism goes on exactly as it would have, frame for frame.
+    #[test]
+    fn the_mechanism_carries_on_across_a_meter_of_the_same_geometry() {
+        let (dir, spec) = theme("carry-same");
+        let cover = dir.join("cover.png").to_string_lossy().to_string();
+        let discs = vec![
+            lead::Disc {
+                index: 0,
+                playing: true,
+                art_file: cover.clone(),
+                ..Default::default()
+            },
+            lead::Disc {
+                index: 1,
+                art_file: cover,
+                ..Default::default()
+            },
+        ];
+        let changer = scene(&spec, discs.clone(), 0.2, 300.0, true);
+        // The next meter names other pictures at the same geometry.
+        let mut next_spec = spec.clone();
+        next_spec.rail_file = dir.join("rail-next.png").to_string_lossy().to_string();
+        let next = scene(&next_spec, discs, 0.2, 300.0, true);
+        let mut carried = ChangerMotion::default();
+        let mut stayed = ChangerMotion::default();
+        for t in 0..=200u64 {
+            carried.advance(&changer, t * 20);
+            stayed.advance(&changer, t * 20);
+        }
+        for t in 201..=300u64 {
+            let a = carried.advance(&next, t * 20);
+            let b = stayed.advance(&changer, t * 20);
+            assert_eq!(a, b, "frame {t}");
+        }
+        assert!(carried.advance(&next, 6020).spinning);
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The next meter with the changer elsewhere, the bar upright and the
+    /// sled's travel another: the arm stays over its disc in the new slot,
+    /// the disc keeps turning from its own angle with the laser on, the
+    /// sled at the same share of its travel; nothing goes back to the park.
+    #[test]
+    fn the_mechanism_carries_on_into_another_geometry() {
+        let (dir, spec) = theme("carry-other");
+        let cover = dir.join("cover.png").to_string_lossy().to_string();
+        let discs = vec![
+            lead::Disc {
+                index: 0,
+                art_file: cover.clone(),
+                ..Default::default()
+            },
+            lead::Disc {
+                index: 1,
+                playing: true,
+                art_file: cover.clone(),
+                ..Default::default()
+            },
+            lead::Disc {
+                index: 2,
+                art_file: cover,
+                ..Default::default()
+            },
+        ];
+        let changer = scene(&spec, discs.clone(), 0.5, 300.0, true);
+        let next_spec = lead::ChangerSpec {
+            horizontal: false,
+            pos: (300, 100),
+            pitch: 120,
+            head_park: (300, 40),
+            sled_start: Some(20),
+            sled_end: Some(45),
+            ..spec.clone()
+        };
+        let next = scene(&next_spec, discs, 0.5, 300.0, true);
+        let mut motion = ChangerMotion::default();
+        let mut before = motion.advance(&changer, 0);
+        for t in 1..=300u64 {
+            before = motion.advance(&changer, t * 20);
+        }
+        assert!(
+            before.spinning && before.laser && !before.travelling,
+            "{before:?}"
+        );
+        assert_eq!(before.along, 550.0, "over the second slot");
+        let (home, edge) = sled_range(&spec);
+        let share = (before.radius - home) / (edge - home);
+        assert!(share > 0.1, "the sled out on the track: {share}");
+        let after = motion.advance(&next, 6020);
+        assert_eq!(
+            after.along, 220.0,
+            "over the second slot of the upright bar"
+        );
+        assert!(
+            after.spinning && after.laser && !after.travelling,
+            "{after:?}"
+        );
+        let turned = (after.degrees - before.degrees).rem_euclid(360.0);
+        assert!(
+            turned > 0.0 && turned < 10.0,
+            "one frame's turn from its own angle: {turned}"
+        );
+        let share_after = (after.radius - 20.0) / 25.0;
+        assert!(
+            (share_after - share).abs() < 0.05,
+            "the sled's share of its travel: {share} then {share_after}"
+        );
+        // Frames on: the arm stays, nothing starts over.
+        let later = motion.advance(&next, 6500);
+        assert_eq!(later.along, 220.0);
+        assert!(later.spinning && !later.travelling, "{later:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The next meter with a bar of more slots shows a wider window of the
+    /// queue: the arm stays over the disc it was over, in that disc's new
+    /// slot, with no slide of the row and no way back to the park.
+    #[test]
+    fn a_bar_of_other_slots_keeps_the_arm_over_its_disc() {
+        let (dir, spec) = theme("carry-slots");
+        let cover = dir.join("cover.png").to_string_lossy().to_string();
+        let disc = |index: i64, playing: bool| lead::Disc {
+            index,
+            playing,
+            art_file: cover.clone(),
+            ..Default::default()
+        };
+        // Three slots: the window 2, 3, 4 of a long queue, 3 playing.
+        let changer = scene(
+            &spec,
+            vec![disc(2, false), disc(3, true), disc(4, false)],
+            0.0,
+            3600.0,
+            true,
+        );
+        // Five slots: the window 1 to 5, the playing disc in the third.
+        let wide = lead::ChangerSpec {
+            slots: 5,
+            ..spec.clone()
+        };
+        let next = scene(
+            &wide,
+            (1..=5).map(|i| disc(i, i == 3)).collect(),
+            0.0,
+            3600.0,
+            true,
+        );
+        let mut motion = ChangerMotion::default();
+        let mut before = motion.advance(&changer, 0);
+        for t in 1..=300u64 {
+            before = motion.advance(&changer, t * 20);
+        }
+        assert_eq!(before.along, 550.0, "over the second slot of three");
+        assert!(before.spinning && !before.travelling, "{before:?}");
+        let after = motion.advance(&next, 6020);
+        assert_eq!(after.along, 700.0, "over the third slot of five");
+        assert!(after.spinning && !after.travelling, "{after:?}");
+        assert_eq!(after.row_offset, 0.0);
+        assert!(motion.leaving(6020).is_none());
+        assert_eq!(after.angles.len(), 5);
+        assert!(after.angles[2] > 0.0, "the playing disc's angle is its own");
+        let later = motion.advance(&next, 7000);
+        assert_eq!(later.along, 700.0);
+        assert!(later.spinning && !later.travelling, "{later:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A change of meter forgets the pictures, not the mechanism: at the
+    /// next meter's first frame the arm is over its disc and the disc
+    /// turning, nothing back at the park, the drawing made afresh.
+    #[test]
+    fn a_change_of_meter_keeps_the_changers_mechanism() {
+        let (dir, spec) = theme("carry-pictures");
+        let cover = dir.join("cover.png").to_string_lossy().to_string();
+        let discs = vec![lead::Disc {
+            index: 0,
+            playing: true,
+            art_file: cover,
+            ..Default::default()
+        }];
+        let changer = scene(&spec, discs, 0.0, 3600.0, true);
+        let mut pictures = Pictures::default();
+        for t in 0..=300u64 {
+            pictures.changer_motion.advance(&changer, t * 20);
+        }
+        pictures.clear();
+        assert!(pictures.changer.is_none(), "the drawing is made afresh");
+        let pose = pictures.changer_motion.advance(&changer, 6020);
+        assert_eq!(pose.along, 400.0, "over its disc");
+        assert!(pose.spinning && !pose.travelling, "{pose:?}");
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     /// The theme's rotation speed is the disc's spin at the inner stop: at
