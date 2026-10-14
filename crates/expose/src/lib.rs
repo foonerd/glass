@@ -3720,14 +3720,18 @@ impl ChangerMotion {
         let sled_home = (radius - home).abs() < 0.5;
         let span = (edge - home).max(1.0);
         // The read: the laser goes off the moment the arm has to move or
-        // the player leaves the disc; once the disc is up to speed with the
-        // sled home, the laser comes on and the sled sweeps the lead-in for
-        // the table of contents, then follows the track.
+        // the player leaves the disc; once the disc is up to speed, the
+        // laser comes on and the sled sweeps the lead-in for the table of
+        // contents where it stands, then follows the track. At a start the
+        // sled stands home; after a frame that put the read out with the
+        // sled on the track, the pickup finds its place again there, as a
+        // pickup does, rather than wait for a home it would reach only
+        // with the disc still.
         let up_to_speed = want_spin && self.rpm >= full_rpm * 0.9;
         if !want_spin {
             self.read = Read::Idle;
             self.toc = None;
-        } else if self.read == Read::Idle && up_to_speed && sled_home {
+        } else if self.read == Read::Idle && up_to_speed {
             self.read = Read::Toc;
             self.toc = Some(Move {
                 from: 0.0,
@@ -3750,11 +3754,12 @@ impl ChangerMotion {
             }
             _ => 0.0,
         };
-        // The sled follows the track once the lead-in is read, goes home
-        // once the disc is still, and holds while it spins down.
+        // The sled follows the track once the lead-in is read, holds where
+        // it stands while the lead-in is read, goes home once the disc is
+        // still, and holds while it spins down.
         let want_radius = match self.read {
             Read::Track => target_radius,
-            Read::Toc => home,
+            Read::Toc => radius,
             Read::Idle if still => home,
             Read::Idle => radius,
         };
@@ -4538,6 +4543,52 @@ mod changer_tests {
         let later = motion.advance(&next, 7000);
         assert_eq!(later.along, 700.0);
         assert!(later.spinning && !later.travelling, "{later:?}");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// A frame that names no playing disc, as a player's report may leave
+    /// between two frames, puts the laser out; when the disc plays on, the
+    /// read comes back where the sled stands, the laser lit within a
+    /// second, the sled on the track and not sent home for it.
+    #[test]
+    fn a_frames_gap_of_the_playing_disc_does_not_put_the_laser_out_for_good() {
+        let (dir, spec) = theme("gap");
+        let cover = dir.join("cover.png").to_string_lossy().to_string();
+        let discs = vec![lead::Disc {
+            index: 0,
+            playing: true,
+            art_file: cover,
+            ..Default::default()
+        }];
+        let changer = scene(&spec, discs, 0.3, 300.0, true);
+        let mut gap = changer.clone();
+        gap.engaged = false;
+        gap.discs[0].playing = false;
+        let mut motion = ChangerMotion::default();
+        let mut pose = motion.advance(&changer, 0);
+        for t in 1..=300u64 {
+            pose = motion.advance(&changer, t * 20);
+        }
+        assert!(pose.laser && pose.spinning, "{pose:?}");
+        let out = motion.advance(&gap, 6020);
+        assert!(!out.laser, "the gap puts the laser out: {out:?}");
+        let mut lit_again = None;
+        let (home, edge) = sled_range(&spec);
+        for t in 302..=1000u64 {
+            let p = motion.advance(&changer, t * 20);
+            assert!(
+                p.radius > home + (edge - home) * 0.1,
+                "the sled is not sent home for the read: {p:?}"
+            );
+            if p.laser {
+                lit_again = Some(t * 20);
+                break;
+            }
+        }
+        assert!(
+            lit_again.is_some_and(|at| at <= 7_020),
+            "the laser comes back within a second of the gap, not {lit_again:?}: {out:?}"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 
