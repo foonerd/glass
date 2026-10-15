@@ -3739,7 +3739,9 @@
             'MANAGER_LOOK_MORE_PIECE', finer('weather', 'weather-grid')],
           ['buttons', 'MANAGER_LOOK_BUTTONS', [
             field('MANAGER_LOOK_SIZE', slider('measure.bar', 'size', 50, 250, 5, 'SMALL', 'LARGE'))],
-            'MANAGER_LOOK_MORE_BUTTONS', finer('buttons', '')]
+            'MANAGER_LOOK_MORE_BUTTONS', finer('buttons', '')],
+          ['lists', 'MANAGER_LOOK_LISTS', [
+            field('MANAGER_LOOK_LISTS_SHAPE', choice('lists.shape', LOOK.LIST_SHAPES, 'MANAGER_LOOK_LISTS_'), esc(t('MANAGER_LOOK_LISTS_HINT')))]]
         ];
         return sections.map(function (s) {
           return '<button class="acc" data-section="' + s[0] + '" aria-expanded="false"><b><span class="mark"></span> ' + esc(t(s[1])) + '</b><span class="sum"></span></button>' +
@@ -3909,7 +3911,7 @@
               b.classList.toggle('on', LOOK.GRID_ROWS[rc[0]] === at.down && LOOK.GRID_COLUMNS[rc[1]] === at.across);
             });
           }
-          else if (kind === 'choice') el.value = key === 'clock.face' ? LOOK.clockFace(v) : key === 'clock.dial' ? LOOK.dialStyle(v) : key === 'weather.span' ? LOOK.span(v) : (v[key] || '');
+          else if (kind === 'choice') el.value = key === 'clock.face' ? LOOK.clockFace(v) : key === 'clock.dial' ? LOOK.dialStyle(v) : key === 'lists.shape' ? LOOK.listShape(v) : key === 'weather.span' ? LOOK.span(v) : (v[key] || '');
         });
         // A row shows while it has something to say: a clock's rows while the
         // clock shows, a date's own background while the date stands at the top.

@@ -1096,7 +1096,10 @@ Glass.prototype.runCommand = function (message) {
     self.logger.info(id + 'channel: command ' + name + (value !== undefined ? ' ' + JSON.stringify(value) : ''));
     try {
         switch (name) {
-            case 'play': router.volumioPlay(); break;
+            case 'play':
+                // A number plays from that place in the queue; bare, the player plays.
+                if (typeof value === 'number' && isFinite(value) && value >= 0) { router.volumioPlay(Math.round(value)); } else { router.volumioPlay(); }
+                break;
             case 'pause': router.volumioPause(); break;
             case 'toggle': router.volumioToggle(); break;
             case 'stop': router.volumioStop(); break;

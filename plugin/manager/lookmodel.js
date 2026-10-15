@@ -17,6 +17,8 @@
     'buttons.ink': 'ink', 'buttons.opacity': '1.0',
     // The buttons' own background (glass-evo 0.1.54): as solid as How solid, in the look's tint, unless said.
     'buttons.glass': 'bar', 'buttons.tint': 'tint',
+    // The queue and the browser (glass-evo 0.10.7): by the screen, a sheet, a drawer, or the whole screen.
+    'lists.shape': 'auto',
     'clock.show': 'on', 'clock.format': '%H:%M', 'clock.ink': 'ink', 'clock.opacity': '0.86', 'clock.glass': '0.55', 'clock.tint': 'tint',
     'clock.face': 'type', 'clock.dial': 'station', 'clock.unlit': '0.08', 'clock.hands': 'ink', 'clock.marks': 'ink', 'clock.second': 'accent', 'clock.disc': 'style', 'clock.card': '#17171a',
     'date.show': 'off', 'date.place': 'top', 'date.format': '%A %-d %B', 'date.ink': 'ink', 'date.opacity': '0.86', 'date.glass': '0.55', 'date.tint': 'tint',
@@ -49,6 +51,13 @@
   // glass-evo names them (from its 0.1.15).
   var CLOCK_FACES = ['type', 'seven', 'sixteen', 'flip', 'dial'];
   var DIAL_STYLES = ['station', 'numbers', 'roman', 'plain'];
+  // The shape the queue and the browser take: by the screen (a sheet on a
+  // wide screen, the whole screen on a portrait one), a sheet, a drawer, the whole screen.
+  var LIST_SHAPES = ['auto', 'sheet', 'drawer', 'screen'];
+  function listShape(v) {
+    var shape = String((v || {})['lists.shape'] || '').trim().toLowerCase();
+    return LIST_SHAPES.indexOf(shape) === -1 ? 'auto' : shape;
+  }
   // The face a look's clock has: the one it names, `type` for a word that is none.
   function clockFace(v) {
     var face = String((v || {})['clock.face'] || '').trim().toLowerCase();
@@ -310,7 +319,7 @@
 
   return {
     BUILTIN: BUILTIN, KEYS: KEYS, CLOCK_PATTERNS: CLOCK_PATTERNS, DATE_PATTERNS: DATE_PATTERNS,
-    CLOCK_FACES: CLOCK_FACES, DIAL_STYLES: DIAL_STYLES, clockFace: clockFace, dialStyle: dialStyle,
+    CLOCK_FACES: CLOCK_FACES, DIAL_STYLES: DIAL_STYLES, clockFace: clockFace, dialStyle: dialStyle, LIST_SHAPES: LIST_SHAPES, listShape: listShape,
     known: known, lay: lay, same: same, differs: differs, changes: changes, buttonsGlass: buttonsGlass,
     isOn: isOn, colourOf: colourOf, rgb: rgb, share: share, frostOn: frostOn, backgrounds: backgrounds,
     cells: cells, cellsText: cellsText, align: align, flexed: flexed, turned: turned, SPANS: SPANS, span: span, GRID_ROWS: GRID_ROWS, GRID_COLUMNS: GRID_COLUMNS,

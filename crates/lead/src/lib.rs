@@ -3577,6 +3577,18 @@ pub fn sky_of(code: u8) -> Sky {
     }
 }
 
+/// A track of the player's queue, as a face lists it.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct QueueEntry {
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    /// Seconds; 0 for a stream.
+    pub duration: f32,
+    pub uri: String,
+    pub albumart: String,
+}
+
 /// One snapshot of the outside world. `plot` turns it into a scene.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Input {
@@ -3586,6 +3598,13 @@ pub struct Input {
     /// The forecast, where the user has chosen a place and one is held.
     #[serde(default)]
     pub weather: Option<Weather>,
+    /// The player's queue, every track, for a face that lists it: shared
+    /// between frames, made again when the queue changes.
+    #[serde(default)]
+    pub queue: std::sync::Arc<Vec<QueueEntry>>,
+    /// The playing track's place in the queue, where the player says.
+    #[serde(default)]
+    pub queue_position: Option<u32>,
 }
 
 /// Geometry the scene is plotted into. Pixels stay in `expose`.

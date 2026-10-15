@@ -8,7 +8,7 @@ description = "Typed values on the leads between stations"
 
 [dependencies]
 bank = { path = "../bank" }
-serde = { version = "1", features = ["derive"] }
+serde = { version = "1", features = ["derive", "rc"] }
 
 [lints]
 workspace = true

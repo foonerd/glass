@@ -1909,6 +1909,10 @@ pub struct TapSource {
     /// The queue as the plugin pushed it; none until it does, and then the
     /// player is not asked for it.
     queue_held: Option<Vec<QueueItem>>,
+    /// The queue as a face lists it, made again when a queue line comes,
+    /// and the playing track's place in it as last derived.
+    queue_entries: std::sync::Arc<Vec<lead::QueueEntry>>,
+    queue_position_held: Option<u32>,
     /// How many discs the meter's changer shows; 0 without a changer.
     changer_slots: u32,
     /// The discs' covers, fetched one at a time as the slots want them.
@@ -2109,6 +2113,8 @@ impl TapSource {
             queue_lengths: Vec::new(),
             queue_read_at: None,
             queue_held: None,
+            queue_entries: Default::default(),
+            queue_position_held: None,
             changer_slots: 0,
             disc_art: DiscArt::default(),
             own_disc: (String::new(), -1),
@@ -2598,6 +2604,19 @@ impl Source for TapSource {
                 Event::Show { meter } => self.show_asked = Some(meter),
                 Event::Weather(weather) => self.weather_held = weather,
                 Event::Queue(items) => {
+                    self.queue_entries = std::sync::Arc::new(
+                        items
+                            .iter()
+                            .map(|item| lead::QueueEntry {
+                                title: item.title.clone(),
+                                artist: item.artist.clone(),
+                                album: item.album.clone(),
+                                duration: item.duration,
+                                uri: item.uri.clone(),
+                                albumart: item.albumart.clone(),
+                            })
+                            .collect(),
+                    );
                     self.queue_held = Some(items);
                     self.rederive = true;
                 }
@@ -2680,6 +2699,11 @@ impl Source for TapSource {
                     Default::default()
                 };
                 let engaged = matches!(playing.status.as_str(), "play" | "pause");
+                self.queue_position_held = self
+                    .queue_held
+                    .as_ref()
+                    .and_then(|items| Self::playing_index(&playing, items))
+                    .map(|at| at as u32);
                 let discs = self.discs_for(&playing, engaged);
                 self.metadata_held = lead::Metadata {
                     title: playing.title,
@@ -2775,6 +2799,8 @@ impl Source for TapSource {
             },
             metadata,
             weather: self.weather_held.clone(),
+            queue: self.queue_entries.clone(),
+            queue_position: self.queue_position_held,
         }
     }
 }
@@ -3099,6 +3125,8 @@ pub fn input_from_records(
         },
         metadata: lead::Metadata::default(),
         weather: None,
+        queue: Default::default(),
+        queue_position: None,
     }
 }
 
@@ -3864,5 +3892,51 @@ mod tests {
         );
         assert_ne!(fnv1a("a"), fnv1a("b"));
         assert_eq!(fnv1a("cover"), fnv1a("cover"));
+    }
+}
+
+#[cfg(test)]
+mod queue_entries_tests {
+    use super::*;
+
+    /// The player's queue reaches the input as entries, every track, made
+    /// again when a queue line comes, with the playing track's place from
+    /// the state; without a queue the input carries none.
+    #[test]
+    fn the_queue_reaches_the_input_as_entries_with_the_playing_place() {
+        let mut source = TapSource::new(8, 1.0).without_player();
+        let input = source.poll();
+        assert!(input.queue.is_empty());
+        assert_eq!(input.queue_position, None);
+        source.push_event(
+            decode_event(br#"{"kind":"queue","items":[{"name":"One","artist":"A","album":"X","duration":100,"uri":"mnt/x/1.flac","albumart":"/a1"},{"name":"Two","artist":"B","duration":200,"uri":"mnt/x/2.flac"}]}"#).unwrap(),
+        );
+        source.push_event(
+            decode_event(br#"{"kind":"state","state":{"status":"play","title":"Two","artist":"B","uri":"mnt/x/2.flac","position":1}}"#).unwrap(),
+        );
+        let input = source.poll();
+        assert_eq!(input.queue.len(), 2);
+        assert_eq!(input.queue[0].title, "One");
+        assert_eq!(input.queue[0].album, "X");
+        assert_eq!(input.queue[0].duration, 100.0);
+        assert_eq!(input.queue[0].albumart, "/a1");
+        assert_eq!(input.queue[1].title, "Two");
+        assert_eq!(input.queue[1].uri, "mnt/x/2.flac");
+        assert_eq!(input.queue_position, Some(1));
+        let again = source.poll();
+        assert!(
+            std::sync::Arc::ptr_eq(&input.queue, &again.queue),
+            "the same entries between frames"
+        );
+        source.push_event(
+            decode_event(br#"{"kind":"queue","items":[{"name":"Three","uri":"mnt/x/3.flac"}]}"#)
+                .unwrap(),
+        );
+        let third = source.poll();
+        assert_eq!(third.queue.len(), 1);
+        assert!(
+            !std::sync::Arc::ptr_eq(&input.queue, &third.queue),
+            "made again at a queue line"
+        );
     }
 }
