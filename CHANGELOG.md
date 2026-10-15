@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.16] - 2026-10-15
+
+- **In step with glass-evo 0.10.16.** Nothing of Glass's own changes; this Glass names glass-evo 0.10.16 as the least it works with, where the favourite tile stands in the library row of the More sheet.
+
 ## [0.10.15] - 2026-10-15
 
 - **A browsed item always has a name, and an album's tracks wear its cover.** An item the player lists without a title (a favourite radio station, a folder) is named by its album, its artist or the last part of its location, so no row is empty; a track without a cover of its own, in an album's list, wears the album's. glass-evo 0.10.15 draws the sources as tiles of glass and a row without a title by the line under it. This Glass names glass-evo 0.10.15 as the least it works with.
