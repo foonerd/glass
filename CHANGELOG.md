@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.9] - 2026-10-15
+
+- **A finger's drag on the Face tab is the face's.** On a phone the browser took a drag on the Face tab's picture for page scrolling and cancelled the touch, which reached the face as a lift: the queue could not be scrolled there, and the row under the finger could play instead. The Face tab's picture now keeps a finger's touches for the face, as the Anymote page did already. glass-evo 0.10.9 gives the queue's sheet and drawer a close of their own at the header's right. This Glass names glass-evo 0.10.9 as the least it works with.
+
 ## [0.10.8] - 2026-10-15
 
 - **In step with glass-evo 0.10.8.** Nothing of Glass's own changes; this Glass names glass-evo 0.10.8 as the least it works with, where the queue's whole-screen shape draws its way back.
