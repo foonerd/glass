@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.18] - 2026-10-15
+
+- **Add and play, and the queue's covers.** A browsed track or folder can now be added to the queue and played without the queue being replaced: the `play` command with `add` true puts the list, or the item, in after what is there and playing jumps to the tapped place. The engine fetches the queue's covers around the playing track and hands the face the file of each, so the queue's rows can wear them. glass-evo 0.10.18 draws the add-and-play symbol beside the plus and the covers in the queue. This Glass names glass-evo 0.10.18 as the least it works with.
+
 ## [0.10.17] - 2026-10-15
 
 - **The file path's two refusals no longer send a user round in a circle.** From 0.10.0 every Glass goes with a glass-evo of its own, so an upgrade by file from an older pair takes both zips chosen together in the box; one alone was refused with "give its zip with the Glass zip" for Glass and "upgrade Glass first" for glass-evo, and a user who followed each in turn got nowhere (asked on the forum). Both refusals, in English, German and French, now say the one thing to do: choose both zips, Glass and glass-evo, and install the files together; the box says the same before anything is tried.
