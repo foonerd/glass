@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.19] - 2026-10-15
+
+- **Tracks out of the queue.** A display or page can take one track out of the queue (`remove` with its place) or empty it (`clear`), as the player's own interface does; glass-evo 0.10.19 swipes a row to its bin and asks once before clearing. This Glass names glass-evo 0.10.19 as the least it works with.
+
 ## [0.10.18] - 2026-10-15
 
 - **Add and play, and the queue's covers.** A browsed track or folder can now be added to the queue and played without the queue being replaced: the `play` command with `add` true puts the list, or the item, in after what is there and playing jumps to the tapped place. The engine fetches the queue's covers around the playing track and hands the face the file of each, so the queue's rows can wear them. glass-evo 0.10.18 draws the add-and-play symbol beside the plus and the covers in the queue. This Glass names glass-evo 0.10.18 as the least it works with.
