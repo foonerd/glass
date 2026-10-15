@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.4] - 2026-10-15
+
+- **Blurred album art behind the theme.** A theme smaller than the screen, or fitted with its shape kept, left the rest of the screen the dark colour, where PeppyMeter's smaller window used to let the kiosk's page show through with its blurred album art. A switch in the plugin's Display settings and on the Manager's Screen tab, off unless you turn it on, fills what the theme does not cover with the album art blurred and dimmed, as Volumio's own page shows it behind its controls. Nothing the theme paints changes: a theme's own screen picture and everything over it stay as they are, so a theme that fills the screen looks the same either way, and without a cover the colour stays. The picture is made once per track at a quarter of the screen's size, so a change of track costs a few milliseconds and a frame nothing. The theme-cutter keeps the setting with the others of the player's own. Asked on the forum. This Glass names glass-evo 0.10.4 as the least it works with.
+
 ## [0.10.3] - 2026-10-14
 
 - **The CD changer's laser comes back wherever the read was lost.** Once the disc was up to speed, the pickup read the lead-in only with the sled at the inner stop. A frame in which the player named no playing disc put the read out at once, and with the sled out on the track the laser then stayed out, the disc turning, until the next change of disc brought the sled home. Every meter switch used to hide that by starting the mechanism over; since 0.10.2 the mechanism carries on across a switch, and a laser it had lost stayed lost, which is how it showed. The pickup now finds its place again wherever the sled stands, as a pickup does: the disc up to speed, the laser comes on, the lead-in is read there, and the sled follows the track. At a start nothing changes, the sled standing home then as before. This Glass names glass-evo 0.10.3 as the least it works with.
