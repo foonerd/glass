@@ -115,6 +115,10 @@ pub struct Surface {
     /// The picture under a frame that leaves part of the window bare, the
     /// window's size; none shows the black.
     backdrop: Option<Texture>,
+    /// The backlight the kernel lists for the panel, where there is one.
+    backlight: Option<std::path::PathBuf>,
+    /// The panel's power as last switched, and by what means.
+    power: Power,
     pump: EventPump,
     /// Where the frame's top left goes; `None` centres it in the window.
     placement: Option<(i32, i32)>,
@@ -409,6 +413,11 @@ impl Surface {
             creator,
             texture: None,
             backdrop: None,
+            backlight: backlight::find(),
+            power: Power {
+                on: true,
+                by: Means::Dark,
+            },
             pump,
             placement: None,
             fit: options.fit,
@@ -528,6 +537,104 @@ impl Surface {
         }
     }
 
+    /// Switch the panel: through its backlight where the kernel lists one;
+    /// else through the connector's power on the card the window draws on
+    /// (DPMS), or X's screen saver where an X server draws; where none of
+    /// them can, nothing but the black frame the display shows. What it
+    /// did comes back, for the player to hear.
+    pub fn set_power(&mut self, on: bool) -> Power {
+        let by = if self
+            .backlight
+            .as_deref()
+            .is_some_and(|dir| backlight::set_power(dir, on).is_ok())
+        {
+            Means::Backlight
+        } else if self.dpms(on) {
+            Means::Dpms
+        } else {
+            Means::Dark
+        };
+        self.power = Power { on, by };
+        self.power
+    }
+
+    /// The panel's power as last switched.
+    pub fn power(&self) -> Power {
+        self.power
+    }
+
+    /// The backlight's brightness and its top, where there is one.
+    pub fn brightness(&self) -> Option<(u32, u32)> {
+        backlight::brightness(self.backlight.as_deref()?)
+    }
+
+    /// The backlight set to `level`, held to its top: what it stands at
+    /// then, or none without a backlight.
+    pub fn set_brightness(&mut self, level: u32) -> Option<(u32, u32)> {
+        backlight::set_brightness(self.backlight.as_deref()?, level).ok()
+    }
+
+    /// The connector's power through the card's own handle, which SDL
+    /// holds when it draws on the screen itself; through X's screen saver
+    /// when an X server draws. False where neither is there or the card
+    /// refuses.
+    fn dpms(&self, on: bool) -> bool {
+        let driver = self.driver.to_ascii_lowercase();
+        if driver == "kmsdrm" {
+            #[cfg(target_os = "linux")]
+            if let Some(fd) = self.drm_fd() {
+                return match dpms::set(fd, on) {
+                    Ok(()) => true,
+                    Err(err) => {
+                        eprintln!("glass: screen: {err}");
+                        false
+                    }
+                };
+            }
+            return false;
+        }
+        if driver == "x11" {
+            // Through the C library's own call, with the window's DISPLAY
+            // in the environment: Rust's own spawn would ask the player's
+            // glibc for a symbol it does not have.
+            #[cfg(target_os = "linux")]
+            {
+                let command = if on {
+                    c"xset dpms force on"
+                } else {
+                    c"xset dpms force off"
+                };
+                return unsafe { libc::system(command.as_ptr()) } == 0;
+            }
+            #[cfg(not(target_os = "linux"))]
+            return false;
+        }
+        false
+    }
+
+    /// The card's handle SDL opened for the screen, from the window's own
+    /// information. The KMSDRM member of that union is not named by these
+    /// bindings; its layout is SDL's own: the card's index, then the handle.
+    #[cfg(target_os = "linux")]
+    fn drm_fd(&self) -> Option<std::os::fd::RawFd> {
+        use sdl2::sys;
+        let mut info: sys::SDL_SysWMinfo = unsafe { std::mem::zeroed() };
+        let linked = sdl2::version::version();
+        info.version = sys::SDL_version {
+            major: linked.major,
+            minor: linked.minor,
+            patch: linked.patch,
+        };
+        let got = unsafe { sys::SDL_GetWindowWMInfo(self.canvas.window().raw(), &mut info) };
+        if got != sys::SDL_bool::SDL_TRUE || info.subsystem != sys::SDL_SYSWM_TYPE::SDL_SYSWM_KMSDRM
+        {
+            return None;
+        }
+        let bytes = unsafe { info.info.dummy };
+        let fd = i32::from_ne_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+        (fd >= 0).then_some(fd)
+    }
+
     /// Follow a new frame size: a window sized to the frame is resized; a
     /// fitted frame is scaled to the window at the next show.
     pub fn fit_to(&mut self, width: u32, height: u32) -> Result<(), String> {
@@ -550,26 +657,28 @@ impl Surface {
         Ok(())
     }
 
-    /// Upload one frame, or only its `changed` boxes when the texture already
-    /// holds the rest, and say what the window saw meanwhile.
-    pub fn show(&mut self, frame: &Frame, changed: &[Rect]) -> Result<Shown, String> {
+    /// The window's events since the last call: fingers and mouse buttons
+    /// as pointer events kept for `take_pointer`, the keys that close or
+    /// resize the window as what the caller does next; `touched` when a
+    /// finger or a button was lifted on the window.
+    fn poll_events(&mut self) -> Result<(bool, Option<Shown>), String> {
         let mut touched = false;
         let mut raw: Vec<(PointerKind, i32, i32)> = Vec::new();
         for event in self.pump.poll_iter() {
             match event {
-                Event::Quit { .. } => return Ok(Shown::Closed),
+                Event::Quit { .. } => return Ok((touched, Some(Shown::Closed))),
                 Event::KeyDown {
                     keycode: Some(Keycode::Q),
                     ..
-                } if self.keys => return Ok(Shown::Closed),
+                } if self.keys => return Ok((touched, Some(Shown::Closed))),
                 Event::KeyDown {
                     keycode: Some(Keycode::Escape),
                     ..
-                } if self.keys => return Ok(Shown::LeaveFullscreen),
+                } if self.keys => return Ok((touched, Some(Shown::LeaveFullscreen))),
                 Event::KeyDown {
                     keycode: Some(Keycode::F),
                     ..
-                } if self.keys => return Ok(Shown::EnterFullscreen),
+                } if self.keys => return Ok((touched, Some(Shown::EnterFullscreen))),
                 // A finger arrives as a finger, with its place as a share of
                 // the window, and SDL may make a mouse of it as well; once a
                 // finger has been seen, those made-up mouse events are
@@ -619,6 +728,23 @@ impl Surface {
         }
         for (kind, x, y) in raw {
             self.push_pointer(kind, x, y);
+        }
+        Ok((touched, None))
+    }
+
+    /// Pump the window's events without showing a frame, while the panel
+    /// is off: what the window saw, as `show` would say it.
+    pub fn pump(&mut self) -> Result<Shown, String> {
+        let (touched, closing) = self.poll_events()?;
+        Ok(closing.unwrap_or(if touched { Shown::Touched } else { Shown::Kept }))
+    }
+
+    /// Upload one frame, or only its `changed` boxes when the texture already
+    /// holds the rest, and say what the window saw meanwhile.
+    pub fn show(&mut self, frame: &Frame, changed: &[Rect]) -> Result<Shown, String> {
+        let (touched, closing) = self.poll_events()?;
+        if let Some(shown) = closing {
+            return Ok(shown);
         }
         let fits = self.texture.as_ref().is_some_and(|t| {
             let q = t.query();
@@ -999,5 +1125,202 @@ mod tests {
             fitted_rect((1280, 720), (1280, 720), None),
             (0, 0, 1280, 720, 1.0)
         );
+    }
+}
+
+/// By what means the panel's power is switched: its backlight's own file,
+/// the connector's power on the card or X's screen saver (DPMS), or not
+/// at all, the picture black instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Means {
+    Backlight,
+    Dpms,
+    Dark,
+}
+
+impl Means {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Means::Backlight => "backlight",
+            Means::Dpms => "dpms",
+            Means::Dark => "dark",
+        }
+    }
+}
+
+/// The panel's power as last switched, and by what means.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Power {
+    pub on: bool,
+    pub by: Means,
+}
+
+/// The panel's backlight as the kernel lists it under `/sys/class/backlight`:
+/// its power and its brightness, by their files. The files are the
+/// kernel's; where an image leaves them root's alone, every write fails
+/// and the panel is switched by other means.
+pub mod backlight {
+    use std::path::{Path, PathBuf};
+
+    const ROOT: &str = "/sys/class/backlight";
+
+    /// The first backlight under `root`, by name, that has a power file.
+    pub fn find_under(root: &Path) -> Option<PathBuf> {
+        let mut dirs: Vec<PathBuf> = std::fs::read_dir(root)
+            .ok()?
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.path())
+            .filter(|dir| dir.join("bl_power").exists())
+            .collect();
+        dirs.sort();
+        dirs.into_iter().next()
+    }
+
+    /// The panel's backlight, where the kernel lists one.
+    pub fn find() -> Option<PathBuf> {
+        find_under(Path::new(ROOT))
+    }
+
+    /// The power: 0 lights it, as the kernel's blanking numbers go; 1
+    /// puts it out.
+    pub fn set_power(dir: &Path, on: bool) -> Result<(), String> {
+        let file = dir.join("bl_power");
+        std::fs::write(&file, if on { "0" } else { "1" })
+            .map_err(|err| format!("{}: {err}", file.display()))
+    }
+
+    /// Whether the backlight is lit, as its power file says.
+    pub fn power(dir: &Path) -> Option<bool> {
+        Some(read(&dir.join("bl_power"))? == 0)
+    }
+
+    /// The brightness and its top, as the kernel has them.
+    pub fn brightness(dir: &Path) -> Option<(u32, u32)> {
+        Some((
+            read(&dir.join("brightness"))?,
+            read(&dir.join("max_brightness"))?,
+        ))
+    }
+
+    /// The brightness set to `level`, held to its top; what it stands at.
+    pub fn set_brightness(dir: &Path, level: u32) -> Result<(u32, u32), String> {
+        let (_, max) =
+            brightness(dir).ok_or_else(|| format!("{}: no brightness", dir.display()))?;
+        let level = level.min(max);
+        let file = dir.join("brightness");
+        std::fs::write(&file, level.to_string())
+            .map_err(|err| format!("{}: {err}", file.display()))?;
+        Ok((level, max))
+    }
+
+    fn read(path: &Path) -> Option<u32> {
+        std::fs::read_to_string(path).ok()?.trim().parse().ok()
+    }
+}
+
+/// The connector's power on a card through its handle: the DPMS property
+/// the kernel keeps on each connector, set on every connector that has it.
+#[cfg(target_os = "linux")]
+mod dpms {
+    use drm::control::Device as ControlDevice;
+    use std::os::fd::{AsFd, BorrowedFd, RawFd};
+
+    struct Card<'a>(BorrowedFd<'a>);
+
+    impl AsFd for Card<'_> {
+        fn as_fd(&self) -> BorrowedFd<'_> {
+            self.0
+        }
+    }
+
+    impl drm::Device for Card<'_> {}
+    impl ControlDevice for Card<'_> {}
+
+    /// DPMS on (0) or off (3), as the kernel numbers them, on every
+    /// connector of the card that has the property.
+    pub fn set(fd: RawFd, on: bool) -> Result<(), String> {
+        // The handle is SDL's: borrowed for the calls, never closed here.
+        let card = Card(unsafe { BorrowedFd::borrow_raw(fd) });
+        let resources = card
+            .resource_handles()
+            .map_err(|err| format!("the card: {err}"))?;
+        let mut set = 0;
+        for connector in resources.connectors() {
+            let Ok(props) = card.get_properties(*connector) else {
+                continue;
+            };
+            let (ids, _) = props.as_props_and_values();
+            for id in ids {
+                let Ok(info) = card.get_property(*id) else {
+                    continue;
+                };
+                if info.name().to_bytes() != b"DPMS" {
+                    continue;
+                }
+                card.set_property(*connector, *id, if on { 0 } else { 3 })
+                    .map_err(|err| format!("DPMS: {err}"))?;
+                set += 1;
+            }
+        }
+        if set == 0 {
+            Err("no connector with a DPMS property".to_string())
+        } else {
+            Ok(())
+        }
+    }
+}
+
+#[cfg(test)]
+mod backlight_tests {
+    use super::backlight;
+    use std::path::PathBuf;
+
+    /// A backlight as the kernel lists one, in a folder of this test's own.
+    fn listed(name: &str) -> (PathBuf, PathBuf) {
+        let root =
+            std::env::temp_dir().join(format!("glass-backlight-{}-{name}", std::process::id()));
+        let dir = root.join("11-0045");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("bl_power"), "0\n").unwrap();
+        std::fs::write(dir.join("brightness"), "200\n").unwrap();
+        std::fs::write(dir.join("max_brightness"), "255\n").unwrap();
+        (root, dir)
+    }
+
+    /// The backlight found by its power file; its power put out and lit
+    /// by the kernel's numbers; its brightness read, set and held to its top.
+    #[test]
+    fn the_backlight_is_found_switched_and_set() {
+        let (root, dir) = listed("found");
+        std::fs::create_dir_all(root.join("not-a-backlight")).unwrap();
+        assert_eq!(backlight::find_under(&root), Some(dir.clone()));
+        assert_eq!(backlight::power(&dir), Some(true));
+        backlight::set_power(&dir, false).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("bl_power")).unwrap(), "1");
+        assert_eq!(backlight::power(&dir), Some(false));
+        backlight::set_power(&dir, true).unwrap();
+        assert_eq!(backlight::power(&dir), Some(true));
+        assert_eq!(backlight::brightness(&dir), Some((200, 255)));
+        assert_eq!(backlight::set_brightness(&dir, 300), Ok((255, 255)));
+        assert_eq!(backlight::set_brightness(&dir, 40), Ok((40, 255)));
+        assert_eq!(backlight::brightness(&dir), Some((40, 255)));
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    /// No backlight listed: none found, and nothing to set.
+    #[test]
+    fn without_a_backlight_nothing_is_found() {
+        let root =
+            std::env::temp_dir().join(format!("glass-backlight-{}-none", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        assert_eq!(backlight::find_under(&root), None);
+        std::fs::create_dir_all(root.join("empty")).unwrap();
+        assert_eq!(
+            backlight::find_under(&root),
+            None,
+            "a folder without a power file is no backlight"
+        );
+        assert!(backlight::set_brightness(&root.join("empty"), 10).is_err());
+        let _ = std::fs::remove_dir_all(root);
     }
 }

@@ -23,6 +23,7 @@ const os = require('os');
 const { Manager, DEFAULT_PORT: MANAGER_DEFAULT_PORT } = require('./manager/server');
 const { FaceFeed } = require('./manager/facefeed');
 const { advanced } = require('./manager/statenow');
+const screenpower = require('./manager/screenpower');
 const screenprobe = require('./manager/screenprobe');
 const playerfacts = require('./manager/playerfacts');
 const screenowner = require('./manager/screenowner');
@@ -82,6 +83,10 @@ const CHANNEL_PROTOCOL = 1;
 const CHANNEL_LINE_MAX = 65536;
 
 function Channel(logger, onAttach, onCommand) {
+    // The panel's power as the player's own display last reported it, and
+    // who hears of a report.
+    this.screenReport = null;
+    this.onScreen = null;
     this.logger = logger;
     this.onAttach = onAttach;
     this.onCommand = onCommand;
@@ -161,6 +166,10 @@ Channel.prototype.attach = function (conn) {
                 // go to its frames port, and the answer says how many went
                 // where, so the remote can judge the path from both ends.
                 self.probeRemote(conn);
+            } else if (message && message.kind === 'screen' && !conn.remote) {
+                // The player's own display says what the panel's power is.
+                self.screenReport = screenpower.report(message);
+                if (self.onScreen) { self.onScreen(self.screenReport); }
             } else if (message && message.kind === 'showing' && !conn.remote) {
                 // The player's own display says which meter it shows; the
                 // remotes that follow the player hear of it.
@@ -289,6 +298,12 @@ Channel.prototype.push = function (message) {
     var self = this;
     self.clients.slice().forEach(function (conn) { self.tell(conn, message); });
     if (self.onPush) { self.onPush(message); }
+};
+
+// A line for the player's own display alone: a remote's screen is its own.
+Channel.prototype.pushLocal = function (message) {
+    var self = this;
+    self.clients.slice().forEach(function (conn) { if (!conn.remote) { self.tell(conn, message); } });
 };
 
 Channel.prototype.close = function () {
@@ -1130,6 +1145,8 @@ Glass.prototype.onStart = function () {
         // A remote that connects hears the configuration as it stands, so a
         // change made while it was away is not missed.
         self.pushRemoteConfig();
+        // The panel's power as asked, so a display that starts anew holds it.
+        self.pushScreenWish();
     }, function (message) {
         self.runCommand(message);
     });
@@ -1141,6 +1158,8 @@ Glass.prototype.onStart = function () {
         return self.channel ? { state: advanced(self.channel.state, self.channel.stateAt, Date.now()), infinity: self.channel.infinity, showing: self.channel.showing, queue: self.channel.queue, persist: self.channel.persist, weather: self.channel.weather } : {};
     } });
     self.channel.onPush = function (message) { self.face.push(message); };
+    // The display's report sets what is held for the next display.
+    self.channel.onScreen = function (report) { self.screenWish = { power: report.power }; };
     // The forecast for the face, once the user has chosen a place: every
     // display and browser view hears it over the channel. Nothing is asked
     // of anyone before a place is set.
@@ -1388,6 +1407,14 @@ Glass.prototype.onStart = function () {
         method: 'getArtistFanart'
     });
 
+    // The panel's power for a remote, a script or Home Assistant.
+    self.commandRouter.addPluginRestEndpoint({
+        endpoint: 'glass_screen',
+        type: 'user_interface',
+        name: 'glass',
+        method: 'screenEndpoint'
+    });
+
     self.updateConfigVersion();
     // Volumio reads a plugin's ALSA contribution from the list it built at
     // start; a plugin installed since then joins the chain after a restart.
@@ -1452,6 +1479,7 @@ Glass.prototype.onStop = function () {
         try { self.pushPersist('', 0, 0); } catch (e) {}
 
         self.commandRouter.removePluginRestEndpoint({ endpoint: 'glass_artistfanart' });
+        self.commandRouter.removePluginRestEndpoint({ endpoint: 'glass_screen' });
         socket.off('pushState');
         socket.off('pushInfinityPlayback');
         if (self.forecast) { self.forecast.stop(); self.forecast = null; }
@@ -2087,6 +2115,57 @@ Glass.prototype.pushPersist = function (mode, seconds, startedAt) {
 // The values the display reads: `screen.driver` (auto, x11, wayland or
 // kmsdrm) and `screen.rotation` (0, 90, 180 or 270), and whether the
 // kiosk holds the screen now.
+// The panel's power: what the player's own display last reported, else what
+// was asked of it, and whether a display is there to ask.
+Glass.prototype.screenPower = function () {
+    var self = this;
+    var running = !!(self.meterChild && self.meterChild.exitCode === null);
+    var ours = false;
+    try { ours = self.screenOurs(); } catch (e) {}
+    return screenpower.state(self.channel ? self.channel.screenReport : null, self.screenWish, { running: running, ours: ours });
+};
+
+// The panel's power asked: on, off, a toggle, a brightness. Sent to the
+// player's own display, which answers with the state; the power is held
+// for a display that starts anew, the brightness kept in the settings. A
+// bare ask has the display report afresh.
+Glass.prototype.setScreenPower = function (data) {
+    var self = this;
+    var asked = screenpower.request(data);
+    if (asked.error) { return { error: 'GLASS.MANAGER_BAD_REQUEST', message: asked.error }; }
+    if (asked.power === 'on' || asked.power === 'off') { self.screenWish = { power: asked.power }; }
+    if (asked.brightness !== undefined) { self.config.set('screenBrightness', asked.brightness); }
+    var line = { kind: 'screen' };
+    if (asked.power) { line.power = asked.power; }
+    if (asked.brightness !== undefined) { line.brightness = asked.brightness; }
+    if (self.channel) { self.channel.pushLocal(line); }
+    return Object.assign({ ok: true }, self.screenPower(), { asked: asked });
+};
+
+// What is held for a display that connects: the power as last asked or
+// reported, and the brightness kept in the settings; a bare line has the
+// display report its state.
+Glass.prototype.pushScreenWish = function () {
+    var self = this;
+    if (!self.channel) { return; }
+    var line = { kind: 'screen' };
+    if (self.screenWish && (self.screenWish.power === 'on' || self.screenWish.power === 'off')) { line.power = self.screenWish.power; }
+    var level = parseInt(self.config.get('screenBrightness'), 10);
+    if (!isNaN(level) && level >= 0) { line.brightness = level; }
+    self.channel.pushLocal(line);
+};
+
+// The REST endpoint glass_screen, for an IR remote, a script or Home Assistant:
+//   GET  /api/v1/pluginEndpoint?endpoint=glass_screen                       the state
+//   POST /api/v1/pluginEndpoint { "endpoint": "glass_screen", "data": { "power": "toggle" } }
+// `power` is on, off or toggle; `brightness` a number up to the backlight's top.
+Glass.prototype.screenEndpoint = function (data) {
+    var self = this;
+    var d = data && typeof data === 'object' ? data : {};
+    if (d.power === undefined && d.brightness === undefined) { return self.screenPower(); }
+    return self.setScreenPower(d);
+};
+
 Glass.prototype.screenSettings = function () {
     var self = this;
     self.loadConfigs();

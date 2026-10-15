@@ -60,6 +60,19 @@ pub enum Event {
     /// The plugin's answer to a remote's probe request: how many probe
     /// datagrams it sent to the remote's frames port, and where to.
     Probed { sent: u32, to: String },
+    /// The player's word on the panel: its power, or a toggle of it, a
+    /// brightness for a backlight, or a bare ask for the panel's state.
+    Screen(ScreenRequest),
+}
+
+/// What the player asks of the panel: power on or off, a toggle instead,
+/// a brightness for a backlight; each absent when not asked. All absent,
+/// the player asks for the state alone.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct ScreenRequest {
+    pub power: Option<bool>,
+    pub toggle: bool,
+    pub brightness: Option<u32>,
 }
 
 /// One track of the player's queue, as the plugin's `queue` line carries it.
@@ -416,6 +429,30 @@ impl Channel {
         self.send_line(&line)
     }
 
+    /// Tell the plugin the panel's state: on or off, how the display
+    /// switches it (`backlight`, `dpms`, or `dark` for black pixels alone),
+    /// the backlight's brightness and its top where there is one, and
+    /// whether the screen is the display's own.
+    pub fn report_screen(
+        &mut self,
+        on: bool,
+        by: &str,
+        brightness: Option<(u32, u32)>,
+        ours: bool,
+    ) -> bool {
+        let mut line = serde_json::json!({
+            "kind": "screen",
+            "power": if on { "on" } else { "off" },
+            "by": by,
+            "brightness": brightness.map(|b| b.0),
+            "max": brightness.map(|b| b.1),
+            "ours": ours,
+        })
+        .to_string();
+        line.push('\n');
+        self.send_line(&line)
+    }
+
     fn send_line(&mut self, line: &str) -> bool {
         let Some(stream) = self.stream.as_mut() else {
             return false;
@@ -496,6 +533,21 @@ pub fn decode(line: &[u8]) -> Option<Event> {
                 .unwrap_or(5)
                 .clamp(3, 9) as u32,
         }),
+        "screen" => {
+            let power = text("power");
+            Some(Event::Screen(ScreenRequest {
+                power: match power.as_str() {
+                    "on" => Some(true),
+                    "off" => Some(false),
+                    _ => None,
+                },
+                toggle: power == "toggle",
+                brightness: value
+                    .get("brightness")
+                    .and_then(Value::as_u64)
+                    .map(|level| level.min(u32::MAX as u64) as u32),
+            }))
+        }
         "probed" => Some(Event::Probed {
             sent: value
                 .get("sent")
@@ -834,5 +886,43 @@ mod tests {
         assert!(!channel.connected());
         assert!(channel.pump().is_empty());
         assert!(!channel.send(&Command::new("toggle")));
+    }
+}
+
+#[cfg(test)]
+mod screen_lines {
+    use super::*;
+
+    /// The player's screen line: a power, a toggle, a brightness, or a
+    /// bare ask; the display's answer carries the state and its means.
+    #[test]
+    fn a_screen_line_names_the_power_a_toggle_a_brightness_or_asks() {
+        let screen = |line: &[u8]| match decode(line) {
+            Some(Event::Screen(request)) => request,
+            other => panic!("not a screen line: {other:?}"),
+        };
+        assert_eq!(
+            screen(br#"{"kind":"screen","power":"off"}"#),
+            ScreenRequest {
+                power: Some(false),
+                toggle: false,
+                brightness: None
+            }
+        );
+        assert_eq!(
+            screen(br#"{"kind":"screen","power":"on"}"#).power,
+            Some(true)
+        );
+        let toggle = screen(br#"{"kind":"screen","power":"toggle"}"#);
+        assert!(toggle.toggle && toggle.power.is_none());
+        assert_eq!(
+            screen(br#"{"kind":"screen","brightness":120}"#).brightness,
+            Some(120)
+        );
+        assert_eq!(screen(br#"{"kind":"screen"}"#), ScreenRequest::default());
+        assert_eq!(
+            screen(br#"{"kind":"screen","power":"dim"}"#),
+            ScreenRequest::default()
+        );
     }
 }

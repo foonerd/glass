@@ -27,6 +27,7 @@ mod governor;
 mod package;
 pub mod probe;
 mod remote;
+mod screen;
 mod tailor;
 
 use remote::run::RemoteSession;
@@ -862,12 +863,52 @@ fn session(
     // The album art blurred behind a theme that leaves part of the screen
     // bare, when the player asks for it: made once per track and screen size.
     let mut backdrop = expose::Backdrop::default();
+    // The panel's power: the player's word, the face's idle black, a touch.
+    let mut screen = screen::ScreenPower::default();
+    let mut wake_screen = false;
     // When the player last played or the screen was last touched: past it
     // the display on a screen of its own slows to the standing rate.
     let mut active_at = Instant::now();
     // The face over the picture, on its copy kept from frame to frame: the
     // same laying as in a browser's page.
     let mut laid = Laid::default();
+    // Switch the panel: off, one black frame goes up first, so a panel that
+    // only goes dark is dark and one switched off comes back to black; on,
+    // the next frame is drawn whole. The player hears the state either way.
+    macro_rules! switch_screen {
+        ($on:expr) => {{
+            let on: bool = $on;
+            if let Some(window) = surface.as_mut() {
+                if !on {
+                    let (w, h) = (skin.width.max(1), skin.height.max(1));
+                    let black = Frame {
+                        blend: expose::Blend::Normal,
+                        width: w,
+                        height: h,
+                        rgba: [0u8, 0, 0, 255].repeat((w * h) as usize),
+                    };
+                    let whole = [Rect { x: 0, y: 0, w, h }];
+                    let _ = window.show(&black, &whole);
+                } else {
+                    motion.repaint();
+                }
+                let power = window.set_power(on);
+                logline::say!(
+                    Info,
+                    "display",
+                    "screen {} by {}",
+                    if power.on { "on" } else { "off" },
+                    power.by.as_str()
+                );
+                source.report_screen(
+                    power.on,
+                    power.by.as_str(),
+                    window.brightness(),
+                    screen_is_ours(&skin.run.driver),
+                );
+            }
+        }};
+    }
     // Move to another meter of the theme: its skin and pictures start afresh,
     // the motion too but for the turn of the record and the reels, and the
     // changer's mechanism, which carries on where it stands.
@@ -952,6 +993,43 @@ fn session(
         if let Some(face) = face.as_deref_mut() {
             for command in face.commands() {
                 source.command(&command);
+            }
+        }
+        // A touch on a panel that is off woke it last frame.
+        if std::mem::take(&mut wake_screen) {
+            if let Some(on) = screen.touched() {
+                switch_screen!(on);
+            }
+        }
+        // The panel's power: the player's word first, the face's after. A
+        // player's line is answered with the state whatever it changed, so
+        // a bare ask tells, and a player that connects anew hears.
+        if let Some(request) = source.take_screen() {
+            if let (Some(level), Some(window)) = (request.brightness, surface.as_mut()) {
+                if window.set_brightness(level).is_none() {
+                    logline::say!(Info, "display", "screen: no backlight to set at {level}");
+                }
+            }
+            match screen.by_player(&request) {
+                Some(on) => switch_screen!(on),
+                None => {
+                    if let Some(window) = surface.as_mut() {
+                        let power = window.power();
+                        source.report_screen(
+                            power.on,
+                            power.by.as_str(),
+                            window.brightness(),
+                            screen_ours,
+                        );
+                    }
+                }
+            }
+        }
+        if let Some(face) = face.as_deref_mut() {
+            if let Some(on) = face.screen() {
+                if let Some(on) = screen.by_face(on) {
+                    switch_screen!(on);
+                }
             }
         }
         if let Some(points) = source.take_calibrate_request() {
@@ -1154,6 +1232,7 @@ fn session(
                     now_ms: started.elapsed().as_millis() as u64,
                     wall: &wall,
                     ours: screen_ours || remote_face,
+                    screen_off: screen.off(),
                     scale: skin.run.face_scale,
                     settings: &skin.run.face,
                     theme_dir: &skin.theme_dir,
@@ -1202,7 +1281,13 @@ fn session(
                         eprintln!("glass: backdrop: {err}");
                     }
                 }
-                let shown = match window.show(frame, damage) {
+                // The panel off: no frame goes up, the window's events are
+                // pumped alone, and a finger or a button on it wakes.
+                let shown = match if screen.off() {
+                    window.pump()
+                } else {
+                    window.show(frame, damage)
+                } {
                     Ok(shown) => shown,
                     Err(err) => {
                         eprintln!("glass: {err}");
@@ -1215,6 +1300,12 @@ fn session(
                 let mut events = window.take_pointer();
                 if !events.is_empty() {
                     active_at = Instant::now();
+                }
+                if screen.off() && !events.is_empty() {
+                    // The touch that wakes the panel is the wake alone; the
+                    // panel comes on at the top of the next frame.
+                    events.clear();
+                    wake_screen = true;
                 }
                 let mut acted = false;
                 let mut dismiss = false;
@@ -1229,6 +1320,7 @@ fn session(
                         now_ms: started.elapsed().as_millis() as u64,
                         wall: &wall,
                         ours: screen_ours || remote_face,
+                        screen_off: screen.off(),
                         scale: skin.run.face_scale,
                         settings: &skin.run.face,
                         theme_dir: &skin.theme_dir,
@@ -1423,6 +1515,12 @@ fn session(
         }
         if let Some(why) = leave {
             logline::say!(Info, "display", "leaving ({why})");
+            // A panel switched off is switched on for whoever has the
+            // screen next.
+            if screen.off() {
+                screen.touched();
+                switch_screen!(true);
+            }
             // Leave the way the engine leaves: fade out when a fade in was shown.
             if let (Some(window), true) = (surface.as_mut(), did_fade_in && skin.transition.fade) {
                 let now = started.elapsed().as_millis() as u64;

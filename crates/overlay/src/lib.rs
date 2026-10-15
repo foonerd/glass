@@ -31,6 +31,9 @@ pub struct View<'a> {
     /// The time of day where the player is.
     pub wall: &'a Wall,
     pub ours: bool,
+    /// The panel is switched off, by the player's word or the face's own
+    /// idle black: nothing drawn is shown until it comes back on.
+    pub screen_off: bool,
     /// How large the face draws: 1 as designed, more for a hand at arm's length.
     pub scale: f32,
     /// The configuration's `face.<name>` keys by name, as written: the
@@ -74,6 +77,13 @@ pub trait Overlay {
     fn pointer(&mut self, kind: PointerKind, x: i32, y: i32, view: &View) -> bool;
     /// The commands for the player the face wants sent, taken every frame.
     fn commands(&mut self) -> Vec<intake::Command>;
+    /// The face's word on the panel's power, once per change: `Some(false)`
+    /// when its idle black has come whole and the panel may go off,
+    /// `Some(true)` when it wakes and the panel must come on. A face that
+    /// does not say leaves the panel to the player's word and to a touch.
+    fn screen(&mut self) -> Option<bool> {
+        None
+    }
     /// What the face is called and its version, as a remote display says
     /// which flavour it is: on its settings page and to the player.
     fn name(&self) -> Option<String> {

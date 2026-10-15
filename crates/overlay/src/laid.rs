@@ -130,6 +130,7 @@ mod tests {
             now_ms: 0,
             wall: &wall,
             ours: true,
+            screen_off: false,
             scale: 1.0,
             settings: &settings,
             theme_dir: "",

@@ -7,9 +7,14 @@ publish.workspace = true
 description = "Put a frame on the glass, or publish a Scene"
 
 [dependencies]
+
 expose = { path = "../expose" }
 plot = { path = "../plot" }
 sdl2 = { version = "0.37", features = ["unsafe_textures"] }
 
 [lints]
 workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+drm = { version = "0.15", default-features = false }
+libc = "0.2"

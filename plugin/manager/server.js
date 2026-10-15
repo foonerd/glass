@@ -547,6 +547,17 @@ class Manager {
       res.json(self.plugin.screenProbe(true));
     });
 
+    // The panel's power: its state; on, off, toggle, or a brightness.
+    app.get('/api/screen/power', function (req, res) {
+      res.json(self.plugin.screenPower());
+    });
+
+    app.post('/api/screen/power', wrap(async function (req, res) {
+      const result = await self.exclusive(function () { return self.plugin.setScreenPower(req.body || {}); });
+      if (result.error) return res.status(400).json(result);
+      res.json(result);
+    }));
+
     // The touch mapping: as the panel reports, overrides, or calibrated.
     app.post('/api/screen/touch', wrap(async function (req, res) {
       const result = await self.exclusive(function () { return self.plugin.setTouchSettings(req.body || {}); });

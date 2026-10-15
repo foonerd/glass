@@ -36,7 +36,9 @@ pub mod hops;
 pub mod remote;
 pub mod support;
 pub mod wants;
-pub use channel::{decode as decode_event, Channel, Command, Event, QueueItem, RemoteHello};
+pub use channel::{
+    decode as decode_event, Channel, Command, Event, QueueItem, RemoteHello, ScreenRequest,
+};
 
 use std::net::ToSocketAddrs;
 use std::sync::RwLock;
@@ -1839,6 +1841,8 @@ pub struct TapSource {
     show_asked: Option<String>,
     /// The plugin's answer to a probe request, until taken.
     probed_seen: Option<(u32, String)>,
+    /// The player's word on the panel since the last take.
+    screen_asked: Option<ScreenRequest>,
     weather_held: Option<lead::Weather>,
     /// The meter's fall, as the old scope shaped it, on the pipe scale.
     decay: tap::legacy::Meter,
@@ -2025,6 +2029,24 @@ impl TapSource {
     pub fn take_probed(&mut self) -> Option<(u32, String)> {
         self.probed_seen.take()
     }
+
+    /// The player's word on the panel since the last take.
+    pub fn take_screen(&mut self) -> Option<ScreenRequest> {
+        self.screen_asked.take()
+    }
+
+    /// Tell the player the panel's state, as the display switches it.
+    pub fn report_screen(
+        &mut self,
+        on: bool,
+        by: &str,
+        brightness: Option<(u32, u32)>,
+        ours: bool,
+    ) -> bool {
+        self.channel
+            .as_mut()
+            .is_some_and(|c| c.report_screen(on, by, brightness, ours))
+    }
     pub fn new(spectrum_bins: usize, meter_max: f32) -> Self {
         let bins = spectrum_bins.max(1);
         // The plugin's channel, when it serves one: the first state is
@@ -2039,6 +2061,7 @@ impl TapSource {
             showing_seen: None,
             show_asked: None,
             probed_seen: None,
+            screen_asked: None,
             weather_held: None,
             decay: tap::legacy::Meter::new(METER_DECAY_MS, meter_max.max(1.0) as u32),
             bins_mapper: tap::legacy::Regroup::new(
@@ -2587,6 +2610,7 @@ impl Source for TapSource {
                 }
                 Event::Calibrate { points } => self.calibrate_asked = Some(points),
                 Event::Probed { sent, to } => self.probed_seen = Some((sent, to)),
+                Event::Screen(request) => self.screen_asked = Some(request),
                 Event::Hello { .. } => {}
             }
         }

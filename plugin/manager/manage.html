@@ -1483,6 +1483,17 @@
         <div class="help" id="screen-help" style="margin-bottom:10px"></div>
         <div class="form">
           <div class="full" id="screen-now"></div>
+          <div class="full" id="screen-power-row" hidden>
+            <div id="screen-power-state"></div>
+            <div class="row" style="margin-top:6px;align-items:center">
+              <button id="screen-power-off"></button>
+              <button id="screen-power-on"></button>
+              <label id="screen-brightness-label" style="margin-left:12px" hidden></label>
+              <input type="range" id="screen-brightness" min="0" max="255" style="max-width:200px" hidden>
+              <span id="screen-brightness-value" hidden></span>
+            </div>
+            <div class="help" id="screen-power-help"></div>
+          </div>
           <div class="full"><button class="small" id="btn-screen-details"></button></div>
           <div class="full" id="screen-owner" style="margin-top:10px"></div>
           <div class="full row" id="screen-owner-actions"></div>
@@ -2073,6 +2084,10 @@
         $('disp-help').textContent = t('MANAGER_DISPLAY_DOC');
         $('disp-fit-label').textContent = t('MANAGER_DISPLAY_FIT');
         $('disp-backdrop-label').textContent = t('MANAGER_DISPLAY_BACKDROP');
+        $('screen-power-off').textContent = t('MANAGER_SCREEN_POWER_SWITCH_OFF');
+        $('screen-power-on').textContent = t('MANAGER_SCREEN_POWER_SWITCH_ON');
+        $('screen-brightness-label').textContent = t('MANAGER_SCREEN_BRIGHTNESS');
+        $('screen-power-help').textContent = t('MANAGER_SCREEN_POWER_HELP');
         $('disp-position-label').textContent = t('MANAGER_DISPLAY_POSITION');
         $('disp-position').options[0].textContent = t('MANAGER_DISPLAY_CENTERED');
         $('disp-position').options[1].textContent = t('MANAGER_DISPLAY_MANUAL');
@@ -4131,6 +4146,37 @@
           api('POST', '/api/face', { set: {}, reset: true }).then(function (r) { renderLook(r); toast(t('MANAGER_LOOK_RESET_DONE')); }).catch(function (e) { toast(errorText(e), 'error'); });
         });
       };
+      // The panel's power: its state and means, the switch, and the
+      // backlight's brightness where there is one.
+      function renderScreenPower(p) {
+        $('screen-power-row').hidden = !p.display && !p.reported;
+        var means = p.by === 'backlight' ? t('MANAGER_SCREEN_POWER_BY_BACKLIGHT') : p.by === 'dpms' ? t('MANAGER_SCREEN_POWER_BY_DPMS') : p.by === 'dark' ? t('MANAGER_SCREEN_POWER_BY_DARK') : '';
+        var state = t(p.power === 'off' ? 'MANAGER_SCREEN_POWER_OFF' : 'MANAGER_SCREEN_POWER_ON') + (means ? ' (' + means + ')' : '');
+        if (!p.display) state = t('MANAGER_SCREEN_POWER_NO_DISPLAY');
+        else if (!p.ours) state += ' \u00b7 ' + t('MANAGER_SCREEN_POWER_NOT_OURS');
+        $('screen-power-state').textContent = state;
+        $('screen-power-off').disabled = !p.display || p.power === 'off';
+        $('screen-power-on').disabled = !p.display || p.power === 'on';
+        var lit = !!p.backlight;
+        $('screen-brightness-label').hidden = !lit;
+        $('screen-brightness').hidden = !lit;
+        $('screen-brightness-value').hidden = !lit;
+        if (lit) {
+          $('screen-brightness').max = p.maxBrightness;
+          $('screen-brightness').value = p.brightness;
+          $('screen-brightness-value').textContent = p.brightness + ' / ' + p.maxBrightness;
+        }
+      }
+      function loadScreenPower() {
+        return api('GET', '/api/screen/power').then(renderScreenPower).catch(function () {});
+      }
+      function setScreenPower(body) {
+        api('POST', '/api/screen/power', body).then(function () { setTimeout(loadScreenPower, 800); }).catch(function (e) { toast(errorText(e), 'error'); });
+      }
+      $('screen-power-off').onclick = function () { setScreenPower({ power: 'off' }); };
+      $('screen-power-on').onclick = function () { setScreenPower({ power: 'on' }); };
+      $('screen-brightness').onchange = function () { setScreenPower({ brightness: parseInt($('screen-brightness').value, 10) || 0 }); };
+      $('screen-brightness').oninput = function () { $('screen-brightness-value').textContent = $('screen-brightness').value + ' / ' + $('screen-brightness').max; };
       function loadScreen() {
         return api('GET', '/api/screen').then(renderScreen).catch(function (e) { toast(errorText(e), 'error'); });
       }
@@ -4220,6 +4266,7 @@
         var free = !!sc.free;
         renderScreenNow(sc.now || {}, free, !!sc.ownX);
         renderScreenOwner(sc.owner, sc.graphics);
+        loadScreenPower();
         // The face's size: shown once glass-evo is here to draw at it; saved as it is chosen.
         // The face's size and look are for a face that can be on this screen: glass-evo here,
         // and the screen its own or one it could hold.

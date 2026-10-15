@@ -6123,6 +6123,12 @@ pub struct Motion {
 }
 
 impl Motion {
+    /// The next frame drawn whole, whatever changed: a panel come back on
+    /// shows all of it.
+    pub fn repaint(&mut self) {
+        self.paint_all = true;
+    }
+
     /// Motion for a player painting on up to `threads` threads. With a
     /// frame rate, only as many threads as a frame needs are used, from one
     /// up; without one, all of them, always.
