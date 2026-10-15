@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.8] - 2026-10-15
+
+- **In step with glass-evo 0.10.8.** Nothing of Glass's own changes; this Glass names glass-evo 0.10.8 as the least it works with, where the queue's whole-screen shape draws its way back.
+
 ## [0.10.7] - 2026-10-15
 
 - **The queue reaches the Glass interface, and the look chooses the shape of its lists.** The player's queue is now part of what the engine hands a face: every track, with the playing track's place, shared between frames and made again when the queue changes; and the plugin plays from a place in the queue when a face asks. The Manager's look panel gains Lists, with the shape the queue and the browser take on the screen: by the screen (a sheet over the theme on a wide screen, the whole screen on a portrait one), always a sheet, a drawer at the right, or the whole screen. glass-evo 0.10.7 brings the queue view itself: a Queue tile on the More sheet, the list with the playing track marked, a tap playing from a row and a drag scrolling, in the shape chosen, on the player's screen, in the Face tab and on the remotes alike. This Glass names glass-evo 0.10.7 as the least it works with.
