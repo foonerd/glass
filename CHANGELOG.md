@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.17] - 2026-10-15
+
+- **The file path's two refusals no longer send a user round in a circle.** From 0.10.0 every Glass goes with a glass-evo of its own, so an upgrade by file from an older pair takes both zips chosen together in the box; one alone was refused with "give its zip with the Glass zip" for Glass and "upgrade Glass first" for glass-evo, and a user who followed each in turn got nowhere (asked on the forum). Both refusals, in English, German and French, now say the one thing to do: choose both zips, Glass and glass-evo, and install the files together; the box says the same before anything is tried.
+
 ## [0.10.16] - 2026-10-15
 
 - **In step with glass-evo 0.10.16.** Nothing of Glass's own changes; this Glass names glass-evo 0.10.16 as the least it works with, where the favourite tile stands in the library row of the More sheet.
