@@ -1854,6 +1854,10 @@ pub struct TapSource {
     /// The covers of the browsed items: fetched one at a time in the
     /// background as a changer's discs are, kept by their location.
     browse_art: DiscArt,
+    /// The covers of the queue's entries around the playing track, fetched
+    /// the same way, and the files as last handed on.
+    queue_art: DiscArt,
+    queue_art_held: std::sync::Arc<Vec<String>>,
     /// The meter's fall, as the old scope shaped it, on the pipe scale.
     decay: tap::legacy::Meter,
     /// The theme's bars from the bank, on the old logarithmic mapping.
@@ -2080,6 +2084,8 @@ impl TapSource {
             favourite_held: None,
             browse_held: None,
             browse_art: DiscArt::default(),
+            queue_art: DiscArt::default(),
+            queue_art_held: Default::default(),
             decay: tap::legacy::Meter::new(METER_DECAY_MS, meter_max.max(1.0) as u32),
             bins_mapper: tap::legacy::Regroup::new(
                 bins,
@@ -2322,6 +2328,36 @@ impl TapSource {
     /// a position; or, when the track is not in the queue, the player's own
     /// disc alone, with an index of its own that moves on with every new
     /// track, so the row moves on as it does for a queue.
+    /// The queue's covers as the snapshot hands them on: the file of each
+    /// entry's cover by place, fetched around the playing track (a few
+    /// before it, more after), empty elsewhere; the same list between
+    /// frames until a cover lands.
+    fn queue_art_dressed(&mut self) -> std::sync::Arc<Vec<String>> {
+        let entries = &self.queue_entries;
+        if entries.is_empty() {
+            if !self.queue_art_held.is_empty() {
+                self.queue_art_held = Default::default();
+            }
+            return self.queue_art_held.clone();
+        }
+        let at = self.queue_position_held.unwrap_or(0) as usize;
+        let start = at.saturating_sub(QUEUE_ART_BEFORE).min(entries.len());
+        let end = (start + QUEUE_ART_MOST).min(entries.len());
+        let wanted: Vec<String> = entries[start..end]
+            .iter()
+            .map(|entry| entry.albumart.clone())
+            .collect();
+        let files = self.queue_art.files_for(&wanted);
+        let mut dressed = vec![String::new(); entries.len()];
+        for (slot, file) in dressed[start..end].iter_mut().zip(files) {
+            *slot = file;
+        }
+        if *self.queue_art_held != dressed {
+            self.queue_art_held = std::sync::Arc::new(dressed);
+        }
+        self.queue_art_held.clone()
+    }
+
     /// The browse answer as the snapshot hands it on: the covers of its
     /// first items filled in as they land, fetched one at a time in the
     /// background as a changer's discs are (on a page, brought by the
@@ -2856,6 +2892,7 @@ impl Source for TapSource {
             weather: self.weather_held.clone(),
             queue: self.queue_entries.clone(),
             browse: self.browse_dressed(),
+            queue_art: self.queue_art_dressed(),
             queue_position: self.queue_position_held,
         }
     }
@@ -2864,6 +2901,10 @@ impl Source for TapSource {
 /// How many of a browse answer's items have their covers fetched, in
 /// the list's order; the rest wear their icons.
 const BROWSE_ART_MOST: usize = 48;
+/// How many of the queue's covers are fetched, and how many of them
+/// before the playing track.
+const QUEUE_ART_MOST: usize = 48;
+const QUEUE_ART_BEFORE: usize = 8;
 
 /// `frame.rate` from the installed `config.txt`, or 30 when that file is absent.
 /// Whether the display may lower its frame rate when it cannot keep up:
@@ -3187,6 +3228,7 @@ pub fn input_from_records(
         weather: None,
         queue: Default::default(),
         browse: None,
+        queue_art: Default::default(),
         queue_position: None,
     }
 }

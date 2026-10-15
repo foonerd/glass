@@ -1188,14 +1188,30 @@ Glass.prototype.searchAsk = function (value) {
 // A tap on a browsed list plays: `{uri, index}` plays the list the face
 // saw at that location from the tapped place, the items that play by
 // themselves into the queue in the player's own way (the queue replaced);
-// a tapped folder, or `{item}`, plays that whole. A location not kept is
-// browsed again first.
+// a tapped folder, or `{item}`, plays that whole. With `add` true the
+// queue is kept: the list, or the item, goes in after what is there and
+// playing jumps to the tapped place. A location not kept is browsed
+// again first.
 Glass.prototype.playBrowsed = function (value) {
     var self = this;
     var router = self.commandRouter;
     var v = value && typeof value === 'object' ? value : {};
+    var add = v.add === true;
+    var fail = function (e) { self.logger.error(id + 'play: ' + (e && e.message ? e.message : e)); };
+    // The queue kept: added after what is there, then played from the place among what was added.
+    var addAndPlay = function (items, at) {
+        var done = router.addQueueItems(items);
+        if (done && typeof done.then === 'function') {
+            done.then(function (e) {
+                var first = e && Number.isInteger(e.firstItemIndex) ? e.firstItemIndex : 0;
+                router.volumioPlay(first + at);
+            }, fail);
+        }
+    };
     if (v.item && typeof v.item === 'object') {
-        try { router.replaceAndPlay(browse.played(v.item)); } catch (e) { self.logger.error(id + 'play: ' + (e && e.message ? e.message : e)); }
+        try {
+            if (add) { addAndPlay(browse.played(v.item), 0); } else { router.replaceAndPlay(browse.played(v.item)); }
+        } catch (e) { fail(e); }
         return;
     }
     var uri = String(v.uri || '');
@@ -1205,8 +1221,10 @@ Glass.prototype.playBrowsed = function (value) {
         if (!line || !Array.isArray(line.items) || !line.items[index]) { self.logger.warn(id + 'play: nothing at ' + index + ' of ' + uri); return; }
         var tapped = browse.playable(line.items, index);
         try {
-            if (tapped.index >= 0) { router.replaceAndPlay({ list: tapped.list, index: tapped.index }); } else { router.replaceAndPlay(browse.played(line.items[index])); }
-        } catch (e) { self.logger.error(id + 'play: ' + (e && e.message ? e.message : e)); }
+            if (add) {
+                if (tapped.index >= 0) { addAndPlay(tapped.list, tapped.index); } else { addAndPlay(browse.played(line.items[index]), 0); }
+            } else if (tapped.index >= 0) { router.replaceAndPlay({ list: tapped.list, index: tapped.index }); } else { router.replaceAndPlay(browse.played(line.items[index])); }
+        } catch (e) { fail(e); }
     };
     var kept = self.browsed.get(uri);
     if (kept) { go(kept); } else { self.browseAsk({ uri: uri }).then(go, function () {}); }

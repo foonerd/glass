@@ -3667,6 +3667,10 @@ pub struct Input {
     /// the covers that have landed; none until one was asked.
     #[serde(default)]
     pub browse: Option<std::sync::Arc<Browse>>,
+    /// The file each queue entry's cover landed in, by place, empty where
+    /// it has not; fetched around the playing track.
+    #[serde(default)]
+    pub queue_art: std::sync::Arc<Vec<String>>,
     /// The playing track's place in the queue, where the player says.
     #[serde(default)]
     pub queue_position: Option<u32>,

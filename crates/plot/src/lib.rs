@@ -903,6 +903,7 @@ mod tests {
         let input = Input {
             queue: Default::default(),
             browse: None,
+            queue_art: Default::default(),
             queue_position: None,
             levels: Levels {
                 left: 50.0,
@@ -1233,6 +1234,7 @@ mod analyser_tests {
         let input = Input {
             queue: Default::default(),
             browse: None,
+            queue_art: Default::default(),
             queue_position: None,
             levels: Levels::default(),
             bins: Bins {
@@ -1300,6 +1302,7 @@ mod analyser_tests {
         let input = Input {
             queue: Default::default(),
             browse: None,
+            queue_art: Default::default(),
             queue_position: None,
             levels: Levels::default(),
             bins: Bins {
@@ -1354,6 +1357,7 @@ mod analyser_tests {
             let input = Input {
                 queue: Default::default(),
                 browse: None,
+                queue_art: Default::default(),
                 queue_position: None,
                 levels: Levels::default(),
                 bins: Bins {
@@ -1430,6 +1434,7 @@ mod analyser_tests {
         let input = Input {
             queue: Default::default(),
             browse: None,
+            queue_art: Default::default(),
             queue_position: None,
             levels: Levels::default(),
             bins: Bins {
