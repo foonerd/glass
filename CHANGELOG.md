@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.7] - 2026-10-15
+
+- **The queue reaches the Glass interface, and the look chooses the shape of its lists.** The player's queue is now part of what the engine hands a face: every track, with the playing track's place, shared between frames and made again when the queue changes; and the plugin plays from a place in the queue when a face asks. The Manager's look panel gains Lists, with the shape the queue and the browser take on the screen: by the screen (a sheet over the theme on a wide screen, the whole screen on a portrait one), always a sheet, a drawer at the right, or the whole screen. glass-evo 0.10.7 brings the queue view itself: a Queue tile on the More sheet, the list with the playing track marked, a tap playing from a row and a drag scrolling, in the shape chosen, on the player's screen, in the Face tab and on the remotes alike. This Glass names glass-evo 0.10.7 as the least it works with.
+
 ## [0.10.6] - 2026-10-15
 
 - **The blurred backdrop switch saves from the plugin's settings page.** The switch stood on the Display section but was not among the fields the section's Apply sent, so the plugin read nothing and wrote the colour back; the setting showed off again when the page reopened, and an Apply of any other Display setting turned a backdrop set on the Manager's Screen tab back off. The field is sent now, and a page that does not send it leaves the setting as it stands. Asked on the forum.
