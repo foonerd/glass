@@ -682,7 +682,15 @@ class Manager {
       if (!/^[a-z]+$/.test(name)) return res.status(400).json({ error: 'bad-command' });
       const message = { kind: 'command', name };
       if (body.value !== undefined && body.value !== null) message.value = body.value;
-      self.plugin.runCommand(message);
+      // A command with an answer (browse, search) answers here with the
+      // line a display would get down the channel; the page hands it to
+      // its module as it hands the feed's lines.
+      const answer = self.plugin.runCommand(message);
+      if (answer && typeof answer.then === 'function') {
+        let line = null;
+        try { line = await answer; } catch (e) { line = null; }
+        return res.json({ ok: true, name, line: line || null });
+      }
       res.json({ ok: true, name });
     }));
 

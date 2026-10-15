@@ -24,6 +24,7 @@ const { Manager, DEFAULT_PORT: MANAGER_DEFAULT_PORT } = require('./manager/serve
 const { FaceFeed } = require('./manager/facefeed');
 const { advanced } = require('./manager/statenow');
 const screenpower = require('./manager/screenpower');
+const browse = require('./manager/browse');
 const screenprobe = require('./manager/screenprobe');
 const playerfacts = require('./manager/playerfacts');
 const screenowner = require('./manager/screenowner');
@@ -146,7 +147,7 @@ Channel.prototype.attach = function (conn) {
             var message = null;
             try { message = JSON.parse(line); } catch (e) {}
             if (message && message.kind === 'command') {
-                self.onCommand(message);
+                self.onCommand(message, conn);
             } else if (message && message.kind === 'hello' && message.remote && typeof message.remote === 'object') {
                 // A remote display says who it is.
                 var r = message.remote;
@@ -1101,9 +1102,13 @@ Glass.prototype.runCommand = function (message) {
     try {
         switch (name) {
             case 'play':
-                // A number plays from that place in the queue; bare, the player plays.
-                if (typeof value === 'number' && isFinite(value) && value >= 0) { router.volumioPlay(Math.round(value)); } else { router.volumioPlay(); }
+                // A number plays from that place in the queue; a browsed
+                // list's place or an item plays that; bare, the player plays.
+                if (typeof value === 'number' && isFinite(value) && value >= 0) { router.volumioPlay(Math.round(value)); } else if (value && typeof value === 'object') { self.playBrowsed(value); } else { router.volumioPlay(); }
                 break;
+            case 'browse': return self.browseAsk(value);
+            case 'search': return self.searchAsk(value);
+            case 'queue': self.queueBrowsed(value); break;
             case 'pause': router.volumioPause(); break;
             case 'toggle': router.volumioToggle(); break;
             case 'stop': router.volumioStop(); break;
@@ -1125,6 +1130,98 @@ Glass.prototype.runCommand = function (message) {
 // takes it out, no value turns it over from what the player last said. The
 // player's word follows down the channel as a `favourite` line, to every
 // display and page at once, so a tap on one shows on all.
+// A browse: what the player lists at a location, as one line for the
+// display or page that asked (`uri` empty for the sources; `serial` goes
+// back as it came, so the asker knows which ask this answers; `title` is
+// the asker's word for the page). Answers with a promise of the line.
+Glass.prototype.browseAsk = function (value) {
+    var self = this;
+    var v = value && typeof value === 'object' ? value : {};
+    var uri = String(v.uri || '');
+    var serial = Number(v.serial) || 0;
+    var title = String(v.title || '');
+    var router = self.commandRouter;
+    if (!uri) {
+        var list = [];
+        try { list = router.volumioGetVisibleBrowseSources() || []; } catch (e) { self.logger.warn(id + 'browse: the sources could not be read: ' + (e && e.message ? e.message : e)); }
+        var line = browse.sources(list, serial);
+        self.browsed.put(line);
+        return Promise.resolve(line);
+    }
+    return new Promise(function (resolve) {
+        var settle = function (result) {
+            var line = browse.answer(uri, result && result.navigation, serial, title);
+            self.browsed.put(line);
+            resolve(line);
+        };
+        var done = null;
+        try { done = router.musicLibrary.executeBrowseSource(uri); } catch (e) { self.logger.warn(id + 'browse ' + uri + ': ' + (e && e.message ? e.message : e)); settle(null); return; }
+        if (done && typeof done.then === 'function') {
+            done.then(settle, function (e) { self.logger.warn(id + 'browse ' + uri + ' failed: ' + (e && e.message ? e.message : e)); settle(null); });
+        } else { settle(done); }
+    });
+};
+
+// A search across the player's sources, answered as a browse of
+// `search/<words>` with the player's lists (songs, albums, artists…).
+Glass.prototype.searchAsk = function (value) {
+    var self = this;
+    var v = value && typeof value === 'object' ? value : {};
+    var words = String(v.value || '').trim().slice(0, 200);
+    var serial = Number(v.serial) || 0;
+    var uri = 'search/' + words;
+    if (!words) { return Promise.resolve(browse.answer(uri, null, serial, 'Search')); }
+    return new Promise(function (resolve) {
+        var settle = function (result) {
+            var line = browse.answer(uri, result && result.navigation, serial, 'Search');
+            self.browsed.put(line);
+            resolve(line);
+        };
+        var done = null;
+        try { done = self.commandRouter.volumioSearch({ value: words }); } catch (e) { self.logger.warn(id + 'search: ' + (e && e.message ? e.message : e)); settle(null); return; }
+        if (done && typeof done.then === 'function') {
+            done.then(settle, function (e) { self.logger.warn(id + 'search failed: ' + (e && e.message ? e.message : e)); settle(null); });
+        } else { settle(done); }
+    });
+};
+
+// A tap on a browsed list plays: `{uri, index}` plays the list the face
+// saw at that location from the tapped place, the items that play by
+// themselves into the queue in the player's own way (the queue replaced);
+// a tapped folder, or `{item}`, plays that whole. A location not kept is
+// browsed again first.
+Glass.prototype.playBrowsed = function (value) {
+    var self = this;
+    var router = self.commandRouter;
+    var v = value && typeof value === 'object' ? value : {};
+    if (v.item && typeof v.item === 'object') {
+        try { router.replaceAndPlay(browse.played(v.item)); } catch (e) { self.logger.error(id + 'play: ' + (e && e.message ? e.message : e)); }
+        return;
+    }
+    var uri = String(v.uri || '');
+    var index = Number(v.index);
+    if (!Number.isInteger(index) || index < 0) { self.logger.warn(id + 'play: no place in the list'); return; }
+    var go = function (line) {
+        if (!line || !Array.isArray(line.items) || !line.items[index]) { self.logger.warn(id + 'play: nothing at ' + index + ' of ' + uri); return; }
+        var tapped = browse.playable(line.items, index);
+        try {
+            if (tapped.index >= 0) { router.replaceAndPlay({ list: tapped.list, index: tapped.index }); } else { router.replaceAndPlay(browse.played(line.items[index])); }
+        } catch (e) { self.logger.error(id + 'play: ' + (e && e.message ? e.message : e)); }
+    };
+    var kept = self.browsed.get(uri);
+    if (kept) { go(kept); } else { self.browseAsk({ uri: uri }).then(go, function () {}); }
+};
+
+// A browsed item added to the queue, whole: a track, or a folder the
+// player unfolds into its tracks.
+Glass.prototype.queueBrowsed = function (value) {
+    var self = this;
+    var v = value && typeof value === 'object' ? value : {};
+    var item = v.item && typeof v.item === 'object' ? v.item : v;
+    if (!item.uri) { self.logger.warn(id + 'queue: no item'); return; }
+    try { self.commandRouter.addQueueItems(browse.played(item)); } catch (e) { self.logger.error(id + 'queue: ' + (e && e.message ? e.message : e)); }
+};
+
 Glass.prototype.setFavourite = function (value) {
     var self = this;
     var state = self.lastState || {};
@@ -1198,6 +1295,8 @@ Glass.prototype.onStart = function () {
     var lastStateIsPlaying = false;
     self.Timeout = null;
     self.favouriteAsked = false;
+    // The last browse answers by location, for a tap's list.
+    self.browsed = new browse.Kept(8);
     self.persistTimer = null;
     self.transitionGraceTimer = null;
     self.meterChild = null;
@@ -1227,8 +1326,15 @@ Glass.prototype.onStart = function () {
         self.pushRemoteConfig();
         // The panel's power as asked, so a display that starts anew holds it.
         self.pushScreenWish();
-    }, function (message) {
-        self.runCommand(message);
+    }, function (message, conn) {
+        // A command with an answer (browse, search) answers the display
+        // that asked, and it alone: another display's list is its own.
+        var answer = self.runCommand(message);
+        if (answer && typeof answer.then === 'function') {
+            answer.then(function (line) {
+                if (line && conn && self.channel) { self.channel.tell(conn, line); }
+            }, function () {});
+        }
     });
     self.channel.listen(channelPath);
 

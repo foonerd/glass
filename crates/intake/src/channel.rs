@@ -67,6 +67,9 @@ pub enum Event {
     /// track's location and whether it is one. It follows every state, and
     /// an answer to the `favourite` command.
     Favourite { uri: String, on: bool },
+    /// The player's answer to this display's `browse` or `search`
+    /// command: what it lists at the location asked.
+    Browse(Box<lead::Browse>),
 }
 
 /// What the player asks of the panel: power on or off, a toggle instead,
@@ -552,6 +555,9 @@ pub fn decode(line: &[u8]) -> Option<Event> {
                     .map(|level| level.min(u32::MAX as u64) as u32),
             }))
         }
+        "browse" => serde_json::from_value::<lead::Browse>(value.clone())
+            .ok()
+            .map(|browse| Event::Browse(Box::new(browse))),
         "favourite" => Some(Event::Favourite {
             uri: text("uri"),
             on: value.get("on").and_then(Value::as_bool).unwrap_or(false),
@@ -571,6 +577,34 @@ pub fn decode(line: &[u8]) -> Option<Event> {
 #[cfg(test)]
 mod decode_tests {
     use super::*;
+
+    /// The player's answer to a browse: the location, the items with what
+    /// the face needs of each, the serial of the ask; a field the plugin
+    /// leaves out is its default, and a line that is no answer is nothing.
+    #[test]
+    fn the_browse_line_is_decoded() {
+        let line = br#"{"kind":"browse","uri":"music-library","title":"Music Library","prev":"","serial":3,"items":[{"title":"NAS","icon":"server","uri":"music-library/NAS","service":"mpd","type":"folder","leaf":false},{"title":"One","subtitle":"A - X","art":"/albumart?path=x","uri":"mnt/x/1.flac","service":"mpd","type":"song","leaf":true,"duration":100}]}"#;
+        let Some(Event::Browse(browse)) = decode(line) else {
+            panic!("a browse answer");
+        };
+        assert_eq!(browse.uri, "music-library");
+        assert_eq!(browse.title, "Music Library");
+        assert_eq!(browse.serial, 3);
+        assert_eq!(browse.info, None);
+        assert_eq!(browse.items.len(), 2);
+        assert_eq!(browse.items[0].icon, "server");
+        assert_eq!(browse.items[0].kind, "folder");
+        assert!(!browse.items[0].leaf && !browse.items[0].heading);
+        assert_eq!(browse.items[1].subtitle, "A - X");
+        assert_eq!(browse.items[1].art, "/albumart?path=x");
+        assert_eq!(
+            browse.items[1].art_file, "",
+            "no cover has landed on the line"
+        );
+        assert!(browse.items[1].leaf);
+        assert_eq!(browse.items[1].duration, 100.0);
+        assert_eq!(decode(br#"{"kind":"browse","items":"no"}"#), None);
+    }
 
     /// The player's word on a track among its favourites: the location and
     /// whether it is one; no word on that is not one.

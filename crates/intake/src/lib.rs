@@ -1848,6 +1848,12 @@ pub struct TapSource {
     /// location and whether it is one. The snapshot says it of the playing
     /// track alone.
     favourite_held: Option<(String, bool)>,
+    /// The player's last answer to this display's browse, as the snapshot
+    /// hands it on, its covers filled in as they land.
+    browse_held: Option<std::sync::Arc<lead::Browse>>,
+    /// The covers of the browsed items: fetched one at a time in the
+    /// background as a changer's discs are, kept by their location.
+    browse_art: DiscArt,
     /// The meter's fall, as the old scope shaped it, on the pipe scale.
     decay: tap::legacy::Meter,
     /// The theme's bars from the bank, on the old logarithmic mapping.
@@ -2072,6 +2078,8 @@ impl TapSource {
             screen_asked: None,
             weather_held: None,
             favourite_held: None,
+            browse_held: None,
+            browse_art: DiscArt::default(),
             decay: tap::legacy::Meter::new(METER_DECAY_MS, meter_max.max(1.0) as u32),
             bins_mapper: tap::legacy::Regroup::new(
                 bins,
@@ -2314,6 +2322,36 @@ impl TapSource {
     /// a position; or, when the track is not in the queue, the player's own
     /// disc alone, with an index of its own that moves on with every new
     /// track, so the row moves on as it does for a queue.
+    /// The browse answer as the snapshot hands it on: the covers of its
+    /// first items filled in as they land, fetched one at a time in the
+    /// background as a changer's discs are (on a page, brought by the
+    /// host), the answer made again only when a cover has landed since.
+    fn browse_dressed(&mut self) -> Option<std::sync::Arc<lead::Browse>> {
+        let held = self.browse_held.clone()?;
+        let wanted: Vec<String> = held
+            .items
+            .iter()
+            .take(BROWSE_ART_MOST)
+            .map(|item| item.art.clone())
+            .collect();
+        let files = self.browse_art.files_for(&wanted);
+        let same = held
+            .items
+            .iter()
+            .zip(files.iter())
+            .all(|(item, file)| &item.art_file == file);
+        if same {
+            return Some(held);
+        }
+        let mut dressed = (*held).clone();
+        for (item, file) in dressed.items.iter_mut().zip(files) {
+            item.art_file = file;
+        }
+        let dressed = std::sync::Arc::new(dressed);
+        self.browse_held = Some(dressed.clone());
+        Some(dressed)
+    }
+
     fn discs_for(&mut self, playing: &NowPlaying, engaged: bool) -> Vec<lead::Disc> {
         let slots = self.changer_slots as usize;
         if slots == 0 {
@@ -2639,6 +2677,7 @@ impl Source for TapSource {
                     self.favourite_held = Some((uri, on));
                     self.rederive = true;
                 }
+                Event::Browse(browse) => self.browse_held = Some(std::sync::Arc::new(*browse)),
                 Event::Hello { .. } => {}
             }
         }
@@ -2816,10 +2855,15 @@ impl Source for TapSource {
             metadata,
             weather: self.weather_held.clone(),
             queue: self.queue_entries.clone(),
+            browse: self.browse_dressed(),
             queue_position: self.queue_position_held,
         }
     }
 }
+
+/// How many of a browse answer's items have their covers fetched, in
+/// the list's order; the rest wear their icons.
+const BROWSE_ART_MOST: usize = 48;
 
 /// `frame.rate` from the installed `config.txt`, or 30 when that file is absent.
 /// Whether the display may lower its frame rate when it cannot keep up:
@@ -3142,6 +3186,7 @@ pub fn input_from_records(
         metadata: lead::Metadata::default(),
         weather: None,
         queue: Default::default(),
+        browse: None,
         queue_position: None,
     }
 }
@@ -3908,6 +3953,43 @@ mod tests {
         );
         assert_ne!(fnv1a("a"), fnv1a("b"));
         assert_eq!(fnv1a("cover"), fnv1a("cover"));
+    }
+}
+
+#[cfg(test)]
+mod browse_tests {
+    use super::*;
+
+    /// A browse answer reaches the snapshot as the player gave it, the
+    /// same between frames, replaced by the next answer; an item without
+    /// a cover of its own has no file, and the snapshot carries none
+    /// until an answer came.
+    #[test]
+    fn a_browse_answer_reaches_the_input_and_stays_until_the_next() {
+        let mut source = TapSource::new(8, 1.0).without_player();
+        assert!(source.poll().browse.is_none());
+        source.push_event(
+            decode_event(br#"{"kind":"browse","uri":"","title":"Browse","serial":1,"items":[{"title":"Music Library","icon":"music","uri":"music-library","service":"mpd","type":"source"},{"title":"Web Radio","icon":"radio","uri":"radio","service":"webradio","type":"source"}]}"#)
+                .unwrap(),
+        );
+        let input = source.poll();
+        let browse = input.browse.as_ref().expect("an answer");
+        assert_eq!(browse.serial, 1);
+        assert_eq!(browse.items.len(), 2);
+        assert_eq!(browse.items[0].icon, "music");
+        assert_eq!(browse.items[0].art_file, "");
+        let again = source.poll();
+        assert!(
+            std::sync::Arc::ptr_eq(browse, again.browse.as_ref().unwrap()),
+            "the same answer between frames"
+        );
+        source.push_event(
+            decode_event(br#"{"kind":"browse","uri":"radio","title":"Web Radio","serial":2,"items":[{"title":"Top 500","icon":"star","uri":"radio/top500","service":"webradio","type":"radio-category"}]}"#)
+                .unwrap(),
+        );
+        let next = source.poll();
+        assert_eq!(next.browse.as_ref().unwrap().serial, 2);
+        assert_eq!(next.browse.as_ref().unwrap().items[0].title, "Top 500");
     }
 }
 

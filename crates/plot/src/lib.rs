@@ -902,6 +902,7 @@ mod tests {
         let skin = SkinDesc::basic();
         let input = Input {
             queue: Default::default(),
+            browse: None,
             queue_position: None,
             levels: Levels {
                 left: 50.0,
@@ -1231,6 +1232,7 @@ mod analyser_tests {
         right[16] = 10f32.powf(-30.0 / 20.0);
         let input = Input {
             queue: Default::default(),
+            browse: None,
             queue_position: None,
             levels: Levels::default(),
             bins: Bins {
@@ -1297,6 +1299,7 @@ mod analyser_tests {
         right[5] = 1.0;
         let input = Input {
             queue: Default::default(),
+            browse: None,
             queue_position: None,
             levels: Levels::default(),
             bins: Bins {
@@ -1350,6 +1353,7 @@ mod analyser_tests {
         let with = |skin: &SkinDesc, left: Vec<f32>, right: Vec<f32>| {
             let input = Input {
                 queue: Default::default(),
+                browse: None,
                 queue_position: None,
                 levels: Levels::default(),
                 bins: Bins {
@@ -1425,6 +1429,7 @@ mod analyser_tests {
         let right = vec![0.0f32; bands];
         let input = Input {
             queue: Default::default(),
+            browse: None,
             queue_position: None,
             levels: Levels::default(),
             bins: Bins {

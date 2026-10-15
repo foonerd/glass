@@ -271,7 +271,16 @@
   function carry(acts) {
     acts.forEach(function (act) {
       if (act.command) {
-        fetch('/api/face/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(act.command) }).catch(function () {});
+        // A command with an answer (a browse) brings a line of the
+        // plugin's back, handed to the module as the feed's lines are.
+        fetch('/api/face/command', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(act.command) })
+          .then(function (r) { return r.json(); })
+          .then(function (a) {
+            if (!a || !a.line || !face.ex) return;
+            var line = JSON.stringify(a.line);
+            guarded(function () { withString(line, function (ptr, len) { face.ex.event(ptr, len); }); });
+          })
+          .catch(function () {});
       }
       if (act.meter) {
         face.meter = act.meter; sized();

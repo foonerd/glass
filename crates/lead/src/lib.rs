@@ -3593,6 +3593,63 @@ pub struct QueueEntry {
     pub albumart: String,
 }
 
+/// One entry of what the player lists at a location: a track, a folder,
+/// an album, a radio, a source, or a heading between lists.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct BrowseItem {
+    #[serde(default)]
+    pub title: String,
+    /// The artist and the album, or what else the player says under the
+    /// title; a radio's bit rate.
+    #[serde(default)]
+    pub subtitle: String,
+    /// The cover's location as the player reports it; empty where the
+    /// item wears an icon instead.
+    #[serde(default)]
+    pub art: String,
+    /// The file the cover landed in; empty until it has.
+    #[serde(default)]
+    pub art_file: String,
+    /// A Lucide icon's name for an item without a cover of its own.
+    #[serde(default)]
+    pub icon: String,
+    #[serde(default)]
+    pub uri: String,
+    #[serde(default)]
+    pub service: String,
+    /// The player's own word for what the item is.
+    #[serde(default, rename = "type")]
+    pub kind: String,
+    /// Plays by itself; one that does not opens as a folder.
+    #[serde(default)]
+    pub leaf: bool,
+    /// A heading between the player's lists, not an item.
+    #[serde(default)]
+    pub heading: bool,
+    /// Seconds; 0 when the player does not say.
+    #[serde(default)]
+    pub duration: f32,
+}
+
+/// The player's answer to a browse: the location asked, a title for the
+/// page, the way up as the player gives it, an album's own header where
+/// the location is one, the items, and the serial of the ask it answers.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Browse {
+    #[serde(default)]
+    pub uri: String,
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub prev: String,
+    #[serde(default)]
+    pub info: Option<BrowseItem>,
+    #[serde(default)]
+    pub items: Vec<BrowseItem>,
+    #[serde(default)]
+    pub serial: u32,
+}
+
 /// One snapshot of the outside world. `plot` turns it into a scene.
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Input {
@@ -3606,6 +3663,10 @@ pub struct Input {
     /// between frames, made again when the queue changes.
     #[serde(default)]
     pub queue: std::sync::Arc<Vec<QueueEntry>>,
+    /// The player's last answer to a browse this display asked for, with
+    /// the covers that have landed; none until one was asked.
+    #[serde(default)]
+    pub browse: Option<std::sync::Arc<Browse>>,
     /// The playing track's place in the queue, where the player says.
     #[serde(default)]
     pub queue_position: Option<u32>,
