@@ -1106,6 +1106,11 @@ Glass.prototype.runCommand = function (message) {
                 // list's place or an item plays that; bare, the player plays.
                 if (typeof value === 'number' && isFinite(value) && value >= 0) { router.volumioPlay(Math.round(value)); } else if (value && typeof value === 'object') { self.playBrowsed(value); } else { router.volumioPlay(); }
                 break;
+            case 'remove':
+                // A place in the queue, taken out.
+                if (Number.isInteger(value) && value >= 0) { router.volumioRemoveQueueItem({ value: value }); } else { self.logger.warn(id + 'channel: remove needs a place in the queue'); }
+                break;
+            case 'clear': router.volumioClearQueue(); break;
             case 'browse': return self.browseAsk(value);
             case 'search': return self.searchAsk(value);
             case 'queue': self.queueBrowsed(value); break;
