@@ -86,7 +86,7 @@ function misfit(manifest, glass, arch, least) {
 
 function misfitMessage(manifest, problem) {
   if (problem.error === 'too-old') return 'glass-evo ' + manifest.version + ' is older than this Glass works with (' + problem.least + ')';
-  if (problem.error === 'needs-glass') return 'glass-evo ' + manifest.version + ' needs Glass ' + problem.needs + ' or later';
+  if (problem.error === 'needs-glass') return 'glass-evo ' + manifest.version + ' needs Glass ' + problem.needs + ' or later: choose both zips and install them together';
   return 'glass-evo ' + manifest.version + ' has no binary for this player (' + problem.arch + ')';
 }
 
@@ -157,7 +157,7 @@ async function pair(component, staged, job, options) {
       throw new ComponentError('pair', 'Glass ' + staged.version + ' needs glass-evo ' + plan.least + ' or later, and the glass-evo file given could not be installed (' + (e && e.message ? e.message : e) + '); nothing was changed');
     }
   } else if (options.byHand) {
-    throw new ComponentError('needs-evo', 'Glass ' + staged.version + ' needs glass-evo ' + plan.least + ' or later; give its zip with the Glass zip', { least: plan.least });
+    throw new ComponentError('needs-evo', 'Glass ' + staged.version + ' needs glass-evo ' + plan.least + ' or later: choose both zips and install them together', { least: plan.least });
   } else {
     try {
       const view = await component.check(true);

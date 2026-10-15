@@ -1716,7 +1716,7 @@ class Manager {
         let paired = false;
         if (held) {
           if (found.least && compareVersions(held.version, found.least) < 0) {
-            throw new UpdateError('needs-evo', 'Glass ' + found.version + ' needs glass-evo ' + found.least + ' or later; the glass-evo zip given is ' + held.version);
+            throw new UpdateError('needs-evo', 'Glass ' + found.version + ' needs glass-evo ' + found.least + ' or later; the glass-evo zip given is ' + held.version + ': choose a later glass-evo zip with it');
           }
           try {
             await self.component.installFile(job, held.file, { glass: glassToRun, least: found.least || self.component.least });
