@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.12] - 2026-10-15
+
+- **In step with glass-evo 0.10.12.** Nothing of Glass's own changes; this Glass names glass-evo 0.10.12 as the least it works with, where the heart on the More sheet is drawn whole: Lucide's glyphs are rastered over the whole of their grid, so nothing of a glyph that draws out to the grid's edge is cut.
+
 ## [0.10.11] - 2026-10-15
 
 - **The playing track's standing among the favourites, down the channel.** The plugin now carries the player's word on the playing track being one of its favourites as a `favourite` line, after every state and to a display or page that connects later, and takes a `favourite` command that adds the track to the favourites or takes it out (a radio goes to the radio favourites). The engine holds the word for the playing track alone, so glass-evo's face can show a heart and press it; the browser pages carry both the same way. This Glass names glass-evo 0.10.11 as the least it works with.
