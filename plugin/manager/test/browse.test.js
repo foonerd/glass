@@ -69,8 +69,18 @@ test("an album's header is kept as the page's title where the face gives none, a
   assert.equal(line.info.art, '/albumart?web=A/X');
   assert.equal(line.info.subtitle, 'A · X');
   assert.equal(line.items.length, 1, 'no heading for one list');
+  assert.equal(line.items[0].art, '/albumart?web=A/X', "a track without a cover of its own wears the album's");
   assert.equal(answer('x', null, 0, '').items.length, 0);
   assert.equal(answer('x', { lists: 'no' }, 0, 'T').title, 'T');
+});
+
+test('an item without a title is named by its album, its artist or the last part of its location', () => {
+  assert.equal(itemOf({ type: 'song', artist: '106.2 MHz', album: 'FM Radio', uri: 'rtlsdr://fm/106.2' }).title, 'FM Radio');
+  assert.equal(itemOf({ type: 'song', artist: 'A', uri: 'x/y' }).title, 'A');
+  assert.equal(itemOf({ type: 'folder', uri: 'music-library/NAS/My%20Music/' }).title, 'My Music');
+  assert.equal(itemOf({ type: 'song', uri: '' }).title, '');
+  assert.equal(itemOf({ type: 'folder', uri: 'f', albumart: '' }, '/albumart?web=c').art, '', "a folder does not wear the list's cover");
+  assert.equal(itemOf({ type: 'song', uri: 's', albumart: '/albumart?path=own' }, '/albumart?web=c').art, '/albumart?path=own', 'its own first');
 });
 
 test('what a tap plays is the leaves of the list with the tapped place among them', () => {

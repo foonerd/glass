@@ -74,15 +74,25 @@ function subtitleOf(item) {
   return artist || album;
 }
 
-// One item as a face draws it.
-function itemOf(item) {
+// A name for an item that carries none: its album or its artist, or the
+// last part of its location.
+function fallbackTitle(item) {
+  const uri = text(item.uri);
+  const last = uri.split('/').filter((part) => part).pop() || uri;
+  return text(item.album) || text(item.artist) || decodeURIComponent(last);
+}
+
+// One item as a face draws it; `cover` is the list's own cover, worn by
+// a track that has none of its own (an album's tracks).
+function itemOf(item, cover) {
   const type = text(item.type);
   const heading = type === 'title';
   const duration = Number(item.duration);
+  const own = heading ? '' : artOf(item);
   return {
-    title: text(item.title) || text(item.name),
+    title: text(item.title) || text(item.name) || fallbackTitle(item),
     subtitle: heading ? '' : subtitleOf(item),
-    art: heading ? '' : artOf(item),
+    art: own || (LEAVES.has(type) ? text(cover) : ''),
     icon: heading ? '' : iconOf(item),
     uri: text(item.uri),
     service: text(item.service),
@@ -137,15 +147,16 @@ function answer(uri, navigation, serial, title) {
   const nav = navigation && typeof navigation === 'object' ? navigation : {};
   const lists = Array.isArray(nav.lists) ? nav.lists : [];
   const items = [];
+  const info = nav.info && typeof nav.info === 'object' ? itemOf(nav.info) : null;
+  const cover = info ? info.art : '';
   lists.forEach((list) => {
     if (!list || typeof list !== 'object') return;
     const entries = Array.isArray(list.items) ? list.items : [];
     if (lists.length > 1 && text(list.title)) {
       items.push({ title: text(list.title), subtitle: '', art: '', icon: '', uri: '', service: '', type: 'title', leaf: false, heading: true, duration: 0 });
     }
-    entries.forEach((item) => { if (item && typeof item === 'object') items.push(itemOf(item)); });
+    entries.forEach((item) => { if (item && typeof item === 'object') items.push(itemOf(item, cover)); });
   });
-  const info = nav.info && typeof nav.info === 'object' ? itemOf(nav.info) : null;
   const name = text(title) || (info ? (info.title || text(nav.info.album)) : '');
   return { kind: 'browse', uri: text(uri), title: name, prev: text(nav.prev && nav.prev.uri), info: info, items: items.slice(0, MOST), serial: serial | 0 };
 }
