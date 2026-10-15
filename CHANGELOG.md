@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.21] - 2026-10-15
+
+- **In step with glass-evo 0.10.21.** Nothing of Glass's own changes; this Glass names glass-evo 0.10.21 as the least it works with, where every browsed row carries the player's three verbs, clear and play, add and play and add to queue, with the chevron for what opens as before.
+
 ## [0.10.20] - 2026-10-15
 
 - **In step with glass-evo 0.10.20.** Nothing of Glass's own changes; this Glass names glass-evo 0.10.20 as the least it works with, where every browsed row carries the player's three verbs: clear and play, add and play, add to queue.
