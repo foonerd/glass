@@ -1130,6 +1130,10 @@ fn fnv1a(text: &str) -> u64 {
 /// kept without end they filled the temp dir of a player up for weeks and
 /// the memory of a page open for days.
 const PICTURES_KEPT: usize = 48;
+/// How many of the rows' covers are kept, the queue's and the browser's,
+/// in a cache of their own: two lists of 48 and room beside them, so one
+/// list's covers never push out the other's or the album art.
+const ROWS_KEPT: usize = 128;
 
 /// The folders of the host's table that hold what arrives track by track,
 /// bounded once: the covers and fanart, and the track folders' pictures.
@@ -1140,6 +1144,8 @@ fn keep_brought_pictures_bounded() {
             let prefix = format!("{}/", lead::home().join(folder).to_string_lossy());
             lead::vfs::bound(&prefix, PICTURES_KEPT);
         }
+        let rows = format!("{}/", lead::home().join("rows").to_string_lossy());
+        lead::vfs::bound(&rows, ROWS_KEPT);
         // The picture when nothing plays: the one on show and the next chosen.
         let backgrounds = format!("{}/", lead::home().join("backgrounds").to_string_lossy());
         lead::vfs::bound(&backgrounds, 2);
@@ -1181,6 +1187,15 @@ fn picture_in_table(reported: &str) -> (String, String) {
     keep_brought_pictures_bounded();
     (
         format!("pictures/{:016x}.img", fnv1a(reported)),
+        format!("/api/face/picture?at={}", bring::encode(reported)),
+    )
+}
+
+/// A row's cover in the host's table: under `rows/`, bounded on its own.
+fn row_picture_in_table(reported: &str) -> (String, String) {
+    keep_brought_pictures_bounded();
+    (
+        format!("rows/{:016x}.img", fnv1a(reported)),
         format!("/api/face/picture?at={}", bring::encode(reported)),
     )
 }
@@ -1254,7 +1269,21 @@ fn art_gave_up(cache: bool, why: &str) {
 
 #[cfg(not(target_arch = "wasm32"))]
 fn fetch_art(reported: &str) -> Option<PathBuf> {
-    let dir = std::env::temp_dir().join("glass-art");
+    fetch_art_into(reported, "glass-art", PICTURES_KEPT)
+}
+
+/// A row's cover, fetched into the rows' own cache.
+#[cfg(not(target_arch = "wasm32"))]
+fn fetch_row_art(reported: &str) -> Option<PathBuf> {
+    fetch_art_into(reported, "glass-art-rows", ROWS_KEPT)
+}
+
+/// The picture at a reported location, fetched into the cache folder
+/// `folder` under the system's temporary directory and kept there with
+/// the newest `keep`; the file it landed in, or none.
+#[cfg(not(target_arch = "wasm32"))]
+fn fetch_art_into(reported: &str, folder: &str, keep: usize) -> Option<PathBuf> {
+    let dir = std::env::temp_dir().join(folder);
     if let Err(e) = std::fs::create_dir_all(&dir) {
         art_gave_up(
             true,
@@ -1312,7 +1341,7 @@ fn fetch_art(reported: &str) -> Option<PathBuf> {
         );
         return None;
     }
-    prune_art(&dir, PICTURES_KEPT, &path);
+    prune_art(&dir, keep, &path);
     Some(path)
 }
 
@@ -1548,11 +1577,22 @@ pub fn disc_window(len: usize, slots: usize, position: usize) -> std::ops::Range
 #[derive(Default)]
 struct DiscArt {
     have: HashMap<String, String>,
+    /// Whether these are rows' covers, kept in the rows' own cache rather
+    /// than with the album art.
+    rows: bool,
     #[cfg(not(target_arch = "wasm32"))]
     pending: Option<(String, mpsc::Receiver<Option<PathBuf>>)>,
 }
 
 impl DiscArt {
+    /// A fetcher for rows' covers: the queue's and the browser's.
+    fn rows() -> Self {
+        DiscArt {
+            rows: true,
+            ..Default::default()
+        }
+    }
+
     /// Whether a fetch under way has landed since the last look: its file
     /// goes into the table, and the caller derives the scene again so the
     /// disc wears its cover and the next fetch starts, without waiting for
@@ -1590,7 +1630,11 @@ impl DiscArt {
                     if reported.is_empty() {
                         return String::new();
                     }
-                    let (relative, url) = picture_in_table(reported);
+                    let (relative, url) = if self.rows {
+                        row_picture_in_table(reported)
+                    } else {
+                        picture_in_table(reported)
+                    };
                     table_file(&relative, &url).unwrap_or_default()
                 })
                 .collect();
@@ -1618,8 +1662,13 @@ impl DiscArt {
                 {
                     let (tx, rx) = mpsc::channel();
                     let reported = next.clone();
+                    let rows = self.rows;
                     thread::spawn(move || {
-                        let _ = tx.send(fetch_art(&reported));
+                        let _ = tx.send(if rows {
+                            fetch_row_art(&reported)
+                        } else {
+                            fetch_art(&reported)
+                        });
                     });
                     self.pending = Some((next, rx));
                 }
@@ -2083,8 +2132,8 @@ impl TapSource {
             weather_held: None,
             favourite_held: None,
             browse_held: None,
-            browse_art: DiscArt::default(),
-            queue_art: DiscArt::default(),
+            browse_art: DiscArt::rows(),
+            queue_art: DiscArt::rows(),
             queue_art_held: Default::default(),
             decay: tap::legacy::Meter::new(METER_DECAY_MS, meter_max.max(1.0) as u32),
             bins_mapper: tap::legacy::Regroup::new(
