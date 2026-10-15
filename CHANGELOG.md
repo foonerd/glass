@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.13] - 2026-10-15
+
+- **Browsing, the road.** A display or page asks the plugin to browse (`browse` with a location, empty for the sources, or `search` with words) and gets the player's answer as one `browse` line of its own: the items with a title, a line under it, a cover's location or a Lucide icon's name, what each is and whether it plays by itself, with a heading between the player's lists and an album's own header where there is one. `play` with a browsed list's place plays that list from there as the player's own interface does, or an item whole; `queue` adds an item or a folder to the queue. The engine holds the answer for the face and fetches the first covers in the background, as it does a changer's discs; the browser pages get the same line back from the Manager's command route and hand it to their module. This Glass names glass-evo 0.10.13 as the least it works with.
+
 ## [0.10.12] - 2026-10-15
 
 - **In step with glass-evo 0.10.12.** Nothing of Glass's own changes; this Glass names glass-evo 0.10.12 as the least it works with, where the heart on the More sheet is drawn whole: Lucide's glyphs are rastered over the whole of their grid, so nothing of a glyph that draws out to the grid's edge is cut.
