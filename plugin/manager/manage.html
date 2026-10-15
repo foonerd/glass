@@ -1371,6 +1371,9 @@
           <div class="full">
             <label class="switch"><input type="checkbox" id="disp-fit"><span id="disp-fit-label"></span></label>
           </div>
+          <div class="full">
+            <label class="switch"><input type="checkbox" id="disp-backdrop"><span id="disp-backdrop-label"></span></label>
+          </div>
           <div>
             <label id="disp-position-label"></label>
             <select id="disp-position">
@@ -2069,6 +2072,7 @@
         $('disp-title').textContent = t('MANAGER_DISPLAY_TITLE');
         $('disp-help').textContent = t('MANAGER_DISPLAY_DOC');
         $('disp-fit-label').textContent = t('MANAGER_DISPLAY_FIT');
+        $('disp-backdrop-label').textContent = t('MANAGER_DISPLAY_BACKDROP');
         $('disp-position-label').textContent = t('MANAGER_DISPLAY_POSITION');
         $('disp-position').options[0].textContent = t('MANAGER_DISPLAY_CENTERED');
         $('disp-position').options[1].textContent = t('MANAGER_DISPLAY_MANUAL');
@@ -2848,6 +2852,7 @@
       function loadDisplay() {
         api('GET', '/api/display').then(function (d) {
           $('disp-fit').checked = !!d.fit;
+          $('disp-backdrop').checked = !!d.backdrop;
           $('disp-position').value = d.position;
           $('disp-x').value = d.x;
           $('disp-y').value = d.y;
@@ -2855,7 +2860,7 @@
         }).catch(function (e) { toast(errorText(e), 'error'); });
       }
       $('btn-disp-save').onclick = function () {
-        var body = { fit: $('disp-fit').checked, position: $('disp-position').value, x: parseInt($('disp-x').value, 10) || 0, y: parseInt($('disp-y').value, 10) || 0 };
+        var body = { fit: $('disp-fit').checked, backdrop: $('disp-backdrop').checked, position: $('disp-position').value, x: parseInt($('disp-x').value, 10) || 0, y: parseInt($('disp-y').value, 10) || 0 };
         api('POST', '/api/display', body).then(function () { toast(t('MANAGER_SAVED')); loadDisplay(); }).catch(function (e) { toast(errorText(e), 'error'); });
       };
       function loadArtwork() {

@@ -420,6 +420,7 @@ const KEPT: &[&str] = &[
     "tonearm.angle.start",
     "tonearm.drop.duration",
     "tonearm.lift.duration",
+    "screen.backdrop",
     "screen.driver",
     "screen.pointer",
     "screen.pointer.shown",

@@ -418,6 +418,60 @@ pub fn read_covering(path: &Path, w: u32, h: u32) -> Option<Frame> {
     })
 }
 
+/// The picture behind a theme smaller than the screen when the player asks
+/// for the album art there: the art made to cover the screen, blurred
+/// until no detail is left and dimmed to half, as the player's own page
+/// shows it behind its controls. Made at a quarter of the screen's size
+/// and scaled up, since the blur leaves nothing a quarter cannot hold, so
+/// a change of track costs a few milliseconds. None where the file is no
+/// picture.
+pub fn backdrop_picture(path: &Path, w: u32, h: u32) -> Option<Frame> {
+    let (w, h) = (w.max(1), h.max(1));
+    let (qw, qh) = ((w / 4).max(1), (h / 4).max(1));
+    let small = read_covering(path, qw, qh)?;
+    let blurred = blur(&small, (qw.max(qh) / 40).max(2));
+    let mut full = fit_art(&blurred, w, h);
+    for px in full.rgba.chunks_mut(4) {
+        px[0] /= 2;
+        px[1] /= 2;
+        px[2] /= 2;
+        px[3] = 255;
+    }
+    Some(full)
+}
+
+/// The backdrop kept between frames: made once per art file and screen
+/// size, gone when the art is.
+#[derive(Default)]
+pub struct Backdrop {
+    key: Option<(String, u32, u32)>,
+    frame: Option<Frame>,
+}
+
+impl Backdrop {
+    /// Follow the art file and the screen's size: true when what is held
+    /// changed, so the surface takes it again. An empty file name drops it.
+    pub fn follow(&mut self, file: &str, size: (u32, u32)) -> bool {
+        if file.is_empty() {
+            let had = self.key.take().is_some();
+            self.frame = None;
+            return had;
+        }
+        let key = (file.to_string(), size.0, size.1);
+        if self.key.as_ref() == Some(&key) {
+            return false;
+        }
+        self.frame = backdrop_picture(Path::new(file), size.0, size.1);
+        self.key = Some(key);
+        true
+    }
+
+    /// The picture held, none without art or where the file is no picture.
+    pub fn frame(&self) -> Option<&Frame> {
+        self.frame.as_ref()
+    }
+}
+
 /// Stretch a frame to `w` by `h` with bilinear filtering.
 pub fn fit_art(frame: &Frame, w: u32, h: u32) -> Frame {
     let (w, h) = (w.max(1), h.max(1));
@@ -12948,5 +13002,101 @@ mod analyser_tests {
         assert!(bottom[2] > 200 && bottom[0] < 60, "bottom {:?}", bottom);
         let as_is = decode_oriented(&plain).unwrap().into_rgb8();
         assert_eq!((as_is.width(), as_is.height()), (4, 2));
+    }
+}
+
+#[cfg(test)]
+mod backdrop_tests {
+    use super::*;
+
+    /// A picture red on the left and blue on the right, written to a file:
+    /// a blur runs the two into each other where they meet.
+    fn picture(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+        let dir =
+            std::env::temp_dir().join(format!("glass-backdrop-{}-{name}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut art = solid_frame(40, 20, [255, 0, 0, 255]);
+        for y in 0..20u32 {
+            for x in 20..40u32 {
+                let i = ((y * 40 + x) * 4) as usize;
+                art.rgba[i..i + 4].copy_from_slice(&[0, 0, 255, 255]);
+            }
+        }
+        let path = dir.join("art.png");
+        write_png(&path, &art).unwrap();
+        (dir, path)
+    }
+
+    /// The backdrop is the screen's size, opaque everywhere, dimmed to
+    /// half, the art's colours run into each other where they met.
+    #[test]
+    fn the_backdrop_is_the_art_covering_the_screen_blurred_and_dimmed() {
+        let (dir, path) = picture("made");
+        let frame = backdrop_picture(&path, 160, 80).expect("a picture");
+        assert_eq!((frame.width, frame.height), (160, 80));
+        let px = |x: u32, y: u32| {
+            let i = ((y * frame.width + x) * 4) as usize;
+            [
+                frame.rgba[i],
+                frame.rgba[i + 1],
+                frame.rgba[i + 2],
+                frame.rgba[i + 3],
+            ]
+        };
+        for y in [0, 40, 79] {
+            for x in [0, 80, 159] {
+                let p = px(x, y);
+                assert_eq!(p[3], 255, "opaque at {x},{y}");
+                assert!(
+                    p[0] <= 128 && p[1] <= 128 && p[2] <= 128,
+                    "dimmed to half at {x},{y}: {p:?}"
+                );
+            }
+        }
+        let (left, middle, right) = (px(8, 40), px(80, 40), px(151, 40));
+        assert!(left[0] > 64 && left[2] < 32, "red on the left: {left:?}");
+        assert!(
+            right[2] > 64 && right[0] < 32,
+            "blue on the right: {right:?}"
+        );
+        assert!(
+            middle[0] > 16 && middle[2] > 16,
+            "run together in the middle: {middle:?}"
+        );
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    /// The backdrop is made once per art file and screen size, dropped
+    /// without art, and absent for a file that is no picture.
+    #[test]
+    fn the_backdrop_follows_the_art_and_the_screen() {
+        let (dir, path) = picture("follow");
+        let file = path.to_string_lossy().to_string();
+        let mut backdrop = Backdrop::default();
+        assert!(
+            !backdrop.follow("", (100, 50)),
+            "nothing held, nothing to drop"
+        );
+        assert!(backdrop.follow(&file, (100, 50)), "the art arrives");
+        assert_eq!(
+            backdrop.frame().map(|f| (f.width, f.height)),
+            Some((100, 50))
+        );
+        assert!(
+            !backdrop.follow(&file, (100, 50)),
+            "the same art at the same size"
+        );
+        assert!(backdrop.follow(&file, (200, 50)), "another screen size");
+        assert_eq!(backdrop.frame().map(|f| f.width), Some(200));
+        assert!(backdrop.follow("", (200, 50)), "the art gone");
+        assert!(backdrop.frame().is_none());
+        let not = dir.join("not.png");
+        std::fs::write(&not, b"no picture").unwrap();
+        assert!(
+            backdrop.follow(&not.to_string_lossy(), (100, 50)),
+            "a change, to nothing"
+        );
+        assert!(backdrop.frame().is_none(), "a file that is no picture");
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

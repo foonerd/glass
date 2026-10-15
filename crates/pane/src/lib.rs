@@ -112,6 +112,9 @@ pub struct Surface {
     canvas: Canvas<Window>,
     creator: TextureCreator<WindowContext>,
     texture: Option<Texture>,
+    /// The picture under a frame that leaves part of the window bare, the
+    /// window's size; none shows the black.
+    backdrop: Option<Texture>,
     pump: EventPump,
     /// Where the frame's top left goes; `None` centres it in the window.
     placement: Option<(i32, i32)>,
@@ -405,6 +408,7 @@ impl Surface {
             canvas,
             creator,
             texture: None,
+            backdrop: None,
             pump,
             placement: None,
             fit: options.fit,
@@ -488,6 +492,40 @@ impl Surface {
     /// Put the frame's top left at a fixed point instead of centring it.
     pub fn place_at(&mut self, x: i32, y: i32) {
         self.placement = Some((x, y));
+    }
+
+    /// The picture under a frame that leaves part of the window bare, made
+    /// at the size `screen_size` gives; none for the black. It stands
+    /// until the next call.
+    pub fn set_backdrop(&mut self, picture: Option<&Frame>) -> Result<(), String> {
+        if let Some(old) = self.backdrop.take() {
+            // With `unsafe_textures` a texture is freed by hand.
+            unsafe { old.destroy() };
+        }
+        let Some(picture) = picture else {
+            return Ok(());
+        };
+        let (width, height) = (picture.width.max(1), picture.height.max(1));
+        let mut texture = self
+            .creator
+            .create_texture_streaming(PixelFormatEnum::RGBA32, width, height)
+            .map_err(|err| err.to_string())?;
+        texture
+            .update(None, &picture.rgba, picture.width as usize * 4)
+            .map_err(|err| err.to_string())?;
+        self.backdrop = Some(texture);
+        Ok(())
+    }
+
+    /// The window's size in the picture's own orientation, a quarter turn
+    /// swapping the two: what a backdrop is made at.
+    pub fn screen_size(&self) -> (u32, u32) {
+        let (w, h) = self.canvas.output_size().unwrap_or(self.frame_size);
+        if matches!(self.rotation, 90 | 270) {
+            (h, w)
+        } else {
+            (w, h)
+        }
     }
 
     /// Follow a new frame size: a window sized to the frame is resized; a
@@ -650,6 +688,39 @@ impl Surface {
         self.last_offset = (x, y);
         self.last_scale = scale;
         self.last_window = (window_w, window_h);
+        // The backdrop under a frame that leaves part of the window bare:
+        // the whole window, turned as the frame is. A frame that covers the
+        // window has nothing under it to show.
+        if let Some(backdrop) = self.backdrop.as_ref() {
+            let bare = x > 0
+                || y > 0
+                || x + (w as i32) < (logical_w as i32)
+                || y + (h as i32) < (logical_h as i32);
+            if bare {
+                if self.rotation == 0 {
+                    self.canvas
+                        .copy(backdrop, None, None)
+                        .map_err(|err| err.to_string())?;
+                } else {
+                    let turned = sdl2::rect::Rect::from_center(
+                        (window_w as i32 / 2, window_h as i32 / 2),
+                        logical_w.max(1),
+                        logical_h.max(1),
+                    );
+                    self.canvas
+                        .copy_ex(
+                            backdrop,
+                            None,
+                            turned,
+                            self.rotation as f64,
+                            None,
+                            false,
+                            false,
+                        )
+                        .map_err(|err| err.to_string())?;
+                }
+            }
+        }
         if self.rotation == 0 {
             let dest = sdl2::rect::Rect::new(x, y, w.max(1), h.max(1));
             self.canvas

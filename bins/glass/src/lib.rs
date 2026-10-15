@@ -859,6 +859,9 @@ fn session(
     let mut leave: Option<&'static str> = None;
     // What lay over the theme on the frame before this one.
     let mut was_over = Over::default();
+    // The album art blurred behind a theme that leaves part of the screen
+    // bare, when the player asks for it: made once per track and screen size.
+    let mut backdrop = expose::Backdrop::default();
     // When the player last played or the screen was last touched: past it
     // the display on a screen of its own slows to the standing rate.
     let mut active_at = Instant::now();
@@ -1187,6 +1190,16 @@ fn session(
                 if let Some(mode) = remote.as_deref().and_then(|r| r.app.take_window_request()) {
                     if let Err(err) = window.set_mode(mode) {
                         eprintln!("glass: window: {err}");
+                    }
+                }
+                let art = if skin.run.backdrop {
+                    input.metadata.art_file.as_str()
+                } else {
+                    ""
+                };
+                if backdrop.follow(art, window.screen_size()) {
+                    if let Err(err) = window.set_backdrop(backdrop.frame()) {
+                        eprintln!("glass: backdrop: {err}");
                     }
                 }
                 let shown = match window.show(frame, damage) {

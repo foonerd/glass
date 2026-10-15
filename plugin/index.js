@@ -3124,6 +3124,7 @@ Glass.prototype.getUIConfig = function () {
             C('timeout').value = self.config.get('timeout');
             minmax[0] = [C('timeout').attributes[2].min, C('timeout').attributes[3].max, C('timeout').attributes[0].placeholder];
             C('positionFit').value = String(meterConfig.current['position.fit']).toLowerCase() === 'true' || meterConfig.current['position.type'] == 'fit';
+            C('screenBackdrop').value = String(meterConfig.current['screen.backdrop']).toLowerCase() === 'blur';
             if (meterConfig.current['position.type'] == 'center' || meterConfig.current['position.type'] == 'fit') {
                 C('positionType').value.value = 0;
                 C('positionType').value.label = 'centered';
@@ -3351,6 +3352,12 @@ Glass.prototype.saveDisplayConf = function (confData) {
     var pos_fit = use_SDL2 && (confData.positionFit === true || confData.positionFit === 'true') ? 'True' : 'False';
     if (String(meterConfig.current['position.fit']) !== pos_fit) {
         meterConfig.current['position.fit'] = pos_fit;
+        noChanges = false;
+    }
+    // The album art blurred behind a theme that leaves part of the screen bare.
+    var backdrop = use_SDL2 && (confData.screenBackdrop === true || confData.screenBackdrop === 'true') ? 'blur' : 'color';
+    if (String(meterConfig.current['screen.backdrop']) !== backdrop) {
+        meterConfig.current['screen.backdrop'] = backdrop;
         noChanges = false;
     }
     if (use_SDL2) {
@@ -6001,6 +6008,7 @@ Glass.prototype.displayPlacement = function () {
     var type = String(cur['position.type'] || 'center').toLowerCase();
     return {
         fit: String(cur['position.fit']).toLowerCase() === 'true' || type === 'fit',
+        backdrop: String(cur['screen.backdrop']).toLowerCase() === 'blur',
         position: type === 'center' || type === 'fit' ? 'center' : 'manual',
         x: parseInt(cur['position.x'], 10) || 0,
         y: parseInt(cur['position.y'], 10) || 0
@@ -6015,6 +6023,7 @@ Glass.prototype.setDisplayPlacement = function (data) {
     if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return { error: 'GLASS.NO_PEPPYCONFIG' }; }
     var now = self.displayPlacement();
     var fit = data.fit === undefined ? now.fit : (data.fit === true || data.fit === 'true');
+    var backdrop = data.backdrop === undefined ? now.backdrop : (data.backdrop === true || data.backdrop === 'true');
     var position = data.position === undefined ? now.position : String(data.position);
     if (['center', 'manual'].indexOf(position) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
     var x = data.x === undefined ? now.x : parseInt(data.x, 10);
@@ -6022,7 +6031,7 @@ Glass.prototype.setDisplayPlacement = function (data) {
     // Either way from the screen's corner: a picture larger than the screen,
     // or one with a margin drawn into it, is placed with a negative start.
     if (isNaN(x) || isNaN(y) || Math.abs(x) > 7680 || Math.abs(y) > 4320) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
-    var wanted = { 'position.fit': fit ? 'True' : 'False', 'position.type': position, 'position.x': String(x), 'position.y': String(y) };
+    var wanted = { 'position.fit': fit ? 'True' : 'False', 'screen.backdrop': backdrop ? 'blur' : 'color', 'position.type': position, 'position.x': String(x), 'position.y': String(y) };
     var changed = false;
     Object.keys(wanted).forEach(function (k) {
         if (String(meterConfig.current[k]) !== wanted[k]) { meterConfig.current[k] = wanted[k]; changed = true; }

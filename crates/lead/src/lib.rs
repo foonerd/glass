@@ -3129,6 +3129,12 @@ pub struct RunSettings {
     /// where the position says; `position.type = fit` says the same.
     #[serde(default)]
     pub fit: bool,
+    /// `screen.backdrop = blur`: where the theme does not cover the
+    /// screen, the album art blurred and dimmed instead of the dark colour,
+    /// as the player's own page shows it behind its controls. The colour
+    /// unless said.
+    #[serde(default)]
+    pub backdrop: bool,
     /// `screen.driver`: what draws the window, `auto` unless said.
     #[serde(default)]
     pub driver: ScreenDriver,
@@ -3346,6 +3352,7 @@ impl Default for RunSettings {
             x: 0,
             y: 0,
             fit: false,
+            backdrop: false,
             driver: ScreenDriver::Auto,
             rotation: Rotation::R0,
             pointer: false,
@@ -3366,6 +3373,8 @@ pub fn run_settings(text: &str) -> RunSettings {
         interactive: InteractiveMode::parse(current_value(text, "touch.interactive").as_deref()),
         centered: kind.as_deref().is_none_or(|v| v == "center" || v == "fit"),
         fit,
+        backdrop: current_value(text, "screen.backdrop")
+            .is_some_and(|v| v.trim().eq_ignore_ascii_case("blur")),
         driver: ScreenDriver::parse(current_value(text, "screen.driver").as_deref()),
         rotation: Rotation::parse(current_value(text, "screen.rotation").as_deref()),
         pointer: truthy(current_value(text, "screen.pointer.shown").as_deref()),
@@ -6337,6 +6346,7 @@ mod tests {
                 x: 10,
                 y: 20,
                 fit: false,
+                backdrop: false,
                 driver: ScreenDriver::Auto,
                 rotation: Rotation::R0,
                 pointer: false,
@@ -6346,6 +6356,10 @@ mod tests {
             }
         );
         assert_eq!(run_settings(""), RunSettings::default());
+        // The backdrop: the blurred art on the word `blur` alone.
+        assert!(run_settings("[current]\nscreen.backdrop = Blur\n").backdrop);
+        assert!(!run_settings("[current]\nscreen.backdrop = color\n").backdrop);
+        assert!(!run_settings("[current]\nscreen.backdrop = True\n").backdrop);
         assert_eq!(
             run_settings("[current]\ntouch.matrix = 0,1,0,1,0,0\n").touch_matrix,
             [0.0, 1.0, 0.0, 1.0, 0.0, 0.0],
