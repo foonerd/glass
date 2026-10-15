@@ -121,7 +121,8 @@ pub mod face {
     /// its own: the file system on a player, the page's file table in a browser.
     pub use lead::{is_file, read_to_string};
     pub use lead::{
-        sky_of, Day, FontFiles, Hour, Input, Metadata, QueueEntry, Sky, TextStyle, Weather,
+        sky_of, Browse, BrowseItem, Day, FontFiles, Hour, Input, Metadata, QueueEntry, Sky,
+        TextStyle, Weather,
     };
 }
 
