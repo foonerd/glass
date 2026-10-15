@@ -507,6 +507,10 @@ pub struct Metadata {
     /// Infinity playback as the plugin's channel reports it; false without a channel.
     #[serde(default)]
     pub infinity: bool,
+    /// Whether the playing track is one of the player's favourites, as the
+    /// player says after every change of track; false until it has said.
+    #[serde(default)]
+    pub favourite: bool,
 }
 
 /// Where a text sits inside its box when it fits.

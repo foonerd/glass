@@ -110,6 +110,7 @@ pub struct Page {
     last_infinity: Option<Event>,
     last_queue: Option<Event>,
     last_weather: Option<Event>,
+    last_favourite: Option<Event>,
     /// The finger on the controls, kept between frames.
     touch: Touch,
     /// A wanted file was put or said to be missing since the last frame:
@@ -266,6 +267,7 @@ impl Page {
                     .chain(self.last_infinity.iter())
                     .chain(self.last_queue.iter())
                     .chain(self.last_weather.iter())
+                    .chain(self.last_favourite.iter())
                     .cloned()
                     .chain(self.early.drain(..))
                 {
@@ -386,6 +388,7 @@ impl Page {
             Event::Infinity(_) => self.last_infinity = Some(event.clone()),
             Event::Queue(_) => self.last_queue = Some(event.clone()),
             Event::Weather(_) => self.last_weather = Some(event.clone()),
+            Event::Favourite { .. } => self.last_favourite = Some(event.clone()),
             _ => {}
         }
         match self.showing.as_mut() {

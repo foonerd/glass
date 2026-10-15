@@ -1844,6 +1844,10 @@ pub struct TapSource {
     /// The player's word on the panel since the last take.
     screen_asked: Option<ScreenRequest>,
     weather_held: Option<lead::Weather>,
+    /// The player's last word on a track among its favourites: the track's
+    /// location and whether it is one. The snapshot says it of the playing
+    /// track alone.
+    favourite_held: Option<(String, bool)>,
     /// The meter's fall, as the old scope shaped it, on the pipe scale.
     decay: tap::legacy::Meter,
     /// The theme's bars from the bank, on the old logarithmic mapping.
@@ -2067,6 +2071,7 @@ impl TapSource {
             probed_seen: None,
             screen_asked: None,
             weather_held: None,
+            favourite_held: None,
             decay: tap::legacy::Meter::new(METER_DECAY_MS, meter_max.max(1.0) as u32),
             bins_mapper: tap::legacy::Regroup::new(
                 bins,
@@ -2630,6 +2635,10 @@ impl Source for TapSource {
                 Event::Calibrate { points } => self.calibrate_asked = Some(points),
                 Event::Probed { sent, to } => self.probed_seen = Some((sent, to)),
                 Event::Screen(request) => self.screen_asked = Some(request),
+                Event::Favourite { uri, on } => {
+                    self.favourite_held = Some((uri, on));
+                    self.rederive = true;
+                }
                 Event::Hello { .. } => {}
             }
         }
@@ -2705,6 +2714,12 @@ impl Source for TapSource {
                     .and_then(|items| Self::playing_index(&playing, items))
                     .map(|at| at as u32);
                 let discs = self.discs_for(&playing, engaged);
+                // The player's word on the favourites is the playing track's
+                // when it names that track; another track's word is stale.
+                let favourite = self
+                    .favourite_held
+                    .as_ref()
+                    .is_some_and(|(uri, on)| *on && !uri.is_empty() && *uri == playing.uri);
                 self.metadata_held = lead::Metadata {
                     title: playing.title,
                     artist: playing.artist,
@@ -2737,6 +2752,7 @@ impl Source for TapSource {
                     repeat: playing.repeat,
                     repeat_single: playing.repeat_single,
                     infinity: self.infinity_held,
+                    favourite,
                     uri: playing.uri,
                     fanart_file: String::new(),
                     fanart_prev_file: String::new(),
@@ -3892,6 +3908,59 @@ mod tests {
         );
         assert_ne!(fnv1a("a"), fnv1a("b"));
         assert_eq!(fnv1a("cover"), fnv1a("cover"));
+    }
+}
+
+#[cfg(test)]
+mod favourite_tests {
+    use super::*;
+
+    /// The player's word on the favourites reaches the snapshot as the
+    /// playing track's flag: on when it names that track, off when it
+    /// names another or says no, and off again at a change of track until
+    /// the player speaks of the new one.
+    #[test]
+    fn the_favourite_word_is_the_playing_tracks_alone() {
+        let mut source = TapSource::new(8, 1.0).without_player();
+        source.push_event(
+            decode_event(
+                br#"{"kind":"state","state":{"status":"play","title":"Two","uri":"mnt/x/2.flac"}}"#,
+            )
+            .unwrap(),
+        );
+        assert!(!source.poll().metadata.favourite, "no word yet");
+        source.push_event(
+            decode_event(br#"{"kind":"favourite","uri":"mnt/x/2.flac","on":true}"#).unwrap(),
+        );
+        assert!(
+            source.poll().metadata.favourite,
+            "the word names the playing track"
+        );
+        source.push_event(
+            decode_event(br#"{"kind":"favourite","uri":"mnt/x/9.flac","on":true}"#).unwrap(),
+        );
+        assert!(
+            !source.poll().metadata.favourite,
+            "another track's word is not this one's"
+        );
+        source.push_event(
+            decode_event(br#"{"kind":"favourite","uri":"mnt/x/2.flac","on":true}"#).unwrap(),
+        );
+        assert!(source.poll().metadata.favourite);
+        source.push_event(
+            decode_event(
+                br#"{"kind":"state","state":{"status":"play","title":"Three","uri":"mnt/x/3.flac"}}"#,
+            )
+            .unwrap(),
+        );
+        assert!(
+            !source.poll().metadata.favourite,
+            "a new track, until the player speaks of it"
+        );
+        source.push_event(
+            decode_event(br#"{"kind":"favourite","uri":"mnt/x/3.flac","on":false}"#).unwrap(),
+        );
+        assert!(!source.poll().metadata.favourite);
     }
 }
 

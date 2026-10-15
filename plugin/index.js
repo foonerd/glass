@@ -100,6 +100,9 @@ function Channel(logger, onAttach, onCommand) {
     this.queue = null;
     // The forecast's line as last pushed, for a display that connects later.
     this.weather = null;
+    // The player's last word on the playing track among the favourites,
+    // as a `favourite` line, for a display that connects later.
+    this.favourite = null;
 }
 
 Channel.prototype.listen = function (path) {
@@ -127,6 +130,7 @@ Channel.prototype.attach = function (conn) {
     if (self.showing) { self.tell(conn, { kind: 'showing', theme: self.showing.theme, meter: self.showing.meter }); }
     if (self.infinity !== null) { self.tell(conn, { kind: 'infinity', on: self.infinity }); }
     if (self.weather) { self.tell(conn, self.weather); }
+    if (self.favourite) { self.tell(conn, self.favourite); }
     conn.on('data', function (chunk) {
         pending += chunk;
         if (pending.length > CHANNEL_LINE_MAX) {
@@ -1109,6 +1113,7 @@ Glass.prototype.runCommand = function (message) {
             case 'volume': router.volumiosetvolume(typeof value === 'number' ? Math.round(value) : String(value)); break;
             case 'random': router.volumioRandom(!!value); break;
             case 'repeat': router.volumioRepeat(value === 'all' || value === 'single', value === 'single'); break;
+            case 'favourite': self.setFavourite(value); break;
             default: self.logger.warn(id + 'channel: unknown command ' + name);
         }
     } catch (e) {
@@ -1116,11 +1121,83 @@ Glass.prototype.runCommand = function (message) {
     }
 };
 
+// The playing track among the player's favourites: `true` adds it, `false`
+// takes it out, no value turns it over from what the player last said. The
+// player's word follows down the channel as a `favourite` line, to every
+// display and page at once, so a tap on one shows on all.
+Glass.prototype.setFavourite = function (value) {
+    var self = this;
+    var state = self.lastState || {};
+    var uri = String(state.uri || '');
+    var service = String(state.service || '');
+    if (!uri) { self.logger.warn(id + 'favourite: nothing plays'); return; }
+    var held = self.channel ? self.channel.favourite : null;
+    var is = !!(held && held.uri === uri && held.on);
+    var want = typeof value === 'boolean' ? value : !is;
+    var playlists = self.commandRouter.playListManager;
+    var done = null;
+    try {
+        done = want
+            ? playlists.addToFavourites({ service: service, uri: uri, title: state.title, albumart: state.albumart })
+            : playlists.removeFromFavourites(state.title, service, uri);
+    } catch (e) {
+        self.logger.error(id + 'favourite: ' + (e && e.message ? e.message : e));
+        return;
+    }
+    var ask = function () { self.askFavourite(state); };
+    if (done && typeof done.then === 'function') { done.then(ask, ask); } else { ask(); }
+};
+
+// The player is asked for its word on a track among the favourites. The
+// answer comes as the player's own event, which pushFavourite carries down
+// the channel; a radio's is read here, the player's check knowing songs
+// alone.
+Glass.prototype.askFavourite = function (state) {
+    var self = this;
+    var uri = String((state && state.uri) || '');
+    var service = String((state && state.service) || '');
+    if (service === 'webradio') { self.pushFavourite(uri, service, false); return; }
+    try {
+        self.commandRouter.checkFavourites({ uri: uri, service: service });
+    } catch (e) {
+        self.logger.warn(id + 'favourite: the player could not be asked: ' + (e && e.message ? e.message : e));
+    }
+};
+
+// The player's word on a track among the favourites, carried down the
+// channel as a `favourite` line and held for a display that connects
+// later. A radio's word is read from the radio favourites, the player's
+// own check knowing songs alone.
+Glass.prototype.pushFavourite = function (uri, service, on) {
+    var self = this;
+    var tell = function (is) {
+        var line = { kind: 'favourite', uri: uri, on: !!is };
+        if (self.channel) {
+            self.channel.favourite = line;
+            self.channel.push(line);
+        }
+    };
+    if (service !== 'webradio' || !uri) { tell(on); return; }
+    var playlists = self.commandRouter.playListManager;
+    var read = null;
+    try {
+        read = playlists.commonGetPlaylistContent(playlists.favouritesPlaylistFolder, 'radio-favourites');
+    } catch (e) {
+        tell(false);
+        return;
+    }
+    var settle = function (entries) {
+        tell(Array.isArray(entries) && entries.some(function (e) { return e && String(e.uri || '') === uri; }));
+    };
+    if (read && typeof read.then === 'function') { read.then(settle, function () { tell(false); }); } else { settle(read); }
+};
+
 Glass.prototype.onStart = function () {
     var self = this;
     var defer = libQ.defer();
     var lastStateIsPlaying = false;
     self.Timeout = null;
+    self.favouriteAsked = false;
     self.persistTimer = null;
     self.transitionGraceTimer = null;
     self.meterChild = null;
@@ -1158,7 +1235,7 @@ Glass.prototype.onStart = function () {
     // The feed behind the manager's Face tab: the frames from the daemon's
     // pages socket, and every line the displays hear, for browser pages.
     self.face = new FaceFeed({ socketPath: faceSocketPath, logger: self.logger, current: function () {
-        return self.channel ? { state: advanced(self.channel.state, self.channel.stateAt, Date.now()), infinity: self.channel.infinity, showing: self.channel.showing, queue: self.channel.queue, persist: self.channel.persist, weather: self.channel.weather } : {};
+        return self.channel ? { state: advanced(self.channel.state, self.channel.stateAt, Date.now()), infinity: self.channel.infinity, showing: self.channel.showing, queue: self.channel.queue, persist: self.channel.persist, weather: self.channel.weather, favourite: self.channel.favourite } : {};
     } });
     self.channel.onPush = function (message) { self.face.push(message); };
     // The display's report sets what is held for the next display.
@@ -1271,6 +1348,13 @@ Glass.prototype.onStart = function () {
         }
     });
 
+    // The player's word on the playing track among the favourites, after
+    // every state and after an add or a remove: carried down the channel.
+    socket.on('urifavourites', function (data) {
+        if (!data || typeof data !== 'object') return;
+        self.pushFavourite(String(data.uri || ''), String(data.service || ''), !!data.favourite);
+    });
+
     socket.on('pushState', function (state) {
         if (!state || typeof state !== 'object') {
             self.logger.warn(id + 'pushState: no state');
@@ -1282,6 +1366,9 @@ Glass.prototype.onStart = function () {
             return;
         }
         self.lastState = state;
+        // The player's word on the favourites follows every state push; the
+        // first after a start is asked for, the word before it having gone by.
+        if (!self.favouriteAsked) { self.favouriteAsked = true; self.askFavourite(state); }
         if (self.channel) {
             self.channel.state = state;
             self.channel.stateAt = Date.now();
@@ -1485,6 +1572,7 @@ Glass.prototype.onStop = function () {
         self.commandRouter.removePluginRestEndpoint({ endpoint: 'glass_screen' });
         socket.off('pushState');
         socket.off('pushInfinityPlayback');
+        socket.off('urifavourites');
         if (self.forecast) { self.forecast.stop(); self.forecast = null; }
         if (self.channel) {
             self.channel.close();

@@ -63,6 +63,10 @@ pub enum Event {
     /// The player's word on the panel: its power, or a toggle of it, a
     /// brightness for a backlight, or a bare ask for the panel's state.
     Screen(ScreenRequest),
+    /// The player's word on a track's standing among its favourites: the
+    /// track's location and whether it is one. It follows every state, and
+    /// an answer to the `favourite` command.
+    Favourite { uri: String, on: bool },
 }
 
 /// What the player asks of the panel: power on or off, a toggle instead,
@@ -548,6 +552,10 @@ pub fn decode(line: &[u8]) -> Option<Event> {
                     .map(|level| level.min(u32::MAX as u64) as u32),
             }))
         }
+        "favourite" => Some(Event::Favourite {
+            uri: text("uri"),
+            on: value.get("on").and_then(Value::as_bool).unwrap_or(false),
+        }),
         "probed" => Some(Event::Probed {
             sent: value
                 .get("sent")
@@ -563,6 +571,26 @@ pub fn decode(line: &[u8]) -> Option<Event> {
 #[cfg(test)]
 mod decode_tests {
     use super::*;
+
+    /// The player's word on a track among its favourites: the location and
+    /// whether it is one; no word on that is not one.
+    #[test]
+    fn the_favourite_line_is_decoded() {
+        assert_eq!(
+            decode(br#"{"kind":"favourite","uri":"mnt/NAS/a.flac","on":true}"#),
+            Some(Event::Favourite {
+                uri: "mnt/NAS/a.flac".to_string(),
+                on: true
+            })
+        );
+        assert_eq!(
+            decode(br#"{"kind":"favourite","uri":"mnt/NAS/a.flac"}"#),
+            Some(Event::Favourite {
+                uri: "mnt/NAS/a.flac".to_string(),
+                on: false
+            })
+        );
+    }
 
     /// The plugin's answer to a probe request: how many datagrams went
     /// where; a count that is no number is none sent.
