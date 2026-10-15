@@ -258,6 +258,8 @@ class Manager {
         now: Date.now(),
         status: await self.status(),
         screen: safe(() => self.plugin.screenSettings(), null),
+        power: safe(() => self.plugin.screenPower(), null),
+        display: safe(() => self.plugin.displayPlacement(), null),
         update: safe(() => self.updater.view(), null),
         log: safe(() => self.plugin.recentLog(300).lines, []),
         page: { module: page && typeof page.module === 'string' ? page.module.slice(0, 32) : null }

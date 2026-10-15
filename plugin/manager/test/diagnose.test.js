@@ -315,3 +315,37 @@ test('a window the display could not open is found by what the display really wr
   assert.notStrictEqual(find([line(1, 'something else entirely')]).key, 'DIAG_LOG_NO_WINDOW');
   assert.ok(strings.MANAGER_DIAG_LOG_NO_WINDOW.indexOf('{last}') !== -1);
 });
+
+test('the panel switched off is named with its means, dark when nothing could switch it; a theme that leaves the screen bare names the backdrop switch', function () {
+  let f = healthy();
+  f.power = { display: true, power: 'on', by: 'backlight' };
+  assert.strictEqual(one(diagnose('screen', f), 'panel-power'), undefined, 'on says nothing');
+  f.power = { display: true, power: 'off', by: 'backlight' };
+  let r = one(diagnose('screen', f), 'panel-power');
+  assert.strictEqual(r.kind, 'cause');
+  assert.strictEqual(r.key, 'DIAG_PANEL_OFF');
+  assert.deepStrictEqual(r.with, { by: 'backlight' });
+  assert.strictEqual(one(diagnose('no-meters', f), 'panel-power').kind, 'cause', 'no meters: the panel is off');
+  f.power = { display: true, power: 'off', by: 'dark' };
+  assert.strictEqual(one(diagnose('screen', f), 'panel-power').key, 'DIAG_PANEL_DARK');
+  f.power = { display: false, power: 'off', by: '' };
+  assert.strictEqual(one(diagnose('screen', f), 'panel-power'), undefined, 'no display on the screen: not the display\'s panel');
+  // The backdrop: a smaller theme on a larger screen, the switch off, then on; a theme of the screen's size says nothing.
+  f = healthy();
+  f.display = { fit: false, backdrop: false, position: 'center', x: 0, y: 0 };
+  f.status.themeSize = '1280x400';
+  r = one(diagnose('artwork', f), 'backdrop');
+  assert.strictEqual(r.kind, 'note');
+  assert.deepStrictEqual(r.with, { theme: '1280x400', screen: '1280x720' });
+  assert.strictEqual(r.go, 'artwork');
+  f.display.backdrop = true;
+  assert.strictEqual(one(diagnose('screen', f), 'backdrop').kind, 'ok');
+  f.status.themeSize = '1280x720';
+  assert.strictEqual(one(diagnose('screen', f), 'backdrop'), undefined);
+  // Fitted: a 16:9 theme on a 16:9 screen leaves nothing bare; a strip does.
+  f.display = { fit: true, backdrop: false };
+  f.status.themeSize = '1920x1080';
+  assert.strictEqual(one(diagnose('screen', f), 'backdrop'), undefined);
+  f.status.themeSize = '1920x515';
+  assert.strictEqual(one(diagnose('screen', f), 'backdrop').kind, 'note');
+});

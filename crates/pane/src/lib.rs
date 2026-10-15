@@ -414,10 +414,7 @@ impl Surface {
             texture: None,
             backdrop: None,
             backlight: backlight::find(),
-            power: Power {
-                on: true,
-                by: Means::Dark,
-            },
+            power: Power { on: true, by: None },
             pump,
             placement: None,
             fit: options.fit,
@@ -554,7 +551,7 @@ impl Surface {
         } else {
             Means::Dark
         };
-        self.power = Power { on, by };
+        self.power = Power { on, by: Some(by) };
         self.power
     }
 
@@ -1148,11 +1145,19 @@ impl Means {
     }
 }
 
-/// The panel's power as last switched, and by what means.
+/// The panel's power as last switched, and by what means; none until the
+/// surface has switched it once.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Power {
     pub on: bool,
-    pub by: Means,
+    pub by: Option<Means>,
+}
+
+impl Power {
+    /// The means as the player hears it: empty until the first switch.
+    pub fn by_name(self) -> &'static str {
+        self.by.map_or("", Means::as_str)
+    }
 }
 
 /// The panel's backlight as the kernel lists it under `/sys/class/backlight`:

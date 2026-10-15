@@ -4146,6 +4146,15 @@
           api('POST', '/api/face', { set: {}, reset: true }).then(function (r) { renderLook(r); toast(t('MANAGER_LOOK_RESET_DONE')); }).catch(function (e) { toast(errorText(e), 'error'); });
         });
       };
+      // The panel's power in words, for the Status tab: the state, the means
+      // it was switched by, and the backlight's brightness where there is one.
+      function panelPowerText(p) {
+        if (!p || !p.display) return t('MANAGER_SCREEN_POWER_NO_DISPLAY');
+        var means = p.by === 'backlight' ? t('MANAGER_SCREEN_POWER_BY_BACKLIGHT') : p.by === 'dpms' ? t('MANAGER_SCREEN_POWER_BY_DPMS') : p.by === 'dark' ? t('MANAGER_SCREEN_POWER_BY_DARK') : '';
+        var text = t(p.power === 'off' ? 'MANAGER_SCREEN_POWER_OFF' : 'MANAGER_SCREEN_POWER_ON') + (means ? ' (' + means + ')' : '');
+        if (p.backlight) text += ' \u00b7 ' + t('MANAGER_SCREEN_BRIGHTNESS').toLowerCase() + ' ' + p.brightness + ' / ' + p.maxBrightness;
+        return text;
+      }
       // The panel's power: its state and means, the switch, and the
       // backlight's brightness where there is one.
       function renderScreenPower(p) {
@@ -4375,7 +4384,9 @@
           ['MANAGER_ST_TOUCH_MAP', mapping],
           ['MANAGER_SCREEN_PANELS', panels.length ? panels.join(' · ') : none],
           ['MANAGER_ST_INPUTS', found.join(' · ')],
-          ['MANAGER_SCREEN_BACKLIGHT', lights.length ? lights.join(' · ') : none]
+          ['MANAGER_SCREEN_BACKLIGHT', lights.length ? lights.join(' · ') : none],
+          ['MANAGER_ST_PANEL_POWER', panelPowerText(sc.power)],
+          ['MANAGER_ST_BACKDROP', t(sc.backdrop ? 'MANAGER_ST_BACKDROP_ON' : 'MANAGER_ST_BACKDROP_OFF')]
         ];
         if (sc.owner && sc.owner.here) rows.splice(1, 0, ['MANAGER_ST_OWNER', ownerLines(sc.owner).concat([t('MANAGER_FACE_SIZE') + ': ' + (sc.faceSize || 'normal')]).join(' · ')]);
         return rows;

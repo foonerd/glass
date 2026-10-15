@@ -898,11 +898,11 @@ fn session(
                     "display",
                     "screen {} by {}",
                     if power.on { "on" } else { "off" },
-                    power.by.as_str()
+                    power.by_name()
                 );
                 source.report_screen(
                     power.on,
-                    power.by.as_str(),
+                    power.by_name(),
                     window.brightness(),
                     screen_is_ours(&skin.run.driver),
                 );
@@ -1017,7 +1017,7 @@ fn session(
                         let power = window.power();
                         source.report_screen(
                             power.on,
-                            power.by.as_str(),
+                            power.by_name(),
                             window.brightness(),
                             screen_ours,
                         );

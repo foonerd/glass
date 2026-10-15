@@ -120,6 +120,7 @@
         "data": [
           "timeout",
           "positionFit",
+          "screenBackdrop",
           "positionType",
           "position_x",
           "position_y",

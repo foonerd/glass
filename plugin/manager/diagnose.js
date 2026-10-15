@@ -12,6 +12,12 @@
 const SYMPTOMS = ['no-meters', 'not-moving', 'restarts', 'touch', 'screen', 'artwork', 'remotes', 'face', 'look', 'forecast', 'slow', 'other'];
 const graphicsFault = require('./graphics').fault;
 
+// A size as the sheet writes it, `1280x720`, as numbers; null for anything else.
+function sizeOf(text) {
+  const m = /^(\d+)x(\d+)$/.exec(String(text || '').trim());
+  return m ? { w: parseInt(m[1], 10), h: parseInt(m[2], 10) } : null;
+}
+
 const cause = (check, key, fill, go) => ({ check, kind: 'cause', key, with: fill || {}, go: go || null });
 const note = (check, key, fill, go) => ({ check, kind: 'note', key, with: fill || {}, go: go || null });
 const ok = (check, key, fill) => ({ check, kind: 'ok', key, with: fill || {}, go: null });
@@ -202,6 +208,30 @@ const CHECKS = [
   },
 
   // ---- the picture on the screen ---------------------------------------
+  {
+    id: 'panel-power', symptoms: ['screen', 'no-meters'],
+    run(f) {
+      const p = f.power;
+      if (!p || !p.display || p.power !== 'off') return null;
+      return p.by === 'dark' ? cause('panel-power', 'DIAG_PANEL_DARK', {}, 'screen')
+        : cause('panel-power', 'DIAG_PANEL_OFF', { by: p.by || '-' }, 'screen');
+    }
+  },
+  {
+    id: 'backdrop', symptoms: ['screen', 'artwork'],
+    run(f) {
+      const d = f.display;
+      const theme = sizeOf(f.status.themeSize);
+      const screen = sizeOf(f.status.sheet && f.status.sheet.screen && f.status.sheet.screen.size);
+      if (!d || !theme || !screen) return null;
+      // Fitted, a theme of another shape leaves bars; as it is, a smaller one leaves a band.
+      const bare = d.fit ? Math.abs(theme.w * screen.h - theme.h * screen.w) > screen.w * screen.h / 100
+        : theme.w < screen.w || theme.h < screen.h;
+      if (!bare) return null;
+      return d.backdrop ? ok('backdrop', 'DIAG_BACKDROP_ON')
+        : note('backdrop', 'DIAG_BACKDROP_OFF', { theme: f.status.themeSize, screen: f.status.sheet.screen.size }, 'artwork');
+    }
+  },
   {
     id: 'whose', symptoms: ['screen'],
     run(f) {

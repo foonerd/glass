@@ -2201,6 +2201,11 @@ Glass.prototype.screenSettings = function () {
             return o;
         })(),
         graphics: seen,
+        // The panel's power as last reported, and whether the album art is
+        // blurred behind a theme that leaves the screen bare: for the Status
+        // tab and Find a problem.
+        power: self.screenPower(),
+        backdrop: self.displayPlacement().backdrop,
         views: (function () { var m = self.faceModule(); return { mode: m.mode, has: m.has, face: m.face }; })(),
         probe: found,
         touch: self.touchSettings()
@@ -3433,11 +3438,15 @@ Glass.prototype.saveDisplayConf = function (confData) {
         meterConfig.current['position.fit'] = pos_fit;
         noChanges = false;
     }
-    // The album art blurred behind a theme that leaves part of the screen bare.
-    var backdrop = use_SDL2 && (confData.screenBackdrop === true || confData.screenBackdrop === 'true') ? 'blur' : 'color';
-    if (String(meterConfig.current['screen.backdrop']) !== backdrop) {
-        meterConfig.current['screen.backdrop'] = backdrop;
-        noChanges = false;
+    // The album art blurred behind a theme that leaves part of the screen
+    // bare. A page that does not send the switch leaves the setting as it
+    // stands: the Manager's Screen tab sets it too.
+    if (confData.screenBackdrop !== undefined) {
+        var backdrop = use_SDL2 && (confData.screenBackdrop === true || confData.screenBackdrop === 'true') ? 'blur' : 'color';
+        if (String(meterConfig.current['screen.backdrop']) !== backdrop) {
+            meterConfig.current['screen.backdrop'] = backdrop;
+            noChanges = false;
+        }
     }
     if (use_SDL2) {
         // write position x
