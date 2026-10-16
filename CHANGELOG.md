@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.24] - 2026-10-16
+
+- **Find a problem and the Status tab know the pair as it stands.** Find a problem gains a symptom, "Browsing, search or the queue shows nothing or will not play", whose checks are glass-evo and its module, the display's connection, the look's buttons, and what the player offers to browse, counted and named; and three checks in every language: the look that hides the buttons, the cause where touch or browsing is the complaint and worth knowing on the face, the look and the remotes, with the way to the switch; the last install that was refused for the pair, when one zip of the two was given alone, named under every symptom with the way out, both zips in the one box, and an install that failed otherwise with its words; and a player that offers nothing to browse, which is the player's own. The sheet has two rows more: Buttons under glass-evo, shown or hidden by the look as the face composes its keys, the user's settings over what the theme on show brings over the look chosen; and Last install under Housekeeping, the newest upgrade, rollback, glass-evo install or return to the stable release that ended, gone through or failed with its words, kept until the next or a restart of the backend. Both reach a report. The Troubleshooting page has the queue and the browser as they work, the file path's two zips, and a screen with no controls.
+
 ## [0.10.23] - 2026-10-16
 
 - **A look may show no buttons.** The look panel's Buttons section has "Show the buttons", on as it was: off takes the bar of controls and its sheet off the screen for a screen no finger reaches (asked on the forum), the clock, the date and the forecast staying, wherever the look is drawn. A remote has a word of its own on its settings page, "Controls on this remote": as the player's look says, shown, or hidden. glass-evo 0.10.23 reads the key; this Glass names it as the least it works with.
