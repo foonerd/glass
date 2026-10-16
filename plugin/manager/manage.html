@@ -1494,6 +1494,13 @@
               <input type="range" id="screen-brightness" min="0" max="255" style="max-width:200px" hidden>
               <span id="screen-brightness-value" hidden></span>
             </div>
+            <div class="row" id="screen-dim-row" style="margin-top:6px;align-items:center" hidden>
+              <label><input type="checkbox" id="screen-dim"> <span id="screen-dim-word"></span></label>
+              <label id="screen-idle-label" style="margin-left:12px" hidden></label>
+              <input type="range" id="screen-idle-brightness" min="0" max="255" style="max-width:200px" hidden>
+              <span id="screen-idle-value" hidden></span>
+            </div>
+            <div class="help" id="screen-dim-help" hidden></div>
             <div class="help" id="screen-power-help"></div>
           </div>
           <div class="full"><button class="small" id="btn-screen-details"></button></div>
@@ -2089,6 +2096,9 @@
         $('screen-power-off').textContent = t('MANAGER_SCREEN_POWER_SWITCH_OFF');
         $('screen-power-on').textContent = t('MANAGER_SCREEN_POWER_SWITCH_ON');
         $('screen-brightness-label').textContent = t('MANAGER_SCREEN_BRIGHTNESS');
+        $('screen-dim-word').textContent = t('MANAGER_SCREEN_DIM');
+        $('screen-idle-label').textContent = t('MANAGER_SCREEN_BRIGHTNESS_IDLE');
+        $('screen-dim-help').textContent = t('MANAGER_SCREEN_DIM_HELP');
         $('screen-power-help').textContent = t('MANAGER_SCREEN_POWER_HELP');
         $('disp-position-label').textContent = t('MANAGER_DISPLAY_POSITION');
         $('disp-position').options[0].textContent = t('MANAGER_DISPLAY_CENTERED');
@@ -4160,6 +4170,7 @@
         var means = p.by === 'backlight' ? t('MANAGER_SCREEN_POWER_BY_BACKLIGHT') : p.by === 'dpms' ? t('MANAGER_SCREEN_POWER_BY_DPMS') : p.by === 'dark' ? t('MANAGER_SCREEN_POWER_BY_DARK') : '';
         var text = t(p.power === 'off' ? 'MANAGER_SCREEN_POWER_OFF' : 'MANAGER_SCREEN_POWER_ON') + (means ? ' (' + means + ')' : '');
         if (p.backlight) text += ' \u00b7 ' + t('MANAGER_SCREEN_BRIGHTNESS').toLowerCase() + ' ' + p.brightness + ' / ' + p.maxBrightness;
+        if (p.idle && p.idle.on) text += ' \u00b7 ' + t(p.idle.dimmed ? 'MANAGER_SCREEN_DIMMED_NOW' : 'MANAGER_SCREEN_DIM_SET').replace('{level}', p.idle.level === null ? '-' : p.idle.level);
         return text;
       }
       // The panel's power: its state and means, the switch, and the
@@ -4182,6 +4193,21 @@
           $('screen-brightness').value = p.brightness;
           $('screen-brightness-value').textContent = p.brightness + ' / ' + p.maxBrightness;
         }
+        // Dim while nothing plays: the switch where there is a backlight, the
+        // level when idle while the switch is on.
+        var idle = p.idle || { on: false, level: null, dimmed: false };
+        $('screen-dim-row').hidden = !lit;
+        $('screen-dim-help').hidden = !lit;
+        $('screen-dim').checked = !!idle.on;
+        $('screen-idle-label').hidden = !lit || !idle.on;
+        $('screen-idle-brightness').hidden = !lit || !idle.on;
+        $('screen-idle-value').hidden = !lit || !idle.on;
+        if (lit && idle.on) {
+          var level = idle.level === null ? Math.round(p.maxBrightness / 5) : idle.level;
+          $('screen-idle-brightness').max = p.maxBrightness;
+          $('screen-idle-brightness').value = level;
+          $('screen-idle-value').textContent = level + ' / ' + p.maxBrightness + (idle.dimmed ? ' · ' + t('MANAGER_SCREEN_DIMMED_NOW').replace('{level}', level) : '');
+        }
       }
       function loadScreenPower() {
         return api('GET', '/api/screen/power').then(renderScreenPower).catch(function () {});
@@ -4193,6 +4219,13 @@
       $('screen-power-on').onclick = function () { setScreenPower({ power: 'on' }); };
       $('screen-brightness').onchange = function () { setScreenPower({ brightness: parseInt($('screen-brightness').value, 10) || 0 }); };
       $('screen-brightness').oninput = function () { $('screen-brightness-value').textContent = $('screen-brightness').value + ' / ' + $('screen-brightness').max; };
+      // The switch on sends the level with it, so the first turn-on has one.
+      $('screen-dim').onchange = function () {
+        var on = $('screen-dim').checked;
+        setScreenPower(on ? { dim: true, idleBrightness: parseInt($('screen-idle-brightness').value, 10) || Math.round(($('screen-brightness').max || 255) / 5) } : { dim: false });
+      };
+      $('screen-idle-brightness').onchange = function () { setScreenPower({ idleBrightness: parseInt($('screen-idle-brightness').value, 10) || 0 }); };
+      $('screen-idle-brightness').oninput = function () { $('screen-idle-value').textContent = $('screen-idle-brightness').value + ' / ' + $('screen-idle-brightness').max; };
       function loadScreen() {
         return api('GET', '/api/screen').then(renderScreen).catch(function (e) { toast(errorText(e), 'error'); });
       }

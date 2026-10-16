@@ -334,6 +334,23 @@ test('the panel switched off is named with its means, dark when nothing could sw
   assert.strictEqual(one(diagnose('no-meters', f), 'panel-power').kind, 'cause', 'no meters: the panel is off');
   f.power = { display: true, power: 'off', by: 'dark' };
   assert.strictEqual(one(diagnose('screen', f), 'panel-power').key, 'DIAG_PANEL_DARK');
+  // On and dimmed while the player stands still: a note with the levels, under the screen, the meters and the face; set but not dimmed now, nothing.
+  f.power = { display: true, power: 'on', by: 'backlight', maxBrightness: 255, idle: { on: true, level: 30, bright: 200, dimmed: true } };
+  r = one(diagnose('screen', f), 'panel-power');
+  assert.strictEqual(r.kind, 'note');
+  assert.strictEqual(r.key, 'DIAG_PANEL_DIMMED');
+  assert.deepStrictEqual(r.with, { level: 30, max: 255, bright: 200 });
+  assert.strictEqual(r.go, 'screen');
+  assert.strictEqual(one(diagnose('face', f), 'panel-power').key, 'DIAG_PANEL_DIMMED');
+  f.power.idle.dimmed = false;
+  assert.strictEqual(one(diagnose('screen', f), 'panel-power'), undefined, 'set and not dimmed now says nothing');
+  f.power = { display: true, power: 'on', by: 'backlight', idle: { on: false, level: null, bright: null, dimmed: false } };
+  assert.strictEqual(one(diagnose('screen', f), 'panel-power'), undefined, 'the switch off says nothing');
+  for (const lang of ['en', 'de', 'fr']) {
+    const s = require('../../i18n/strings_' + lang + '.json').GLASS;
+    assert.ok(s.MANAGER_DIAG_PANEL_DIMMED.indexOf('{level}') !== -1 && s.MANAGER_DIAG_PANEL_DIMMED.indexOf('{bright}') !== -1, lang);
+    for (const key of ['MANAGER_SCREEN_DIM', 'MANAGER_SCREEN_BRIGHTNESS_IDLE', 'MANAGER_SCREEN_DIM_HELP', 'MANAGER_SCREEN_DIM_SET', 'MANAGER_SCREEN_DIMMED_NOW']) assert.ok(s[key], lang + ' ' + key);
+  }
   f.power = { display: false, power: 'off', by: '' };
   assert.strictEqual(one(diagnose('screen', f), 'panel-power'), undefined, 'no display on the screen: not the display\'s panel');
   // The backdrop: a smaller theme on a larger screen, the switch off, then on; a theme of the screen's size says nothing.

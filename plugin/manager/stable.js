@@ -41,7 +41,7 @@ const DEFAULT = 'default';
 // star for everything that begins so. The first that fits decides.
 // The plugin's own configuration (config.json).
 const CONFIG = [
-  ['displayOutput', 'screen'], ['headless', 'screen'], ['screenBrightness', 'screen'],
+  ['displayOutput', 'screen'], ['headless', 'screen'], ['screenBrightness', 'screen'], ['screenDimIdle', 'screen'], ['screenBrightnessIdle', 'screen'],
   ['remotesEnabled', 'network'], ['remoteBeaconPort', 'network'], ['remoteChannelPort', 'network'], ['remoteFramesPort', 'network'],
   ['managerHost', 'network'], ['managerPort', 'network'], ['smbShareAccess', 'network'],
   ['activeFolder', 'show'], ['activeFolder_title', 'show'], ['randomSelection', 'show'], ['themeTagRules', 'show'],

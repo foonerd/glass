@@ -209,10 +209,16 @@ const CHECKS = [
 
   // ---- the picture on the screen ---------------------------------------
   {
-    id: 'panel-power', symptoms: ['screen', 'no-meters'],
+    id: 'panel-power', symptoms: ['screen', 'no-meters', 'face'],
     run(f) {
       const p = f.power;
-      if (!p || !p.display || p.power !== 'off') return null;
+      if (!p || !p.display) return null;
+      if (p.power !== 'off') {
+        // On, and dimmed while the player stands still: as set, worth knowing.
+        const i = p.idle;
+        if (i && i.on && i.dimmed) return note('panel-power', 'DIAG_PANEL_DIMMED', { level: i.level === null ? '-' : i.level, max: p.maxBrightness === null ? '?' : p.maxBrightness, bright: i.bright === null ? '-' : i.bright }, 'screen');
+        return null;
+      }
       return p.by === 'dark' ? cause('panel-power', 'DIAG_PANEL_DARK', {}, 'screen')
         : cause('panel-power', 'DIAG_PANEL_OFF', { by: p.by || '-' }, 'screen');
     }

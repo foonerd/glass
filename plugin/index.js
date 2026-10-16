@@ -1524,6 +1524,7 @@ Glass.prototype.onStart = function () {
         var isGetEmptyState = (status === 'stop' && (state.uri || '') === '' && (state.title || '') === '');
 
         if (status === 'play') {
+            self.undim();
             if (self.persistTimer) {
                 clearTimeout(self.persistTimer);
                 self.persistTimer = null;
@@ -1559,6 +1560,7 @@ Glass.prototype.onStart = function () {
                     clearInterval(self.Timeout);
                     self.Timeout = null;
                 }
+                self.scheduleDim();
                 if (persistDuration > 0 && fs.existsSync(runFlag)) {
                     if (self.persistTimer) {
                         clearTimeout(self.persistTimer);
@@ -1694,6 +1696,7 @@ Glass.prototype.onStop = function () {
             clearTimeout(self.persistTimer);
             self.persistTimer = null;
         }
+        self.clearDim();
         if (self.transitionGraceTimer) {
             clearTimeout(self.transitionGraceTimer);
             self.transitionGraceTimer = null;
@@ -2350,7 +2353,66 @@ Glass.prototype.screenPower = function () {
     var running = !!(self.meterChild && self.meterChild.exitCode === null);
     var ours = false;
     try { ours = self.screenOurs(); } catch (e) {}
-    return screenpower.state(self.channel ? self.channel.screenReport : null, self.screenWish, { running: running, ours: ours });
+    var idle = screenpower.settings(self.config);
+    idle.dimmed = !!self.dimmed;
+    return screenpower.state(self.channel ? self.channel.screenReport : null, self.screenWish, { running: running, ours: ours }, idle);
+};
+
+// ---- Dim while nothing plays ----------------------------------------------
+// Off unless turned on. On, the backlight goes to the brightness when idle
+// at the moment the clock comes after a genuine stop (at once, or after
+// the persist period when the look waits for it), and back to the
+// brightness at play when playback begins. Only the player's own display
+// is told; a remote's panel is its own.
+
+// The brightness the display is to hold now, sent to it.
+Glass.prototype.pushBrightnessNow = function () {
+    var self = this;
+    var level = screenpower.wantedLevel(screenpower.settings(self.config), self.dimmed);
+    if (level === null || !self.channel) { return; }
+    self.channel.pushLocal({ kind: 'screen', brightness: level });
+};
+
+Glass.prototype.clearDim = function () {
+    if (this.dimTimer) { clearTimeout(this.dimTimer); this.dimTimer = null; }
+};
+
+// After a genuine stop: the panel dims when the clock comes, if the switch is on.
+Glass.prototype.scheduleDim = function () {
+    var self = this;
+    self.clearDim();
+    var s = screenpower.settings(self.config);
+    if (!s.dim || s.idleLevel === null) { return; }
+    var wait = String(self.config.get('face.idle.wait') || 'none');
+    var delay = screenpower.dimDelayMs(wait, self.persistSettings().seconds);
+    self.dimTimer = setTimeout(function () {
+        self.dimTimer = null;
+        self.dimmed = true;
+        self.logger.info(id + 'screen: dimmed to ' + s.idleLevel + ' while the player stands still');
+        self.pushBrightnessNow();
+    }, delay);
+};
+
+// Playback began: the panel back to the brightness at play.
+Glass.prototype.undim = function () {
+    var self = this;
+    self.clearDim();
+    if (!self.dimmed) { return; }
+    self.dimmed = false;
+    self.logger.info(id + 'screen: back to the brightness at play');
+    self.pushBrightnessNow();
+};
+
+// The switch or the level changed on the Screen tab or through the
+// endpoint: shown at once where the player stands still, undone at once
+// where the switch went off.
+Glass.prototype.dimSettingsChanged = function () {
+    var self = this;
+    var s = screenpower.settings(self.config);
+    var playing = !!(self.lastState && self.lastState.status === 'play');
+    if (!s.dim) { self.undim(); return; }
+    if (playing) { return; }
+    if (self.dimmed) { self.pushBrightnessNow(); } else { self.clearDim(); self.dimmed = true; self.pushBrightnessNow(); }
 };
 
 // The panel's power asked: on, off, a toggle, a brightness. Sent to the
@@ -2362,11 +2424,16 @@ Glass.prototype.setScreenPower = function (data) {
     var asked = screenpower.request(data);
     if (asked.error) { return { error: 'GLASS.MANAGER_BAD_REQUEST', message: asked.error }; }
     if (asked.power === 'on' || asked.power === 'off') { self.screenWish = { power: asked.power }; }
-    if (asked.brightness !== undefined) { self.config.set('screenBrightness', asked.brightness); }
+    // The brightness asked is the brightness at play, and the panel takes it now.
+    if (asked.brightness !== undefined) { self.config.set('screenBrightness', asked.brightness); self.clearDim(); self.dimmed = false; }
     var line = { kind: 'screen' };
     if (asked.power) { line.power = asked.power; }
     if (asked.brightness !== undefined) { line.brightness = asked.brightness; }
-    if (self.channel) { self.channel.pushLocal(line); }
+    if (self.channel && (line.power || line.brightness !== undefined)) { self.channel.pushLocal(line); }
+    if (asked.dim !== undefined) { self.config.set('screenDimIdle', asked.dim); }
+    if (asked.idleBrightness !== undefined) { self.config.set('screenBrightnessIdle', asked.idleBrightness); }
+    if (asked.dim !== undefined || asked.idleBrightness !== undefined) { self.dimSettingsChanged(); }
+    if (self.channel && asked.power === undefined && asked.brightness === undefined && asked.dim === undefined && asked.idleBrightness === undefined) { self.channel.pushLocal(line); }
     return Object.assign({ ok: true }, self.screenPower(), { asked: asked });
 };
 
@@ -2378,8 +2445,9 @@ Glass.prototype.pushScreenWish = function () {
     if (!self.channel) { return; }
     var line = { kind: 'screen' };
     if (self.screenWish && (self.screenWish.power === 'on' || self.screenWish.power === 'off')) { line.power = self.screenWish.power; }
-    var level = parseInt(self.config.get('screenBrightness'), 10);
-    if (!isNaN(level) && level >= 0) { line.brightness = level; }
+    // The brightness at play, or the brightness when idle while the panel is dimmed.
+    var level = screenpower.wantedLevel(screenpower.settings(self.config), self.dimmed);
+    if (level !== null) { line.brightness = level; }
     self.channel.pushLocal(line);
 };
 
