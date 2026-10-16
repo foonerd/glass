@@ -3068,6 +3068,7 @@
             ['MANAGER_ST_SECTION_HOUSE', [
               ['MANAGER_ST_LOGGING', !s.logging ? '-' : String(s.logging.level || '') + (s.logging.targets && s.logging.targets.length ? ' · ' + s.logging.targets.join(', ') : '')],
               ['MANAGER_ST_UPGRADE', !s.upgrade || !s.upgrade.last ? t('MANAGER_ST_UPGRADE_NONE') : s.upgrade.last.from + ' · ' + s.upgrade.last.to + ' · ' + fmtDate(s.upgrade.last.at) + (s.upgrade.last.phase && s.upgrade.last.phase !== 'done' ? ' · ' + s.upgrade.last.phase : '')],
+              ['MANAGER_ST_LAST_JOB', !s.upgrade || !s.upgrade.job ? t('MANAGER_ST_LAST_JOB_NONE') : s.upgrade.job.name + ' · ' + t(s.upgrade.job.state === 'failed' ? 'MANAGER_ST_JOB_FAILED' : 'MANAGER_ST_JOB_DONE') + (s.upgrade.job.endedAt ? ' · ' + fmtDate(s.upgrade.job.endedAt) : '') + (s.upgrade.job.error ? ' · ' + errorText({ code: s.upgrade.job.error.error, message: s.upgrade.job.error.message }) : '')],
               ['MANAGER_ST_RELEASES', t(s.upgrade && s.upgrade.test ? 'MANAGER_ST_RELEASES_TEST' : 'MANAGER_ST_RELEASES_LATEST')],
               ['MANAGER_ST_BACKUP', !house || !house.newestBackup ? t('MANAGER_ST_BACKUP_NONE') : house.newestBackup.name + (house.newestBackup.at ? ' · ' + fmtDate(house.newestBackup.at) : '')],
               ['MANAGER_ST_DISK', s.diskFree !== null ? fmtBytes(s.diskFree) + ' ' + t('MANAGER_ST_FREE') : '-'],
@@ -4347,6 +4348,7 @@
           ['MANAGER_LOOK_PICTURE', !e.picture ? t('MANAGER_ST_EVO_PICTURE_NONE') : e.picture.name + ' · ' + t(e.picture.found ? 'MANAGER_ST_FOUND' : 'MANAGER_ST_MISSING')],
           ['MANAGER_LOOK_IDLE_WAIT', e.idleWait === 'persist' ? t('MANAGER_LOOK_IDLE_WAIT_PERSIST') + (typeof e.persistS === 'number' ? ' (' + e.persistS + ' s)' : '') : t('MANAGER_LOOK_IDLE_WAIT_NONE')],
           ['MANAGER_FACE_SIZE', !e.faceSize ? '-' : t('MANAGER_FACE_SIZE_' + String(e.faceSize).toUpperCase())],
+          ['MANAGER_ST_EVO_BUTTONS', typeof e.buttons !== 'boolean' ? '-' : t(e.buttons ? 'MANAGER_ST_EVO_BUTTONS_SHOWN' : 'MANAGER_ST_EVO_BUTTONS_HIDDEN')],
           ['MANAGER_ST_EVO_FORECAST', !w.on ? t('MANAGER_ST_OFF') : (reveal ? w.place : t('MANAGER_ST_HIDDEN')) + ' · °' + w.unit + ' · ' + t(w.span === 'week' ? 'MANAGER_LOOK_SPAN_WEEK' : 'MANAGER_LOOK_SPAN_TODAY') + ' · ' + (w.readingAgeS === null ? t('MANAGER_ST_EVO_NO_READING') : t('MANAGER_ST_EVO_READING_AGO').replace('{age}', ago(w.readingAgeS))) + (w.error ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + w.error : '')]
         ];
       }

@@ -18,19 +18,22 @@ function healthyEvo() {
     displayBinary: '/data/INTERNAL/glass/evo/bin/arm/glass-evo', displayStartedAt: '2026-10-01T03:00:00Z', componentInstalledAt: '2026-10-01T02:00:00Z', displayOlder: false,
     views: { mode: 'follow', face: true, has: true, version: '0.2.4' }, pages: 0,
     look: { name: 'Clear', source: 'shipped', skies: 0, themeBrings: false, themeFolder: null, themeSkies: 0, unknownSkies: [] },
-    picture: { name: 'lake.jpg', found: true }, idleWait: 'none', persistS: 15, faceSize: 'normal', motion: true, smallBoard: false,
+    picture: { name: 'lake.jpg', found: true }, idleWait: 'none', persistS: 15, faceSize: 'normal', buttons: true, motion: true, smallBoard: false,
     weather: { on: true, place: 'Bergen, Vestland, Norway', unit: 'C', span: 'today', readingAgeS: 600, error: '' },
     problems: []
   };
 }
 
 // A player in good order: playing a file, measured, the display up on the
-// kiosk's X server, a touch panel, remotes served with none connected.
+// kiosk's X server, a touch panel, remotes served with none connected, no
+// install since the backend started, three sources to browse.
 function healthy() {
   return {
     now: NOW,
     update: { current: '0.7.93', latest: { version: '0.7.93' }, available: false },
     log: [],
+    job: null,
+    browse: { count: 3, names: ['Favourites', 'Playlists', 'Music Library'] },
     page: { module: '0.2.4' },
     status: {
       version: '0.7.93', arch: 'arm', binary: true, legacy: false, headless: false, running: true, timeout: 5,
@@ -84,6 +87,9 @@ test('every finding a check can make has its words, with every value it fills in
   Object.assign(broken.status, { legacy: true, binary: false, diskFree: 5 * 1048576, interactive: 'off', measured: false });
   broken.update.available = true; broken.update.latest.version = '0.8.0';
   broken.status.sheet.housekeeping.problems = ['warn: glass: something'];
+  broken.status.evo.buttons = false;
+  broken.job = { kind: 'upgrade', name: 'Glass (file)', state: 'failed', error: { error: 'needs-evo', message: 'Glass 0.10.23 needs glass-evo 0.10.23 or later' }, endedAt: '2026-10-01T04:30:00Z' };
+  broken.browse = { count: 0, names: [] };
   [healthy(), broken].forEach(function (facts) {
     SYMPTOMS.forEach(function (symptom) {
       diagnose(symptom, facts).findings.forEach(function (x) {
@@ -348,4 +354,63 @@ test('the panel switched off is named with its means, dark when nothing could sw
   assert.strictEqual(one(diagnose('screen', f), 'backdrop'), undefined);
   f.status.themeSize = '1920x515';
   assert.strictEqual(one(diagnose('screen', f), 'backdrop').kind, 'note');
+});
+
+test('the buttons hidden by the look, an install refused for the pair or failed, a player with nothing to browse', () => {
+  // In good order under the browse symptom: the buttons shown, the sources named, no install to speak of.
+  const f = healthy();
+  let r = diagnose('browse', f);
+  assert.strictEqual(r.found, false, kinds(r).join(' '));
+  assert.strictEqual(one(r, 'buttons').key, 'DIAG_BUTTONS_SHOWN');
+  assert.deepStrictEqual(one(r, 'sources').with, { count: 3, names: 'Favourites, Playlists, Music Library' });
+  assert.strictEqual(one(r, 'install-job'), undefined);
+  assert.ok(one(r, 'evo-component') && one(r, 'channel') && one(r, 'evo-module'), 'the browser needs glass-evo, its module and the channel: ' + kinds(r).join(' '));
+  // Hidden: the cause where touch or browsing is the complaint, worth knowing on the face, the look and the remotes; the Screen tab has the switch.
+  f.status.evo.buttons = false;
+  assert.strictEqual(one(diagnose('touch', f), 'buttons').kind, 'cause');
+  assert.strictEqual(one(diagnose('browse', f), 'buttons').kind, 'cause');
+  ['face', 'look', 'remotes'].forEach((s) => assert.strictEqual(one(diagnose(s, f), 'buttons').kind, 'note', s));
+  assert.strictEqual(one(diagnose('touch', f), 'buttons').go, 'screen');
+  assert.strictEqual(one(diagnose('touch', f), 'buttons').key, 'DIAG_BUTTONS_HIDDEN');
+  // Without glass-evo there are no buttons to ask about; a sheet that says nothing of them neither.
+  const bare = healthy(); bare.status.evo = null;
+  assert.strictEqual(one(diagnose('touch', bare), 'buttons'), undefined);
+  const unsaid = healthy(); delete unsaid.status.evo.buttons;
+  assert.strictEqual(one(diagnose('touch', unsaid), 'buttons'), undefined);
+  // The last install: refused for the pair is a cause under every symptom, with the way out; failed otherwise a note; one that went through, nothing.
+  const refused = healthy();
+  refused.job = { kind: 'upgrade', name: 'Glass (file)', state: 'failed', error: { error: 'needs-evo', message: 'Glass 0.10.23 needs glass-evo 0.10.23 or later: choose both zips and install them together' }, endedAt: '2026-10-01T04:30:00Z' };
+  SYMPTOMS.forEach(function (s) {
+    const x = one(diagnose(s, refused), 'install-job');
+    assert.strictEqual(x.key, 'DIAG_INSTALL_NEEDS_PAIR', s);
+    assert.strictEqual(x.kind, 'cause', s);
+    assert.strictEqual(x.go, 'system', s);
+    assert.strictEqual(diagnose(s, refused).found, true, s);
+  });
+  assert.deepStrictEqual(one(diagnose('other', refused), 'install-job').with, { name: 'Glass (file)', message: refused.job.error.message });
+  refused.job = { kind: 'component', name: 'glass-evo (file)', state: 'failed', error: { error: 'needs-glass', message: 'glass-evo 0.10.23 needs Glass 0.10.23 or later: choose both zips and install them together' }, endedAt: '2026-10-01T04:30:00Z' };
+  assert.strictEqual(one(diagnose('other', refused), 'install-job').key, 'DIAG_INSTALL_NEEDS_PAIR');
+  refused.job = { kind: 'upgrade', name: 'Glass 0.10.24', state: 'failed', error: { error: 'network', message: 'ETIMEDOUT' }, endedAt: '2026-10-01T04:30:00Z' };
+  const failed = one(diagnose('other', refused), 'install-job');
+  assert.strictEqual(failed.key, 'DIAG_INSTALL_FAILED');
+  assert.strictEqual(failed.kind, 'note');
+  assert.strictEqual(failed.with.message, 'ETIMEDOUT');
+  refused.job = { kind: 'component', name: 'glass-evo 0.10.23', state: 'done', error: null, endedAt: '2026-10-01T04:30:00Z' };
+  assert.strictEqual(one(diagnose('other', refused), 'install-job'), undefined);
+  // Nothing to browse is the player's own: a cause with no tab to go to; sources that could not be read say nothing.
+  const empty = healthy(); empty.browse = { count: 0, names: [] };
+  const none = one(diagnose('browse', empty), 'sources');
+  assert.strictEqual(none.key, 'DIAG_NO_SOURCES');
+  assert.strictEqual(none.kind, 'cause');
+  assert.strictEqual(none.go, null);
+  const unread = healthy(); unread.browse = null;
+  assert.strictEqual(one(diagnose('browse', unread), 'sources'), undefined);
+  // The symptom and the rows have their words in every language, the findings with their holes.
+  for (const lang of ['en', 'de', 'fr']) {
+    const s = require('../../i18n/strings_' + lang + '.json').GLASS;
+    for (const key of ['MANAGER_DIAG_S_BROWSE', 'MANAGER_DIAG_BUTTONS_SHOWN', 'MANAGER_DIAG_BUTTONS_HIDDEN', 'MANAGER_DIAG_NO_SOURCES', 'MANAGER_ST_EVO_BUTTONS', 'MANAGER_ST_EVO_BUTTONS_SHOWN', 'MANAGER_ST_EVO_BUTTONS_HIDDEN', 'MANAGER_ST_LAST_JOB', 'MANAGER_ST_LAST_JOB_NONE', 'MANAGER_ST_JOB_DONE', 'MANAGER_ST_JOB_FAILED']) assert.ok(s[key], lang + ' ' + key);
+    assert.ok(s.MANAGER_DIAG_INSTALL_NEEDS_PAIR.indexOf('{name}') !== -1 && s.MANAGER_DIAG_INSTALL_NEEDS_PAIR.indexOf('{message}') !== -1, lang);
+    assert.ok(s.MANAGER_DIAG_INSTALL_FAILED.indexOf('{name}') !== -1 && s.MANAGER_DIAG_INSTALL_FAILED.indexOf('{message}') !== -1, lang);
+    assert.ok(s.MANAGER_DIAG_SOURCES.indexOf('{count}') !== -1 && s.MANAGER_DIAG_SOURCES.indexOf('{names}') !== -1, lang);
+  }
 });

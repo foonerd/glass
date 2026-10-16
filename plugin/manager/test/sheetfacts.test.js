@@ -47,6 +47,7 @@ test('the glass-evo section carries the component, the owner, the views, the loo
   assert.strictEqual(s.idleWait, 'persist');
   assert.strictEqual(s.persistS, 15);
   assert.strictEqual(s.faceSize, 'large');
+  assert.strictEqual(s.buttons, true, 'the buttons show unless a key says off');
   assert.strictEqual(s.motion, true, 'the skies move unless the setting says off');
   assert.strictEqual(s.smallBoard, false);
   assert.deepStrictEqual(s.weather, { on: true, place: 'Bergen, Vestland, Norway', unit: 'C', span: 'week', readingAgeS: 900, error: '' });
@@ -92,6 +93,21 @@ test('the built-in look, a shipped look, no picture, the forecast off, and nothi
   assert.strictEqual(none.owner, 'kiosk');
   assert.strictEqual(none.views, null);
   assert.deepStrictEqual(none.problems, []);
+});
+
+test('the buttons as the face composes them: the user over the theme on show, over the look chosen, over the built-in', () => {
+  const look = facts().look;
+  const over = (more) => evo(facts({ look: Object.assign({}, look, more) })).buttons;
+  assert.strictEqual(over({}), true, 'unsaid everywhere is on');
+  assert.strictEqual(over({ settings: Object.assign({}, look.settings, { 'buttons.show': 'off' }) }), false, 'the user says off');
+  assert.strictEqual(over({ settings: Object.assign({}, look.settings, { 'buttons.show': ' Off ' }) }), false, 'as the face reads a word');
+  assert.strictEqual(over({ themeLook: { folder: 'T', keys: { 'buttons.show': 'off' } } }), false, 'the theme on show hides them');
+  assert.strictEqual(over({ themeLook: { folder: 'T', keys: { 'buttons.show': 'off' } }, settings: Object.assign({}, look.settings, { 'buttons.show': 'on' }) }), true, 'the user over the theme');
+  assert.strictEqual(over({ looks: [{ name: 'Mine', shipped: false, keys: { 'buttons.show': 'off' } }] }), false, 'the look chosen');
+  assert.strictEqual(over({ looks: [{ name: 'Mine', shipped: false, keys: { 'buttons.show': 'off' } }], themeLook: { folder: 'T', keys: { 'buttons.show': 'on' } } }), true, 'the theme over the look chosen');
+  assert.strictEqual(over({ builtIn: { 'buttons.show': 'off' } }), false, 'the built-in');
+  assert.strictEqual(over({ builtIn: { 'buttons.show': 'off' }, looks: [{ name: 'Mine', shipped: false, keys: { 'buttons.show': 'on' } }] }), true, 'the look chosen over the built-in');
+  assert.strictEqual(evo({}).buttons, true);
 });
 
 test('the remotes each with their product, version and standing, through the standing handed in', () => {

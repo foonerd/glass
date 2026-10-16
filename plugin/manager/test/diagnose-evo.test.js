@@ -16,7 +16,7 @@ function evoFacts() {
     displayBinary: '/data/INTERNAL/glass/evo/bin/arm/glass-evo', displayStartedAt: '2026-10-08T11:00:00Z', componentInstalledAt: '2026-10-08T10:00:00Z', displayOlder: false,
     views: { mode: 'follow', face: true, has: true, version: '0.2.4' }, pages: 1,
     look: { name: 'Mine', source: 'user', skies: 2, themeBrings: false, themeFolder: null, themeSkies: 0, unknownSkies: [] },
-    picture: { name: 'lake.jpg', found: true }, idleWait: 'none', persistS: 15, faceSize: 'normal', motion: true, smallBoard: false,
+    picture: { name: 'lake.jpg', found: true }, idleWait: 'none', persistS: 15, faceSize: 'normal', buttons: true, motion: true, smallBoard: false,
     weather: { on: true, place: 'Bergen, Vestland, Norway', unit: 'C', span: 'week', readingAgeS: 900, error: '' },
     problems: []
   };
@@ -36,10 +36,10 @@ const one = (result, check) => result.findings.find((x) => x.check === check);
 test('the three symptoms of glass-evo find no cause on a player in good order, and check what they check', () => {
   const face = diagnose('face', facts());
   assert.strictEqual(face.found, false, ids(face, 'cause').join(' '));
-  assert.deepStrictEqual(ids(face, 'ok'), ['evo-component', 'evo-owner', 'evo-display', 'evo-look', 'evo-picture', 'forecast-place', 'forecast-reading']);
+  assert.deepStrictEqual(ids(face, 'ok'), ['evo-component', 'evo-owner', 'evo-display', 'evo-look', 'evo-picture', 'forecast-place', 'forecast-reading', 'buttons']);
   const look = diagnose('look', facts());
   assert.strictEqual(look.found, false);
-  assert.deepStrictEqual(ids(look, 'ok'), ['evo-component', 'evo-display', 'evo-module', 'evo-look', 'evo-picture']);
+  assert.deepStrictEqual(ids(look, 'ok'), ['evo-component', 'evo-display', 'evo-module', 'evo-look', 'evo-picture', 'buttons']);
   const forecast = diagnose('forecast', facts());
   assert.strictEqual(forecast.found, false);
   assert.deepStrictEqual(ids(forecast, 'ok'), ['evo-component', 'evo-owner', 'evo-display', 'forecast-place', 'forecast-reading']);

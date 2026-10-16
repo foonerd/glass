@@ -1190,6 +1190,14 @@ Glass.prototype.searchAsk = function (value) {
     });
 };
 
+// What the player offers to browse, for the Manager's checks: the sources
+// of its own Browse page as the face would list them, counted and named.
+Glass.prototype.browseSourcesFact = function () {
+    var list = this.commandRouter.volumioGetVisibleBrowseSources() || [];
+    var items = browse.sources(list, 0).items;
+    return { count: items.length, names: items.map(function (item) { return item.title; }) };
+};
+
 // A tap on a browsed list plays: `{uri, index}` plays the list the face
 // saw at that location from the tapped place, the items that play by
 // themselves into the queue in the player's own way (the queue replaced);

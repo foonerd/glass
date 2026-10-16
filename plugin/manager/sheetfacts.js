@@ -55,6 +55,12 @@ function evo(f) {
   const name = String(settings.theme || '').trim();
   const found = name ? (look.looks || []).find(function (l) { return l.name === name; }) : null;
   if (name && !found) problems.push('look-missing');
+  // The buttons as the face composes its keys: the user's settings over
+  // what the theme on show brings, over the look chosen, over the built-in;
+  // unsaid everywhere is on.
+  const brought = look.themeLook && look.themeLook.keys ? look.themeLook.keys : {};
+  const chosen = found && found.keys ? found.keys : {};
+  const buttons = settings['buttons.show'] || brought['buttons.show'] || chosen['buttons.show'] || builtIn['buttons.show'] || 'on';
   const picture = String(settings['idle.picture'] || '').trim();
   const pictureFound = !!(f.picture && f.picture.found);
   if (picture && !pictureFound) problems.push('picture-missing');
@@ -89,6 +95,7 @@ function evo(f) {
     // The plugin's persist period, which "After the persist period" waits for.
     persistS: typeof f.persistS === 'number' ? f.persistS : null,
     faceSize: f.faceSize || null,
+    buttons: !OFF.test(String(buttons).trim()),
     motion: !OFF.test(String(settings['weather.motion'] || builtIn['weather.motion'] || 'on')),
     smallBoard: look.frostSuits === false,
     weather: {

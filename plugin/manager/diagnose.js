@@ -9,7 +9,7 @@
 // and found right), the string that says it with the values to fill in,
 // and the Manager's tab where it is set, when there is one.
 
-const SYMPTOMS = ['no-meters', 'not-moving', 'restarts', 'touch', 'screen', 'artwork', 'remotes', 'face', 'look', 'forecast', 'slow', 'other'];
+const SYMPTOMS = ['no-meters', 'not-moving', 'restarts', 'touch', 'screen', 'artwork', 'remotes', 'face', 'look', 'forecast', 'browse', 'slow', 'other'];
 const graphicsFault = require('./graphics').fault;
 
 // A size as the sheet writes it, `1280x720`, as numbers; null for anything else.
@@ -200,7 +200,7 @@ const CHECKS = [
     }
   },
   {
-    id: 'channel', symptoms: ['touch'],
+    id: 'channel', symptoms: ['touch', 'browse'],
     run(f) {
       if (!f.status.running || !f.status.channel) return null;
       return f.status.channel.clients > 0 ? ok('channel', 'DIAG_CHANNEL_UP') : cause('channel', 'DIAG_CHANNEL_DOWN');
@@ -334,7 +334,7 @@ const CHECKS = [
   // the theme's own fonts; a sheet without them, a Glass before 0.9.6 or a
   // read that failed, says nothing here.
   {
-    id: 'evo-component', symptoms: ['face', 'look', 'forecast', 'remotes', 'other'],
+    id: 'evo-component', symptoms: ['face', 'look', 'forecast', 'browse', 'remotes', 'other'],
     run(f) {
       const e = f.status.evo;
       if (!e) return null;
@@ -367,7 +367,7 @@ const CHECKS = [
   {
     // The module the views and the look panel draw with: the component's,
     // present, and in this page the installed one.
-    id: 'evo-module', symptoms: ['look', 'remotes'],
+    id: 'evo-module', symptoms: ['look', 'remotes', 'browse'],
     run(f) {
       const e = f.status.evo;
       if (!e || !e.component || !e.views) return null;
@@ -461,6 +461,47 @@ const CHECKS = [
       const e = f.status.evo;
       if (!e || !e.component || e.owner !== 'glass-evo' || !e.weather || !e.weather.on) return null;
       return e.motion && e.smallBoard ? note('skies-motion', 'DIAG_SKIES_MOTION_SMALL', {}, 'screen') : null;
+    }
+  },
+
+  // ---- the buttons, the last install, what there is to browse -----------
+  {
+    // The look's buttons: off takes the bar and its sheet off the face, so
+    // nothing on it answers a touch and the queue, the browser and search
+    // cannot be opened. The cause where touch or browsing is the complaint,
+    // worth knowing elsewhere.
+    id: 'buttons', symptoms: ['touch', 'face', 'look', 'remotes', 'browse'],
+    run(f) {
+      const e = f.status.evo;
+      if (!e || !e.component || typeof e.buttons !== 'boolean') return null;
+      if (e.buttons) return ok('buttons', 'DIAG_BUTTONS_SHOWN');
+      const by = f.symptom === 'touch' || f.symptom === 'browse' ? cause : note;
+      return by('buttons', 'DIAG_BUTTONS_HIDDEN', {}, 'screen');
+    }
+  },
+  {
+    // The last install that ended, an upgrade, a rollback, a glass-evo
+    // install or a return to the stable release: refused for the pair when
+    // one zip of the two was given alone, or failed in its own words. One
+    // that went through says nothing here; the release check has it.
+    id: 'install-job', symptoms: SYMPTOMS,
+    run(f) {
+      const j = f.job;
+      if (!j || j.state !== 'failed' || !j.error) return null;
+      const fill = { name: j.name || '?', message: j.error.message || j.error.error || '-' };
+      if (j.error.error === 'needs-evo' || j.error.error === 'needs-glass') return cause('install-job', 'DIAG_INSTALL_NEEDS_PAIR', fill, 'system');
+      return note('install-job', 'DIAG_INSTALL_FAILED', fill, 'system');
+    }
+  },
+  {
+    // What the player offers to browse: the sources of its own Browse page,
+    // which the face lists as tiles. None, and the browser is empty for the
+    // player's own reason, not Glass's.
+    id: 'sources', symptoms: ['browse'],
+    run(f) {
+      const b = f.browse;
+      if (!b || typeof b.count !== 'number') return null;
+      return b.count ? ok('sources', 'DIAG_SOURCES', { count: b.count, names: (b.names || []).join(', ') }) : cause('sources', 'DIAG_NO_SOURCES');
     }
   }
 ];

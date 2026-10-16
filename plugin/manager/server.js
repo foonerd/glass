@@ -262,6 +262,8 @@ class Manager {
         display: safe(() => self.plugin.displayPlacement(), null),
         update: safe(() => self.updater.view(), null),
         log: safe(() => self.plugin.recentLog(300).lines, []),
+        job: self.lastInstallJob(),
+        browse: safe(() => self.plugin.browseSourcesFact(), null),
         page: { module: page && typeof page.module === 'string' ? page.module.slice(0, 32) : null }
       };
     };
@@ -1355,7 +1357,7 @@ class Manager {
       rings: rings,
       diskFree: free,
       hostname: os.hostname(),
-      upgrade: { last: (this.updater.state && this.updater.state.last) || null, previous: this.updater.previous(), test: this.plugin.testReleases() },
+      upgrade: { last: (this.updater.state && this.updater.state.last) || null, previous: this.updater.previous(), test: this.plugin.testReleases(), job: this.lastInstallJob() },
       themeSize: (function () { const m = SIZE_PREFIX.exec(String(info.activeTheme || '')); return m ? m[1] + 'x' + m[2] : ''; })(),
       jobs: this.jobs.filter(function (j) { return j.state !== 'done' && j.state !== 'failed'; }).length
     });
@@ -1510,6 +1512,20 @@ class Manager {
       if (!error && job.kind !== 'upgrade' && job.kind !== 'component' && this.plugin && typeof this.plugin.themesWritten === 'function') { try { this.plugin.themesWritten(); } catch (e) { } }
       this.logger.info('glass: manager ' + job.kind + ' ' + job.name + ' done: ' + job.folders.map(function (f) { return f.install + '/' + f.folder; }).join(', '));
     }
+  }
+
+  // The newest install that ended, an upgrade, a rollback, a glass-evo
+  // install or a return to the stable release, for the sheet and the
+  // checks: one refused or failed stands here, with its error, until the
+  // next such job or a restart of the backend.
+  lastInstallJob() {
+    const kinds = ['upgrade', 'rollback', 'component', 'stable'];
+    for (let i = this.jobs.length - 1; i >= 0; i--) {
+      const j = this.jobs[i];
+      if (kinds.indexOf(j.kind) === -1 || (j.state !== 'done' && j.state !== 'failed')) continue;
+      return { kind: j.kind, name: j.name, state: j.state, error: j.error || null, endedAt: j.endedAt || null };
+    }
+    return null;
   }
 
   // Cut a theme to a size into a staging folder, then move the copy and
