@@ -474,7 +474,7 @@ const CHECKS = [
     run(f) {
       const e = f.status.evo;
       if (!e || !e.component || typeof e.buttons !== 'boolean') return null;
-      if (e.buttons) return ok('buttons', 'DIAG_BUTTONS_SHOWN');
+      if (e.buttons) return ok('buttons', e.buttonsIdle === 'leave' ? 'DIAG_BUTTONS_SHOWN_IDLE_LEAVES' : 'DIAG_BUTTONS_SHOWN');
       const by = f.symptom === 'touch' || f.symptom === 'browse' ? cause : note;
       return by('buttons', 'DIAG_BUTTONS_HIDDEN', {}, 'screen');
     }

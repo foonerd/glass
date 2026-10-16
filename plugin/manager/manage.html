@@ -3742,6 +3742,7 @@
             'MANAGER_LOOK_MORE_PIECE', finer('weather', 'weather-grid')],
           ['buttons', 'MANAGER_LOOK_BUTTONS', [
             field('MANAGER_LOOK_SHOW_BUTTONS', onoff('buttons.show', 'switch'), esc(t('MANAGER_LOOK_SHOW_BUTTONS_HINT'))),
+            field('MANAGER_LOOK_BUTTONS_IDLE', choice('buttons.idle', ['stay', 'leave'], 'MANAGER_LOOK_BUTTONS_IDLE_'), esc(t('MANAGER_LOOK_BUTTONS_IDLE_HINT'))),
             field('MANAGER_LOOK_SIZE', slider('measure.bar', 'size', 50, 250, 5, 'SMALL', 'LARGE'))],
             'MANAGER_LOOK_MORE_BUTTONS', finer('buttons', '')],
           ['lists', 'MANAGER_LOOK_LISTS', [
@@ -4348,7 +4349,7 @@
           ['MANAGER_LOOK_PICTURE', !e.picture ? t('MANAGER_ST_EVO_PICTURE_NONE') : e.picture.name + ' · ' + t(e.picture.found ? 'MANAGER_ST_FOUND' : 'MANAGER_ST_MISSING')],
           ['MANAGER_LOOK_IDLE_WAIT', e.idleWait === 'persist' ? t('MANAGER_LOOK_IDLE_WAIT_PERSIST') + (typeof e.persistS === 'number' ? ' (' + e.persistS + ' s)' : '') : t('MANAGER_LOOK_IDLE_WAIT_NONE')],
           ['MANAGER_FACE_SIZE', !e.faceSize ? '-' : t('MANAGER_FACE_SIZE_' + String(e.faceSize).toUpperCase())],
-          ['MANAGER_ST_EVO_BUTTONS', typeof e.buttons !== 'boolean' ? '-' : t(e.buttons ? 'MANAGER_ST_EVO_BUTTONS_SHOWN' : 'MANAGER_ST_EVO_BUTTONS_HIDDEN')],
+          ['MANAGER_ST_EVO_BUTTONS', typeof e.buttons !== 'boolean' ? '-' : t(e.buttons ? 'MANAGER_ST_EVO_BUTTONS_SHOWN' : 'MANAGER_ST_EVO_BUTTONS_HIDDEN') + (e.buttons && e.buttonsIdle === 'leave' ? ' · ' + t('MANAGER_ST_EVO_BUTTONS_IDLE_LEAVE') : '')],
           ['MANAGER_ST_EVO_FORECAST', !w.on ? t('MANAGER_ST_OFF') : (reveal ? w.place : t('MANAGER_ST_HIDDEN')) + ' · °' + w.unit + ' · ' + t(w.span === 'week' ? 'MANAGER_LOOK_SPAN_WEEK' : 'MANAGER_LOOK_SPAN_TODAY') + ' · ' + (w.readingAgeS === null ? t('MANAGER_ST_EVO_NO_READING') : t('MANAGER_ST_EVO_READING_AGO').replace('{age}', ago(w.readingAgeS))) + (w.error ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + w.error : '')]
         ];
       }

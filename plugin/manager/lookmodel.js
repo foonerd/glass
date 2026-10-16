@@ -14,7 +14,7 @@
   var BUILTIN = {
     'colours.tint': 'artwork', 'colours.accent': 'artwork', 'colours.ink': '#f2f2f5',
     'glass.bar': '0.75', 'glass.sheet': '0.78', 'glass.hairline': '0.12', 'glass.frost': 'auto',
-    'buttons.show': 'on', 'buttons.ink': 'ink', 'buttons.opacity': '1.0',
+    'buttons.show': 'on', 'buttons.idle': 'stay', 'buttons.ink': 'ink', 'buttons.opacity': '1.0',
     // The buttons' own background (glass-evo 0.1.54): as solid as How solid, in the look's tint, unless said.
     'buttons.glass': 'bar', 'buttons.tint': 'tint',
     // The queue and the browser (glass-evo 0.10.7): by the screen, a sheet, a drawer, or the whole screen.

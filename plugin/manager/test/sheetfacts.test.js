@@ -108,6 +108,16 @@ test('the buttons as the face composes them: the user over the theme on show, ov
   assert.strictEqual(over({ builtIn: { 'buttons.show': 'off' } }), false, 'the built-in');
   assert.strictEqual(over({ builtIn: { 'buttons.show': 'off' }, looks: [{ name: 'Mine', shipped: false, keys: { 'buttons.show': 'on' } }] }), true, 'the look chosen over the built-in');
   assert.strictEqual(evo({}).buttons, true);
+  // Whether the bar leaves the idle screen too, composed the same way; unsaid is stay.
+  const idle = (more) => evo(facts({ look: Object.assign({}, look, more) })).buttonsIdle;
+  assert.strictEqual(idle({}), 'stay');
+  assert.strictEqual(idle({ settings: Object.assign({}, look.settings, { 'buttons.idle': 'leave' }) }), 'leave');
+  assert.strictEqual(idle({ settings: Object.assign({}, look.settings, { 'buttons.idle': ' Away ' }) }), 'leave', 'as the face reads the word');
+  assert.strictEqual(idle({ settings: Object.assign({}, look.settings, { 'buttons.idle': 'nonsense' }) }), 'stay');
+  assert.strictEqual(idle({ themeLook: { folder: 'T', keys: { 'buttons.idle': 'leave' } } }), 'leave', 'the theme on show');
+  assert.strictEqual(idle({ themeLook: { folder: 'T', keys: { 'buttons.idle': 'leave' } }, settings: Object.assign({}, look.settings, { 'buttons.idle': 'stay' }) }), 'stay', 'the user over the theme');
+  assert.strictEqual(idle({ looks: [{ name: 'Mine', shipped: false, keys: { 'buttons.idle': 'leave' } }] }), 'leave', 'the look chosen');
+  assert.strictEqual(evo({}).buttonsIdle, 'stay');
 });
 
 test('the remotes each with their product, version and standing, through the standing handed in', () => {

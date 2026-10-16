@@ -372,6 +372,16 @@ test('the buttons hidden by the look, an install refused for the pair or failed,
   ['face', 'look', 'remotes'].forEach((s) => assert.strictEqual(one(diagnose(s, f), 'buttons').kind, 'note', s));
   assert.strictEqual(one(diagnose('touch', f), 'buttons').go, 'screen');
   assert.strictEqual(one(diagnose('touch', f), 'buttons').key, 'DIAG_BUTTONS_HIDDEN');
+  // Shown, and leaving the idle screen too: checked, in its own words, with the setting named.
+  const leaves = healthy(); leaves.status.evo.buttonsIdle = 'leave';
+  assert.strictEqual(one(diagnose('touch', leaves), 'buttons').key, 'DIAG_BUTTONS_SHOWN_IDLE_LEAVES');
+  assert.strictEqual(one(diagnose('touch', leaves), 'buttons').kind, 'ok');
+  leaves.status.evo.buttons = false;
+  assert.strictEqual(one(diagnose('touch', leaves), 'buttons').key, 'DIAG_BUTTONS_HIDDEN', 'hidden is hidden, whatever the idle word');
+  for (const lang of ['en', 'de', 'fr']) {
+    const s = require('../../i18n/strings_' + lang + '.json').GLASS;
+    for (const key of ['MANAGER_DIAG_BUTTONS_SHOWN_IDLE_LEAVES', 'MANAGER_ST_EVO_BUTTONS_IDLE_LEAVE', 'MANAGER_LOOK_BUTTONS_IDLE', 'MANAGER_LOOK_BUTTONS_IDLE_STAY', 'MANAGER_LOOK_BUTTONS_IDLE_LEAVE', 'MANAGER_LOOK_BUTTONS_IDLE_HINT']) assert.ok(s[key], lang + ' ' + key);
+  }
   // Without glass-evo there are no buttons to ask about; a sheet that says nothing of them neither.
   const bare = healthy(); bare.status.evo = null;
   assert.strictEqual(one(diagnose('touch', bare), 'buttons'), undefined);

@@ -61,6 +61,7 @@ function evo(f) {
   const brought = look.themeLook && look.themeLook.keys ? look.themeLook.keys : {};
   const chosen = found && found.keys ? found.keys : {};
   const buttons = settings['buttons.show'] || brought['buttons.show'] || chosen['buttons.show'] || builtIn['buttons.show'] || 'on';
+  const buttonsIdle = settings['buttons.idle'] || brought['buttons.idle'] || chosen['buttons.idle'] || builtIn['buttons.idle'] || 'stay';
   const picture = String(settings['idle.picture'] || '').trim();
   const pictureFound = !!(f.picture && f.picture.found);
   if (picture && !pictureFound) problems.push('picture-missing');
@@ -96,6 +97,8 @@ function evo(f) {
     persistS: typeof f.persistS === 'number' ? f.persistS : null,
     faceSize: f.faceSize || null,
     buttons: !OFF.test(String(buttons).trim()),
+    // Whether the bar leaves the idle screen too, as the face reads the word.
+    buttonsIdle: /^(leave|leaves|away)$/i.test(String(buttonsIdle).trim()) ? 'leave' : 'stay',
     motion: !OFF.test(String(settings['weather.motion'] || builtIn['weather.motion'] || 'on')),
     smallBoard: look.frostSuits === false,
     weather: {
