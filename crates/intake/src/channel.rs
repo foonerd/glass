@@ -80,6 +80,9 @@ pub struct ScreenRequest {
     pub power: Option<bool>,
     pub toggle: bool,
     pub brightness: Option<u32>,
+    /// How long the backlight takes to reach the brightness, in
+    /// milliseconds; zero is at once.
+    pub fade_ms: u32,
 }
 
 /// One track of the player's queue, as the plugin's `queue` line carries it.
@@ -553,6 +556,11 @@ pub fn decode(line: &[u8]) -> Option<Event> {
                     .get("brightness")
                     .and_then(Value::as_u64)
                     .map(|level| level.min(u32::MAX as u64) as u32),
+                fade_ms: value
+                    .get("fade")
+                    .and_then(Value::as_u64)
+                    .map(|ms| ms.min(60_000) as u32)
+                    .unwrap_or(0),
             }))
         }
         "browse" => serde_json::from_value::<lead::Browse>(value.clone())
@@ -968,13 +976,22 @@ mod screen_lines {
             ScreenRequest {
                 power: Some(false),
                 toggle: false,
-                brightness: None
+                brightness: None,
+                fade_ms: 0
             }
         );
         assert_eq!(
             screen(br#"{"kind":"screen","power":"on"}"#).power,
             Some(true)
         );
+        // A fade rides with a brightness, in milliseconds, held to a minute; unsaid is at once.
+        let faded = screen(br#"{"kind":"screen","brightness":30,"fade":1000}"#);
+        assert_eq!((faded.brightness, faded.fade_ms), (Some(30), 1000));
+        assert_eq!(
+            screen(br#"{"kind":"screen","brightness":30,"fade":999999}"#).fade_ms,
+            60_000
+        );
+        assert_eq!(screen(br#"{"kind":"screen","brightness":30}"#).fade_ms, 0);
         let toggle = screen(br#"{"kind":"screen","power":"toggle"}"#);
         assert!(toggle.toggle && toggle.power.is_none());
         assert_eq!(

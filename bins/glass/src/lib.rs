@@ -983,6 +983,9 @@ fn session(
     // own: it shows its clock while the player stands still over the theme,
     // as on the player, and a touch beside it does nothing.
     let remote_face = remote.is_some() && face.is_some();
+    // A backlight on its way to a brightness the player asked with a fade,
+    // stepped a level a frame; reported once it has arrived.
+    let mut backlight_fade: Option<screen::BacklightFade> = None;
     loop {
         let frame_started = Instant::now();
         if let Some(step) = meter_step.take() {
@@ -1023,9 +1026,39 @@ fn session(
         // a bare ask tells, and a player that connects anew hears.
         if let Some(request) = source.take_screen() {
             if let (Some(level), Some(window)) = (request.brightness, surface.as_mut()) {
-                if window.set_brightness(level).is_none() {
-                    logline::say!(Info, "display", "screen: no backlight to set at {level}");
+                // With a fade, from where the backlight stands over the time
+                // asked, a level a frame; without, at once. A new word ends
+                // the fade before it.
+                backlight_fade = None;
+                match (request.fade_ms, window.brightness()) {
+                    (ms, Some((from, max))) if ms > 0 && from != level.min(max) => {
+                        let now_ms = started.elapsed().as_millis() as u64;
+                        backlight_fade = Some(screen::BacklightFade::new(
+                            from,
+                            level.min(max),
+                            now_ms,
+                            ms as u64,
+                        ));
+                        logline::say!(
+                            Info,
+                            "display",
+                            "screen: backlight from {from} to {} over {ms} ms",
+                            level.min(max)
+                        );
+                    }
+                    _ => {
+                        if window.set_brightness(level).is_none() {
+                            logline::say!(
+                                Info,
+                                "display",
+                                "screen: no backlight to set at {level}"
+                            );
+                        }
+                    }
                 }
+            }
+            if request.power.is_some() || request.toggle {
+                backlight_fade = None;
             }
             match screen.by_player(&request) {
                 Some(on) => switch_screen!(on),
@@ -1040,6 +1073,21 @@ fn session(
                         );
                     }
                 }
+            }
+        }
+        // The backlight's fade, a level a frame; the state reported once it
+        // has arrived, as a brightness set at once is reported.
+        if let (Some(fade), Some(window)) = (backlight_fade.as_mut(), surface.as_mut()) {
+            let now_ms = started.elapsed().as_millis() as u64;
+            if let Some(level) = fade.step(now_ms) {
+                if window.set_brightness(level).is_none() {
+                    backlight_fade = None;
+                }
+            }
+            if backlight_fade.as_ref().is_some_and(|f| f.done()) {
+                backlight_fade = None;
+                let power = window.power();
+                source.report_screen(power.on, power.by_name(), window.brightness(), screen_ours);
             }
         }
         if let Some(face) = face.as_deref_mut() {

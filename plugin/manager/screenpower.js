@@ -33,8 +33,18 @@ function request(data) {
     if (!isFinite(idle) || idle < 0 || Math.floor(idle) !== idle) return { error: 'bad-idle-brightness' };
     out.idleBrightness = idle;
   }
+  // How long the backlight takes to reach a brightness, in milliseconds, up to a minute; unsaid is at once.
+  if (d.fade !== undefined && d.fade !== null && d.fade !== '') {
+    var fade = Number(d.fade);
+    if (!isFinite(fade) || fade < 0 || fade > 60000 || Math.floor(fade) !== fade) return { error: 'bad-fade' };
+    out.fade = fade;
+  }
   return out;
 }
+
+// The time the backlight takes between the brightness at play and the
+// brightness when idle, either way.
+var DIM_FADE_MS = 1000;
 
 // The dim settings as the plugin keeps them: whether the panel dims while
 // nothing plays (off unless turned on), the brightness then, and the
@@ -109,4 +119,4 @@ function state(last, wish, display, idle) {
   };
 }
 
-module.exports = { request, report, state, settings, wantedLevel, dimDelayMs, brightnessAtPlay };
+module.exports = { request, report, state, settings, wantedLevel, dimDelayMs, brightnessAtPlay, DIM_FADE_MS };

@@ -1,7 +1,17 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { request, report, state, settings, wantedLevel, dimDelayMs, brightnessAtPlay } = require('../screenpower');
+const { request, report, state, settings, wantedLevel, dimDelayMs, brightnessAtPlay, DIM_FADE_MS } = require('../screenpower');
+
+test('a fade rides with a brightness in milliseconds, whole and up to a minute; the dim and the undim take a second', () => {
+  assert.deepEqual(request({ brightness: 30, fade: 1000 }), { brightness: 30, fade: 1000 });
+  assert.deepEqual(request({ fade: '0' }), { fade: 0 });
+  assert.deepEqual(request({ fade: 60001 }), { error: 'bad-fade' });
+  assert.deepEqual(request({ fade: -1 }), { error: 'bad-fade' });
+  assert.deepEqual(request({ fade: 1.5 }), { error: 'bad-fade' });
+  assert.deepEqual(request({ fade: 'slow' }), { error: 'bad-fade' });
+  assert.equal(DIM_FADE_MS, 1000);
+});
 
 test("the brightness at play is the user's own: kept, else the backlight as it stands while not dimmed, never the idle level", () => {
   const told = report({ power: 'on', by: 'backlight', brightness: 25, max: 31 });

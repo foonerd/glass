@@ -2369,12 +2369,15 @@ Glass.prototype.screenPower = function () {
 // brightness at play when playback begins. Only the player's own display
 // is told; a remote's panel is its own.
 
-// The brightness the display is to hold now, sent to it.
-Glass.prototype.pushBrightnessNow = function () {
+// The brightness the display is to hold now, sent to it; with a fade the
+// backlight takes that long to get there.
+Glass.prototype.pushBrightnessNow = function (fadeMs) {
     var self = this;
     var level = screenpower.wantedLevel(screenpower.settings(self.config), self.dimmed);
     if (level === null || !self.channel) { return; }
-    self.channel.pushLocal({ kind: 'screen', brightness: level });
+    var line = { kind: 'screen', brightness: level };
+    if (fadeMs > 0) { line.fade = fadeMs; }
+    self.channel.pushLocal(line);
 };
 
 Glass.prototype.clearDim = function () {
@@ -2394,7 +2397,7 @@ Glass.prototype.scheduleDim = function () {
         self.adoptBrightnessAtPlay();
         self.dimmed = true;
         self.logger.info(id + 'screen: dimmed to ' + s.idleLevel + ' while the player stands still');
-        self.pushBrightnessNow();
+        self.pushBrightnessNow(screenpower.DIM_FADE_MS);
     }, delay);
 };
 
@@ -2416,7 +2419,7 @@ Glass.prototype.undim = function () {
     if (!self.dimmed) { return; }
     self.dimmed = false;
     self.logger.info(id + 'screen: back to the brightness at play');
-    self.pushBrightnessNow();
+    self.pushBrightnessNow(screenpower.DIM_FADE_MS);
 };
 
 // The switch or the level changed on the Screen tab or through the
@@ -2428,7 +2431,7 @@ Glass.prototype.dimSettingsChanged = function () {
     var playing = !!(self.lastState && self.lastState.status === 'play');
     if (!s.dim) { self.undim(); return; }
     if (playing) { return; }
-    if (self.dimmed) { self.pushBrightnessNow(); } else { self.clearDim(); self.adoptBrightnessAtPlay(); self.dimmed = true; self.pushBrightnessNow(); }
+    if (self.dimmed) { self.pushBrightnessNow(screenpower.DIM_FADE_MS); } else { self.clearDim(); self.adoptBrightnessAtPlay(); self.dimmed = true; self.pushBrightnessNow(screenpower.DIM_FADE_MS); }
 };
 
 // The panel's power asked: on, off, a toggle, a brightness. Sent to the
@@ -2444,7 +2447,7 @@ Glass.prototype.setScreenPower = function (data) {
     if (asked.brightness !== undefined) { self.config.set('screenBrightness', asked.brightness); self.clearDim(); self.dimmed = false; }
     var line = { kind: 'screen' };
     if (asked.power) { line.power = asked.power; }
-    if (asked.brightness !== undefined) { line.brightness = asked.brightness; }
+    if (asked.brightness !== undefined) { line.brightness = asked.brightness; if (asked.fade > 0) { line.fade = asked.fade; } }
     if (self.channel && (line.power || line.brightness !== undefined)) { self.channel.pushLocal(line); }
     if (asked.dim !== undefined) { self.config.set('screenDimIdle', asked.dim); }
     if (asked.idleBrightness !== undefined) { self.config.set('screenBrightnessIdle', asked.idleBrightness); }

@@ -1,7 +1,62 @@
 //! The panel's power as the display holds it: who switched it off, and
-//! what a word from the player, a word from the face or a finger does.
+//! what a word from the player, a word from the face or a finger does;
+//! and a backlight on its way from one brightness to another.
 
 use intake::ScreenRequest;
+
+/// A backlight on its way from one brightness to another over a time, as
+/// the player asks with a fade: stepped by the display's clock, one level
+/// a frame at most, a level never written twice. Done once the brightness
+/// asked is written.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct BacklightFade {
+    from: u32,
+    to: u32,
+    started_ms: u64,
+    duration_ms: u64,
+    written: Option<u32>,
+}
+
+impl BacklightFade {
+    pub fn new(from: u32, to: u32, now_ms: u64, duration_ms: u64) -> Self {
+        Self {
+            from,
+            to,
+            started_ms: now_ms,
+            duration_ms: duration_ms.max(1),
+            written: None,
+        }
+    }
+
+    /// Where the backlight should stand at `now_ms`, on the straight line
+    /// from `from` to `to`, `to` from the end of the time on.
+    fn level_at(&self, now_ms: u64) -> u32 {
+        let elapsed = now_ms.saturating_sub(self.started_ms);
+        if elapsed >= self.duration_ms {
+            return self.to;
+        }
+        let from = self.from as i64;
+        let to = self.to as i64;
+        let level = from + (to - from) * elapsed as i64 / self.duration_ms as i64;
+        level.max(0) as u32
+    }
+
+    /// The level to write this frame, when it differs from the last one
+    /// written; none when the backlight already stands where the line says.
+    pub fn step(&mut self, now_ms: u64) -> Option<u32> {
+        let level = self.level_at(now_ms);
+        if self.written == Some(level) {
+            return None;
+        }
+        self.written = Some(level);
+        Some(level)
+    }
+
+    /// Whether the brightness asked has been written.
+    pub fn done(&self) -> bool {
+        self.written == Some(self.to)
+    }
+}
 
 /// Who switched the panel off. The player's word (the API, the Manager, a
 /// remote) holds until the player's word or a touch; the face's idle black
@@ -82,6 +137,7 @@ mod tests {
             power,
             toggle,
             brightness: None,
+            fade_ms: 0,
         }
     }
 
@@ -153,5 +209,51 @@ mod tests {
             None,
             "a power named beats the toggle"
         );
+    }
+
+    /// A fade walks the backlight from where it stands to the level asked
+    /// over the time, a level never written twice, and is done once the
+    /// level asked is written; downwards as upwards.
+    #[test]
+    fn a_fade_steps_the_backlight_a_level_at_a_time_and_arrives() {
+        let mut fade = BacklightFade::new(31, 5, 1000, 1000);
+        assert_eq!(
+            fade.step(1000),
+            Some(31),
+            "the first frame writes where it stands"
+        );
+        assert_eq!(
+            fade.step(1010),
+            None,
+            "a level stands until the line moves on"
+        );
+        assert_eq!(fade.step(1500), Some(18), "half way, half the distance");
+        assert_eq!(fade.step(1500), None);
+        assert!(!fade.done());
+        assert_eq!(
+            fade.step(2000),
+            Some(5),
+            "the end of the time is the level asked"
+        );
+        assert!(fade.done());
+        assert_eq!(fade.step(2500), None, "and nothing more is written");
+        // Upwards, with few levels: every level on the way, none twice.
+        let mut up = BacklightFade::new(2, 6, 0, 400);
+        let mut written = Vec::new();
+        for now in (0..=400).step_by(10) {
+            if let Some(level) = up.step(now) {
+                written.push(level);
+            }
+        }
+        assert_eq!(written, vec![2, 3, 4, 5, 6]);
+        assert!(up.done());
+        // A fade of no time is the level at once; a clock that ran past the end too.
+        let mut none = BacklightFade::new(10, 20, 0, 0);
+        assert_eq!(none.step(0), Some(10));
+        assert_eq!(none.step(1), Some(20));
+        assert!(none.done());
+        let mut late = BacklightFade::new(10, 20, 0, 100);
+        assert_eq!(late.step(5000), Some(20));
+        assert!(late.done());
     }
 }
