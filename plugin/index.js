@@ -2353,9 +2353,13 @@ Glass.prototype.screenPower = function () {
     var running = !!(self.meterChild && self.meterChild.exitCode === null);
     var ours = false;
     try { ours = self.screenOurs(); } catch (e) {}
+    var report = self.channel ? self.channel.screenReport : null;
     var idle = screenpower.settings(self.config);
     idle.dimmed = !!self.dimmed;
-    return screenpower.state(self.channel ? self.channel.screenReport : null, self.screenWish, { running: running, ours: ours }, idle);
+    // The brightness at play is the user's own: kept, or the backlight as
+    // it stands while the panel is not dimmed.
+    idle.level = screenpower.brightnessAtPlay(idle, report, idle.dimmed);
+    return screenpower.state(report, self.screenWish, { running: running, ours: ours }, idle);
 };
 
 // ---- Dim while nothing plays ----------------------------------------------
@@ -2387,10 +2391,22 @@ Glass.prototype.scheduleDim = function () {
     var delay = screenpower.dimDelayMs(wait, self.persistSettings().seconds);
     self.dimTimer = setTimeout(function () {
         self.dimTimer = null;
+        self.adoptBrightnessAtPlay();
         self.dimmed = true;
         self.logger.info(id + 'screen: dimmed to ' + s.idleLevel + ' while the player stands still');
         self.pushBrightnessNow();
     }, delay);
+};
+
+// Before the panel dims: the backlight as it stands is the user's
+// brightness at play where none was ever set, and is kept as such, so
+// the panel comes back to it and the Screen tab shows it while dimmed.
+Glass.prototype.adoptBrightnessAtPlay = function () {
+    var self = this;
+    if (self.dimmed) { return; }
+    var s = screenpower.settings(self.config);
+    var bright = screenpower.brightnessAtPlay(s, self.channel ? self.channel.screenReport : null, false);
+    if (s.level === null && bright !== null) { self.config.set('screenBrightness', bright); }
 };
 
 // Playback began: the panel back to the brightness at play.
@@ -2412,7 +2428,7 @@ Glass.prototype.dimSettingsChanged = function () {
     var playing = !!(self.lastState && self.lastState.status === 'play');
     if (!s.dim) { self.undim(); return; }
     if (playing) { return; }
-    if (self.dimmed) { self.pushBrightnessNow(); } else { self.clearDim(); self.dimmed = true; self.pushBrightnessNow(); }
+    if (self.dimmed) { self.pushBrightnessNow(); } else { self.clearDim(); self.adoptBrightnessAtPlay(); self.dimmed = true; self.pushBrightnessNow(); }
 };
 
 // The panel's power asked: on, off, a toggle, a brightness. Sent to the

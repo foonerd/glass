@@ -1307,6 +1307,7 @@
     "MANAGER_SCREEN_POWER_HELP": "Off holds through playback until Switch on, a touch on the panel, or the player's glass_screen endpoint, which an IR remote, a script or Home Assistant calls. A look of glass-evo that goes black after idle minutes switches the panel off the same way.",
     "MANAGER_SCREEN_DIM": "Dim while nothing plays",
     "MANAGER_SCREEN_BRIGHTNESS_IDLE": "Brightness when idle",
+    "MANAGER_SCREEN_BRIGHTNESS_PLAY": "Brightness at play",
     "MANAGER_SCREEN_DIM_HELP": "Off unless turned on. On, the backlight goes to the brightness when idle at the moment the clock comes after a stop, at once or after the persist period as the look says, and back to the brightness above when playback begins. The glass_screen endpoint takes dim and idleBrightness the same way.",
     "MANAGER_SCREEN_DIM_SET": "dims to {level} while the player stands still",
     "MANAGER_SCREEN_DIMMED_NOW": "dimmed to {level} while the player stands still",

@@ -4188,14 +4188,19 @@
         $('screen-brightness-label').hidden = !lit;
         $('screen-brightness').hidden = !lit;
         $('screen-brightness-value').hidden = !lit;
+        // The Brightness slider is the brightness at play, the user's own: it
+        // keeps that value while the panel is dimmed, and says "at play" while
+        // the dim switch is on; the backlight as it is now is the Panel row's.
+        var idle = p.idle || { on: false, level: null, bright: null, dimmed: false };
         if (lit) {
+          var bright = idle.bright !== null && idle.bright !== undefined ? idle.bright : p.brightness;
           $('screen-brightness').max = p.maxBrightness;
-          $('screen-brightness').value = p.brightness;
-          $('screen-brightness-value').textContent = p.brightness + ' / ' + p.maxBrightness;
+          $('screen-brightness').value = bright;
+          $('screen-brightness-value').textContent = bright + ' / ' + p.maxBrightness;
+          $('screen-brightness-label').textContent = t(idle.on ? 'MANAGER_SCREEN_BRIGHTNESS_PLAY' : 'MANAGER_SCREEN_BRIGHTNESS');
         }
         // Dim while nothing plays: the switch where there is a backlight, the
         // level when idle while the switch is on.
-        var idle = p.idle || { on: false, level: null, dimmed: false };
         $('screen-dim-row').hidden = !lit;
         $('screen-dim-help').hidden = !lit;
         $('screen-dim').checked = !!idle.on;

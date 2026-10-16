@@ -1,7 +1,17 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { request, report, state, settings, wantedLevel, dimDelayMs } = require('../screenpower');
+const { request, report, state, settings, wantedLevel, dimDelayMs, brightnessAtPlay } = require('../screenpower');
+
+test("the brightness at play is the user's own: kept, else the backlight as it stands while not dimmed, never the idle level", () => {
+  const told = report({ power: 'on', by: 'backlight', brightness: 25, max: 31 });
+  assert.equal(brightnessAtPlay({ level: 20 }, told, false), 20, 'kept beats the report');
+  assert.equal(brightnessAtPlay({ level: 20 }, told, true), 20, 'and stands while dimmed');
+  assert.equal(brightnessAtPlay({ level: null }, told, false), 25, 'none kept: the backlight as it stands');
+  assert.equal(brightnessAtPlay({ level: null }, told, true), null, 'none kept and dimmed: the report is the idle level, not the brightness at play');
+  assert.equal(brightnessAtPlay({ level: null }, null, false), null);
+  assert.equal(brightnessAtPlay({ level: null }, report({ power: 'on', by: 'dpms' }), false), null, 'no backlight, no level');
+});
 
 test('dim while nothing plays: the switch and the level when idle in a request, the settings, the level wanted, the moment', () => {
   assert.deepEqual(request({ dim: true }), { dim: true });

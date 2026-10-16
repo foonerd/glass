@@ -1307,6 +1307,7 @@
     "MANAGER_SCREEN_POWER_HELP": "Aus bleibt aus, auch bei Wiedergabe, bis Einschalten, eine Berührung des Panels oder der Endpunkt glass_screen des Players, den eine IR-Fernbedienung, ein Skript oder Home Assistant aufruft. Ein glass-evo-Look, der nach Leerlaufminuten schwarz wird, schaltet das Panel auf demselben Weg aus.",
     "MANAGER_SCREEN_DIM": "Abdunkeln, wenn nichts spielt",
     "MANAGER_SCREEN_BRIGHTNESS_IDLE": "Helligkeit im Ruhezustand",
+    "MANAGER_SCREEN_BRIGHTNESS_PLAY": "Helligkeit bei Wiedergabe",
     "MANAGER_SCREEN_DIM_HELP": "Aus, solange es nicht eingeschaltet wird. Ein, und die Hintergrundbeleuchtung geht auf die Helligkeit im Ruhezustand, sobald nach einem Stopp die Uhr kommt, sofort oder nach der Nachlaufzeit, wie der Look es sagt, und zurück auf die Helligkeit oben, wenn die Wiedergabe beginnt. Der Endpunkt glass_screen nimmt dim und idleBrightness ebenso.",
     "MANAGER_SCREEN_DIM_SET": "dunkelt auf {level} ab, wenn der Player stillsteht",
     "MANAGER_SCREEN_DIMMED_NOW": "abgedunkelt auf {level}, weil der Player stillsteht",

@@ -1307,6 +1307,7 @@
     "MANAGER_SCREEN_POWER_HELP": "Éteint reste éteint, même en lecture, jusqu'à Allumer, un toucher sur le panneau ou le point d'accès glass_screen du lecteur, qu'une télécommande IR, un script ou Home Assistant appelle. Un look glass-evo qui passe au noir après des minutes d'inactivité éteint le panneau de la même manière.",
     "MANAGER_SCREEN_DIM": "Atténuer quand rien ne joue",
     "MANAGER_SCREEN_BRIGHTNESS_IDLE": "Luminosité au repos",
+    "MANAGER_SCREEN_BRIGHTNESS_PLAY": "Luminosité en lecture",
     "MANAGER_SCREEN_DIM_HELP": "Désactivé tant qu'il n'est pas activé. Activé, le rétroéclairage passe à la luminosité au repos au moment où l'horloge vient après un arrêt, aussitôt ou après la période de maintien selon le look, et revient à la luminosité ci-dessus quand la lecture commence. Le point d'accès glass_screen prend dim et idleBrightness de la même façon.",
     "MANAGER_SCREEN_DIM_SET": "s'atténue à {level} quand le lecteur est à l'arrêt",
     "MANAGER_SCREEN_DIMMED_NOW": "atténué à {level} car le lecteur est à l'arrêt",

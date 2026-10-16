@@ -45,6 +45,16 @@ function settings(config) {
   return { dim: String(get('screenDimIdle')) === 'true', idleLevel: level('screenBrightnessIdle'), level: level('screenBrightness') };
 }
 
+// The brightness at play, the user's own: the level kept, else the
+// backlight as the display reports it while the panel is not dimmed (a
+// panel never set stands at the user's liking already); null while
+// dimmed with none kept.
+function brightnessAtPlay(s, report, dimmed) {
+  if (s.level !== null && s.level !== undefined) return s.level;
+  if (dimmed || !report || report.brightness === null || report.brightness === undefined) return null;
+  return report.brightness;
+}
+
 // The brightness the display is to hold: the idle level while the panel
 // is dimmed and the switch is on and a level is set, else the brightness
 // at play; null when nothing is known.
@@ -99,4 +109,4 @@ function state(last, wish, display, idle) {
   };
 }
 
-module.exports = { request, report, state, settings, wantedLevel, dimDelayMs };
+module.exports = { request, report, state, settings, wantedLevel, dimDelayMs, brightnessAtPlay };
