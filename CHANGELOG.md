@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.26] - 2026-10-16
+
+- **The panel may dim while nothing plays.** The Screen tab's power row has "Dim while nothing plays", off unless turned on, with "Brightness when idle" beside the brightness at play, where the panel has a backlight (asked on the forum). On, the backlight goes to the idle level at the moment the clock comes after a stop, at once or after the persist period as the look's "When the player stops" says, and back to the brightness at play when playback begins; only the player's own panel, never a remote's. The glass_screen endpoint takes `dim` and `idleBrightness` the same way and answers an `idle` part in the state, so an IR remote, a script or Home Assistant can set them. The Status tab's Panel row says when the panel dims and when it is dimmed, and Find a problem, asked about the screen, the meters or the face, notes a dimmed panel with both levels. Back to the stable release puts the switch off with the screen's other settings. glass-evo 0.10.26 is in step with nothing of its own.
+
 ## [0.10.25] - 2026-10-16
 
 - **The bar may leave the idle screen too.** The look panel's Buttons section has "While the player stands still, the bar": stays, as it was, or leaves, when the bar goes by itself six seconds after the last touch while nothing plays, as it does while music plays, and a touch on the picture brings it back (asked on the forum). A look's `buttons.idle` key carries it, stay or leave. The sheet's Buttons row says "away while the player stands still", and Find a problem names the setting where it checks the buttons. glass-evo 0.10.25 reads the key; this Glass names it as the least it works with.
