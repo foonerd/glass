@@ -1205,6 +1205,8 @@
     "MANAGER_LOOK_BLUR": "Blur what is behind",
     "MANAGER_LOOK_BLUR_SUITS": "Suits this player.",
     "MANAGER_LOOK_BLUR_HEAVY": "Heavy for this player: turn it off if the screen stutters.",
+    "MANAGER_LOOK_SHOW_BUTTONS": "Show the buttons",
+    "MANAGER_LOOK_SHOW_BUTTONS_HINT": "The bar of controls and its sheet, wherever this look is drawn. Off for a screen no finger reaches; the clock, the date and the forecast stay, and Volumio's own interface and the remotes still drive the player. A remote has a word of its own on its settings page.",
     "MANAGER_LOOK_SHOW_CLOCK": "Show the clock",
     "MANAGER_LOOK_SHOW_DATE": "Show the date",
     "MANAGER_LOOK_SHOWS": "What it shows",

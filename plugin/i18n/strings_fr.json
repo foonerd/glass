@@ -1205,6 +1205,8 @@
     "MANAGER_LOOK_BLUR": "Flouter ce qui est derrière",
     "MANAGER_LOOK_BLUR_SUITS": "Convient à ce lecteur.",
     "MANAGER_LOOK_BLUR_HEAVY": "Lourd pour ce lecteur : à désactiver si l'écran saccade.",
+    "MANAGER_LOOK_SHOW_BUTTONS": "Afficher les boutons",
+    "MANAGER_LOOK_SHOW_BUTTONS_HINT": "La barre de commandes et son volet, partout où ce look est dessiné. Désactivé pour un écran qu'aucun doigt n'atteint ; l'horloge, la date et les prévisions restent, et l'interface de Volumio et les afficheurs distants pilotent toujours le lecteur. Un afficheur distant a son propre mot sur sa page de réglages.",
     "MANAGER_LOOK_SHOW_CLOCK": "Afficher l'horloge",
     "MANAGER_LOOK_SHOW_DATE": "Afficher la date",
     "MANAGER_LOOK_SHOWS": "Ce qui s'affiche",

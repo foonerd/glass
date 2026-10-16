@@ -709,6 +709,14 @@ impl RemoteApp {
             .unwrap_or_else(|e| e.into_inner().clone())
     }
 
+    /// This remote's word on the face's bar of controls, read each frame.
+    pub fn buttons(&self) -> config::ButtonsShown {
+        self.config
+            .lock()
+            .map(|c| c.buttons)
+            .unwrap_or_else(|e| e.into_inner().buttons)
+    }
+
     /// The number that grows with every change; the frame loop compares.
     pub fn generation(&self) -> u64 {
         self.generation.load(Ordering::Acquire)

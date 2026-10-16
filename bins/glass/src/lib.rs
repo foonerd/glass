@@ -571,6 +571,23 @@ pub fn run_with(args: Vec<String>, mut face: Option<Box<dyn Overlay>>) -> ExitCo
 /// the window closes, the player says stop, or (on a remote) the theme or
 /// the settings change and a session starts again. A remote's window is
 /// handed in and kept between sessions.
+/// The face's settings as the player hands them, with a remote's own word
+/// on the bar of controls laid over where it has one: the look's
+/// `buttons.show` stands unless this remote says shown or hidden.
+fn face_keys_with_remote<'a>(
+    face: &'a std::collections::BTreeMap<String, String>,
+    remote: Option<&RemoteSession>,
+) -> std::borrow::Cow<'a, std::collections::BTreeMap<String, String>> {
+    match remote.and_then(|r| r.app.buttons().over_look()) {
+        Some(word) => {
+            let mut keys = face.clone();
+            keys.insert("buttons.show".to_string(), word.to_string());
+            std::borrow::Cow::Owned(keys)
+        }
+        None => std::borrow::Cow::Borrowed(face),
+    }
+}
+
 fn session(
     run: &Run,
     mut remote: Option<&mut RemoteSession>,
@@ -1224,6 +1241,7 @@ fn session(
                 Wall::default()
             };
             if let Some(face) = face.as_deref_mut() {
+                let face_keys = face_keys_with_remote(&skin.run.face, remote.as_deref());
                 let view = View {
                     input: &input,
                     fonts: &assets.fonts,
@@ -1234,7 +1252,7 @@ fn session(
                     ours: screen_ours || remote_face,
                     screen_off: screen.off(),
                     scale: skin.run.face_scale,
-                    settings: &skin.run.face,
+                    settings: face_keys.as_ref(),
                     theme_dir: &skin.theme_dir,
                 };
                 // A calibration's target over the picture is drawn afresh
@@ -1312,6 +1330,7 @@ fn session(
                 // The face sees every touch first; what it takes, the
                 // theme's controls and the touch rules do not.
                 if let Some(face) = face.as_deref_mut() {
+                    let face_keys = face_keys_with_remote(&skin.run.face, remote.as_deref());
                     let view = View {
                         input: &input,
                         fonts: &assets.fonts,
@@ -1322,7 +1341,7 @@ fn session(
                         ours: screen_ours || remote_face,
                         screen_off: screen.off(),
                         scale: skin.run.face_scale,
-                        settings: &skin.run.face,
+                        settings: face_keys.as_ref(),
                         theme_dir: &skin.theme_dir,
                     };
                     events.retain(|event| {

@@ -167,6 +167,8 @@
     <h2>The Glass interface</h2>
     <div class="form">
       <div class="full"><label>This remote shows</label><select id="face-shown"><option value="follow">the Glass interface while glass-evo holds the player's screen</option><option value="always">the Glass interface always</option><option value="off">the theme alone</option></select></div>
+      <div class="full"><label>Controls on this remote</label><select id="face-buttons"><option value="look">as the player's look says</option><option value="shown">shown</option><option value="hidden">hidden</option></select></div>
+      <div class="full help">The bar of controls and its sheet, drawn by the Glass interface on this remote. As the look says is the player's own choice under Buttons; shown or hidden is this remote's word over it, for a screen that takes a finger while the player's does not, or the other way round.</div>
       <div class="full help" id="face-help"></div>
     </div>
   </div>
@@ -675,6 +677,7 @@
     $('d-fps').value = c.display.fps || ''; $('d-fit').checked = !!c.display.fit;
     $('gain').value = c.gain_db; $('decay').value = c.spectrum_decay ? c.spectrum_decay : ''; $('r-name').value = c.name; $('r-port').value = c.page_port; $('r-log').value = c.log_level || '';
     $('face-shown').value = c.face || 'follow';
+    $('face-buttons').value = c.buttons || 'look';
     $('test-releases').checked = !!c.test_releases;
     $('upload-install').checked = !!c.upload_install;
     $('upload-box').classList.toggle('hidden', !c.upload_install);
@@ -699,11 +702,12 @@
     c.display = { mode: $('d-mode').value, position: (x !== '' && y !== '') ? [parseInt(x, 10) || 0, parseInt(y, 10) || 0] : null, fit: $('d-fit').checked, fps: $('d-fps').value ? parseInt($('d-fps').value, 10) : null, monitor: parseInt($('d-monitor').value, 10) || 0 };
     c.gain_db = parseFloat($('gain').value) || 0; c.spectrum_decay = parseFloat($('decay').value) || 0; c.name = $('r-name').value.trim(); c.page_port = parseInt($('r-port').value, 10) || 5583; c.log_level = $('r-log').value || null;
     c.face = $('face-shown').value || 'follow';
+    c.buttons = $('face-buttons').value || 'look';
     c.test_releases = $('test-releases').checked;
     c.upload_install = $('upload-install').checked;
     return c;
   }
-  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'gain', 'decay', 'r-name', 'r-port', 'r-log', 'face-shown', 'test-releases', 'upload-install'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
+  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'gain', 'decay', 'r-name', 'r-port', 'r-log', 'face-shown', 'face-buttons', 'test-releases', 'upload-install'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
   // The Assets switch: this browser's own choice, off unless turned on.
   try { $('assets-all').checked = window.localStorage.getItem('glass.remote.assets.all') === 'on'; } catch (e) { $('assets-all').checked = false; }
   $('assets-all').onchange = function () {

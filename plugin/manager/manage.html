@@ -3740,6 +3740,7 @@
             field('MANAGER_LOOK_MARGIN', units('weather.margin'), esc(t('MANAGER_LOOK_MARGIN_HINT')), 'weather-grid')],
             'MANAGER_LOOK_MORE_PIECE', finer('weather', 'weather-grid')],
           ['buttons', 'MANAGER_LOOK_BUTTONS', [
+            field('MANAGER_LOOK_SHOW_BUTTONS', onoff('buttons.show', 'switch'), esc(t('MANAGER_LOOK_SHOW_BUTTONS_HINT'))),
             field('MANAGER_LOOK_SIZE', slider('measure.bar', 'size', 50, 250, 5, 'SMALL', 'LARGE'))],
             'MANAGER_LOOK_MORE_BUTTONS', finer('buttons', '')],
           ['lists', 'MANAGER_LOOK_LISTS', [

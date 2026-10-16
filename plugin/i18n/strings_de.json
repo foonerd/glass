@@ -1205,6 +1205,8 @@
     "MANAGER_LOOK_BLUR": "Weichzeichnen, was dahinter liegt",
     "MANAGER_LOOK_BLUR_SUITS": "Passt zu diesem Player.",
     "MANAGER_LOOK_BLUR_HEAVY": "Schwer für diesen Player: ausschalten, wenn der Bildschirm ruckelt.",
+    "MANAGER_LOOK_SHOW_BUTTONS": "Die Tasten zeigen",
+    "MANAGER_LOOK_SHOW_BUTTONS_HINT": "Die Leiste mit den Tasten und ihr Blatt, wo immer dieser Look gezeichnet wird. Aus für einen Bildschirm, den kein Finger erreicht; Uhr, Datum und Vorhersage bleiben, und Volumios eigene Oberfläche und die Fernanzeigen steuern den Player weiter. Eine Fernanzeige hat auf ihrer Einstellungsseite ein eigenes Wort dazu.",
     "MANAGER_LOOK_SHOW_CLOCK": "Die Uhr zeigen",
     "MANAGER_LOOK_SHOW_DATE": "Das Datum zeigen",
     "MANAGER_LOOK_SHOWS": "Was es zeigt",

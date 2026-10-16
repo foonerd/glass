@@ -298,6 +298,12 @@ pub struct RemoteConfig {
     /// display without one has nothing to draw, whatever this says.
     #[serde(default)]
     pub face: FaceShown,
+    /// The face's bar of controls on this remote: as the player's look says
+    /// (`buttons.show`), shown whatever it says, or hidden whatever it
+    /// says, for a remote whose screen takes no finger or one that does
+    /// while the player's does not.
+    #[serde(default)]
+    pub buttons: ButtonsShown,
     /// Whether this remote is offered test releases, as the player's
     /// "Offer test releases": the newest of the repository's last ten
     /// releases, a pre-release among them; off, the latest release only.
@@ -327,6 +333,29 @@ pub enum FaceShown {
     Follow,
     Always,
     Off,
+}
+
+/// The bar of controls on a remote: as the player's look says, shown, or
+/// hidden.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ButtonsShown {
+    #[default]
+    Look,
+    Shown,
+    Hidden,
+}
+
+impl ButtonsShown {
+    /// The word this remote lays over the look's `buttons.show`, or none
+    /// where the look's own stands.
+    pub fn over_look(self) -> Option<&'static str> {
+        match self {
+            ButtonsShown::Look => None,
+            ButtonsShown::Shown => Some("on"),
+            ButtonsShown::Hidden => Some("off"),
+        }
+    }
 }
 
 impl FaceShown {
@@ -361,6 +390,7 @@ impl Default for RemoteConfig {
             log_level: None,
             spectrum_decay: 0.0,
             face: FaceShown::default(),
+            buttons: ButtonsShown::Look,
             test_releases: false,
             upload_install: false,
             frames_port: intake::remote::DEFAULT_REMOTE_FRAMES_PORT,
