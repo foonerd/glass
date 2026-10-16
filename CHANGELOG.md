@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.29] - 2026-10-16
+
+- **glass-evo 0.10.29 is the least this Glass works with.** The backlight's fade is done by the display, which on a screen glass-evo holds is glass-evo's own binary, so a player upgraded to 0.10.28 alone kept a display that set the brightness at once; this Glass names the glass-evo that fades, and the Manager brings it along with the upgrade.
+
 ## [0.10.28] - 2026-10-16
 
 - **The backlight fades between the brightness at play and the brightness when idle.** The dim while nothing plays and the return at play took the panel from one level to the other in a jump; they now go over a second, the display stepping the backlight a level a frame from where it stands and reporting the state once it has arrived. A brightness on the channel and on the glass_screen endpoint may carry `fade`, the milliseconds to get there, up to a minute; without it, and from the Screen tab's slider, the brightness is set at once. glass-evo 0.10.28 carries the display's fade in its bundle; this Glass names 0.10.25 as the least it works with still.
