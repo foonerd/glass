@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.23] - 2026-10-16
+
+- **A look may show no buttons.** The look panel's Buttons section has "Show the buttons", on as it was: off takes the bar of controls and its sheet off the screen for a screen no finger reaches (asked on the forum), the clock, the date and the forecast staying, wherever the look is drawn. A remote has a word of its own on its settings page, "Controls on this remote": as the player's look says, shown, or hidden. glass-evo 0.10.23 reads the key; this Glass names it as the least it works with.
+
 ## [0.10.22] - 2026-10-15
 
 - **Covers no longer flicker on the Face tab and Anymote.** The queue's covers and the browser's were fetched into the one picture cache, bounded to the newest 48, where the album art and the fanart live: each list's 48 pushed the other's out, and a page, wanting an evicted cover again, fetched it back and evicted another, round and round; the player's screen and the remotes kept what they fetched and lost a cover instead. The rows' covers now have a cache of their own, bounded to the newest 128, on the player and on a page alike. The pages' module is built from the engine, so glass-evo 0.10.22 carries the fix there; this Glass names it as the least it works with.
