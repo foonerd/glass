@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.28] - 2026-10-16
+
+- **The backlight fades between the brightness at play and the brightness when idle.** The dim while nothing plays and the return at play took the panel from one level to the other in a jump; they now go over a second, the display stepping the backlight a level a frame from where it stands and reporting the state once it has arrived. A brightness on the channel and on the glass_screen endpoint may carry `fade`, the milliseconds to get there, up to a minute; without it, and from the Screen tab's slider, the brightness is set at once. glass-evo 0.10.28 carries the display's fade in its bundle; this Glass names 0.10.25 as the least it works with still.
+
 ## [0.10.27] - 2026-10-16
 
 - **The Brightness slider is the brightness at play, and stays put while the panel is dimmed.** It showed the backlight as it stood at the moment, which while the panel was dimmed was the brightness when idle, so the two sliders seemed to move together. It now keeps the brightness at play, the user's own, reads "Brightness at play" while "Dim while nothing plays" is on, and the backlight as it is at the moment stays in the Status tab's Panel row. A panel whose brightness was never set on the tab has that brightness kept as the brightness at play the first time the panel dims, so it comes back to it. glass-evo 0.10.27 is in step with nothing of its own.
