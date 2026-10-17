@@ -345,6 +345,7 @@ test('a component zip brought by hand is held to its release, then in place; wit
   // Examined and held for a Glass by hand: its version, the file kept.
   const held = await component.examineFile(job(), made('0.2.0', { requires: '0.9.0' }));
   assert.equal(held.version, '0.2.0');
+  assert.equal(held.requires, '0.9.0', 'and the Glass it requires, for the pairing rule');
   assert.ok(fs.existsSync(held.file));
   // A Glass by hand that needs 0.2.0: asked for without a file, taken with one.
   const staged = function (version, least) {
@@ -356,6 +357,17 @@ test('a component zip brought by hand is held to its release, then in place; wit
   assert.equal(component.installed().version, '0.1.10');
   assert.equal(await pair(component, staged('0.9.0', '0.2.0'), job(), { byHand: true, file: held.file }), true);
   assert.deepStrictEqual([component.installed().version, component.previous().version], ['0.2.0', '0.1.10']);
+  // A glass-evo zip kept on the player goes in with a Glass the online path brings, before any fetch, when it fits that Glass.
+  const kept = await component.examineFile(job(), made('0.2.1', { requires: '0.9.1' }));
+  const unfit = { file: kept.file, version: kept.version, requires: kept.requires };
+  await assert.rejects(pair(component, staged('0.9.0', '0.2.1'), job(), { byHand: true, held: unfit }), { code: 'needs-evo' }, 'kept but needing a later Glass than the one going in: not used');
+  assert.equal(unfit.used, undefined);
+  assert.ok(fs.existsSync(kept.file), 'and left where it is');
+  const fit = { file: kept.file, version: kept.version, requires: kept.requires };
+  assert.equal(await pair(component, staged('0.9.1', '0.2.1'), job(), { held: fit }), true);
+  assert.equal(fit.used, true);
+  assert.equal(component.installed().version, '0.2.1');
+  assert.ok(!fs.existsSync(kept.file), 'the kept file is consumed');
   fs.rmSync(root, { recursive: true, force: true });
 });
 

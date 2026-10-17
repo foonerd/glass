@@ -500,6 +500,20 @@ const CHECKS = [
     }
   },
   {
+    // A release zip brought by hand that could not go in alone, kept on
+    // the player for the other zip of the pair: a Glass waiting for a
+    // glass-evo, a glass-evo waiting for a Glass. Worth knowing under
+    // every symptom, since the upgrade the user meant has not happened.
+    id: 'held-zip', symptoms: SYMPTOMS,
+    run(f) {
+      const h = f.held;
+      if (!h) return null;
+      if (h.glass) return note('held-zip', 'DIAG_HELD_GLASS', { version: h.glass.version, needs: h.glass.needs || '-' }, 'system');
+      if (h.evo) return note('held-zip', 'DIAG_HELD_EVO', { version: h.evo.version, needs: h.evo.needs || '-' }, 'system');
+      return null;
+    }
+  },
+  {
     // What the player offers to browse: the sources of its own Browse page,
     // which the face lists as tiles. None, and the browser is empty for the
     // player's own reason, not Glass's.

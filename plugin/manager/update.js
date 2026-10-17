@@ -407,14 +407,7 @@ class Updater {
   async stageFile(job, file) {
     const found = await examineGlassZip(file);
     if (found.version === this.version) throw new UpdateError('same-version', 'Glass ' + found.version + ' is what runs; nothing to install');
-    // An archive that carries its own signature is verified here, with no
-    // network; one without (published before signing) is held to the
-    // release on GitHub.
-    if (job) job.state = 'verifying';
-    const inside = await verifyArchiveFile(file, this.publicKey);
-    const release = inside ? { version: found.version, asset: 'glass-' + found.version + '.zip', verified: 'archive', files: inside.files }
-      : Object.assign(await verifyAgainstRelease(this.fetch, this.releasesUrl, found.version, file, ASSET, job), { verified: 'release' });
-    this.logger.info('glass: manager: ' + path.basename(file) + (inside ? ' verified by the signature it carries (' + inside.files + ' files)' : ' verified against release ' + found.version + ' on GitHub'));
+    const release = await this.verifyFile(job, file, found.version);
     await fsp.mkdir(this.stagingDir, { recursive: true });
     const name = 'glass-' + found.version + '.zip';
     const to = path.join(this.stagingDir, name);
@@ -428,6 +421,19 @@ class Updater {
       }
     }
     return { name: name, file: to, version: found.version, least: found.least, release: release, verified: release.verified, files: release.files || null };
+  }
+
+  // A Glass zip brought by hand held to the signature it carries inside,
+  // with no network; one without (published before signing) to the
+  // release of its version on GitHub. Answers the release as verified,
+  // `verified` saying which way.
+  async verifyFile(job, file, version) {
+    if (job) job.state = 'verifying';
+    const inside = await verifyArchiveFile(file, this.publicKey);
+    const release = inside ? { version: version, asset: 'glass-' + version + '.zip', verified: 'archive', files: inside.files }
+      : Object.assign(await verifyAgainstRelease(this.fetch, this.releasesUrl, version, file, ASSET, job), { verified: 'release' });
+    this.logger.info('glass: manager: ' + path.basename(file) + (inside ? ' verified by the signature it carries (' + inside.files + ' files)' : ' verified against release ' + version + ' on GitHub'));
+    return release;
   }
 
   // The kept zip of the version before the last upgrade, staged for the

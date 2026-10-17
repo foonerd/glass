@@ -33,6 +33,7 @@ function healthy() {
     update: { current: '0.7.93', latest: { version: '0.7.93' }, available: false },
     log: [],
     job: null,
+    held: { glass: null, evo: null },
     browse: { count: 3, names: ['Favourites', 'Playlists', 'Music Library'] },
     page: { module: '0.2.4' },
     status: {
@@ -424,6 +425,27 @@ test('the buttons hidden by the look, an install refused for the pair or failed,
   assert.strictEqual(failed.with.message, 'ETIMEDOUT');
   refused.job = { kind: 'component', name: 'glass-evo 0.10.23', state: 'done', error: null, endedAt: '2026-10-01T04:30:00Z' };
   assert.strictEqual(one(diagnose('other', refused), 'install-job'), undefined);
+  // A zip kept for the other of the pair is worth knowing under every symptom, with what it waits for; nothing kept, nothing said.
+  const kept = healthy();
+  kept.held = { glass: { version: '0.10.33', needs: '0.10.33', at: '2026-10-17T15:00:00Z' }, evo: null };
+  SYMPTOMS.forEach(function (s) {
+    const x = one(diagnose(s, kept), 'held-zip');
+    assert.strictEqual(x.key, 'DIAG_HELD_GLASS', s);
+    assert.strictEqual(x.kind, 'note', s);
+    assert.strictEqual(x.go, 'system', s);
+  });
+  assert.deepStrictEqual(one(diagnose('other', kept), 'held-zip').with, { version: '0.10.33', needs: '0.10.33' });
+  kept.held = { glass: null, evo: { version: '0.10.33', needs: '0.10.33', at: '2026-10-17T15:00:00Z' } };
+  assert.strictEqual(one(diagnose('other', kept), 'held-zip').key, 'DIAG_HELD_EVO');
+  assert.strictEqual(one(diagnose('other', healthy()), 'held-zip'), undefined);
+  const unsaidHeld = healthy(); delete unsaidHeld.held;
+  assert.strictEqual(one(diagnose('other', unsaidHeld), 'held-zip'), undefined);
+  for (const lang of ['en', 'de', 'fr']) {
+    const s = require('../../i18n/strings_' + lang + '.json').GLASS;
+    for (const key of ['MANAGER_DIAG_HELD_GLASS', 'MANAGER_DIAG_HELD_EVO']) assert.ok(s[key].indexOf('{version}') !== -1 && s[key].indexOf('{needs}') !== -1, lang + ' ' + key);
+    for (const key of ['MANAGER_UPD_HELD_GLASS', 'MANAGER_UPD_HELD_EVO', 'MANAGER_ST_HELD_GLASS', 'MANAGER_ST_HELD_EVO']) assert.ok(s[key].indexOf('{version}') !== -1 && s[key].indexOf('{needs}') !== -1, lang + ' ' + key);
+    for (const key of ['MANAGER_UPD_HELD_DISCARD', 'MANAGER_UPD_HELD_DISCARDED', 'MANAGER_ST_JOB_HELD']) assert.ok(s[key], lang + ' ' + key);
+  }
   // Nothing to browse is the player's own: a cause with no tab to go to; sources that could not be read say nothing.
   const empty = healthy(); empty.browse = { count: 0, names: [] };
   const none = one(diagnose('browse', empty), 'sources');

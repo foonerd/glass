@@ -123,9 +123,11 @@ function pairPlan(installed, target) {
 // Glass older than the component needs is not installed at all. Answers
 // whether the component was changed; a pair that cannot be made is an
 // error, and nothing was changed. `options.file` is a component zip
-// brought by hand to go in with the Glass; `options.byHand` says the
-// Glass itself came by hand, so a component it needs is not fetched: it
-// is asked for, by the least version it must be.
+// brought by hand to go in with the Glass; `options.held` one kept on the
+// player from an earlier upload ({file, version, requires}), used when it
+// fits and marked `used`; `options.byHand` says the Glass itself came by
+// hand, so a component it needs is not fetched: it is asked for, by the
+// least version it must be.
 async function pair(component, staged, job, options) {
   options = options || {};
   const here = component.installed();
@@ -150,11 +152,17 @@ async function pair(component, staged, job, options) {
       throw new ComponentError('pair', 'glass-evo ' + here.version + ' needs Glass ' + plan.needs + ' or later, and the glass-evo kept before it does not go with Glass ' + staged.version + ' (' + (e && e.message ? e.message : e) + '); nothing was changed');
     }
   }
-  if (options.file) {
+  // A glass-evo zip kept on the player from an earlier upload that fits
+  // the Glass about to go in is used before anything is fetched: the
+  // online upgrade takes it, and `used` says so to the caller.
+  const kept = options.held && compareVersions(options.held.version, plan.least) >= 0 && (!options.held.requires || compareVersions(staged.version, options.held.requires) >= 0) ? options.held : null;
+  if (options.file || kept) {
+    const file = options.file || kept.file;
     try {
-      await component.installFile(job, options.file, { glass: staged.version, least: plan.least });
+      await component.installFile(job, file, { glass: staged.version, least: plan.least });
+      if (kept) kept.used = true;
     } catch (e) {
-      throw new ComponentError('pair', 'Glass ' + staged.version + ' needs glass-evo ' + plan.least + ' or later, and the glass-evo file given could not be installed (' + (e && e.message ? e.message : e) + '); nothing was changed');
+      throw new ComponentError('pair', 'Glass ' + staged.version + ' needs glass-evo ' + plan.least + ' or later, and the glass-evo file ' + (kept ? 'kept' : 'given') + ' could not be installed (' + (e && e.message ? e.message : e) + '); nothing was changed');
     }
   } else if (options.byHand) {
     throw new ComponentError('needs-evo', 'Glass ' + staged.version + ' needs glass-evo ' + plan.least + ' or later: choose both zips and install them together', { least: plan.least });
@@ -173,18 +181,24 @@ async function pair(component, staged, job, options) {
   return true;
 }
 
-// The version a component zip says it is, from its manifest, read before
-// the zip is held to the release of that version.
-async function manifestVersionOf(file) {
+// What a component zip says it is, from its manifest, read before the zip
+// is held to the release of that version: its version and the least Glass
+// it requires.
+async function manifestFactsOf(file) {
   const zip = await Zip.open(file);
   try {
     const found = zip.entries.find(function (e) { return e.isRegular && e.name === 'manifest.json'; });
     if (!found && zip.entries.some(function (e) { return e.isRegular && e.name === 'package.json'; })) throw new ComponentError('bad-manifest', 'the zip is a Glass release; choose it as the Glass zip');
     if (!found || found.size > MAX_TEXT_BYTES) throw new ComponentError('bad-manifest', 'the zip holds no manifest; it is not a glass-evo release');
-    return manifestOf((await zip.read(found)).toString('utf8')).version;
+    const m = manifestOf((await zip.read(found)).toString('utf8'));
+    return { version: m.version, requires: m.requires };
   } finally {
     await zip.close();
   }
+}
+
+async function manifestVersionOf(file) {
+  return (await manifestFactsOf(file)).version;
 }
 
 class Component {
@@ -417,9 +431,9 @@ class Component {
   // same way: what it says it is, verified now, installed when the Glass
   // is staged. Nothing is changed here.
   async examineFile(job, file) {
-    const version = await manifestVersionOf(file);
-    const verified = await this.verifyFile(job, file, version);
-    return { file: file, version: version, verified: verified };
+    const facts = await manifestFactsOf(file);
+    const verified = await this.verifyFile(job, file, facts.version);
+    return { file: file, version: facts.version, requires: facts.requires, verified: verified };
   }
 
   // A component zip brought by hand held to the signature it carries
@@ -484,4 +498,4 @@ class Component {
   }
 }
 
-module.exports = { Component, ComponentError, RELEASES_URL, ASSET, leastOf, manifestOf, misfit, installedAt, pairPlan, pair, manifestVersionOf };
+module.exports = { Component, ComponentError, RELEASES_URL, ASSET, leastOf, manifestOf, misfit, misfitMessage, installedAt, pairPlan, pair, manifestVersionOf, manifestFactsOf };

@@ -1608,6 +1608,7 @@
                 class="muted" id="upd-file-evo-name"></span></div>
             <div class="row" style="margin-top:8px"><button class="primary" id="btn-upd-files"></button></div>
             <div class="help" id="upd-upload-note"></div>
+            <div id="upd-held" class="hidden" style="margin-top:8px"></div>
             <div id="shelf-box" style="margin-top:14px">
               <div><b id="shelf-title"></b></div>
               <div class="help" id="shelf-help"></div>
@@ -3078,7 +3079,15 @@
             ['MANAGER_ST_SECTION_HOUSE', [
               ['MANAGER_ST_LOGGING', !s.logging ? '-' : String(s.logging.level || '') + (s.logging.targets && s.logging.targets.length ? ' · ' + s.logging.targets.join(', ') : '')],
               ['MANAGER_ST_UPGRADE', !s.upgrade || !s.upgrade.last ? t('MANAGER_ST_UPGRADE_NONE') : s.upgrade.last.from + ' · ' + s.upgrade.last.to + ' · ' + fmtDate(s.upgrade.last.at) + (s.upgrade.last.phase && s.upgrade.last.phase !== 'done' ? ' · ' + s.upgrade.last.phase : '')],
-              ['MANAGER_ST_LAST_JOB', !s.upgrade || !s.upgrade.job ? t('MANAGER_ST_LAST_JOB_NONE') : s.upgrade.job.name + ' · ' + t(s.upgrade.job.state === 'failed' ? 'MANAGER_ST_JOB_FAILED' : 'MANAGER_ST_JOB_DONE') + (s.upgrade.job.endedAt ? ' · ' + fmtDate(s.upgrade.job.endedAt) : '') + (s.upgrade.job.error ? ' · ' + errorText({ code: s.upgrade.job.error.error, message: s.upgrade.job.error.message }) : '')],
+              ['MANAGER_ST_LAST_JOB', (function () {
+                var j = s.upgrade && s.upgrade.job;
+                var h = s.upgrade && s.upgrade.held;
+                var parts = [];
+                if (j) parts.push(j.name + ' · ' + t(j.state === 'failed' ? 'MANAGER_ST_JOB_FAILED' : j.held ? 'MANAGER_ST_JOB_HELD' : 'MANAGER_ST_JOB_DONE') + (j.endedAt ? ' · ' + fmtDate(j.endedAt) : '') + (j.error ? ' · ' + errorText({ code: j.error.error, message: j.error.message }) : ''));
+                if (h && h.glass) parts.push(heldLine('MANAGER_ST_HELD_GLASS', h.glass));
+                if (h && h.evo) parts.push(heldLine('MANAGER_ST_HELD_EVO', h.evo));
+                return parts.length ? parts.join(' · ') : t('MANAGER_ST_LAST_JOB_NONE');
+              })()],
               ['MANAGER_ST_RELEASES', t(s.upgrade && s.upgrade.test ? 'MANAGER_ST_RELEASES_TEST' : 'MANAGER_ST_RELEASES_LATEST')],
               ['MANAGER_ST_BACKUP', !house || !house.newestBackup ? t('MANAGER_ST_BACKUP_NONE') : house.newestBackup.name + (house.newestBackup.at ? ' · ' + fmtDate(house.newestBackup.at) : '')],
               ['MANAGER_ST_DISK', s.diskFree !== null ? fmtBytes(s.diskFree) + ' ' + t('MANAGER_ST_FREE') : '-'],
@@ -4549,7 +4558,30 @@
         $('upd-test').checked = !!u.test;
         $('upd-upload').checked = !!u.upload;
         $('upd-upload-box').classList.toggle('hidden', !u.upload);
+        renderHeld(u.held);
         if (u.upload) loadShelf();
+      }
+      // A zip kept on the player for the other of the pair: what it is,
+      // what it waits for, and Discard.
+      function heldLine(key, e) {
+        return t(key).replace(/\{([a-z]+)\}/g, function (slot, name) { return e[name] !== undefined && e[name] !== null ? String(e[name]) : '-'; });
+      }
+      function renderHeld(h) {
+        var box = $('upd-held');
+        var lines = [];
+        ['glass', 'evo'].forEach(function (kind) {
+          var e = h && h[kind];
+          if (!e) return;
+          lines.push('<div class="row" style="margin-top:6px;align-items:flex-start"><span class="help" style="flex:1">' + esc(heldLine(kind === 'glass' ? 'MANAGER_UPD_HELD_GLASS' : 'MANAGER_UPD_HELD_EVO', e)) + '</span><button class="small" data-held="' + kind + '">' + esc(t('MANAGER_UPD_HELD_DISCARD')) + '</button></div>');
+        });
+        box.innerHTML = lines.join('');
+        box.classList.toggle('hidden', !lines.length);
+        Array.prototype.forEach.call(box.querySelectorAll('button[data-held]'), function (b) {
+          b.onclick = function () {
+            b.disabled = true;
+            api('DELETE', '/api/update/held/' + b.getAttribute('data-held')).then(function (r) { renderHeld(r.held); toast(t('MANAGER_UPD_HELD_DISCARDED')); }).catch(function (e) { b.disabled = false; toast(errorText(e), 'error'); });
+          };
+        });
       }
       // The shelf for remotes: the archives the player keeps for its remotes'
       // machines, each with its product, version and platform, the usage
@@ -4617,7 +4649,9 @@
       });
       // The files chosen go to the player, the glass-evo zip first and held,
       // then the Glass zip, which takes it with it where it needs a newer
-      // glass-evo; a glass-evo zip alone is installed at once.
+      // glass-evo; one zip alone runs the pairing rule on the player: in at
+      // once, in with the zip kept from before (an upgrade, the backend
+      // restarting), or kept for the other to come.
       $('btn-upd-files').onclick = function () {
         var glass = $('upd-file-glass').files[0] || null;
         var evo = $('upd-file-evo').files[0] || null;
@@ -4630,7 +4664,7 @@
           var chain;
           if (glass && evo) chain = api('POST', '/api/evo/upload?hold=1', evo, true).then(function () { return api('POST', '/api/update/upload', glass, true); }).then(function (d) { followUpgrade(d.job); });
           else if (glass) chain = api('POST', '/api/update/upload', glass, true).then(function (d) { followUpgrade(d.job); });
-          else chain = api('POST', '/api/evo/upload', evo, true).then(function (d) { $('jobs-update').innerHTML = ''; followEvo(d.job); });
+          else chain = api('POST', '/api/evo/upload', evo, true).then(function (d) { $('jobs-update').innerHTML = ''; if (d.job.kind === 'upgrade') followUpgrade(d.job); else followEvo(d.job, function () { loadUpdate(false); }); });
           chain.catch(function (e) { $('jobs-update').innerHTML = ''; toast(errorText(e), 'error'); }).then(function () {
             $('btn-upd-files').disabled = false;
             ['upd-file-glass', 'upd-file-evo'].forEach(function (id) { $(id).value = ''; $(id + '-name').textContent = t('MANAGER_UPD_NO_FILE'); });
@@ -4718,9 +4752,12 @@
         });
       };
       // The job is the Manager's own: no restart, the page reads it to its end.
-      function followEvo(job) {
+      // `after` runs once the job has ended either way; a job that ended
+      // with the zip kept on the player says so instead of installed.
+      function followEvo(job, after) {
         var buttons = ['btn-evo-install', 'btn-evo-rollback', 'btn-evo-remove'];
         buttons.forEach(function (b) { $(b).disabled = true; });
+        var ended = function () { buttons.forEach(function (b) { $(b).disabled = false; }); loadEvo(false); if (after) after(); };
         var draw = function (j) {
           var pct = j.progress && j.progress.total ? Math.round(j.progress.done * 100 / j.progress.total) : 0;
           var label = { queued: 'MANAGER_JOB_QUEUED', downloading: 'MANAGER_JOB_DOWNLOADING', verifying: 'MANAGER_JOB_CHECKING', applying: 'MANAGER_EVO_JOB_APPLYING', failed: 'MANAGER_JOB_FAILED' }[j.state] || j.state;
@@ -4732,11 +4769,11 @@
         var tick = function () {
           api('GET', '/api/jobs/' + job.id).then(function (data) {
             var j = data.job;
-            if (j.state === 'done') { $('jobs-evo').innerHTML = ''; buttons.forEach(function (b) { $(b).disabled = false; }); toast(t('MANAGER_EVO_DONE') + ' ' + j.name.replace(/^glass-evo /, '')); loadEvo(false); lookModule(true); return; }
+            if (j.state === 'done') { $('jobs-evo').innerHTML = ''; toast(j.held ? t('MANAGER_UPD_KEPT') + ' ' + j.name : t('MANAGER_EVO_DONE') + ' ' + j.name.replace(/^glass-evo /, '')); ended(); if (!j.held) lookModule(true); return; }
             draw(j);
-            if (j.state === 'failed') { buttons.forEach(function (b) { $(b).disabled = false; }); loadEvo(false); return; }
+            if (j.state === 'failed') { ended(); return; }
             setTimeout(tick, 700);
-          }).catch(function (e) { buttons.forEach(function (b) { $(b).disabled = false; }); toast(errorText(e), 'error'); loadEvo(false); });
+          }).catch(function (e) { toast(errorText(e), 'error'); ended(); });
         };
         setTimeout(tick, 400);
       }
@@ -4774,7 +4811,7 @@
         var draw = function (j, extra) {
           var pct = j.progress && j.progress.total ? Math.round(j.progress.done * 100 / j.progress.total) : 0;
           var label = { queued: 'MANAGER_JOB_QUEUED', downloading: 'MANAGER_JOB_DOWNLOADING', verifying: 'MANAGER_JOB_CHECKING', 'backing-up': 'MANAGER_JOB_BACKING_UP', applying: 'MANAGER_JOB_APPLYING', restarting: 'MANAGER_UPD_RESTARTING', failed: 'MANAGER_JOB_FAILED' }[j.state] || j.state;
-          jobsEl.innerHTML = '<div class="job"><b>' + esc(j.name) + '</b> · ' + esc(t(label)) + (extra ? ' · ' + esc(extra) : '') +
+          jobsEl.innerHTML = '<div class="job"><b>' + esc(j.name) + '</b> · ' + esc(t(label)) + (extra ? ' · ' + esc(extra) : '') + (j.state === 'done' && j.held ? ' · ' + esc(t('MANAGER_ST_JOB_HELD')) : '') +
             (j.state === 'downloading' || j.state === 'backing-up' ? ' ' + pct + '%<div class="progress"><div style="width:' + pct + '%"></div></div>' : '') +
             (j.state === 'failed' && j.error ? ' <span class="failed-word">' + esc(errorText({ code: j.error.error, message: j.error.message })) + '</span>' : '') + '</div>';
         };
@@ -4786,8 +4823,8 @@
             api('GET', '/api/jobs/' + job.id).then(function (data) {
               draw(data.job);
               if (data.job.state === 'failed') { $('btn-upd-install').disabled = false; $('btn-upd-rollback').disabled = false; loadUpdate(false); if (opts.failed) opts.failed(); return; }
-              // Done without a restart: the glass-evo zip went in and Glass stayed as it is.
-              if (data.job.state === 'done') { draw(data.job); $('btn-upd-install').disabled = false; $('btn-upd-rollback').disabled = false; loadUpdate(false); loadEvo(false); toast(t('MANAGER_EVO_DONE') + ' ' + data.job.name); return; }
+              // Done without a restart: the glass-evo zip went in and Glass stayed as it is, or the zip was kept for the other of the pair.
+              if (data.job.state === 'done') { draw(data.job); $('btn-upd-install').disabled = false; $('btn-upd-rollback').disabled = false; loadUpdate(false); loadEvo(false); toast(data.job.held ? t('MANAGER_UPD_KEPT') + ' ' + data.job.name : t('MANAGER_EVO_DONE') + ' ' + data.job.name); return; }
               if (data.job.state === 'restarting') { restarting = true; started = Date.now(); if (data.job.target) target = data.job.target; }
               setTimeout(tick, 1000);
             }).catch(function () {

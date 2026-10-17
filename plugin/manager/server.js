@@ -25,7 +25,9 @@ const stable = require('./stable');
 const remotebehind = require('./remotebehind');
 const sheetfacts = require('./sheetfacts');
 const backgrounds = require('./backgrounds');
-const { Component, leastOf, pair } = require('./component');
+const { Component, ComponentError, leastOf, pair, manifestFactsOf } = require('./component');
+const { Held } = require('./held');
+const pairing = require('./pairing');
 const { Shelf, MAX_ARCHIVE_BYTES: MAX_SHELF_ARCHIVE } = require('./shelf');
 const views = require('./views');
 const picture = require('./picture');
@@ -110,6 +112,9 @@ class Manager {
       test: function () { return plugin.testReleases(); },
       logger: this.logger
     });
+    // A release zip brought by hand that cannot go in alone, kept for the
+    // other zip of the pair.
+    this.held = new Held({ dir: path.join(paths.dataDir, 'held'), logger: this.logger });
     this.shelf = new Shelf({
       dir: path.join(paths.dataDir, 'shelf'),
       ceilingMb: function () { return typeof plugin.shelfCeilingMb === 'function' ? plugin.shelfCeilingMb() : undefined; },
@@ -141,6 +146,10 @@ class Manager {
     await self.previews.init();
     await self.updater.init();
     await self.component.init();
+    try {
+      await self.held.init();
+      await self.pruneHeld();
+    } catch (e) { self.logger.warn('glass: manager: the kept zips not read: ' + (e && e.message ? e.message : e)); }
     // A capture the backend went down under goes on, or ends if its time passed.
     try {
       if (self.capture.resume().state !== 'idle') self.logger.info('glass: manager: a report\'s capture goes on after the restart');
@@ -263,6 +272,7 @@ class Manager {
         update: safe(() => self.updater.view(), null),
         log: safe(() => self.plugin.recentLog(300).lines, []),
         job: self.lastInstallJob(),
+        held: self.held.summary(),
         browse: safe(() => self.plugin.browseSourcesFact(), null),
         page: { module: page && typeof page.module === 'string' ? page.module.slice(0, 32) : null }
       };
@@ -1033,9 +1043,9 @@ class Manager {
     const uploadOn = function () { return typeof self.plugin.uploadInstall === 'function' && self.plugin.uploadInstall() === true; };
     app.get('/api/update', wrap(async function (req, res) {
       try {
-        res.json(Object.assign(await self.updater.check(false), { upload: uploadOn() }));
+        res.json(Object.assign(await self.updater.check(false), { upload: uploadOn(), held: self.held.summary() }));
       } catch (e) {
-        res.json(Object.assign(self.updater.view(), { upload: uploadOn(), error: failure(e) }));
+        res.json(Object.assign(self.updater.view(), { upload: uploadOn(), held: self.held.summary(), error: failure(e) }));
       }
     }));
 
@@ -1098,14 +1108,16 @@ class Manager {
       const body = req.body || {};
       if (typeof body.upload !== 'boolean') return res.status(400).json({ error: 'bad-request', message: 'upload must be true or false' });
       const result = self.plugin.setUploadInstall(body.upload);
-      if (!body.upload) self.heldEvo = null;
-      res.json({ ok: true, changed: result.changed, upload: result.upload });
+      if (!body.upload) await self.held.clear();
+      res.json({ ok: true, changed: result.changed, upload: result.upload, held: self.held.summary() });
     }));
 
-    // A Glass release zip as the request body: examined, verified against
-    // the release of its version, then installed as the online path
-    // installs, the glass-evo zip held beforehand going in with it where
-    // that Glass needs a newer one.
+    // A Glass release zip as the request body: what it says it is read,
+    // the pairing rule asked, then the job runs the plan: installed as the
+    // online path installs, with the glass-evo zip kept from before where
+    // it fits, with the glass-evo fetched where that Glass needs a newer
+    // one and the player can see it, or kept on the player for the
+    // glass-evo zip that will complete it. The job says which it will be.
     app.post('/api/update/upload', wrap(async function (req, res) {
       if (!uploadOn()) return res.status(403).json({ error: 'switch-off', message: 'install from a file is off on this player' });
       if (upgrading()) return res.status(409).json({ error: 'busy' });
@@ -1117,9 +1129,27 @@ class Manager {
         await fsp.rm(file, { force: true });
         return res.status(e.code === 'too-large' ? 413 : 400).json(failure(e));
       }
-      const job = self.newJob('upgrade', 'Glass (file)');
-      self.runUploadInstall(job, file);
+      let seen;
+      try {
+        seen = await examineGlassZip(file);
+      } catch (e) {
+        await fsp.rm(file, { force: true });
+        return res.status(400).json(failure(e));
+      }
+      const zip = { kind: 'glass', version: seen.version, least: seen.least };
+      const job = self.newJob('upgrade', 'Glass ' + seen.version);
+      job.will = self.pairingPlan(zip).action;
+      self.runUploadInstall(job, file, zip);
       res.status(202).json({ ok: true, job: job });
+    }));
+
+    // A kept zip discarded by the user.
+    app.delete('/api/update/held/:kind', wrap(async function (req, res) {
+      const kind = String(req.params.kind || '');
+      if (kind !== 'glass' && kind !== 'evo') return res.status(400).json({ error: 'bad-request', message: 'kind is glass or evo' });
+      const dropped = await self.held.drop(kind);
+      if (!dropped) return res.status(404).json({ error: 'not-found', message: 'no ' + (kind === 'glass' ? 'Glass' : 'glass-evo') + ' zip is kept' });
+      res.json({ ok: true, dropped: { kind: kind, version: dropped.version }, held: self.held.summary() });
     }));
 
     // The shelf for remotes: the archives kept for the remotes' machines,
@@ -1250,9 +1280,13 @@ class Manager {
       res.status(202).json({ ok: true, job: job });
     }));
 
-    // A glass-evo release zip as the request body: installed at once, held
-    // to this Glass; or, with `hold`, verified and kept for the Glass zip
-    // that follows, to go in with it. Refused while the switch is off.
+    // A glass-evo release zip as the request body: what it says it is
+    // read, the pairing rule asked, then the job runs the plan: installed
+    // in place and held to this Glass, installed with the Glass zip kept
+    // from before where it fits that one (the job is then an upgrade, the
+    // backend restarting), or kept on the player for the Glass zip that
+    // will complete it. With `hold`, verified and kept outright for the
+    // Glass zip that follows at once. Refused while the switch is off.
     app.post('/api/evo/upload', wrap(async function (req, res) {
       if (!uploadOn()) return res.status(403).json({ error: 'switch-off', message: 'install from a file is off on this player' });
       if (componentBusy()) return res.status(409).json({ error: 'busy' });
@@ -1265,19 +1299,29 @@ class Manager {
         return res.status(e.code === 'too-large' ? 413 : 400).json(failure(e));
       }
       if (String(req.query.hold || '') === '1') {
-        const held = self.heldEvo;
-        self.heldEvo = null;
-        if (held) await fsp.rm(held.file, { force: true });
         try {
-          self.heldEvo = await self.component.examineFile({ state: 'queued' }, file);
+          const seen = await self.component.examineFile({ state: 'queued' }, file);
+          await self.held.keep('evo', file, { version: seen.version, requires: seen.requires, verified: seen.verified });
         } catch (e) {
           await fsp.rm(file, { force: true });
           return res.status(400).json(failure(e));
         }
-        return res.json({ ok: true, held: { version: self.heldEvo.version } });
+        return res.json({ ok: true, held: self.held.summary() });
       }
-      const job = self.newJob('component', 'glass-evo (file)');
-      self.runComponentFile(job, file);
+      let seen;
+      try {
+        seen = await manifestFactsOf(file);
+      } catch (e) {
+        await fsp.rm(file, { force: true });
+        return res.status(400).json(failure(e));
+      }
+      const zip = { kind: 'evo', version: seen.version, requires: seen.requires };
+      const will = self.pairingPlan(zip).action;
+      const both = will === 'install-both';
+      const job = self.newJob(both ? 'upgrade' : 'component', 'glass-evo ' + seen.version);
+      job.will = will;
+      if (both) job.target = self.held.get('glass').version;
+      self.runComponentFile(job, file, zip);
       res.status(202).json({ ok: true, job: job });
     }));
 
@@ -1359,7 +1403,7 @@ class Manager {
       rings: rings,
       diskFree: free,
       hostname: os.hostname(),
-      upgrade: { last: (this.updater.state && this.updater.state.last) || null, previous: this.updater.previous(), test: this.plugin.testReleases(), job: this.lastInstallJob() },
+      upgrade: { last: (this.updater.state && this.updater.state.last) || null, previous: this.updater.previous(), test: this.plugin.testReleases(), job: this.lastInstallJob(), held: this.held.summary() },
       themeSize: (function () { const m = SIZE_PREFIX.exec(String(info.activeTheme || '')); return m ? m[1] + 'x' + m[2] : ''; })(),
       jobs: this.jobs.filter(function (j) { return j.state !== 'done' && j.state !== 'failed'; }).length
     });
@@ -1525,9 +1569,46 @@ class Manager {
     for (let i = this.jobs.length - 1; i >= 0; i--) {
       const j = this.jobs[i];
       if (kinds.indexOf(j.kind) === -1 || (j.state !== 'done' && j.state !== 'failed')) continue;
-      return { kind: j.kind, name: j.name, state: j.state, error: j.error || null, endedAt: j.endedAt || null };
+      return { kind: j.kind, name: j.name, state: j.state, error: j.error || null, endedAt: j.endedAt || null, held: j.held || null };
     }
     return null;
+  }
+
+  // The pairing rule asked for a zip brought by hand, against what runs,
+  // what is kept of the other kind, and, where the answer would be to keep
+  // the zip, what the player can see online: a Glass that needs a newer
+  // glass-evo takes the latest released where that satisfies it, as the
+  // online upgrade does. `online` false asks without looking online.
+  pairingPlan(zip, online) {
+    const here = this.component.installed();
+    const facts = { glass: this.updater.version, evo: here.installed ? here.version : null, least: this.component.least, zip: zip, held: this.held.get(zip.kind === 'glass' ? 'evo' : 'glass'), online: null };
+    const first = pairing.plan(facts);
+    if (!online) return first;
+    if (first.action === 'hold-glass') {
+      // Only a look that succeeds counts: the release list kept from an
+      // earlier look says nothing about whether GitHub is reachable now.
+      return this.component.check(true).then(
+        () => { const latest = this.component.latest; return latest ? latest.version : null; },
+        () => null
+      ).then((evo) => pairing.plan(Object.assign({}, facts, { online: { evo: evo } })));
+    }
+    if (first.action === 'hold-evo') {
+      const latest = this.updater.latest;
+      return Promise.resolve(pairing.plan(Object.assign({}, facts, { online: { glass: latest ? latest.version : null } })));
+    }
+    return Promise.resolve(first);
+  }
+
+  // A kept zip that has become moot is let go: a Glass of the version
+  // running, a glass-evo of the version installed or older than the
+  // running Glass works with.
+  async pruneHeld() {
+    const g = this.held.get('glass');
+    if (g && g.version === this.updater.version) await this.held.drop('glass');
+    const e = this.held.get('evo');
+    if (!e) return;
+    const here = this.component.installed();
+    if ((here.installed && here.version === e.version) || (this.component.least && compareVersions(e.version, this.component.least) < 0)) await this.held.drop('evo');
   }
 
   // Cut a theme to a size into a staging folder, then move the copy and
@@ -1642,8 +1723,12 @@ class Manager {
     self.exclusive(async function () {
       try {
         const staged = rollback ? await self.updater.stagePrevious(job) : await self.updater.download(job);
-        // The component here is brought to what that Glass works with first.
-        const paired = await pair(self.component, staged, job);
+        // The component here is brought to what that Glass works with
+        // first, a glass-evo zip kept from an earlier upload used before
+        // any is fetched.
+        const kept = self.held.get('evo');
+        const paired = await pair(self.component, staged, job, { held: kept });
+        if (kept && kept.used) await self.held.take('evo');
         let result;
         try {
           result = await self.updater.apply(job, staged);
@@ -1713,51 +1798,76 @@ class Manager {
     });
   }
 
-  // A Glass release brought by hand goes in as the online path's does,
-  // the glass-evo zip held with it first where that Glass needs a newer
-  // one; a Glass that needs one and has none given is refused by the
-  // least version it must be.
-  runUploadInstall(job, file) {
+  // A Glass release brought by hand runs the pairing rule's plan: the
+  // glass-evo zip kept from before goes in first where it fits, the Glass
+  // then as the online path's does; a Glass that needs a newer glass-evo
+  // takes the latest released where the player sees one that satisfies
+  // it, else is kept on the player for the glass-evo zip to come. `zip`
+  // is what the file says it is, read by the route.
+  runUploadInstall(job, file, zip) {
     const self = this;
     self.exclusive(async function () {
-      const held = self.heldEvo;
-      self.heldEvo = null;
+      let kept = null;
+      let paired = false;
       try {
-        // What the Glass zip says it is, first: a Glass that is what runs
-        // already leaves Glass as it is, and the glass-evo zip given with
-        // it still goes in.
-        const found = await examineGlassZip(file);
-        const sameGlass = found.version === self.updater.version;
-        const glassToRun = sameGlass ? self.updater.version : found.version;
-        // The glass-evo zip given goes in first, held to the Glass that
-        // will run; the version here already is left as it is.
-        let paired = false;
-        if (held) {
-          if (found.least && compareVersions(held.version, found.least) < 0) {
-            throw new UpdateError('needs-evo', 'Glass ' + found.version + ' needs glass-evo ' + found.least + ' or later; the glass-evo zip given is ' + held.version + ': choose a later glass-evo zip with it');
-          }
-          try {
-            await self.component.installFile(job, held.file, { glass: glassToRun, least: found.least || self.component.least });
-            paired = true;
-            self.logger.info('glass: manager upgrade: glass-evo ' + held.version + ' installed from a file' + (sameGlass ? '' : ' with Glass ' + found.version));
-          } catch (e) {
-            if (e.code !== 'same-version') throw e;
-            self.logger.info('glass: manager upgrade: glass-evo ' + held.version + ' is what is installed; left as it is');
-          }
-          if (paired) self.plugin.componentChanged();
+        const p = await self.pairingPlan(zip, true);
+        job.will = p.action;
+        if (p.dropped) {
+          await self.held.drop('evo');
+          self.logger.info('glass: manager upgrade: the kept glass-evo ' + p.dropped.version + ' zip does not go with Glass ' + zip.version + '; discarded');
         }
-        if (sameGlass) {
+        if (p.action === 'nothing') {
           await fsp.rm(file, { force: true });
-          if (!held) throw new UpdateError('same-version', 'Glass ' + found.version + ' is what runs; nothing to install');
-          job.name = 'glass-evo ' + held.version + (paired ? '' : ' (installed already)') + ' · Glass ' + found.version + ' is what runs';
+          throw new UpdateError('same-version', 'Glass ' + zip.version + ' is what runs; nothing to install');
+        }
+        if (p.action === 'hold-glass') {
+          const release = await self.updater.verifyFile(job, file, zip.version);
+          await self.held.keep('glass', file, { version: zip.version, least: zip.least, verified: release.verified });
+          job.held = { kind: 'glass', version: zip.version, needs: p.needs };
+          job.name = 'Glass ' + zip.version + ' (kept)';
+          self.logger.info('glass: manager upgrade: Glass ' + zip.version + ' kept; it needs glass-evo ' + p.needs + ' or later, which the player does not have');
           self.finish(job, null);
           return;
+        }
+        if (p.action === 'install-held' || p.action === 'install-both') {
+          // The kept glass-evo goes in first, held to the Glass that will run.
+          kept = await self.held.take('evo');
+          const glassToRun = p.action === 'install-held' ? self.updater.version : zip.version;
+          await self.component.installFile(job, kept.file, { glass: glassToRun, least: zip.least || self.component.least });
+          paired = true;
+          self.plugin.componentChanged();
+          self.logger.info('glass: manager upgrade: the kept glass-evo ' + kept.version + ' installed from a file' + (p.action === 'install-held' ? '' : ' with Glass ' + zip.version));
+          if (p.action === 'install-held') {
+            await fsp.rm(file, { force: true });
+            job.name = 'glass-evo ' + kept.version + ' · Glass ' + zip.version + ' is what runs';
+            await self.pruneHeld();
+            self.finish(job, null);
+            return;
+          }
         }
         const staged = await self.updater.stageFile(job, file);
         job.name = 'Glass ' + staged.version;
         job.target = staged.version;
-        // The pair rule, which the glass-evo given now satisfies, or says what is still needed.
-        paired = (await pair(self.component, staged, job, { byHand: true })) || paired;
+        // The pair rule once more, as the online path has it: satisfied by
+        // the kept zip or by what is installed, or, where the player sees
+        // the glass-evo it needs online, fetching it.
+        const fetching = p.action === 'install-glass-fetching-evo';
+        try {
+          paired = (await pair(self.component, staged, job, fetching ? {} : { byHand: true })) || paired;
+        } catch (e) {
+          if (!fetching) throw e;
+          // The glass-evo it needs could not be fetched after all: the
+          // Glass, verified already, is kept for the zip, as it is where
+          // the player cannot see GitHub at all.
+          await self.held.keep('glass', staged.file, { version: staged.version, least: staged.least, verified: staged.verified });
+          job.will = 'hold-glass';
+          job.held = { kind: 'glass', version: staged.version, needs: zip.least };
+          job.name = 'Glass ' + staged.version + ' (kept)';
+          job.target = null;
+          self.logger.info('glass: manager upgrade: Glass ' + staged.version + ' kept; the glass-evo it needs could not be fetched (' + (e && e.message ? e.message : e) + ')');
+          self.finish(job, null);
+          return;
+        }
         let result;
         try {
           result = await self.updater.apply(job, staged);
@@ -1771,22 +1881,76 @@ class Manager {
         self.logger.info('glass: manager ' + job.kind + ' from ' + result.from + ' to ' + result.to + ' from a file: plugin replaced, backend restarting');
       } catch (e) {
         await fsp.rm(file, { force: true });
-        if (held) await fsp.rm(held.file, { force: true });
+        if (kept) await fsp.rm(kept.file, { force: true });
         self.finish(job, e);
       }
     });
   }
 
-  // A glass-evo release brought by hand, in place and the face told.
-  runComponentFile(job, file) {
+  // A glass-evo release brought by hand runs the pairing rule's plan: in
+  // place and the face told; in with the Glass zip kept from before where
+  // it fits that one, the backend restarting; or kept on the player for
+  // the Glass zip to come. `zip` is what the file says it is, read by the
+  // route.
+  runComponentFile(job, file, zip) {
     const self = this;
     self.exclusive(async function () {
+      let kept = null;
       try {
-        const result = await self.component.installFile(job, file);
-        job.name = 'glass-evo ' + result.to;
+        const p = await self.pairingPlan(zip, true);
+        job.will = p.action;
+        if (p.dropped) {
+          await self.held.drop('glass');
+          self.logger.info('glass: manager component: the kept Glass ' + p.dropped.version + ' zip does not go with glass-evo ' + zip.version + '; discarded');
+        }
+        if (p.action === 'nothing') {
+          await fsp.rm(file, { force: true });
+          throw new ComponentError('same-version', 'glass-evo ' + zip.version + ' is what is installed; nothing to install');
+        }
+        if (p.action === 'refuse-too-old') {
+          await fsp.rm(file, { force: true });
+          throw new ComponentError('too-old', 'glass-evo ' + zip.version + ' is older than this Glass works with (' + p.least + ')', { least: p.least });
+        }
+        if (p.action === 'hold-evo') {
+          const verified = await self.component.verifyFile(job, file, zip.version);
+          await self.held.keep('evo', file, { version: zip.version, requires: zip.requires, verified: verified });
+          job.held = { kind: 'evo', version: zip.version, needs: p.needs, online: p.online };
+          job.name = 'glass-evo ' + zip.version + ' (kept)';
+          self.logger.info('glass: manager component: glass-evo ' + zip.version + ' kept; it needs Glass ' + p.needs + ' or later, which does not run here');
+          self.finish(job, null);
+          return;
+        }
+        if (p.action === 'install-evo') {
+          const result = await self.component.installFile(job, file);
+          job.name = 'glass-evo ' + result.to;
+          self.plugin.componentChanged();
+          await self.pruneHeld();
+          self.finish(job, null);
+          return;
+        }
+        // Both: the glass-evo first, held to the Glass that will run, then
+        // the kept Glass as the online path's upgrade goes.
+        kept = await self.held.take('glass');
+        job.kind = 'upgrade';
+        job.target = kept.version;
+        await self.component.installFile(job, file, { glass: kept.version, least: kept.least || self.component.least });
         self.plugin.componentChanged();
-        self.finish(job, null);
+        self.logger.info('glass: manager upgrade: glass-evo ' + zip.version + ' installed from a file with the kept Glass ' + kept.version);
+        let result;
+        try {
+          const staged = await self.updater.stageFile(job, kept.file);
+          job.name = 'Glass ' + staged.version + ' · glass-evo ' + zip.version;
+          await pair(self.component, staged, job, { byHand: true });
+          result = await self.updater.apply(job, staged);
+        } catch (e) {
+          try { await self.component.rollback(); } catch (e2) { self.logger.warn('glass: manager component: not put back after the upgrade failed: ' + e2.message); }
+          throw e;
+        }
+        job.endedAt = new Date().toISOString();
+        self.logger.info('glass: manager ' + job.kind + ' from ' + result.from + ' to ' + result.to + ' from the kept file: plugin replaced, backend restarting');
       } catch (e) {
+        await fsp.rm(file, { force: true });
+        if (kept) await fsp.rm(kept.file, { force: true });
         self.finish(job, e);
       }
     });
