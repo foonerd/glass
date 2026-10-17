@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.30] - 2026-10-17
+
+- **Power from the face.** The More sheet's modes row has a fourth tile, Power, which opens a page over the theme: Power off and Reboot as large tiles, and Standby where the board has it, each through Volumio's own action, the plugins' hooks first, as the player's own menu does. Nothing happens on one touch: the look's `power.ask`, "Power asks" under Buttons in the look panel, is a second screen with a large Power off and a Cancel that cancels by itself after eight seconds, the one a look starts with since a finger held while driving is unlawful on a car dash, or the tile held for two seconds while a ring fills (asked on the forum). The channel carries a `power` command and a `power` line that says whether standby is there; the Contracts and Troubleshooting pages have them. No new check: the page is the face's own and the plugin logs what it was asked. glass-evo 0.10.30 draws the page; this Glass names it as the least it works with.
+
 ## [0.10.29] - 2026-10-16
 
 - **glass-evo 0.10.29 is the least this Glass works with.** The backlight's fade is done by the display, which on a screen glass-evo holds is glass-evo's own binary, so a player upgraded to 0.10.28 alone kept a display that set the brightness at once; this Glass names the glass-evo that fades, and the Manager brings it along with the upgrade.
