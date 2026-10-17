@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.33] - 2026-10-17
+
+- **A release zip given alone by file is kept for the other of the pair, and the two go in together when it comes.** From 0.10.0 every Glass goes with a glass-evo of its own; an upgrade by file from an older pair needed both zips chosen together, and a zip given alone was refused after the upload, Glass for wanting a newer glass-evo, glass-evo for wanting a later Glass. The System tab's files box now takes the zips in either order: a zip that needs the other is verified and kept on the player, the box says what it waits for, with Discard, and the other zip, whenever it comes, goes in with it, the glass-evo first, held to the Glass that will run. A Glass zip on a player that reaches GitHub fetches the glass-evo it needs, as the online upgrade does; a kept glass-evo goes in with an online upgrade of Glass that it fits, before any is fetched. One zip of each kind is kept at most, the newer replacing the older; a kept zip survives a restart of the backend and is let go when it becomes moot, the version installed or older than the pair works with. The rule is one table in a module of its own, replayed whole by its test, and the paths were replayed on a player with the release zips (asked on the forum). In step: the sheet's Last install row names a kept zip and what it waits for, Find a problem notes it under every symptom with the way on, and the Troubleshooting page has the row; the remotes have no file path and need nothing.
+
 ## [0.10.32] - 2026-10-17
 
 - **In step with glass-evo 0.10.32.** Nothing of Glass's own changes; this Glass names glass-evo 0.10.32 as the least it works with, where the gallery's previews keep their own shape instead of being stretched to a square, the names under them in view again.
