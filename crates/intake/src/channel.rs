@@ -70,6 +70,9 @@ pub enum Event {
     /// The player's answer to this display's `browse` or `search`
     /// command: what it lists at the location asked.
     Browse(Box<lead::Browse>),
+    /// The player's word on power: whether it can go to standby, a board
+    /// whose plugin put a standby handler in Volumio's hands.
+    Power { standby: bool },
 }
 
 /// What the player asks of the panel: power on or off, a toggle instead,
@@ -570,6 +573,12 @@ pub fn decode(line: &[u8]) -> Option<Event> {
             uri: text("uri"),
             on: value.get("on").and_then(Value::as_bool).unwrap_or(false),
         }),
+        "power" => Some(Event::Power {
+            standby: value
+                .get("standby")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
         "probed" => Some(Event::Probed {
             sent: value
                 .get("sent")
@@ -624,6 +633,15 @@ mod decode_tests {
                 uri: "mnt/NAS/a.flac".to_string(),
                 on: true
             })
+        );
+        assert_eq!(
+            decode(br#"{"kind":"power","standby":true}"#),
+            Some(Event::Power { standby: true })
+        );
+        assert_eq!(
+            decode(br#"{"kind":"power"}"#),
+            Some(Event::Power { standby: false }),
+            "unsaid, the board has no standby"
         );
         assert_eq!(
             decode(br#"{"kind":"favourite","uri":"mnt/NAS/a.flac"}"#),

@@ -904,6 +904,7 @@ mod tests {
             queue: Default::default(),
             browse: None,
             queue_art: Default::default(),
+            standby: false,
             queue_position: None,
             levels: Levels {
                 left: 50.0,
@@ -1235,6 +1236,7 @@ mod analyser_tests {
             queue: Default::default(),
             browse: None,
             queue_art: Default::default(),
+            standby: false,
             queue_position: None,
             levels: Levels::default(),
             bins: Bins {
@@ -1303,6 +1305,7 @@ mod analyser_tests {
             queue: Default::default(),
             browse: None,
             queue_art: Default::default(),
+            standby: false,
             queue_position: None,
             levels: Levels::default(),
             bins: Bins {
@@ -1358,6 +1361,7 @@ mod analyser_tests {
                 queue: Default::default(),
                 browse: None,
                 queue_art: Default::default(),
+                standby: false,
                 queue_position: None,
                 levels: Levels::default(),
                 bins: Bins {
@@ -1435,6 +1439,7 @@ mod analyser_tests {
             queue: Default::default(),
             browse: None,
             queue_art: Default::default(),
+            standby: false,
             queue_position: None,
             levels: Levels::default(),
             bins: Bins {

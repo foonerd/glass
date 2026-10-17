@@ -3671,6 +3671,10 @@ pub struct Input {
     /// it has not; fetched around the playing track.
     #[serde(default)]
     pub queue_art: std::sync::Arc<Vec<String>>,
+    /// Whether the player can go to standby: a board whose plugin put a
+    /// standby handler in Volumio's hands. False until the player has said.
+    #[serde(default)]
+    pub standby: bool,
     /// The playing track's place in the queue, where the player says.
     #[serde(default)]
     pub queue_position: Option<u32>,

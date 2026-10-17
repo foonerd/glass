@@ -3753,6 +3753,7 @@
           ['buttons', 'MANAGER_LOOK_BUTTONS', [
             field('MANAGER_LOOK_SHOW_BUTTONS', onoff('buttons.show', 'switch'), esc(t('MANAGER_LOOK_SHOW_BUTTONS_HINT'))),
             field('MANAGER_LOOK_BUTTONS_IDLE', choice('buttons.idle', ['stay', 'leave'], 'MANAGER_LOOK_BUTTONS_IDLE_'), esc(t('MANAGER_LOOK_BUTTONS_IDLE_HINT'))),
+            field('MANAGER_LOOK_POWER_ASK', choice('power.ask', ['screen', 'hold'], 'MANAGER_LOOK_POWER_ASK_'), esc(t('MANAGER_LOOK_POWER_ASK_HINT'))),
             field('MANAGER_LOOK_SIZE', slider('measure.bar', 'size', 50, 250, 5, 'SMALL', 'LARGE'))],
             'MANAGER_LOOK_MORE_BUTTONS', finer('buttons', '')],
           ['lists', 'MANAGER_LOOK_LISTS', [

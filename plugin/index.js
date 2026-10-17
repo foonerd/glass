@@ -104,6 +104,7 @@ function Channel(logger, onAttach, onCommand) {
     // The player's last word on the playing track among the favourites,
     // as a `favourite` line, for a display that connects later.
     this.favourite = null;
+    this.power = null;
 }
 
 Channel.prototype.listen = function (path) {
@@ -132,6 +133,7 @@ Channel.prototype.attach = function (conn) {
     if (self.infinity !== null) { self.tell(conn, { kind: 'infinity', on: self.infinity }); }
     if (self.weather) { self.tell(conn, self.weather); }
     if (self.favourite) { self.tell(conn, self.favourite); }
+    if (self.power) { self.tell(conn, self.power); }
     conn.on('data', function (chunk) {
         pending += chunk;
         if (pending.length > CHANNEL_LINE_MAX) {
@@ -1124,6 +1126,7 @@ Glass.prototype.runCommand = function (message) {
             case 'random': router.volumioRandom(!!value); break;
             case 'repeat': router.volumioRepeat(value === 'all' || value === 'single', value === 'single'); break;
             case 'favourite': self.setFavourite(value); break;
+            case 'power': self.powerAsked(value); break;
             default: self.logger.warn(id + 'channel: unknown command ' + name);
         }
     } catch (e) {
@@ -1196,6 +1199,40 @@ Glass.prototype.browseSourcesFact = function () {
     var list = this.commandRouter.volumioGetVisibleBrowseSources() || [];
     var items = browse.sources(list, 0).items;
     return { count: items.length, names: items.map(function (item) { return item.title; }) };
+};
+
+// ---- Power from the face ---------------------------------------------------
+// Off, reboot, or standby where the board has it, through Volumio's own
+// actions, the plugins' hooks first, as its own menu does. The face asks
+// once more before it sends; the plugin does what it is told.
+Glass.prototype.powerAsked = function (value) {
+    var self = this;
+    var router = self.commandRouter;
+    var what = String(value || '').trim().toLowerCase();
+    if (what === 'off' || what === 'shutdown') { self.logger.info(id + 'power: off, asked from the face'); router.shutdown(); return; }
+    if (what === 'reboot') { self.logger.info(id + 'power: reboot, asked from the face'); router.reboot(); return; }
+    if (what === 'standby') {
+        if (self.standbyAvailable()) { self.logger.info(id + 'power: standby, asked from the face'); router.standby(); } else { self.logger.warn(id + 'power: standby asked, and the board has no standby handler'); }
+        return;
+    }
+    self.logger.warn(id + 'power: unknown action ' + what);
+};
+
+// Whether a plugin put a standby handler in Volumio's hands: the boards
+// whose MCU puts the unit to standby; a plain board has none.
+Glass.prototype.standbyAvailable = function () {
+    var h = this.commandRouter && this.commandRouter.standByHandler;
+    return !!(h && h.category && h.name && h.method);
+};
+
+// The player's word on power, a `power` line held for a display that
+// connects: whether standby is there to offer.
+Glass.prototype.pushPower = function () {
+    var self = this;
+    if (!self.channel) { return; }
+    var line = { kind: 'power', standby: self.standbyAvailable() };
+    self.channel.power = line;
+    self.channel.push(line);
 };
 
 // A tap on a browsed list plays: `{uri, index}` plays the list the face
@@ -1357,6 +1394,8 @@ Glass.prototype.onStart = function () {
         self.pushRemoteConfig();
         // The panel's power as asked, so a display that starts anew holds it.
         self.pushScreenWish();
+        // Whether the board can go to standby, for the face's Power page.
+        self.pushPower();
     }, function (message, conn) {
         // A command with an answer (browse, search) answers the display
         // that asked, and it alone: another display's list is its own.
@@ -1372,7 +1411,7 @@ Glass.prototype.onStart = function () {
     // The feed behind the manager's Face tab: the frames from the daemon's
     // pages socket, and every line the displays hear, for browser pages.
     self.face = new FaceFeed({ socketPath: faceSocketPath, logger: self.logger, current: function () {
-        return self.channel ? { state: advanced(self.channel.state, self.channel.stateAt, Date.now()), infinity: self.channel.infinity, showing: self.channel.showing, queue: self.channel.queue, persist: self.channel.persist, weather: self.channel.weather, favourite: self.channel.favourite } : {};
+        return self.channel ? { state: advanced(self.channel.state, self.channel.stateAt, Date.now()), infinity: self.channel.infinity, showing: self.channel.showing, queue: self.channel.queue, persist: self.channel.persist, weather: self.channel.weather, favourite: self.channel.favourite, power: self.channel.power } : {};
     } });
     self.channel.onPush = function (message) { self.face.push(message); };
     // The display's report sets what is held for the next display.

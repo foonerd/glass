@@ -18,7 +18,7 @@
     // The buttons' own background (glass-evo 0.1.54): as solid as How solid, in the look's tint, unless said.
     'buttons.glass': 'bar', 'buttons.tint': 'tint',
     // The queue and the browser (glass-evo 0.10.7): by the screen, a sheet, a drawer, or the whole screen.
-    'lists.shape': 'auto',
+    'lists.shape': 'auto', 'power.ask': 'screen',
     'clock.show': 'on', 'clock.format': '%H:%M', 'clock.ink': 'ink', 'clock.opacity': '0.86', 'clock.glass': '0.55', 'clock.tint': 'tint',
     'clock.face': 'type', 'clock.dial': 'station', 'clock.unlit': '0.08', 'clock.hands': 'ink', 'clock.marks': 'ink', 'clock.second': 'accent', 'clock.disc': 'style', 'clock.card': '#17171a',
     'date.show': 'off', 'date.place': 'top', 'date.format': '%A %-d %B', 'date.ink': 'ink', 'date.opacity': '0.86', 'date.glass': '0.55', 'date.tint': 'tint',

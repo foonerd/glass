@@ -1897,6 +1897,8 @@ pub struct TapSource {
     /// location and whether it is one. The snapshot says it of the playing
     /// track alone.
     favourite_held: Option<(String, bool)>,
+    /// The player's word on power: whether the board can go to standby.
+    standby_held: bool,
     /// The player's last answer to this display's browse, as the snapshot
     /// hands it on, its covers filled in as they land.
     browse_held: Option<std::sync::Arc<lead::Browse>>,
@@ -2131,6 +2133,7 @@ impl TapSource {
             screen_asked: None,
             weather_held: None,
             favourite_held: None,
+            standby_held: false,
             browse_held: None,
             browse_art: DiscArt::rows(),
             queue_art: DiscArt::rows(),
@@ -2763,6 +2766,7 @@ impl Source for TapSource {
                     self.rederive = true;
                 }
                 Event::Browse(browse) => self.browse_held = Some(std::sync::Arc::new(*browse)),
+                Event::Power { standby } => self.standby_held = standby,
                 Event::Hello { .. } => {}
             }
         }
@@ -2942,6 +2946,7 @@ impl Source for TapSource {
             queue: self.queue_entries.clone(),
             browse: self.browse_dressed(),
             queue_art: self.queue_art_dressed(),
+            standby: self.standby_held,
             queue_position: self.queue_position_held,
         }
     }
@@ -3278,6 +3283,7 @@ pub fn input_from_records(
         queue: Default::default(),
         browse: None,
         queue_art: Default::default(),
+        standby: false,
         queue_position: None,
     }
 }
