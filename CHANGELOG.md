@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.32] - 2026-10-17
+
+- **In step with glass-evo 0.10.32.** Nothing of Glass's own changes; this Glass names glass-evo 0.10.32 as the least it works with, where the gallery's previews keep their own shape instead of being stretched to a square, the names under them in view again.
+
 ## [0.10.31] - 2026-10-17
 
 - **Themes from the face.** The More sheet has a third row at the top: the previous theme, the next theme, each applied at once in the Manager's order, and Themes, a gallery over the theme of the installed themes with the Manager's own previews, three a row, the one on show framed in the accent; a theme opened shows its variants the same way, Apply theme sets the theme as the Manager has it and a variant tapped sets the theme to that variant alone, nothing else offered (asked on the forum). The channel carries a `themes` command answered with a `themes` line and a `theme` command; the previews are named at the player's address, which a remote reaches at the Manager's address it knows and a page through the picture relay. The Power page now redraws by itself while its ring fills or its question counts down. No new check; the Troubleshooting page has the gallery's line. glass-evo 0.10.31 draws the row and the gallery; this Glass names it as the least it works with.
