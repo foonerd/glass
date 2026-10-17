@@ -1127,6 +1127,8 @@ Glass.prototype.runCommand = function (message) {
             case 'repeat': router.volumioRepeat(value === 'all' || value === 'single', value === 'single'); break;
             case 'favourite': self.setFavourite(value); break;
             case 'power': self.powerAsked(value); break;
+            case 'themes': return self.themesAsk(value);
+            case 'theme': self.themeAsked(value); break;
             default: self.logger.warn(id + 'channel: unknown command ' + name);
         }
     } catch (e) {
@@ -1199,6 +1201,75 @@ Glass.prototype.browseSourcesFact = function () {
     var list = this.commandRouter.volumioGetVisibleBrowseSources() || [];
     var items = browse.sources(list, 0).items;
     return { count: items.length, names: items.map(function (item) { return item.title; }) };
+};
+
+// ---- Themes from the face --------------------------------------------------
+// The installed themes as the face's gallery, with the Manager's own
+// previews, and one theme's variants; Previous and Next step the themes in
+// the Manager's order; apply sets the theme as the Manager has it, or one
+// variant alone. The previews are named at the player's own address: the
+// display on the player fetches them there, a remote at the Manager's
+// address it knows, and a page through the Manager's picture relay.
+Glass.prototype.themeFolders = function () {
+    return this.themeList().filter(function (t) { return !t.empty; });
+};
+
+Glass.prototype.themePreview = function (folder, meter) {
+    var port = parseInt(this.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT;
+    return 'http://127.0.0.1:' + port + '/api/themes/' + encodeURIComponent(folder) + '/preview/' + encodeURIComponent(meter) + '?thumb=1';
+};
+
+// A theme's word on a tile: the folder without its size, underscores as spaces.
+function themeWord(folder) {
+    return String(folder || '').replace(/^\d+x\d+_/, '').replace(/_/g, ' ').trim() || String(folder || '');
+}
+
+Glass.prototype.themesAsk = function (value) {
+    var self = this;
+    var v = value && typeof value === 'object' ? value : {};
+    var serial = Number(v.serial) || 0;
+    var folder = String(v.folder || '');
+    var active = self.activeTheme();
+    var showing = (self.channel && self.channel.showing && self.channel.showing.meter) || '';
+    var items;
+    if (!folder) {
+        items = self.themeFolders().map(function (t) {
+            var n = t.meters.length;
+            return { title: themeWord(t.folder), subtitle: n === 1 ? '1 variant' : n + ' variants', art: n ? self.themePreview(t.folder, t.meters[0]) : '', art_file: '', folder: t.folder, meter: '', on_show: t.folder === active };
+        });
+    } else {
+        var theme = self.themeFolders().filter(function (t) { return t.folder === folder; })[0];
+        items = theme ? theme.meters.map(function (m) {
+            return { title: m, subtitle: '', art: self.themePreview(folder, m), art_file: '', folder: folder, meter: m, on_show: folder === active && m === showing };
+        }) : [];
+    }
+    return Promise.resolve({ kind: 'themes', title: folder ? themeWord(folder) : 'Themes', folder: folder, items: items, serial: serial });
+};
+
+Glass.prototype.themeAsked = function (value) {
+    var self = this;
+    var word = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    if (word === 'next' || word === 'previous') {
+        var folders = self.themeFolders().map(function (t) { return t.folder; });
+        if (!folders.length) { self.logger.warn(id + 'theme: nothing installed to step to'); return; }
+        var at = folders.indexOf(self.activeTheme());
+        var to = word === 'next' ? (at + 1) % folders.length : (at <= 0 ? folders.length - 1 : at - 1);
+        self.logger.info(id + 'theme: ' + word + ', ' + folders[to]);
+        var stepped = self.activateTheme(folders[to]);
+        if (stepped && stepped.error) { self.logger.warn(id + 'theme: ' + folders[to] + ' not activated: ' + stepped.error); }
+        return;
+    }
+    var v = value && typeof value === 'object' ? value : {};
+    var folder = String(v.folder || '');
+    var meter = String(v.meter || '');
+    if (!folder) { self.logger.warn(id + 'theme: nothing named'); return; }
+    self.logger.info(id + 'theme: apply ' + folder + (meter ? ', ' + meter + ' alone' : ' as set'));
+    var applied = self.activateTheme(folder);
+    if (applied && applied.error) { self.logger.warn(id + 'theme: ' + folder + ' not activated: ' + applied.error); return; }
+    if (meter) {
+        var set = self.setMeterSelection({ mode: 'single', names: [meter] });
+        if (set && set.error) { self.logger.warn(id + 'theme: ' + meter + ' not set: ' + set.error); }
+    }
 };
 
 // ---- Power from the face ---------------------------------------------------

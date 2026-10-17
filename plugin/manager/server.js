@@ -733,6 +733,8 @@ class Manager {
       const state = (self.plugin.channel && self.plugin.channel.state) || {};
       let target = null;
       if (at.startsWith('/albumart')) target = 'http://127.0.0.1:3000' + at;
+      // A theme's preview, the Manager's own, named at the player's address.
+      else if (new RegExp('^http://127\\.0\\.0\\.1:' + self.port + '/api/themes/[^/]+/preview/[^/?]+(\\?thumb=1)?$').test(at)) target = at;
       else if (/^https?:\/\//.test(at) && (at === String(state.albumart || '') || ((self.plugin.channel && self.plugin.channel.arts) || []).indexOf(at) !== -1 || queue.hasCover(self.plugin.channel && self.plugin.channel.queue, at))) target = at;
       if (!target) return res.status(404).json({ error: 'not-found' });
       // A picture by the server's word or by its own first bytes.

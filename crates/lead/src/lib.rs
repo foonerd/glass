@@ -3651,6 +3651,44 @@ pub struct Browse {
 }
 
 /// One snapshot of the outside world. `plot` turns it into a scene.
+/// One installed theme, or one variant of a theme, for the face's gallery:
+/// its word, a line under it, the Manager's preview of it, and whether it
+/// is on show.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct ThemeItem {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub subtitle: String,
+    /// The preview's address, as the plugin names it; fetched by the engine.
+    #[serde(default)]
+    pub art: String,
+    /// The preview's file once fetched; empty until it has come.
+    #[serde(default)]
+    pub art_file: String,
+    #[serde(default)]
+    pub folder: String,
+    /// The variant's name; empty for a theme as a whole.
+    #[serde(default)]
+    pub meter: String,
+    #[serde(default)]
+    pub on_show: bool,
+}
+
+/// The plugin's answer to a `themes` ask: the installed themes (`folder`
+/// empty) or one theme's variants, under the ask's serial.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct Themes {
+    #[serde(default)]
+    pub title: String,
+    #[serde(default)]
+    pub folder: String,
+    #[serde(default)]
+    pub items: Vec<ThemeItem>,
+    #[serde(default)]
+    pub serial: u32,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Input {
     pub levels: Levels,
@@ -3675,6 +3713,10 @@ pub struct Input {
     /// standby handler in Volumio's hands. False until the player has said.
     #[serde(default)]
     pub standby: bool,
+    /// The plugin's last answer to this display's `themes` ask, with the
+    /// previews that have landed; none until one was asked.
+    #[serde(default)]
+    pub themes: Option<std::sync::Arc<Themes>>,
     /// The playing track's place in the queue, where the player says.
     #[serde(default)]
     pub queue_position: Option<u32>,

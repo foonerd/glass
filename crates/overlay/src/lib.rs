@@ -122,7 +122,7 @@ pub mod face {
     pub use lead::{is_file, read_to_string};
     pub use lead::{
         sky_of, Browse, BrowseItem, Day, FontFiles, Hour, Input, Metadata, QueueEntry, Sky,
-        TextStyle, Weather,
+        TextStyle, ThemeItem, Themes, Weather,
     };
 }
 

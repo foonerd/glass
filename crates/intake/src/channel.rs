@@ -73,6 +73,9 @@ pub enum Event {
     /// The player's word on power: whether it can go to standby, a board
     /// whose plugin put a standby handler in Volumio's hands.
     Power { standby: bool },
+    /// The player's answer to this display's `themes` ask: the installed
+    /// themes, or one theme's variants.
+    Themes(Box<lead::Themes>),
 }
 
 /// What the player asks of the panel: power on or off, a toggle instead,
@@ -569,6 +572,9 @@ pub fn decode(line: &[u8]) -> Option<Event> {
         "browse" => serde_json::from_value::<lead::Browse>(value.clone())
             .ok()
             .map(|browse| Event::Browse(Box::new(browse))),
+        "themes" => serde_json::from_value::<lead::Themes>(value.clone())
+            .ok()
+            .map(|themes| Event::Themes(Box::new(themes))),
         "favourite" => Some(Event::Favourite {
             uri: text("uri"),
             on: value.get("on").and_then(Value::as_bool).unwrap_or(false),
@@ -638,6 +644,14 @@ mod decode_tests {
             decode(br#"{"kind":"power","standby":true}"#),
             Some(Event::Power { standby: true })
         );
+        match decode(br#"{"kind":"themes","title":"Themes","folder":"","serial":3,"items":[{"title":"Akai 77","subtitle":"1 variant","art":"http://127.0.0.1:5582/api/themes/a/preview/b?thumb=1","folder":"1280x720_Akai_77","on_show":true}]}"#) {
+            Some(Event::Themes(themes)) => {
+                assert_eq!((themes.serial, themes.items.len()), (3, 1));
+                assert_eq!(themes.items[0].folder, "1280x720_Akai_77");
+                assert!(themes.items[0].on_show && themes.items[0].meter.is_empty());
+            }
+            other => panic!("not a themes line: {other:?}"),
+        }
         assert_eq!(
             decode(br#"{"kind":"power"}"#),
             Some(Event::Power { standby: false }),

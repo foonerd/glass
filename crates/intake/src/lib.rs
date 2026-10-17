@@ -1108,10 +1108,24 @@ pub fn resolve_icon(key: &str, name: &str, skin_icons: &str, plugin_icons: &str)
 /// slash is a path served by the player itself; anything else is used as is.
 pub fn art_url(reported: &str) -> String {
     if reported.starts_with('/') {
-        format!("{}{reported}", player_http())
-    } else {
-        reported.to_string()
+        return format!("{}{reported}", player_http());
     }
+    // A picture the player's own Manager serves, which the plugin names at
+    // the player's own address: a remote reaches that Manager at the
+    // address it knows the Manager by.
+    if let (Some(manager), Some(path)) = (manager_url(), local_manager_path(reported)) {
+        return format!("{manager}{path}");
+    }
+    reported.to_string()
+}
+
+/// The path of a picture named at the player's own address,
+/// `http://127.0.0.1:<port>/…`; none for any other address.
+pub fn local_manager_path(reported: &str) -> Option<&str> {
+    let rest = reported.strip_prefix("http://127.0.0.1:")?;
+    let slash = rest.find('/')?;
+    rest[..slash].parse::<u16>().ok()?;
+    Some(&rest[slash..])
 }
 
 fn fnv1a(text: &str) -> u64 {
@@ -1899,6 +1913,11 @@ pub struct TapSource {
     favourite_held: Option<(String, bool)>,
     /// The player's word on power: whether the board can go to standby.
     standby_held: bool,
+    /// The player's last answer to this display's `themes` ask, as the
+    /// snapshot hands it on with the previews that have landed.
+    themes_held: Option<std::sync::Arc<lead::Themes>>,
+    /// The previews of the themes, in the rows' cache with the covers.
+    themes_art: DiscArt,
     /// The player's last answer to this display's browse, as the snapshot
     /// hands it on, its covers filled in as they land.
     browse_held: Option<std::sync::Arc<lead::Browse>>,
@@ -2136,6 +2155,8 @@ impl TapSource {
             standby_held: false,
             browse_held: None,
             browse_art: DiscArt::rows(),
+            themes_held: None,
+            themes_art: DiscArt::rows(),
             queue_art: DiscArt::rows(),
             queue_art_held: Default::default(),
             decay: tap::legacy::Meter::new(METER_DECAY_MS, meter_max.max(1.0) as u32),
@@ -2437,6 +2458,34 @@ impl TapSource {
         }
         let dressed = std::sync::Arc::new(dressed);
         self.browse_held = Some(dressed.clone());
+        Some(dressed)
+    }
+
+    /// The themes answered, their previews fetched into the rows' cache as
+    /// a browsed list's covers are, the first of the page before the rest.
+    fn themes_dressed(&mut self) -> Option<std::sync::Arc<lead::Themes>> {
+        let held = self.themes_held.clone()?;
+        let wanted: Vec<String> = held
+            .items
+            .iter()
+            .take(THEMES_ART_MOST)
+            .map(|item| item.art.clone())
+            .collect();
+        let files = self.themes_art.files_for(&wanted);
+        let same = held
+            .items
+            .iter()
+            .zip(files.iter())
+            .all(|(item, file)| &item.art_file == file);
+        if same {
+            return Some(held);
+        }
+        let mut dressed = (*held).clone();
+        for (item, file) in dressed.items.iter_mut().zip(files) {
+            item.art_file = file;
+        }
+        let dressed = std::sync::Arc::new(dressed);
+        self.themes_held = Some(dressed.clone());
         Some(dressed)
     }
 
@@ -2767,6 +2816,7 @@ impl Source for TapSource {
                 }
                 Event::Browse(browse) => self.browse_held = Some(std::sync::Arc::new(*browse)),
                 Event::Power { standby } => self.standby_held = standby,
+                Event::Themes(themes) => self.themes_held = Some(std::sync::Arc::new(*themes)),
                 Event::Hello { .. } => {}
             }
         }
@@ -2947,6 +2997,7 @@ impl Source for TapSource {
             browse: self.browse_dressed(),
             queue_art: self.queue_art_dressed(),
             standby: self.standby_held,
+            themes: self.themes_dressed(),
             queue_position: self.queue_position_held,
         }
     }
@@ -2955,6 +3006,8 @@ impl Source for TapSource {
 /// How many of a browse answer's items have their covers fetched, in
 /// the list's order; the rest wear their icons.
 const BROWSE_ART_MOST: usize = 48;
+/// The previews fetched for a page of themes: the first of its items.
+const THEMES_ART_MOST: usize = 48;
 /// How many of the queue's covers are fetched, and how many of them
 /// before the playing track.
 const QUEUE_ART_MOST: usize = 48;
@@ -3284,6 +3337,7 @@ pub fn input_from_records(
         browse: None,
         queue_art: Default::default(),
         standby: false,
+        themes: None,
         queue_position: None,
     }
 }
