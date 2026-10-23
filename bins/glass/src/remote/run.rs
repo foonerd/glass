@@ -71,6 +71,12 @@ fn window_options_of(display: &super::config::Display, title: String) -> WindowO
         fit: display.fit && display.scale.is_none(),
         scale: display.scale.unwrap_or(100),
         anchor: anchor_of(display.place),
+        margins: pane::Margins {
+            top: display.margin.top,
+            right: display.margin.right,
+            bottom: display.margin.bottom,
+            left: display.margin.left,
+        },
         pointer: mode != WindowMode::Fullscreen,
         keys: true,
         title,

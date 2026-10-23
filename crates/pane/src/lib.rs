@@ -74,6 +74,8 @@ pub struct WindowOptions {
     pub scale: u32,
     /// Not fitted, where the frame sits in a window it does not fill.
     pub anchor: Anchor,
+    /// Not fitted, how far the frame keeps off the edges it sits against.
+    pub margins: Margins,
     /// Show the pointer.
     pub pointer: bool,
     /// Escape or Q closes the window.
@@ -101,6 +103,7 @@ impl Default for WindowOptions {
             fit: false,
             scale: 100,
             anchor: Anchor::Center,
+            margins: Margins::default(),
             pointer: false,
             keys: false,
             title: "Glass".to_string(),
@@ -181,18 +184,85 @@ pub fn placed_rect(
     percent: u32,
     anchor: Anchor,
 ) -> (i32, i32, u32, u32, f32) {
+    placed_rect_within(
+        frame,
+        window,
+        placement,
+        percent,
+        anchor,
+        Margins::default(),
+    )
+}
+
+/// The largest margin, as a share of the window's shorter side.
+pub const MAX_MARGIN_PERCENT: u32 = 25;
+
+/// How far a frame keeps off the edges its anchor puts it against, each
+/// as a share of the window's shorter side, 0 to [`MAX_MARGIN_PERCENT`]
+/// percent. A centred frame keeps off nothing: there is no edge.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Margins {
+    pub top: u32,
+    pub right: u32,
+    pub bottom: u32,
+    pub left: u32,
+}
+
+impl Margins {
+    /// The same share off every edge.
+    pub fn all(percent: u32) -> Self {
+        Self {
+            top: percent,
+            right: percent,
+            bottom: percent,
+            left: percent,
+        }
+    }
+
+    /// Each share kept within its bounds.
+    pub fn clamped(self) -> Self {
+        Self {
+            top: self.top.min(MAX_MARGIN_PERCENT),
+            right: self.right.min(MAX_MARGIN_PERCENT),
+            bottom: self.bottom.min(MAX_MARGIN_PERCENT),
+            left: self.left.min(MAX_MARGIN_PERCENT),
+        }
+    }
+}
+
+/// [`placed_rect`] with margins: a frame against an edge keeps that edge's
+/// margin, and never goes past the opposite edge for it; a frame larger
+/// than the window sits as it does without margins.
+pub fn placed_rect_within(
+    frame: (u32, u32),
+    window: (u32, u32),
+    placement: Option<(i32, i32)>,
+    percent: u32,
+    anchor: Anchor,
+    margins: Margins,
+) -> (i32, i32, u32, u32, f32) {
     let scale = percent.clamp(MIN_SCALE_PERCENT, 100) as f32 / 100.0;
     let (w, h) = scaled_size(frame, percent);
-    let along = |side: Side, room: u32, size: u32| -> i32 {
+    let margins = margins.clamped();
+    let shorter = window.0.min(window.1) as f32;
+    let px = |share: u32| -> i32 { (shorter * share as f32 / 100.0).round() as i32 };
+    let along = |side: Side, room: u32, size: u32, near: u32, far: u32| -> i32 {
+        let spare = room as i32 - size as i32;
         match side {
-            Side::Near => 0,
-            Side::Middle => (room as i32 - size as i32) / 2,
-            Side::Far => room as i32 - size as i32,
+            Side::Near => px(near).min(spare.max(0)),
+            Side::Middle => spare / 2,
+            Side::Far => {
+                if spare < 0 {
+                    spare
+                } else {
+                    (spare - px(far)).max(0)
+                }
+            }
         }
     };
     let (x, y) = placement.unwrap_or((
-        along(anchor.across(), window.0, w),
-        along(anchor.down(), window.1, h),
+        along(anchor.across(), window.0, w, margins.left, margins.right),
+        along(anchor.down(), window.1, h, margins.top, margins.bottom),
     ));
     (x, y, w, h, scale)
 }
@@ -214,9 +284,11 @@ pub struct Surface {
     /// Where the frame's top left goes; `None` centres it in the window.
     placement: Option<(i32, i32)>,
     fit: bool,
-    /// Not fitted, the frame's share of its own size and where it sits.
+    /// Not fitted, the frame's share of its own size, where it sits, and
+    /// how far it keeps off the edges.
     scale: u32,
     anchor: Anchor,
+    margins: Margins,
     keys: bool,
     /// What draws the frames: the video driver the window opened on, the
     /// renderer's name, and whether it draws in software.
@@ -525,6 +597,7 @@ impl Surface {
             fit: options.fit,
             scale: options.scale.clamp(MIN_SCALE_PERCENT, 100),
             anchor: options.anchor,
+            margins: options.margins.clamped(),
             keys: options.keys,
             driver,
             renderer,
@@ -910,12 +983,13 @@ impl Surface {
                 self.placement,
             )
         } else {
-            placed_rect(
+            placed_rect_within(
                 (frame.width, frame.height),
                 (logical_w, logical_h),
                 self.placement,
                 self.scale,
                 self.anchor,
+                self.margins,
             )
         };
         self.last_offset = (x, y);
@@ -1106,8 +1180,9 @@ pub fn write_ppm(path: impl AsRef<Path>, frame: &Frame) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        asked_for, finger_pixel, fitted_rect, keep_mouse, kms, placed_rect, rotated_center,
-        scaled_size, shows_nothing, through, unrotate_point, Anchor, IDENTITY, TOUCH_MOUSEID,
+        asked_for, finger_pixel, fitted_rect, keep_mouse, kms, placed_rect, placed_rect_within,
+        rotated_center, scaled_size, shows_nothing, through, unrotate_point, Anchor, Margins,
+        IDENTITY, MAX_MARGIN_PERCENT, TOUCH_MOUSEID,
     };
 
     fn connector(name: &str, status: &str) -> (String, String) {
@@ -1277,6 +1352,74 @@ mod tests {
         assert_eq!(
             placed_rect((1920, 1080), (1280, 720), None, 100, Anchor::Center),
             (-320, -180, 1920, 1080, 1.0)
+        );
+    }
+
+    #[test]
+    fn a_margin_keeps_a_frame_off_the_edges_it_sits_against_and_never_past_the_other() {
+        let screen = (1920, 1080);
+        let frame = (1920, 1080);
+        // Three percent of the shorter side, 1080, is 32 pixels.
+        let m = Margins::all(3);
+        assert_eq!(
+            placed_rect_within(frame, screen, None, 50, Anchor::TopLeft, m),
+            (32, 32, 960, 540, 0.5)
+        );
+        assert_eq!(
+            placed_rect_within(frame, screen, None, 50, Anchor::BottomRight, m),
+            (1920 - 960 - 32, 1080 - 540 - 32, 960, 540, 0.5)
+        );
+        // An edge the anchor does not touch keeps no margin; centred keeps none.
+        assert_eq!(
+            placed_rect_within(frame, screen, None, 50, Anchor::Top, m).0,
+            480
+        );
+        assert_eq!(
+            placed_rect_within(frame, screen, None, 50, Anchor::Center, m),
+            placed_rect(frame, screen, None, 50, Anchor::Center)
+        );
+        // Each edge its own.
+        let each = Margins {
+            top: 10,
+            right: 0,
+            bottom: 0,
+            left: 5,
+        };
+        assert_eq!(
+            placed_rect_within(frame, screen, None, 50, Anchor::TopLeft, each),
+            (54, 108, 960, 540, 0.5)
+        );
+        assert_eq!(
+            placed_rect_within(frame, screen, None, 50, Anchor::BottomRight, each),
+            (960, 540, 960, 540, 0.5)
+        );
+        // Never past the opposite edge: a frame as wide as the screen stays at 0,
+        // and one with less spare than the margin keeps what spare there is.
+        assert_eq!(
+            placed_rect_within(frame, screen, None, 100, Anchor::TopLeft, Margins::all(10)),
+            (0, 0, 1920, 1080, 1.0)
+        );
+        assert_eq!(
+            placed_rect_within(
+                (1800, 1000),
+                screen,
+                None,
+                100,
+                Anchor::BottomRight,
+                Margins::all(10)
+            ),
+            (12, 0, 1800, 1000, 1.0)
+        );
+        // Larger than the screen: as without margins.
+        assert_eq!(
+            placed_rect_within((2400, 1080), screen, None, 100, Anchor::BottomRight, m),
+            (-480, 0, 2400, 1080, 1.0)
+        );
+        // The share is bounded, and a placement given beats the margins.
+        assert_eq!(Margins::all(90).clamped(), Margins::all(MAX_MARGIN_PERCENT));
+        assert_eq!(
+            placed_rect_within(frame, screen, Some((5, 7)), 50, Anchor::TopLeft, m).0,
+            5
         );
     }
 

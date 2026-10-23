@@ -242,6 +242,33 @@ pub enum Place {
     BottomRight,
 }
 
+/// The margins a placed theme keeps off the edges, each a share of the
+/// screen's shorter side in percent; the page writes all four equal
+/// unless each edge is given its own.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct Margin {
+    #[serde(default)]
+    pub top: u32,
+    #[serde(default)]
+    pub right: u32,
+    #[serde(default)]
+    pub bottom: u32,
+    #[serde(default)]
+    pub left: u32,
+}
+
+impl Margin {
+    pub fn clamped(self) -> Self {
+        let m = pane::MAX_MARGIN_PERCENT;
+        Self {
+            top: self.top.min(m),
+            right: self.right.min(m),
+            bottom: self.bottom.min(m),
+            left: self.left.min(m),
+        }
+    }
+}
+
 /// What fills the screen where a smaller theme leaves it bare: what the
 /// player says for its own screen, a dark colour, or the album art blurred.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -283,6 +310,10 @@ pub struct Display {
     /// Where the theme sits when it does not fill the screen.
     #[serde(default)]
     pub place: Place,
+    /// How far the theme keeps off the edges its place puts it against,
+    /// each a share of the screen's shorter side, 0 to 25 percent.
+    #[serde(default)]
+    pub margin: Margin,
     /// What fills the screen where the theme leaves it bare.
     #[serde(default)]
     pub backdrop: BackdropChoice,
@@ -306,6 +337,7 @@ impl Default for Display {
             fit: true,
             scale: None,
             place: Place::Center,
+            margin: Margin::default(),
             backdrop: BackdropChoice::Player,
             fps: None,
             monitor: 0,
@@ -523,6 +555,7 @@ impl RemoteConfig {
                 self.display.fit = false;
             }
         }
+        self.display.margin = self.display.margin.clamped();
         self.players
             .retain(|id, p| !id.is_empty() && !p.host.trim().is_empty());
         for player in self.players.values_mut() {
@@ -841,6 +874,26 @@ mod tests {
         c.tidy();
         assert_eq!(c.display.scale, Some(pane::MIN_SCALE_PERCENT));
         assert!(!c.display.fit);
+    }
+
+    #[test]
+    fn a_margin_reads_as_zero_when_absent_and_is_kept_within_a_quarter() {
+        let old: Display = serde_json::from_str(r#"{"mode":"fullscreen"}"#).unwrap();
+        assert_eq!(old.margin, Margin::default());
+        let set: Display =
+            serde_json::from_str(r#"{"margin":{"top":3,"right":3,"bottom":3,"left":3}}"#).unwrap();
+        assert_eq!(set.margin.left, 3);
+        let part: Display = serde_json::from_str(r#"{"margin":{"top":40}}"#).unwrap();
+        assert_eq!((part.margin.top, part.margin.left), (40, 0));
+        let mut c = RemoteConfig {
+            display: part,
+            ..Default::default()
+        };
+        c.tidy();
+        assert_eq!(c.display.margin.top, pane::MAX_MARGIN_PERCENT);
+        assert!(serde_json::to_string(&c.display)
+            .unwrap()
+            .contains("\"margin\":{\"top\":25"));
     }
 
     #[test]

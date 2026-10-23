@@ -161,6 +161,9 @@
       <div class="full"><label class="switch"><input type="checkbox" id="d-fit"><span>Fit the theme to the screen, keeping its shape</span></label><div class="help">Off, the theme shows at its own size, or at the share of it set below, placed as Place says; the rest of the screen is what Behind a smaller theme says. Fit scales a theme up as well as down, and a theme scaled up looks jagged on a large screen: a share of 100 or less never does.</div></div>
       <div><label>Scale, percent of the theme's size</label><input type="number" id="d-scale" min="10" max="100" placeholder="100"></div>
       <div><label>Place</label><select id="d-place"><option value="center">centred</option><option value="top-left">top left</option><option value="top">top</option><option value="top-right">top right</option><option value="left">left</option><option value="right">right</option><option value="bottom-left">bottom left</option><option value="bottom">bottom</option><option value="bottom-right">bottom right</option></select></div>
+      <div><label>Margin, percent of the screen's shorter side</label><input type="number" id="d-margin" min="0" max="25" placeholder="0"></div>
+      <div><label class="switch" style="margin-top:22px"><input type="checkbox" id="d-margin-each"><span>Each edge its own</span></label></div>
+      <div class="full hidden" id="d-margin-edges"><div class="form"><div><label>Top</label><input type="number" id="d-margin-top" min="0" max="25" placeholder="0"></div><div><label>Right</label><input type="number" id="d-margin-right" min="0" max="25" placeholder="0"></div><div><label>Bottom</label><input type="number" id="d-margin-bottom" min="0" max="25" placeholder="0"></div><div><label>Left</label><input type="number" id="d-margin-left" min="0" max="25" placeholder="0"></div></div><div class="help">A placed theme keeps off the edges its place puts it against by these shares, so it is not pressed against the frame; centred, it keeps off none. A margin never pushes the theme past the opposite edge.</div></div>
       <div class="full"><label>Behind a smaller theme</label><select id="d-backdrop"><option value="player">as the player says</option><option value="color">a dark colour</option><option value="blur">the album art blurred</option></select><div class="help">A share below 100 turns Fit off. The player's word is its own Screen setting for its screen; a dark colour or the album art blurred is this remote's own. The Status panel says which is in force.</div></div>
       <div class="full"><button class="small" id="btn-win-leave">Leave full screen now</button> <button class="small" id="btn-win-full">Full screen now</button><div class="help">For this run only, so this page can be used on the same machine while the display keeps showing; the setting above is what the next start takes. On the keyboard, Escape leaves full screen, F returns to it, Q quits the remote.</div></div>
     </div>
@@ -556,6 +559,15 @@
     var d = state.config && state.config.display; if (!d) return '';
     var places = { center: 'centred', 'top-left': 'top left', top: 'at the top', 'top-right': 'top right', left: 'on the left', right: 'on the right', 'bottom-left': 'bottom left', bottom: 'at the bottom', 'bottom-right': 'bottom right' };
     var how = d.fit && !d.scale ? 'fitted to the screen, its shape kept' : (d.scale ? 'at ' + d.scale + ' % of its size' : 'pixel for pixel') + ', ' + (places[d.place || 'center'] || 'centred');
+    var m = d.margin || {}; var p = d.place || 'center';
+    if (!(d.fit && !d.scale) && p !== 'center') {
+      var edges = [];
+      if (/top/.test(p) && m.top) edges.push('top ' + m.top + ' %');
+      if (/right/.test(p) && m.right) edges.push('right ' + m.right + ' %');
+      if (/bottom/.test(p) && m.bottom) edges.push('bottom ' + m.bottom + ' %');
+      if (/left/.test(p) && m.left) edges.push('left ' + m.left + ' %');
+      if (edges.length) how += ', off the ' + edges.join(' and ');
+    }
     var behind = st.backdrop ? ' · behind it ' + st.backdrop + (d.backdrop === 'color' || d.backdrop === 'blur' ? ' (this remote\'s word)' : ' (the player\'s word)') : '';
     return how + behind;
   }
@@ -690,6 +702,12 @@
     $('d-fps').value = c.display.fps || ''; $('d-fit').checked = !!c.display.fit;
     $('d-scale').value = c.display.scale || ''; $('d-place').value = c.display.place || 'center'; $('d-backdrop').value = c.display.backdrop || 'player';
     fitFollowsScale();
+    var m = c.display.margin || { top: 0, right: 0, bottom: 0, left: 0 };
+    var equal = m.top === m.right && m.right === m.bottom && m.bottom === m.left;
+    $('d-margin-each').checked = !equal;
+    $('d-margin').value = equal && m.top ? m.top : '';
+    ['top', 'right', 'bottom', 'left'].forEach(function (e) { $('d-margin-' + e).value = m[e] || ''; });
+    marginEachFollows();
     $('gain').value = c.gain_db; $('decay').value = c.spectrum_decay ? c.spectrum_decay : ''; $('r-name').value = c.name; $('r-port').value = c.page_port; $('r-log').value = c.log_level || '';
     $('face-shown').value = c.face || 'follow';
     $('face-buttons').value = c.buttons || 'look';
@@ -715,7 +733,9 @@
     c.themes_dir = $('local-dir').value.trim() || null;
     var x = $('d-x').value.trim(), y = $('d-y').value.trim();
     var scale = parseInt($('d-scale').value, 10);
-    c.display = { mode: $('d-mode').value, position: (x !== '' && y !== '') ? [parseInt(x, 10) || 0, parseInt(y, 10) || 0] : null, fit: $('d-fit').checked, scale: scale > 0 && scale < 100 ? scale : null, place: $('d-place').value || 'center', backdrop: $('d-backdrop').value || 'player', fps: $('d-fps').value ? parseInt($('d-fps').value, 10) : null, monitor: parseInt($('d-monitor').value, 10) || 0 };
+    var pct = function (id) { var v = parseInt($(id).value, 10); return v > 0 ? Math.min(v, 25) : 0; };
+    var margin = $('d-margin-each').checked ? { top: pct('d-margin-top'), right: pct('d-margin-right'), bottom: pct('d-margin-bottom'), left: pct('d-margin-left') } : (function () { var a = pct('d-margin'); return { top: a, right: a, bottom: a, left: a }; })();
+    c.display = { mode: $('d-mode').value, margin: margin, position: (x !== '' && y !== '') ? [parseInt(x, 10) || 0, parseInt(y, 10) || 0] : null, fit: $('d-fit').checked, scale: scale > 0 && scale < 100 ? scale : null, place: $('d-place').value || 'center', backdrop: $('d-backdrop').value || 'player', fps: $('d-fps').value ? parseInt($('d-fps').value, 10) : null, monitor: parseInt($('d-monitor').value, 10) || 0 };
     c.gain_db = parseFloat($('gain').value) || 0; c.spectrum_decay = parseFloat($('decay').value) || 0; c.name = $('r-name').value.trim(); c.page_port = parseInt($('r-port').value, 10) || 5583; c.log_level = $('r-log').value || null;
     c.face = $('face-shown').value || 'follow';
     c.buttons = $('face-buttons').value || 'look';
@@ -723,7 +743,14 @@
     c.upload_install = $('upload-install').checked;
     return c;
   }
-  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'd-scale', 'd-place', 'd-backdrop', 'gain', 'decay', 'r-name', 'r-port', 'r-log', 'face-shown', 'face-buttons', 'test-releases', 'upload-install'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
+  // One margin for every edge, or each edge its own: the switch shows the four fields and hides the one.
+  function marginEachFollows() {
+    var each = $('d-margin-each').checked;
+    $('d-margin-edges').classList.toggle('hidden', !each);
+    $('d-margin').disabled = each;
+  }
+  $('d-margin-each').onchange = function () { marginEachFollows(); setDirty(true); };
+  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'd-scale', 'd-place', 'd-backdrop', 'd-margin', 'd-margin-top', 'd-margin-right', 'd-margin-bottom', 'd-margin-left', 'gain', 'decay', 'r-name', 'r-port', 'r-log', 'face-shown', 'face-buttons', 'test-releases', 'upload-install'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
   // A share of the theme's size below 100 shows it smaller, never fitted: Fit goes off and stays off while the share stands.
   function fitFollowsScale() {
     var s = parseInt($('d-scale').value, 10);
