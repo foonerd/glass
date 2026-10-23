@@ -19,15 +19,24 @@ echo "check: glibc"
 # it, even a weak one, makes the loader refuse the whole binary (the
 # standard library's process spawn brings two such). The release build
 # refuses such a binary (scripts/ship.sh); here the same is asked of this
-# machine's build, which shows it wherever this machine's glibc is newer
-# than the player's.
+# machine's build. The verdict is exact only where this machine's glibc is
+# 2.36 or older, the builder image's, which CI runs this check and the
+# ship gate in: a newer glibc versions functions of its own above 2.36
+# (log10f, atan2f and acosf at 2.43, for three), so a build on it refers
+# to them whatever the code does. There the symbols are listed, and the
+# verdict is the builder's.
 cargo build --locked -p glass
+host_glibc=$(getconf GNU_LIBC_VERSION 2>/dev/null | awk '{print $2}')
 newest=$(readelf -W --dyn-syms target/debug/glass | grep -o 'GLIBC_2\.[0-9]*' | sort -t. -k2,2n -u | tail -n1)
 case "$newest" in
   GLIBC_2.3[7-9]|GLIBC_2.[4-9]*|GLIBC_2.[1-9][0-9][0-9])
-    echo "check: the display refers to $newest, newer than Volumio's glibc 2.36:" >&2
-    readelf -W --dyn-syms target/debug/glass | grep "$newest" >&2
-    exit 1
+    if [ "$(printf '%s\n2.36\n' "${host_glibc:-2.36}" | sort -V | tail -n1)" = "2.36" ]; then
+      echo "check: the display refers to $newest, newer than Volumio's glibc 2.36:" >&2
+      readelf -W --dyn-syms target/debug/glass | grep "$newest" >&2
+      exit 1
+    fi
+    echo "check: this machine's glibc $host_glibc versions functions of its own above 2.36 ($newest); the verdict on Volumio's 2.36 is the builder's, where CI runs this check and the ship gate:"
+    readelf -W --dyn-syms target/debug/glass | grep "$newest" | awk '{print "  " $NF}'
     ;;
 esac
 
