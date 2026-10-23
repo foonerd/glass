@@ -225,6 +225,46 @@ pub enum WindowMode {
     Frameless,
 }
 
+/// Where a theme that does not fill the screen sits: the centre, an edge
+/// or a corner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "kebab-case")]
+pub enum Place {
+    #[default]
+    Center,
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+}
+
+/// What fills the screen where a smaller theme leaves it bare: what the
+/// player says for its own screen, a dark colour, or the album art blurred.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum BackdropChoice {
+    #[default]
+    Player,
+    Color,
+    Blur,
+}
+
+impl BackdropChoice {
+    /// Whether the album art is blurred behind the theme, given the
+    /// player's own word for its screen.
+    pub fn wanted(self, player_says: bool) -> bool {
+        match self {
+            BackdropChoice::Player => player_says,
+            BackdropChoice::Color => false,
+            BackdropChoice::Blur => true,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct Display {
     #[serde(default)]
@@ -235,6 +275,17 @@ pub struct Display {
     /// Scale the theme to the window, keeping its shape.
     #[serde(default = "default_true")]
     pub fit: bool,
+    /// The theme's size on the screen as a share of its own, a tenth to
+    /// 99 percent, never larger than itself; absent, pixel for pixel. A
+    /// share set turns `fit` off.
+    #[serde(default)]
+    pub scale: Option<u32>,
+    /// Where the theme sits when it does not fill the screen.
+    #[serde(default)]
+    pub place: Place,
+    /// What fills the screen where the theme leaves it bare.
+    #[serde(default)]
+    pub backdrop: BackdropChoice,
     /// A frame rate of this remote's own; the player's when absent.
     #[serde(default)]
     pub fps: Option<u32>,
@@ -253,6 +304,9 @@ impl Default for Display {
             mode: WindowMode::Fullscreen,
             position: None,
             fit: true,
+            scale: None,
+            place: Place::Center,
+            backdrop: BackdropChoice::Player,
             fps: None,
             monitor: 0,
         }
@@ -459,6 +513,15 @@ impl RemoteConfig {
         };
         if let Some(fps) = self.display.fps {
             self.display.fps = Some(fps.clamp(lead::MIN_FRAME_RATE, lead::MAX_FRAME_RATE));
+        }
+        // A share of the theme's size: within its bounds, 100 being no
+        // share at all; a share set shows the theme smaller, not fitted.
+        if let Some(scale) = self.display.scale {
+            let scale = scale.clamp(pane::MIN_SCALE_PERCENT, 100);
+            self.display.scale = (scale < 100).then_some(scale);
+            if scale < 100 {
+                self.display.fit = false;
+            }
         }
         self.players
             .retain(|id, p| !id.is_empty() && !p.host.trim().is_empty());
@@ -727,6 +790,65 @@ mod tests {
         assert!(config.check().is_err());
         config.players.get_mut("one").unwrap().host = "http://x".into();
         assert!(config.check().is_err());
+    }
+
+    #[test]
+    fn a_share_of_the_themes_size_turns_fit_off_and_stays_within_its_bounds() {
+        // The defaults: fitted, no share, centred, the player's word behind.
+        let d = Display::default();
+        assert!(d.fit && d.scale.is_none());
+        assert_eq!(
+            (d.place, d.backdrop),
+            (Place::Center, BackdropChoice::Player)
+        );
+        // A file without the new keys reads as the defaults.
+        let old: Display = serde_json::from_str(r#"{"mode":"fullscreen","fit":true}"#).unwrap();
+        assert_eq!(old, Display::default());
+        // The keys as the page writes them.
+        let set: Display = serde_json::from_str(
+            r#"{"mode":"fullscreen","fit":true,"scale":75,"place":"bottom-right","backdrop":"blur"}"#,
+        )
+        .unwrap();
+        assert_eq!(set.scale, Some(75));
+        assert_eq!(
+            (set.place, set.backdrop),
+            (Place::BottomRight, BackdropChoice::Blur)
+        );
+        let text = serde_json::to_string(&set).unwrap();
+        assert!(
+            text.contains("\"place\":\"bottom-right\"") && text.contains("\"backdrop\":\"blur\"")
+        );
+        // Tidied: a share below 100 turns fit off; 100 is no share; the bounds hold.
+        let mut c = RemoteConfig {
+            display: set,
+            ..Default::default()
+        };
+        c.tidy();
+        assert_eq!(c.display.scale, Some(75));
+        assert!(
+            !c.display.fit,
+            "a share set shows the theme smaller, not fitted"
+        );
+        c.display.scale = Some(100);
+        c.display.fit = true;
+        c.tidy();
+        assert_eq!(c.display.scale, None);
+        assert!(c.display.fit, "100 is no share: fit stays as set");
+        c.display.scale = Some(250);
+        c.tidy();
+        assert_eq!(c.display.scale, None);
+        c.display.scale = Some(3);
+        c.tidy();
+        assert_eq!(c.display.scale, Some(pane::MIN_SCALE_PERCENT));
+        assert!(!c.display.fit);
+    }
+
+    #[test]
+    fn the_backdrop_follows_the_player_unless_this_remote_says_otherwise() {
+        assert!(BackdropChoice::Player.wanted(true));
+        assert!(!BackdropChoice::Player.wanted(false));
+        assert!(!BackdropChoice::Color.wanted(true));
+        assert!(BackdropChoice::Blur.wanted(false));
     }
 
     #[test]

@@ -8,10 +8,10 @@ use std::time::{Duration, Instant};
 use intake::remote::{frames_address, Beacon, Choice, NetHops, Sync, DEFAULT_BEACON_PORT};
 use intake::{Overrides, RemoteHello, TapSource};
 use lead::SkinDesc;
-use pane::{Shown, Surface, WindowMode, WindowOptions};
+use pane::{Anchor, Shown, Surface, WindowMode, WindowOptions};
 use std::process::ExitCode;
 
-use super::config::{Player, RemoteConfig, ThemeChoice, WindowMode as ConfiguredMode};
+use super::config::{Place, Player, RemoteConfig, ThemeChoice, WindowMode as ConfiguredMode};
 use super::RemoteApp;
 use crate::{session, Outcome, Run};
 
@@ -67,7 +67,10 @@ fn window_options_of(display: &super::config::Display, title: String) -> WindowO
     WindowOptions {
         mode,
         position: display.position,
-        fit: display.fit,
+        // A share of the theme's size shows it smaller, never fitted.
+        fit: display.fit && display.scale.is_none(),
+        scale: display.scale.unwrap_or(100),
+        anchor: anchor_of(display.place),
         pointer: mode != WindowMode::Fullscreen,
         keys: true,
         title,
@@ -80,12 +83,34 @@ fn window_options_of(display: &super::config::Display, title: String) -> WindowO
     }
 }
 
+/// Where the settings' place puts the theme in the window.
+fn anchor_of(place: Place) -> Anchor {
+    match place {
+        Place::Center => Anchor::Center,
+        Place::TopLeft => Anchor::TopLeft,
+        Place::Top => Anchor::Top,
+        Place::TopRight => Anchor::TopRight,
+        Place::Left => Anchor::Left,
+        Place::Right => Anchor::Right,
+        Place::BottomLeft => Anchor::BottomLeft,
+        Place::Bottom => Anchor::Bottom,
+        Place::BottomRight => Anchor::BottomRight,
+    }
+}
+
 impl RemoteSession {
     pub fn window_options(&self) -> WindowOptions {
         window_options_of(
             &self.app.config().display,
             format!("Glass Remote: {}", self.beacon.name),
         )
+    }
+
+    /// Whether the album art is blurred behind a theme that leaves the
+    /// screen bare: this remote's own word, or the player's for its own
+    /// screen when the remote has none.
+    pub fn backdrop_wanted(&self, player_says: bool) -> bool {
+        self.app.config().display.backdrop.wanted(player_says)
     }
 
     /// The source for a session: the frames over the wire, the channel over TCP.

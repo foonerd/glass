@@ -67,6 +67,13 @@ pub struct WindowOptions {
     /// Scale the frame to the window, keeping its shape, instead of
     /// showing it pixel for pixel: a theme larger or smaller than the screen fills it.
     pub fit: bool,
+    /// Not fitted, the frame's size as a share of its own, [`MIN_SCALE_PERCENT`]
+    /// to 100 percent: a theme shown smaller than it is, never larger, so
+    /// nothing is drawn jagged. A window that is not full screen is made
+    /// at that size.
+    pub scale: u32,
+    /// Not fitted, where the frame sits in a window it does not fill.
+    pub anchor: Anchor,
     /// Show the pointer.
     pub pointer: bool,
     /// Escape or Q closes the window.
@@ -92,6 +99,8 @@ impl Default for WindowOptions {
             mode: WindowMode::Fullscreen,
             position: None,
             fit: false,
+            scale: 100,
+            anchor: Anchor::Center,
             pointer: false,
             keys: false,
             title: "Glass".to_string(),
@@ -105,6 +114,88 @@ impl Default for WindowOptions {
 
 /// The matrix that changes nothing.
 pub const IDENTITY: [f32; 6] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+
+/// The smallest share of its own size a frame is shown at.
+pub const MIN_SCALE_PERCENT: u32 = 10;
+
+/// Where a frame that does not fill its window sits: the centre, an edge
+/// or a corner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Anchor {
+    #[default]
+    Center,
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+}
+
+/// A frame's end of one axis: at the start, in the middle, at the end.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Side {
+    Near,
+    Middle,
+    Far,
+}
+
+impl Anchor {
+    fn across(self) -> Side {
+        match self {
+            Anchor::TopLeft | Anchor::Left | Anchor::BottomLeft => Side::Near,
+            Anchor::Top | Anchor::Center | Anchor::Bottom => Side::Middle,
+            Anchor::TopRight | Anchor::Right | Anchor::BottomRight => Side::Far,
+        }
+    }
+
+    fn down(self) -> Side {
+        match self {
+            Anchor::TopLeft | Anchor::Top | Anchor::TopRight => Side::Near,
+            Anchor::Left | Anchor::Center | Anchor::Right => Side::Middle,
+            Anchor::BottomLeft | Anchor::Bottom | Anchor::BottomRight => Side::Far,
+        }
+    }
+}
+
+/// A frame's size at a share of its own, the share kept within
+/// [`MIN_SCALE_PERCENT`] and 100.
+pub fn scaled_size(frame: (u32, u32), percent: u32) -> (u32, u32) {
+    let scale = percent.clamp(MIN_SCALE_PERCENT, 100) as f32 / 100.0;
+    (
+        (frame.0.max(1) as f32 * scale).round().max(1.0) as u32,
+        (frame.1.max(1) as f32 * scale).round().max(1.0) as u32,
+    )
+}
+
+/// Where a frame shown at a share of its own size goes in a window: that
+/// share both ways, never larger than itself, with its top left at
+/// `placement`, else where the anchor puts it; and the scale it took. At
+/// 100 and centred this is the frame pixel for pixel in the middle.
+pub fn placed_rect(
+    frame: (u32, u32),
+    window: (u32, u32),
+    placement: Option<(i32, i32)>,
+    percent: u32,
+    anchor: Anchor,
+) -> (i32, i32, u32, u32, f32) {
+    let scale = percent.clamp(MIN_SCALE_PERCENT, 100) as f32 / 100.0;
+    let (w, h) = scaled_size(frame, percent);
+    let along = |side: Side, room: u32, size: u32| -> i32 {
+        match side {
+            Side::Near => 0,
+            Side::Middle => (room as i32 - size as i32) / 2,
+            Side::Far => room as i32 - size as i32,
+        }
+    };
+    let (x, y) = placement.unwrap_or((
+        along(anchor.across(), window.0, w),
+        along(anchor.down(), window.1, h),
+    ));
+    (x, y, w, h, scale)
+}
 
 /// One window. The binary keeps it for the life of the player, with one
 /// streaming texture the frames are uploaded into.
@@ -123,6 +214,9 @@ pub struct Surface {
     /// Where the frame's top left goes; `None` centres it in the window.
     placement: Option<(i32, i32)>,
     fit: bool,
+    /// Not fitted, the frame's share of its own size and where it sits.
+    scale: u32,
+    anchor: Anchor,
     keys: bool,
     /// What draws the frames: the video driver the window opened on, the
     /// renderer's name, and whether it draws in software.
@@ -258,7 +352,11 @@ impl Surface {
     /// on; windowed shows the frame at its size, centred, with a frame;
     /// frameless the same without one.
     pub fn set_mode(&mut self, mode: WindowMode) -> Result<(), String> {
-        let (width, height) = self.frame_size;
+        let (width, height) = if self.fit {
+            self.frame_size
+        } else {
+            scaled_size(self.frame_size, self.scale)
+        };
         let window = self.canvas.window_mut();
         match mode {
             WindowMode::Fullscreen => {
@@ -282,11 +380,11 @@ impl Surface {
     }
 
     /// Keep a pointer event in frame pixels: the frame's offset comes off,
-    /// and a fitted frame's scale.
+    /// and the scale a fitted or a smaller-shown frame took.
     fn push_pointer(&mut self, kind: PointerKind, x: i32, y: i32) {
         let (x, y) = unrotate_point((x, y), self.rotation, self.last_window);
         let (x, y) = (x - self.last_offset.0, y - self.last_offset.1);
-        let (x, y) = if self.fit && self.last_scale > 0.0 {
+        let (x, y) = if self.last_scale > 0.0 && self.last_scale != 1.0 {
             (
                 (x as f32 / self.last_scale).round() as i32,
                 (y as f32 / self.last_scale).round() as i32,
@@ -353,7 +451,14 @@ impl Surface {
             ));
         }
         let (width, height) = (width.max(1), height.max(1));
-        let mut builder = video.window(&options.title, width, height);
+        // A window that is not full screen is the frame's size, or the
+        // size the frame is shown at when it is shown smaller.
+        let (made_w, made_h) = if options.fit {
+            (width, height)
+        } else {
+            scaled_size((width, height), options.scale)
+        };
+        let mut builder = video.window(&options.title, made_w, made_h);
         // Centred on the chosen screen; a full screen window takes that screen.
         let centred = (sdl2::sys::SDL_WINDOWPOS_CENTERED_MASK | options.display.min(15)) as i32;
         match options.mode {
@@ -418,6 +523,8 @@ impl Surface {
             pump,
             placement: None,
             fit: options.fit,
+            scale: options.scale.clamp(MIN_SCALE_PERCENT, 100),
+            anchor: options.anchor,
             keys: options.keys,
             driver,
             renderer,
@@ -641,13 +748,14 @@ impl Surface {
         }
         self.frame_size = (width, height);
         if !self.fit {
+            let (made_w, made_h) = scaled_size((width, height), self.scale);
             let window = self.canvas.window_mut();
             if (window.window_flags()
                 & sdl2::sys::SDL_WindowFlags::SDL_WINDOW_FULLSCREEN_DESKTOP as u32)
                 == 0
             {
                 window
-                    .set_size(width, height)
+                    .set_size(made_w, made_h)
                     .map_err(|err| err.to_string())?;
             }
         }
@@ -802,11 +910,13 @@ impl Surface {
                 self.placement,
             )
         } else {
-            let (x, y) = self.placement.unwrap_or((
-                (logical_w as i32 - frame.width as i32) / 2,
-                (logical_h as i32 - frame.height as i32) / 2,
-            ));
-            (x, y, frame.width, frame.height, 1.0)
+            placed_rect(
+                (frame.width, frame.height),
+                (logical_w, logical_h),
+                self.placement,
+                self.scale,
+                self.anchor,
+            )
         };
         self.last_offset = (x, y);
         self.last_scale = scale;
@@ -996,8 +1106,8 @@ pub fn write_ppm(path: impl AsRef<Path>, frame: &Frame) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        asked_for, finger_pixel, fitted_rect, keep_mouse, kms, rotated_center, shows_nothing,
-        through, unrotate_point, IDENTITY, TOUCH_MOUSEID,
+        asked_for, finger_pixel, fitted_rect, keep_mouse, kms, placed_rect, rotated_center,
+        scaled_size, shows_nothing, through, unrotate_point, Anchor, IDENTITY, TOUCH_MOUSEID,
     };
 
     fn connector(name: &str, status: &str) -> (String, String) {
@@ -1105,6 +1215,71 @@ mod tests {
     /// A 1024x600 frame on a 1280x720 screen fills the height at 1.2 and
     /// sits centred with a bar each side, or where a placement says; a
     /// tall frame fills the height and keeps its shape.
+    #[test]
+    fn a_frame_shown_smaller_keeps_its_shape_and_sits_where_the_anchor_says() {
+        // At 100 and centred: the frame pixel for pixel in the middle, as before.
+        assert_eq!(
+            placed_rect((1024, 600), (1280, 720), None, 100, Anchor::Center),
+            (128, 60, 1024, 600, 1.0)
+        );
+        // A placement given beats the anchor, as it does for a fitted frame.
+        assert_eq!(
+            placed_rect(
+                (1024, 600),
+                (1280, 720),
+                Some((5, 7)),
+                100,
+                Anchor::BottomRight
+            ),
+            (5, 7, 1024, 600, 1.0)
+        );
+        // Three quarters, bottom right: the frame scaled both ways, against both edges.
+        assert_eq!(
+            placed_rect((1920, 1080), (1920, 1080), None, 75, Anchor::BottomRight),
+            (480, 270, 1440, 810, 0.75)
+        );
+        assert_eq!(
+            placed_rect((1920, 1080), (1920, 1080), None, 50, Anchor::TopLeft),
+            (0, 0, 960, 540, 0.5)
+        );
+        assert_eq!(
+            placed_rect((1920, 1080), (1920, 1080), None, 50, Anchor::Top),
+            (480, 0, 960, 540, 0.5)
+        );
+        assert_eq!(
+            placed_rect((1920, 1080), (1920, 1080), None, 50, Anchor::Left),
+            (0, 270, 960, 540, 0.5)
+        );
+        assert_eq!(
+            placed_rect((1920, 1080), (1920, 1080), None, 50, Anchor::Right),
+            (960, 270, 960, 540, 0.5)
+        );
+        assert_eq!(
+            placed_rect((1920, 1080), (1920, 1080), None, 50, Anchor::Bottom),
+            (480, 540, 960, 540, 0.5)
+        );
+        assert_eq!(
+            placed_rect((1920, 1080), (1920, 1080), None, 50, Anchor::BottomLeft),
+            (0, 540, 960, 540, 0.5)
+        );
+        assert_eq!(
+            placed_rect((1920, 1080), (1920, 1080), None, 50, Anchor::TopRight),
+            (960, 0, 960, 540, 0.5)
+        );
+        // The share is kept within its bounds: never larger than the frame, never below a tenth.
+        assert_eq!(
+            placed_rect((1000, 500), (4000, 2000), None, 250, Anchor::Center).2,
+            1000
+        );
+        assert_eq!(scaled_size((1000, 500), 3), (100, 50));
+        assert_eq!(scaled_size((1000, 500), 85), (850, 425));
+        // A frame larger than the window at 100 sits past the window's edges, centred, as before.
+        assert_eq!(
+            placed_rect((1920, 1080), (1280, 720), None, 100, Anchor::Center),
+            (-320, -180, 1920, 1080, 1.0)
+        );
+    }
+
     #[test]
     fn a_fitted_frame_fills_one_way_and_keeps_its_shape() {
         assert_eq!(

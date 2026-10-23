@@ -52,6 +52,10 @@ pub struct Status {
     pub monitors: Vec<MonitorInfo>,
     /// Whether the face this display carries is drawn in this session.
     pub face_shown: bool,
+    /// What fills the screen where the theme leaves it bare, as this session
+    /// resolved it: "the album art blurred" or "a dark colour"; empty before
+    /// the first frame.
+    pub backdrop: String,
     /// What draws the frames, once the window opened: the video driver, the
     /// renderer, and whether it draws in software.
     pub driver: String,

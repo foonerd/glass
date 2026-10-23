@@ -878,8 +878,10 @@ fn session(
     // What lay over the theme on the frame before this one.
     let mut was_over = Over::default();
     // The album art blurred behind a theme that leaves part of the screen
-    // bare, when the player asks for it: made once per track and screen size.
+    // bare, when the player asks for it, or a remote for itself: made once
+    // per track and screen size. A remote's page says which it got.
     let mut backdrop = expose::Backdrop::default();
+    let mut backdrop_said: Option<bool> = None;
     // The panel's power: the player's word, the face's idle black, a touch.
     let mut screen = screen::ScreenPower::default();
     let mut wake_screen = false;
@@ -1337,7 +1339,25 @@ fn session(
                         eprintln!("glass: window: {err}");
                     }
                 }
-                let art = if skin.run.backdrop {
+                // The player's word for its screen; a remote may have its own.
+                let blurred = match remote.as_deref() {
+                    Some(remote) => remote.backdrop_wanted(skin.run.backdrop),
+                    None => skin.run.backdrop,
+                };
+                if let Some(remote) = remote.as_deref() {
+                    if backdrop_said != Some(blurred) {
+                        backdrop_said = Some(blurred);
+                        remote.app.set_status(|s| {
+                            s.backdrop = if blurred {
+                                "the album art blurred"
+                            } else {
+                                "a dark colour"
+                            }
+                            .to_string();
+                        });
+                    }
+                }
+                let art = if blurred {
                     input.metadata.art_file.as_str()
                 } else {
                     ""
