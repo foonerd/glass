@@ -535,6 +535,18 @@ const CHECKS = [
       if (!m || !m.count) return null;
       return note('markup', 'DIAG_MARKUP_CLEARED', { count: m.count, services: (m.services || []).join(', ') || '-' });
     }
+  },
+  {
+    // The theme on show was picked by an edition tag rule for what plays,
+    // from the album name, the folder name or the source: worth knowing
+    // when the theme is not the one chosen on the Themes tab.
+    id: 'theme-rule', symptoms: ['look', 'other'],
+    run(f) {
+      const r = f.themeRule;
+      if (!r || !r.folder) return null;
+      const by = { album: 'the album name', folder: 'the folder name', source: 'the source' }[r.by] || r.by || '-';
+      return note('theme-rule', 'DIAG_THEME_RULE', { folder: r.folder, tag: r.tag || '-', by: by, home: r.home || '-' }, 'themes');
+    }
   }
 ];
 

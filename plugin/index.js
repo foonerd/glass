@@ -349,53 +349,10 @@ function meterRestartNow(cleanExit, ranMs) {
     return cleanExit || ranMs >= METER_CRASH_BACKOFF_MS;
 }
 
-// theme-tag-contract:start
-function lastEditionTag(text) {
-    var last = '';
-    var match;
-    var re = /\[([^\[\]]+)\]/g;
-    var source = String(text || '');
-    while ((match = re.exec(source))) {
-        last = match[1].trim();
-    }
-    return last;
-}
-
-function folderNameFromUri(uri) {
-    var path = String(uri || '').split('?')[0];
-    try { path = decodeURIComponent(path); } catch (e) {}
-    var parts = path.split('/').filter(function (part) { return part !== ''; });
-    if (parts.length < 2) return '';
-    return parts[parts.length - 2];
-}
-
-function parseThemeTagRules(text) {
-    var rules = [];
-    String(text || '').split(/\r?\n|,/).forEach(function (line) {
-        var eq = line.indexOf('=');
-        if (eq <= 0) return;
-        var tag = line.slice(0, eq).trim().toLowerCase();
-        var folder = line.slice(eq + 1).trim();
-        if (!tag || !folder) return;
-        if (folder.indexOf('/') !== -1 || folder.indexOf('..') !== -1) return;
-        rules.push({ tag: tag, folder: folder });
-    });
-    return rules;
-}
-
-// null: no rules, leave the theme alone. '': rules exist but nothing matched (use home).
-function themeFolderForEdition(album, uri, rulesText) {
-    var rules = parseThemeTagRules(rulesText);
-    if (!rules.length) return null;
-    var map = {};
-    rules.forEach(function (rule) { map[rule.tag] = rule.folder; });
-    var albumTag = lastEditionTag(album).toLowerCase();
-    if (albumTag && map[albumTag]) return map[albumTag];
-    var folderTag = lastEditionTag(folderNameFromUri(uri)).toLowerCase();
-    if (folderTag && map[folderTag]) return map[folderTag];
-    return '';
-}
-// theme-tag-contract:end
+// The edition tag rules live in manager/themerule.js, with their tests:
+// the tag in the album name, then in the folder, then the source the
+// music plays from.
+const themerule = require('./manager/themerule');
 
 // Settings backups live under DATA_DIR and survive uninstall and reinstall.
 // The file names inside a backup are the ones PeppyMeter Screensaver used,
@@ -1198,6 +1155,16 @@ Glass.prototype.searchAsk = function (value) {
 
 // What the player offers to browse, for the Manager's checks: the sources
 // of its own Browse page as the face would list them, counted and named.
+// The edition tag rule that picked the theme on show, for the sheet and
+// Find a problem: the folder, the tag and how it was found, with the home
+// theme; null where the theme on show is the chosen one.
+Glass.prototype.themeRuleFact = function () {
+    var self = this;
+    var pick = self.themeTagOverride && self.themeRulePick ? self.themeRulePick : null;
+    if (!pick) return null;
+    return { folder: pick.folder, tag: pick.tag, by: pick.by, home: String(self.config.get('activeFolder') || '') };
+};
+
 // A source sent names with web markup, cleared before they were shown:
 // counted since the backend started, with the services that did it, for
 // the Status tab and Find a problem.
@@ -5005,10 +4972,12 @@ Glass.prototype.applyThemeTag = function (state) {
   var self = this;
   if (!state) state = self._themeTagState;
   if (!state || !meterConfig || !meterConfig.current) return;
-  self._themeTagState = { album: state.album || '', uri: state.uri || '' };
+  self._themeTagState = { album: state.album || '', uri: state.uri || '', service: state.service || '' };
   var rulesText = '';
   try { rulesText = self.config.get('themeTagRules') || ''; } catch (e) { return; }
-  var picked = themeFolderForEdition(self._themeTagState.album, self._themeTagState.uri, rulesText);
+  var pick = themerule.pickTheme(self._themeTagState.album, self._themeTagState.uri, self._themeTagState.service, rulesText);
+  var picked = pick === null ? null : pick.folder;
+  self.themeRulePick = pick && pick.folder ? { folder: pick.folder, tag: pick.tag, by: pick.by } : null;
   if (picked === null) {
     self.themeTagOverride = false;
     return;
@@ -5023,6 +4992,7 @@ Glass.prototype.applyThemeTag = function (state) {
     if (!pickedOk) {
       self.logger.info(id + 'theme tag folder missing: ' + picked);
       target = home;
+      self.themeRulePick = null;
     }
   }
   if (!target || target === meterConfig.current[meterFolderStr]) {
@@ -6847,6 +6817,7 @@ Glass.prototype.statusInfo = function () {
         headless: self.config.get('headless') === true,
         timeout: parseInt(self.config.get('timeout'), 10) || 0,
         activeTheme: self.activeTheme(),
+        themeRule: self.themeRuleFact(),
         meter: self.meterSelection(),
         channel: {
             clients: self.channel ? self.channel.clients.length : 0,

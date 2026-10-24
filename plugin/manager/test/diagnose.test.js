@@ -462,6 +462,25 @@ test('the buttons hidden by the look, an install refused for the pair or failed,
     const s = require('../../i18n/strings_' + lang + '.json').GLASS;
     assert.ok(s.MANAGER_DIAG_MARKUP_CLEARED.indexOf('{count}') !== -1 && s.MANAGER_DIAG_MARKUP_CLEARED.indexOf('{services}') !== -1, lang);
   }
+  // The theme picked by an edition tag rule: a note under the look and something else, the Themes tab to go to; the chosen theme on show says nothing.
+  const ruled = healthy(); ruled.themeRule = { folder: '1280x720_radio', tag: 'radio', by: 'source', home: '1280x720_g5_705_meters' };
+  ['look', 'other'].forEach(function (s) {
+    const x = one(diagnose(s, ruled), 'theme-rule');
+    assert.strictEqual(x.key, 'DIAG_THEME_RULE', s);
+    assert.strictEqual(x.kind, 'note', s);
+    assert.strictEqual(x.go, 'themes', s);
+    assert.deepStrictEqual(x.with, { folder: '1280x720_radio', tag: 'radio', by: 'the source', home: '1280x720_g5_705_meters' });
+  });
+  assert.strictEqual(one(diagnose('browse', ruled), 'theme-rule'), undefined);
+  assert.strictEqual(one(diagnose('look', healthy()), 'theme-rule'), undefined);
+  const unruled = healthy(); unruled.themeRule = null;
+  assert.strictEqual(one(diagnose('look', unruled), 'theme-rule'), undefined);
+  for (const lang of ['en', 'de', 'fr']) {
+    const s = require('../../i18n/strings_' + lang + '.json').GLASS;
+    for (const slot of ['{folder}', '{tag}', '{by}', '{home}']) assert.ok(s.MANAGER_DIAG_THEME_RULE.indexOf(slot) !== -1, lang + ' ' + slot);
+    for (const key of ['MANAGER_ST_THEME_RULE', 'MANAGER_ST_THEME_RULE_ALBUM', 'MANAGER_ST_THEME_RULE_FOLDER', 'MANAGER_ST_THEME_RULE_SOURCE']) assert.ok(s[key], lang + ' ' + key);
+    assert.ok(s.THEME_TAG_RULES_DOC.indexOf('Radio') !== -1 && s.THEME_TAG_RULES_DOC.indexOf('YouTube') !== -1, lang + ' help names the sources');
+  }
   // Nothing to browse is the player's own: a cause with no tab to go to; sources that could not be read say nothing.
   const empty = healthy(); empty.browse = { count: 0, names: [] };
   const none = one(diagnose('browse', empty), 'sources');

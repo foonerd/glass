@@ -275,6 +275,7 @@ class Manager {
         held: self.held.summary(),
         browse: safe(() => self.plugin.browseSourcesFact(), null),
         markup: safe(() => self.plugin.markupFact(), null),
+        themeRule: safe(() => self.plugin.themeRuleFact(), null),
         page: { module: page && typeof page.module === 'string' ? page.module.slice(0, 32) : null }
       };
     };
