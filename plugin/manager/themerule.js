@@ -2,7 +2,9 @@
 // The edition tag rules: at the start of playback, a tag picks a theme
 // folder. The tag is the last `[...]` in the album name, else in the
 // folder that holds the file; where the name carries none, the source the
-// music plays from stands in as the tag, by a word of its own or by the
+// music plays from stands in as the tag, by a word of its own, by its
+// family's word (Radio for every radio plugin, Spotify for both ways it
+// plays, FM and DAB for the tuner by the station's address) or by the
 // service id the player reports, so a web radio stream or a YouTube video,
 // which have no folder of the listener's making, can pick a theme too. A
 // tag written in the name wins over the source. The rules are one line,
@@ -10,19 +12,28 @@
 // without regard to case; a folder with a slash or a `..` is refused.
 
 // The word each source answers to, by the service id the player reports.
-// A source not here answers to its id itself.
+// A source not here answers to its id itself, and to a family word where
+// it belongs to one (see `sourceTags`).
 const SOURCE_WORDS = {
   webradio: 'radio',
+  rtlsdr_radio: 'radio',
+  rad357pl: 'radio',
   youtube2: 'youtube',
   ytmusic: 'youtubemusic',
   spop: 'spotify',
+  soloist_connect: 'spotify',
   bandcamp: 'bandcamp',
   soundcloud: 'soundcloud',
   mixcloud: 'mixcloud',
   jellyfin: 'jellyfin',
+  podcast: 'podcast',
   airplay_emulation: 'airplay',
   mpd: 'local'
 };
+
+// The tuner plugin plays FM and DAB alike; the station's address tells
+// which: `rtlsdr://fm/...` or `rtlsdr://dab/...`.
+const TUNER = 'rtlsdr_radio';
 
 // The last `[tag]` in a name, '' for none; what follows the bracket is ignored.
 function lastEditionTag(text) {
@@ -62,13 +73,24 @@ function parseThemeTagRules(text) {
   return rules;
 }
 
-// The words a playing source answers to: its own word where it has one,
-// and the service id as the player reports it; none for no service.
-function sourceTags(service) {
+// The words a playing source answers to, the most particular first: FM or
+// DAB for the tuner by the station's address; the source's own word; the
+// family word Radio for every service whose id carries "radio"; and the
+// service id as the player reports it. None for no service.
+function sourceTags(service, uri) {
   const id = String(service || '').trim().toLowerCase();
   if (!id) return [];
-  const word = SOURCE_WORDS[id];
-  return word && word !== id ? [word, id] : [id];
+  const words = [];
+  const add = (w) => { if (w && words.indexOf(w) === -1) words.push(w); };
+  if (id === TUNER) {
+    const address = String(uri || '').trim().toLowerCase();
+    if (address.indexOf('rtlsdr://fm') === 0) add('fm');
+    if (address.indexOf('rtlsdr://dab') === 0) add('dab');
+  }
+  add(SOURCE_WORDS[id]);
+  if (id.indexOf('radio') !== -1) add('radio');
+  add(id);
+  return words;
 }
 
 // What the rules pick for what plays: `null` with no rules at all; else
@@ -84,7 +106,7 @@ function pickTheme(album, uri, service, rulesText) {
   if (albumTag && map[albumTag]) return { folder: map[albumTag], tag: albumTag, by: 'album' };
   const folderTag = lastEditionTag(folderNameFromUri(uri)).toLowerCase();
   if (folderTag && map[folderTag]) return { folder: map[folderTag], tag: folderTag, by: 'folder' };
-  const words = sourceTags(service);
+  const words = sourceTags(service, uri);
   for (let i = 0; i < words.length; i += 1) {
     if (map[words[i]]) return { folder: map[words[i]], tag: words[i], by: 'source' };
   }

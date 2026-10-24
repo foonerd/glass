@@ -37,18 +37,43 @@ test('the rules parse by commas or new lines, the word lowercase, a folder that 
   assert.deepStrictEqual(parseThemeTagRules(null), []);
 });
 
-test('a source answers to its word and to its id; one without a word to its id alone', () => {
+test('a source answers to its word, its family and its id, the most particular first; one without a word to its id alone', () => {
   assert.deepStrictEqual(sourceTags('webradio'), ['radio', 'webradio']);
   assert.deepStrictEqual(sourceTags('youtube2'), ['youtube', 'youtube2']);
   assert.deepStrictEqual(sourceTags('ytmusic'), ['youtubemusic', 'ytmusic']);
-  assert.deepStrictEqual(sourceTags('spop'), ['spotify', 'spop']);
   assert.deepStrictEqual(sourceTags('airplay_emulation'), ['airplay', 'airplay_emulation']);
   assert.deepStrictEqual(sourceTags('mpd'), ['local', 'mpd']);
   assert.deepStrictEqual(sourceTags('Bandcamp'), ['bandcamp'], 'a word that is the id is said once');
+  assert.deepStrictEqual(sourceTags('podcast'), ['podcast']);
   assert.deepStrictEqual(sourceTags('tidal'), ['tidal']);
+  // Spotify plays under two ids: the Spotify plugin and Soloist Connect.
+  assert.deepStrictEqual(sourceTags('spop'), ['spotify', 'spop']);
+  assert.deepStrictEqual(sourceTags('soloist_connect'), ['spotify', 'soloist_connect']);
+  // Radio is a family: every plugin whose id carries the word, Radio 357 named since its id does not.
+  ['radio_paradise', 'radio_browser', 'radio_fip', 'radio_france', 'personal_radio', 'calmradio', 'controradio', 'jp_radio', 'motherearthradio'].forEach((id) => {
+    assert.deepStrictEqual(sourceTags(id), ['radio', id], id);
+  });
+  assert.deepStrictEqual(sourceTags('rad357pl'), ['radio', 'rad357pl']);
+  // The tuner: FM or DAB by the station's address, then Radio, then its id.
+  assert.deepStrictEqual(sourceTags('rtlsdr_radio', 'rtlsdr://fm/101.1'), ['fm', 'radio', 'rtlsdr_radio']);
+  assert.deepStrictEqual(sourceTags('rtlsdr_radio', 'rtlsdr://dab/12B/BBC%20Radio%204'), ['dab', 'radio', 'rtlsdr_radio']);
+  assert.deepStrictEqual(sourceTags('rtlsdr_radio', 'rtlsdr://favorites'), ['radio', 'rtlsdr_radio'], 'an address that names neither');
+  assert.deepStrictEqual(sourceTags('rtlsdr_radio'), ['radio', 'rtlsdr_radio']);
+  assert.deepStrictEqual(sourceTags('webradio', 'rtlsdr://fm/1'), ['radio', 'webradio'], 'the address counts for the tuner alone');
   assert.deepStrictEqual(sourceTags(''), []);
   assert.deepStrictEqual(sourceTags(undefined), []);
   Object.keys(SOURCE_WORDS).forEach((id) => assert.strictEqual(SOURCE_WORDS[id], SOURCE_WORDS[id].toLowerCase(), id));
+});
+
+test('the families pick: FM before Radio before the id, Spotify for both ways it plays, a radio plugin by the family word', () => {
+  const rules = 'Radio=1280x720_radio, FM=1280x720_fm, Spotify=1280x720_spot, rtlsdr_radio=1280x720_tuner';
+  assert.deepStrictEqual(pickTheme('', 'rtlsdr://fm/101.1', 'rtlsdr_radio', rules), { folder: '1280x720_fm', tag: 'fm', by: 'source' });
+  assert.deepStrictEqual(pickTheme('', 'rtlsdr://dab/12B/x', 'rtlsdr_radio', rules), { folder: '1280x720_radio', tag: 'radio', by: 'source' }, 'no DAB rule: the family word');
+  assert.deepStrictEqual(pickTheme('', 'rtlsdr://dab/12B/x', 'rtlsdr_radio', 'rtlsdr_radio=1280x720_tuner'), { folder: '1280x720_tuner', tag: 'rtlsdr_radio', by: 'source' }, 'no word rule: the id');
+  assert.deepStrictEqual(pickTheme('', 'http://x', 'radio_paradise', rules).folder, '1280x720_radio');
+  assert.deepStrictEqual(pickTheme('', 'spotify:track:1', 'soloist_connect', rules).folder, '1280x720_spot');
+  assert.deepStrictEqual(pickTheme('', 'spotify:track:1', 'spop', rules).folder, '1280x720_spot');
+  assert.deepStrictEqual(pickTheme('Show [Vinyl]', 'rtlsdr://fm/1', 'rtlsdr_radio', rules + ', Vinyl=1280x720_vinyl').by, 'album', 'a tag in the name still wins');
 });
 
 test('the pick: the album tag first, then the folder tag, then the source; a tag in the name wins over the source', () => {
