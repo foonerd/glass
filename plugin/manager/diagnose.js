@@ -523,6 +523,18 @@ const CHECKS = [
       if (!b || typeof b.count !== 'number') return null;
       return b.count ? ok('sources', 'DIAG_SOURCES', { count: b.count, names: (b.names || []).join(', ') }) : cause('sources', 'DIAG_NO_SOURCES');
     }
+  },
+  {
+    // A source that writes web markup into its names, for the player's
+    // classic interface to render: Glass clears it where the names enter,
+    // so the lists and the theme show the words alone. Worth knowing when
+    // a name looks odd, not a cause.
+    id: 'markup', symptoms: ['browse', 'look', 'other'],
+    run(f) {
+      const m = f.markup;
+      if (!m || !m.count) return null;
+      return note('markup', 'DIAG_MARKUP_CLEARED', { count: m.count, services: (m.services || []).join(', ') || '-' });
+    }
   }
 ];
 

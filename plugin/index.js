@@ -25,6 +25,7 @@ const { FaceFeed } = require('./manager/facefeed');
 const { advanced } = require('./manager/statenow');
 const screenpower = require('./manager/screenpower');
 const browse = require('./manager/browse');
+const plaintext = require('./manager/plaintext');
 const screenprobe = require('./manager/screenprobe');
 const playerfacts = require('./manager/playerfacts');
 const screenowner = require('./manager/screenowner');
@@ -1197,6 +1198,13 @@ Glass.prototype.searchAsk = function (value) {
 
 // What the player offers to browse, for the Manager's checks: the sources
 // of its own Browse page as the face would list them, counted and named.
+// A source sent names with web markup, cleared before they were shown:
+// counted since the backend started, with the services that did it, for
+// the Status tab and Find a problem.
+Glass.prototype.markupFact = function () {
+    return plaintext.markupFact();
+};
+
 Glass.prototype.browseSourcesFact = function () {
     var list = this.commandRouter.volumioGetVisibleBrowseSources() || [];
     var items = browse.sources(list, 0).items;
@@ -1612,6 +1620,10 @@ Glass.prototype.onStart = function () {
             self.logger.warn(id + 'pushState: no status');
             return;
         }
+        // The names made plain where they enter: a source's markup gone
+        // from the title, the artist and the album, on a copy, and counted
+        // for the Status tab and Find a problem.
+        state = plaintext.state(state).state;
         self.lastState = state;
         // The player's word on the favourites follows every state push; the
         // first after a start is asked for, the word before it having gone by.

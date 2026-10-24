@@ -1103,6 +1103,7 @@
     "MANAGER_DIAG_HELD_EVO": "glass-evo {version}, per Datei gebracht, wird auf dem Player behalten: Es braucht Glass {needs} oder neuer, das hier nicht läuft; es ist also noch nicht installiert. Wählen Sie auf dem System-Tab dieses Glass-Zip im Dateifeld, und beide gehen zusammen hinein, aktualisieren Sie Glass dort, und das behaltene Zip geht mit hinein, oder verwerfen Sie es.",
     "MANAGER_DIAG_SOURCES": "Der Player bietet {count} Quellen zum Stöbern: {names}.",
     "MANAGER_DIAG_NO_SOURCES": "Der Player bietet nichts zum Stöbern: seine eigene Seite Stöbern führt keine Quellen, also führt das Gesicht keine. Die Musikdienste und die Bibliothek werden in Volumios eigenen Einstellungen gesetzt; ein Player, dessen Bibliothek nicht eingelesen wurde oder dessen Dienste alle aus sind, zeigt dort dasselbe.",
+    "MANAGER_DIAG_MARKUP_CLEARED": "Namen von {services} kamen mit Web-Markup, das diese Quelle für die klassische Oberfläche des Players schreibt; Glass hat es vor dem Anzeigen entfernt ({count} Namen seit dem Start des Backends), sodass ein Kennzeichen-Wort, ein Symbol oder ein farbiger Abschnitt nie als Text erscheint. Ein Name, der trotzdem seltsam aussieht, ist so, wie die Quelle ihn geschickt hat.",
     "MANAGER_OWNER_OWN_X": "es hat einen eigenen X-Server gestartet",
     "MANAGER_OWNER_NO_SCREEN": "Dieser Player hat keinen Bildschirm, auf den glass-evo selbst zeichnen kann: Sein Bild kommt nur über den Kiosk. Der Kiosk bleibt hier die Oberfläche.",
     "MANAGER_VIEWS": "Der Face-Tab und Anymote zeigen",

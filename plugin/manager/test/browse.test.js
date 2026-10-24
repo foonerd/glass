@@ -83,6 +83,30 @@ test('an item without a title is named by its album, its artist or the last part
   assert.equal(itemOf({ type: 'song', uri: 's', albumart: '/albumart?path=own' }, '/albumart?web=c').art, '/albumart?path=own', 'its own first');
 });
 
+test("a source's markup is cleared from names, and a badge before a name gives a folder its icon", () => {
+  const nav = { lists: [{ title: '<span style="color: #7a848e;">My Purse</span>', items: [
+    { service: 'bandcamp', type: 'folder', title: "<span style='color: #999; font-size: 10px; padding-right: 8px;'>TRACK</span>Shadow of the Day", artist: 'Automatic &amp; Co', uri: 'bandcamp/track/1' },
+    { service: 'bandcamp', type: 'folder', title: "<span style='color: #999; font-size: 10px; padding-right: 8px;'>ALBUM</span>Tom Waits - Alice", uri: 'bandcamp/album/2', albumart: 'https://x/a.jpg' },
+    { service: 'bandcamp', type: 'song', title: 'TRACKMake It Better', uri: 'bandcamp/track/3' },
+    { service: 'mpd', type: 'song', title: 'TRACKS of Time', uri: 'music-library/x.flac' }
+  ] }, { title: 'Albums', items: [] }] };
+  const line = answer('bandcamp/purse', nav, 1, '<img src="/albumart?sourceicon=x" style="width: 23px;" />Purchases');
+  assert.strictEqual(line.title, 'Purchases');
+  assert.strictEqual(line.items[0].title, 'My Purse', 'a heading is made plain');
+  const [track, album, glued, other] = line.items.slice(1);
+  assert.strictEqual(track.title, 'Shadow of the Day');
+  assert.strictEqual(track.subtitle, 'Automatic & Co');
+  assert.strictEqual(track.icon, 'music', 'the badge gives a folder its icon');
+  assert.strictEqual(track.type, 'folder', 'what the player says the item is stands');
+  assert.strictEqual(album.title, 'Tom Waits - Alice');
+  assert.strictEqual(album.icon, 'disc-3');
+  assert.strictEqual(glued.title, 'Make It Better');
+  assert.strictEqual(other.title, 'TRACKS of Time', 'a name from another source is as sent');
+  assert.strictEqual(played(track).title, 'Shadow of the Day', 'what goes to the queue is the plain name');
+  const src = sources([{ name: '<i class="fa fa-cloud"></i>Bandcamp &amp; more', uri: 'bandcamp', plugin_name: 'bandcamp' }], 1);
+  assert.strictEqual(src.items[0].title, 'Bandcamp & more');
+});
+
 test('what a tap plays is the leaves of the list with the tapped place among them', () => {
   const items = [
     itemOf({ type: 'folder', title: 'F', uri: 'f', service: 'mpd' }),

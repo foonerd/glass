@@ -446,6 +446,22 @@ test('the buttons hidden by the look, an install refused for the pair or failed,
     for (const key of ['MANAGER_UPD_HELD_GLASS', 'MANAGER_UPD_HELD_EVO', 'MANAGER_ST_HELD_GLASS', 'MANAGER_ST_HELD_EVO']) assert.ok(s[key].indexOf('{version}') !== -1 && s[key].indexOf('{needs}') !== -1, lang + ' ' + key);
     for (const key of ['MANAGER_UPD_HELD_DISCARD', 'MANAGER_UPD_HELD_DISCARDED', 'MANAGER_ST_JOB_HELD']) assert.ok(s[key], lang + ' ' + key);
   }
+  // Names that came with a source's markup, cleared: a note under browsing, the look and something else; none cleared, nothing said.
+  const marked = healthy(); marked.markup = { count: 7, services: ['bandcamp', 'mixcloud'], at: '2026-10-24T10:00:00Z' };
+  ['browse', 'look', 'other'].forEach(function (s) {
+    const x = one(diagnose(s, marked), 'markup');
+    assert.strictEqual(x.key, 'DIAG_MARKUP_CLEARED', s);
+    assert.strictEqual(x.kind, 'note', s);
+    assert.deepStrictEqual(x.with, { count: 7, services: 'bandcamp, mixcloud' });
+  });
+  assert.strictEqual(one(diagnose('touch', marked), 'markup'), undefined);
+  const unmarked = healthy(); unmarked.markup = { count: 0, services: [], at: null };
+  assert.strictEqual(one(diagnose('browse', unmarked), 'markup'), undefined);
+  assert.strictEqual(one(diagnose('browse', healthy()), 'markup'), undefined);
+  for (const lang of ['en', 'de', 'fr']) {
+    const s = require('../../i18n/strings_' + lang + '.json').GLASS;
+    assert.ok(s.MANAGER_DIAG_MARKUP_CLEARED.indexOf('{count}') !== -1 && s.MANAGER_DIAG_MARKUP_CLEARED.indexOf('{services}') !== -1, lang);
+  }
   // Nothing to browse is the player's own: a cause with no tab to go to; sources that could not be read say nothing.
   const empty = healthy(); empty.browse = { count: 0, names: [] };
   const none = one(diagnose('browse', empty), 'sources');

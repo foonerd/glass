@@ -5,6 +5,8 @@
 // icon's name), what they are and whether they play by themselves. The
 // icons are Lucide's names; the faces draw them from their own data.
 
+const plaintext = require('./plaintext');
+
 // Lucide's names for the icon classes the player's lists carry.
 const FA_ICONS = {
   'folder-open-o': 'folder', 'folder-o': 'folder', folder: 'folder', 'folder-open': 'folder',
@@ -68,8 +70,8 @@ function artOf(item) {
 }
 
 function subtitleOf(item) {
-  const artist = text(item.artist);
-  const album = text(item.album);
+  const artist = plaintext.plain(item.artist);
+  const album = plaintext.plain(item.album);
   if (artist && album) return artist + ' · ' + album;
   return artist || album;
 }
@@ -79,7 +81,7 @@ function subtitleOf(item) {
 function fallbackTitle(item) {
   const uri = text(item.uri);
   const last = uri.split('/').filter((part) => part).pop() || uri;
-  return text(item.album) || text(item.artist) || decodeURIComponent(last);
+  return plaintext.plain(item.album) || plaintext.plain(item.artist) || decodeURIComponent(last);
 }
 
 // One item as a face draws it; `cover` is the list's own cover, worn by
@@ -89,11 +91,16 @@ function itemOf(item, cover) {
   const heading = type === 'title';
   const duration = Number(item.duration);
   const own = heading ? '' : artOf(item);
+  // The name made plain: a source's markup gone, a badge before the name
+  // kept as the icon where the item would wear a folder's.
+  const named = plaintext.name(text(item.title) || text(item.name), item.service);
+  const icon = heading ? '' : iconOf(item);
+  const badged = plaintext.badgeIcon(named.badge);
   return {
-    title: text(item.title) || text(item.name) || fallbackTitle(item),
+    title: named.text || fallbackTitle(item),
     subtitle: heading ? '' : subtitleOf(item),
     art: own || (LEAVES.has(type) ? text(cover) : ''),
-    icon: heading ? '' : iconOf(item),
+    icon: badged && icon === 'folder' ? badged : icon,
     uri: text(item.uri),
     service: text(item.service),
     type: type,
@@ -125,7 +132,7 @@ function sources(list, serial) {
   const items = (Array.isArray(list) ? list : [])
     .filter((s) => s && typeof s === 'object' && s.name !== undefined)
     .map((s) => ({
-      title: text(s.name),
+      title: plaintext.plain(s.name),
       subtitle: '',
       art: artOf(s),
       icon: faIcon(s.icon) || stockIcon(s.albumart) || sourceIcon(s),
@@ -152,12 +159,13 @@ function answer(uri, navigation, serial, title) {
   lists.forEach((list) => {
     if (!list || typeof list !== 'object') return;
     const entries = Array.isArray(list.items) ? list.items : [];
-    if (lists.length > 1 && text(list.title)) {
-      items.push({ title: text(list.title), subtitle: '', art: '', icon: '', uri: '', service: '', type: 'title', leaf: false, heading: true, duration: 0 });
+    const heading = plaintext.plain(list.title);
+    if (lists.length > 1 && heading) {
+      items.push({ title: heading, subtitle: '', art: '', icon: '', uri: '', service: '', type: 'title', leaf: false, heading: true, duration: 0 });
     }
     entries.forEach((item) => { if (item && typeof item === 'object') items.push(itemOf(item, cover)); });
   });
-  const name = text(title) || (info ? (info.title || text(nav.info.album)) : '');
+  const name = plaintext.plain(title) || (info ? (info.title || plaintext.plain(nav.info.album)) : '');
   return { kind: 'browse', uri: text(uri), title: name, prev: text(nav.prev && nav.prev.uri), info: info, items: items.slice(0, MOST), serial: serial | 0 };
 }
 
