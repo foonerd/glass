@@ -373,7 +373,7 @@
     "MANAGER_DISPLAY_MARGIN_RIGHT": "Droite",
     "MANAGER_DISPLAY_MARGIN_BOTTOM": "Bas",
     "MANAGER_DISPLAY_MARGIN_LEFT": "Gauche",
-    "MANAGER_DISPLAY_PLACE_HELP": "Échelle montre le thème à une part de sa propre taille, 10 à 99 pour cent, jamais plus grand ; une part sous 100 désactive Ajuster. Position place un thème qui ne remplit pas l'écran au centre, sur un bord ou dans un coin, ou à des X et Y à vous. Marge tient un thème placé à l'écart des bords contre lesquels sa position le met, comme part du petit côté de l'écran jusqu'à un quart, une part pour chaque bord ou chacun à part ; centré, il n'en tient aucune. Le reste de l'écran est la pochette floutée, si activée, sinon la couleur sombre.",
+    "MANAGER_DISPLAY_PLACE_HELP": "Échelle montre le thème à une part de sa propre taille, 10 à 99 pour cent, jamais plus grand ; une part sous 100 désactive Ajuster. Position place un thème qui ne remplit pas l'écran au centre, sur un bord ou dans un coin, ou à des X et Y à vous. Marge, comme part du petit côté de l'écran jusqu'à un quart, une part pour chaque bord ou chacun à part : ajusté, le thème remplit l'écran rétréci des marges, sa forme gardée, des marges égales le centrant et des marges inégales le décalant, si bien qu'un écran de toute taille est dimensionné et placé en pour cent ; placé, le thème se tient à l'écart des bords contre lesquels sa position le met, d'aucun quand il est centré. Le reste de l'écran est la pochette floutée, si activée, sinon la couleur sombre.",
     "MANAGER_PLACE_CENTER": "centré",
     "MANAGER_PLACE_TOP_LEFT": "en haut à gauche",
     "MANAGER_PLACE_TOP": "en haut",

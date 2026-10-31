@@ -1000,10 +1000,11 @@ impl Surface {
             (window_w, window_h)
         };
         let (x, y, w, h, scale) = if self.fit {
-            fitted_rect(
+            fitted_rect_within(
                 (frame.width, frame.height),
                 (logical_w, logical_h),
                 self.placement,
+                self.margins,
             )
         } else {
             placed_rect_within(
@@ -1113,14 +1114,33 @@ pub fn fitted_rect(
     window: (u32, u32),
     placement: Option<(i32, i32)>,
 ) -> (i32, i32, u32, u32, f32) {
+    fitted_rect_within(frame, window, placement, Margins::default())
+}
+
+/// [`fitted_rect`] with margins: the window inset by them, each a share
+/// of the window's shorter side, is the box the frame is fitted to and
+/// centred in; equal margins centre the frame on the window, unequal ones
+/// shift it. A placement given puts the top left there, as ever. Margins
+/// that would leave no box at all leave one of a pixel.
+pub fn fitted_rect_within(
+    frame: (u32, u32),
+    window: (u32, u32),
+    placement: Option<(i32, i32)>,
+    margins: Margins,
+) -> (i32, i32, u32, u32, f32) {
+    let margins = margins.clamped();
+    let shorter = window.0.min(window.1) as f32;
+    let px = |share: u32| -> i32 { (shorter * share as f32 / 100.0).round() as i32 };
+    let (left, top) = (px(margins.left), px(margins.top));
+    let bw = (window.0 as i32 - left - px(margins.right)).max(1) as u32;
+    let bh = (window.1 as i32 - top - px(margins.bottom)).max(1) as u32;
     let (fw, fh) = (frame.0.max(1) as f32, frame.1.max(1) as f32);
-    let (ww, wh) = (window.0.max(1) as f32, window.1.max(1) as f32);
-    let scale = (ww / fw).min(wh / fh);
+    let scale = (bw as f32 / fw).min(bh as f32 / fh);
     let w = (fw * scale).round().max(1.0) as u32;
     let h = (fh * scale).round().max(1.0) as u32;
     let (x, y) = placement.unwrap_or((
-        (window.0 as i32 - w as i32) / 2,
-        (window.1 as i32 - h as i32) / 2,
+        left + (bw as i32 - w as i32) / 2,
+        top + (bh as i32 - h as i32) / 2,
     ));
     (x, y, w, h, scale)
 }
@@ -1203,9 +1223,9 @@ pub fn write_ppm(path: impl AsRef<Path>, frame: &Frame) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        asked_for, finger_pixel, fitted_rect, keep_mouse, kms, placed_rect, placed_rect_within,
-        rotated_center, scaled_size, shows_nothing, through, unrotate_point, Anchor, Margins,
-        IDENTITY, MAX_MARGIN_PERCENT, TOUCH_MOUSEID,
+        asked_for, finger_pixel, fitted_rect, fitted_rect_within, keep_mouse, kms, placed_rect,
+        placed_rect_within, rotated_center, scaled_size, shows_nothing, through, unrotate_point,
+        Anchor, Margins, IDENTITY, MAX_MARGIN_PERCENT, TOUCH_MOUSEID,
     };
 
     fn connector(name: &str, status: &str) -> (String, String) {
@@ -1447,6 +1467,51 @@ mod tests {
             placed_rect_within(frame, screen, Some((5, 7)), 50, Anchor::TopLeft, m).0,
             5
         );
+    }
+
+    #[test]
+    fn a_fitted_frame_with_margins_fills_the_inset_box_and_shifts_with_them() {
+        // No margins: as fitted_rect.
+        assert_eq!(
+            fitted_rect_within((1024, 600), (1280, 720), None, Margins::default()),
+            fitted_rect((1024, 600), (1280, 720), None)
+        );
+        // Ten percent of 1080 is 108 off every edge: the box is 1704x864, the
+        // 16:9 frame fills its height and sits centred in its width.
+        assert_eq!(
+            fitted_rect_within((1920, 1080), (1920, 1080), None, Margins::all(10)),
+            (192, 108, 1536, 864, 0.8)
+        );
+        // Unequal margins shift the box: 20 at the top, none below, the frame sits lower.
+        let m = Margins {
+            top: 20,
+            right: 0,
+            bottom: 0,
+            left: 0,
+        };
+        let (x, y, w, h, _) = fitted_rect_within((1920, 1080), (1920, 1080), None, m);
+        assert_eq!(
+            (w, h),
+            (1536, 864),
+            "the box is 1920 by 864: the height binds"
+        );
+        assert_eq!((x, y), ((1920 - 1536) / 2, 216));
+        // A frame of another shape in the inset box: the width binds, centred in the box's height.
+        let (x, y, w, h, _) = fitted_rect_within((600, 1024), (1280, 720), None, Margins::all(5));
+        assert_eq!(
+            (w, h),
+            (380, 648),
+            "the box is 1208 by 648: the height binds {w}x{h}"
+        );
+        assert_eq!((x, y), (36 + (1208 - 380) / 2, 36));
+        // A placement given beats the margins.
+        assert_eq!(
+            fitted_rect_within((1024, 600), (1280, 720), Some((3, 4)), Margins::all(10)).0,
+            3
+        );
+        // Margins that eat the window leave a box of a pixel, not a panic.
+        let (_, _, w, h, _) = fitted_rect_within((1024, 600), (10, 10), None, Margins::all(25));
+        assert!(w >= 1 && h >= 1);
     }
 
     #[test]

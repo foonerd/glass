@@ -373,7 +373,7 @@
     "MANAGER_DISPLAY_MARGIN_RIGHT": "Rechts",
     "MANAGER_DISPLAY_MARGIN_BOTTOM": "Unten",
     "MANAGER_DISPLAY_MARGIN_LEFT": "Links",
-    "MANAGER_DISPLAY_PLACE_HELP": "Skalierung zeigt das Thema in einem Anteil seiner eigenen Größe, 10 bis 99 Prozent, nie größer; ein Anteil unter 100 schaltet Anpassen aus. Position setzt ein Thema, das den Bildschirm nicht füllt, in die Mitte, an eine Kante oder in eine Ecke, oder an eigene X und Y. Rand hält ein platziertes Thema von den Kanten fern, an die seine Position es setzt, als Anteil der kürzeren Bildschirmseite bis zu einem Viertel, ein Anteil für jede Kante oder jede eigens; zentriert hält es keinen. Den Rest des Bildschirms füllt das unscharfe Albumcover, wenn an, sonst die dunkle Farbe.",
+    "MANAGER_DISPLAY_PLACE_HELP": "Skalierung zeigt das Thema in einem Anteil seiner eigenen Größe, 10 bis 99 Prozent, nie größer; ein Anteil unter 100 schaltet Anpassen aus. Position setzt ein Thema, das den Bildschirm nicht füllt, in die Mitte, an eine Kante oder in eine Ecke, oder an eigene X und Y. Rand, als Anteil der kürzeren Bildschirmseite bis zu einem Viertel, ein Anteil für jede Kante oder jede eigens: angepasst füllt das Thema den um die Ränder verkleinerten Bildschirm, die Form gewahrt, gleiche Ränder zentrieren es, ungleiche verschieben es, sodass ein Bildschirm jeder Größe in Prozent bemessen und platziert wird; platziert hält das Thema die Kanten frei, an die seine Position es setzt, keine wenn zentriert. Den Rest des Bildschirms füllt das unscharfe Albumcover, wenn an, sonst die dunkle Farbe.",
     "MANAGER_PLACE_CENTER": "zentriert",
     "MANAGER_PLACE_TOP_LEFT": "oben links",
     "MANAGER_PLACE_TOP": "oben",

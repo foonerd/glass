@@ -4506,13 +4506,11 @@
         if (d.position === 'manual') return how + ' · ' + t('MANAGER_ST_PLACED_AT').replace('{x}', d.x).replace('{y}', d.y);
         var place = d.place || 'center';
         how += ' · ' + t('MANAGER_PLACE_' + place.toUpperCase().replace('-', '_'));
+        // Fitted, the margins inset the screen on every edge; placed, they keep the theme off the edges its place puts it against.
         var m = d.margin || {}; var edges = [];
-        if (place !== 'center' && !d.fit) {
-          if (/top/.test(place) && m.top) edges.push(t('MANAGER_DISPLAY_MARGIN_TOP').toLowerCase() + ' ' + m.top + ' %');
-          if (/right/.test(place) && m.right) edges.push(t('MANAGER_DISPLAY_MARGIN_RIGHT').toLowerCase() + ' ' + m.right + ' %');
-          if (/bottom/.test(place) && m.bottom) edges.push(t('MANAGER_DISPLAY_MARGIN_BOTTOM').toLowerCase() + ' ' + m.bottom + ' %');
-          if (/left/.test(place) && m.left) edges.push(t('MANAGER_DISPLAY_MARGIN_LEFT').toLowerCase() + ' ' + m.left + ' %');
-        }
+        ['top', 'right', 'bottom', 'left'].forEach(function (e) {
+          if (m[e] && (d.fit || (place !== 'center' && place.indexOf(e) !== -1))) edges.push(t('MANAGER_DISPLAY_MARGIN_' + e.toUpperCase()).toLowerCase() + ' ' + m[e] + ' %');
+        });
         return how + (edges.length ? ' · ' + t('MANAGER_ST_OFF_EDGES') + ' ' + edges.join(', ') : '');
       }
       function renderTouch(tc) {

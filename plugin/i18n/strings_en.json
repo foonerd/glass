@@ -373,7 +373,7 @@
     "MANAGER_DISPLAY_MARGIN_RIGHT": "Right",
     "MANAGER_DISPLAY_MARGIN_BOTTOM": "Bottom",
     "MANAGER_DISPLAY_MARGIN_LEFT": "Left",
-    "MANAGER_DISPLAY_PLACE_HELP": "Scale shows the theme at a share of its own size, 10 to 99 percent, never larger; a share below 100 turns Fit off. Position puts a theme that does not fill the screen in the centre, at an edge or in a corner, or at X and Y of your own. Margin keeps a placed theme off the edges its position puts it against, as a share of the screen's shorter side up to a quarter, one share for every edge or each its own; centred, it keeps off none. What fills the rest of the screen is the blurred album art, when on, else the dark colour.",
+    "MANAGER_DISPLAY_PLACE_HELP": "Scale shows the theme at a share of its own size, 10 to 99 percent, never larger; a share below 100 turns Fit off. Position puts a theme that does not fill the screen in the centre, at an edge or in a corner, or at X and Y of your own. Margin, as a share of the screen's shorter side up to a quarter, one share for every edge or each its own: fitted, the theme fills the screen inset by the margins, its shape kept, equal margins centring it and unequal ones shifting it, so a screen of any size is sized and placed in percent; placed, the theme keeps off the edges its position puts it against, none when centred. What fills the rest of the screen is the blurred album art, when on, else the dark colour.",
     "MANAGER_PLACE_CENTER": "centred",
     "MANAGER_PLACE_TOP_LEFT": "top left",
     "MANAGER_PLACE_TOP": "top",
