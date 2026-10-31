@@ -18,7 +18,7 @@
     "qrcode": "^1.5.4"
   },
   "glassEvo": {
-    "least": "0.10.40"
+    "least": "0.10.41"
   },
   "volumio_info": {
     "prettyName": "Glass",
@@ -34,6 +34,6 @@
       "amd64"
     ],
     "details": "Glass draws VU meters, spectrum analysers, turntables and tape decks on the player's display from PeppyMeter themes. It is a native display, one small binary, with no Python and no browser in the path. Glass replaces PeppyMeter Screensaver: only one of the two may be enabled.",
-    "changelog": "0.10.40 The theme on the player's screen at a share of its own size, placed in the centre, at an edge or in a corner, with a margin off the edges: Scale, Position and Margin under Display on the Appearance tab, Scale and Place on the settings page."
+    "changelog": "0.10.41 A fitted theme fills the screen inset by the margins on every edge, its shape kept, equal margins centring it and unequal ones shifting it, on the player's screen and the remotes alike; the package's changelog names the latest note alone."
   }
 }
