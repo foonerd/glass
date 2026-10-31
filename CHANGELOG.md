@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.44] - 2026-10-31
+
+- **A track browsed from a media server keeps its names while it plays.** A track played from a media server on the player's own Browse page showed its file's name as the title, no artist and no album the moment it played, until pause and play: the player knows the names, its queue carries them and the state it pushes between tracks says them, but while the track plays it builds the state from MPD's bare stream address instead. The player's own queue is now the first source the state is made whole from, before MPD and the UPnP renderer: the item that is the state's track gives the names, the cover and the length the state lacks, at no cost and with nothing asked; MPD and the renderer are asked only for what the queue could not give. In step: the Find a problem note and the Troubleshooting row name the queue among the sources; the sheet's Player row counts it (asked on the forum, found on a player).
+
 ## [0.10.43] - 2026-10-31
 
 - **A remote's screen and meter reports are taken quietly, and the Face row says when the player stands still.** A remote's display tells the player of its own screen's power and its own meter as the player's display does; the channel logged those lines as "not a command" at warning level, so every remote that connected left a line in Recent problems on the Status tab and a journal note under every symptom of Find a problem. The lines are the remote's own and are taken quietly now. The Status tab's Face row said "no frames from the daemon" whenever nothing played, as if something were wrong; it says "no frames: the player stands still" then, and keeps the daemon's words for music playing without frames. In step: the two Troubleshooting rows; nothing else to diagnose.
