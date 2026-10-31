@@ -3133,6 +3133,20 @@ pub struct RunSettings {
     /// where the position says; `position.type = fit` says the same.
     #[serde(default)]
     pub fit: bool,
+    /// `position.scale`: the frame at a share of its own size, 10 to 100
+    /// percent, never larger; below 100 the frame is not fitted.
+    #[serde(default = "full_scale")]
+    pub scale: u32,
+    /// `position.place`: where a frame that does not fill the screen sits,
+    /// centred unless said; a manual position wins over it.
+    #[serde(default)]
+    pub place: Place,
+    /// `position.margin.top`, `.right`, `.bottom`, `.left`, or
+    /// `position.margin` for all four: how far a placed frame keeps off
+    /// the edges it sits against, each a share of the screen's shorter side
+    /// up to 25 percent.
+    #[serde(default)]
+    pub margins: [u32; 4],
     /// `screen.backdrop = blur`: where the theme does not cover the
     /// screen, the album art blurred and dimmed instead of the dark colour,
     /// as the player's own page shows it behind its controls. The colour
@@ -3356,6 +3370,9 @@ impl Default for RunSettings {
             x: 0,
             y: 0,
             fit: false,
+            scale: 100,
+            place: Place::Center,
+            margins: [0; 4],
             backdrop: false,
             driver: ScreenDriver::Auto,
             rotation: Rotation::R0,
@@ -3367,11 +3384,99 @@ impl Default for RunSettings {
     }
 }
 
+/// The largest margin a placed frame keeps, as a share of the screen's shorter side.
+pub const MAX_MARGIN_PERCENT: u32 = 25;
+/// The smallest share of its own size a frame is shown at.
+pub const MIN_SCALE_PERCENT: u32 = 10;
+
+fn full_scale() -> u32 {
+    100
+}
+
+/// Where a frame that does not fill the screen sits: the centre, an edge
+/// or a corner, by the words the settings use.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Place {
+    #[default]
+    Center,
+    TopLeft,
+    Top,
+    TopRight,
+    Left,
+    Right,
+    BottomLeft,
+    Bottom,
+    BottomRight,
+}
+
+impl Place {
+    /// The place by its word, centred for a word that is none.
+    pub fn parse(value: Option<&str>) -> Self {
+        match value.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+            Some("top-left") | Some("topleft") | Some("top_left") => Self::TopLeft,
+            Some("top") => Self::Top,
+            Some("top-right") | Some("topright") | Some("top_right") => Self::TopRight,
+            Some("left") => Self::Left,
+            Some("right") => Self::Right,
+            Some("bottom-left") | Some("bottomleft") | Some("bottom_left") => Self::BottomLeft,
+            Some("bottom") => Self::Bottom,
+            Some("bottom-right") | Some("bottomright") | Some("bottom_right") => Self::BottomRight,
+            _ => Self::Center,
+        }
+    }
+
+    /// The place's word, as the settings write it.
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Center => "center",
+            Self::TopLeft => "top-left",
+            Self::Top => "top",
+            Self::TopRight => "top-right",
+            Self::Left => "left",
+            Self::Right => "right",
+            Self::BottomLeft => "bottom-left",
+            Self::Bottom => "bottom",
+            Self::BottomRight => "bottom-right",
+        }
+    }
+}
+
+/// A percentage from a setting, kept within `lo` and `hi`; `or` where it is none.
+fn percent(value: Option<String>, lo: u32, hi: u32, or: u32) -> u32 {
+    value
+        .and_then(|v| v.trim().trim_end_matches('%').trim().parse::<u32>().ok())
+        .map_or(or, |v| v.clamp(lo, hi))
+}
+
 pub fn run_settings(text: &str) -> RunSettings {
     let kind = current_value(text, "position.type").map(|v| v.trim().to_ascii_lowercase());
     let fit =
         truthy(current_value(text, "position.fit").as_deref()) || kind.as_deref() == Some("fit");
+    let scale = percent(
+        current_value(text, "position.scale"),
+        MIN_SCALE_PERCENT,
+        100,
+        100,
+    );
+    let all = percent(
+        current_value(text, "position.margin"),
+        0,
+        MAX_MARGIN_PERCENT,
+        0,
+    );
+    let edge = |name: &str| {
+        percent(
+            current_value(text, &format!("position.margin.{name}")),
+            0,
+            MAX_MARGIN_PERCENT,
+            all,
+        )
+    };
     RunSettings {
+        scale,
+        place: Place::parse(current_value(text, "position.place").as_deref()),
+        margins: [edge("top"), edge("right"), edge("bottom"), edge("left")],
         exit_on_touch: truthy(current_value(text, "exit.on.touch").as_deref())
             || truthy(current_value(text, "stop.display.on.touch").as_deref()),
         interactive: InteractiveMode::parse(current_value(text, "touch.interactive").as_deref()),
@@ -6480,6 +6585,9 @@ mod tests {
                 x: 10,
                 y: 20,
                 fit: false,
+                scale: 100,
+                place: Place::Center,
+                margins: [0; 4],
                 backdrop: false,
                 driver: ScreenDriver::Auto,
                 rotation: Rotation::R0,
@@ -6490,6 +6598,34 @@ mod tests {
             }
         );
         assert_eq!(run_settings(""), RunSettings::default());
+        // A share of the frame's size, a place and margins: within their bounds, the words as written.
+        let small = run_settings(
+            "[current]\nposition.scale = 75\nposition.place = Bottom-Right\nposition.margin = 3\n",
+        );
+        assert_eq!(
+            (small.scale, small.place, small.margins),
+            (75, Place::BottomRight, [3; 4])
+        );
+        let edges = run_settings(
+            "[current]\nposition.margin = 2\nposition.margin.top = 10\nposition.margin.left = 40\n",
+        );
+        assert_eq!(
+            edges.margins,
+            [10, 2, 2, 25],
+            "an edge of its own over the one for all, kept within a quarter"
+        );
+        assert_eq!(
+            run_settings("[current]\nposition.scale = 3\n").scale,
+            MIN_SCALE_PERCENT
+        );
+        assert_eq!(run_settings("[current]\nposition.scale = 250\n").scale, 100);
+        assert_eq!(run_settings("[current]\nposition.scale = 85%\n").scale, 85);
+        assert_eq!(
+            run_settings("[current]\nposition.place = sideways\n").place,
+            Place::Center
+        );
+        assert_eq!(Place::parse(Some("top_left")), Place::TopLeft);
+        assert_eq!(Place::parse(Some("TOP")).name(), "top");
         // The backdrop: the blurred art on the word `blur` alone.
         assert!(run_settings("[current]\nscreen.backdrop = Blur\n").backdrop);
         assert!(!run_settings("[current]\nscreen.backdrop = color\n").backdrop);

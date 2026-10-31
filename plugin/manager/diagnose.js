@@ -227,15 +227,22 @@ const CHECKS = [
     id: 'backdrop', symptoms: ['screen', 'artwork'],
     run(f) {
       const d = f.display;
+      if (!d) return null;
       const theme = sizeOf(f.status.themeSize);
-      const screen = sizeOf(f.status.sheet && f.status.sheet.screen && f.status.sheet.screen.size);
-      if (!d || !theme || !screen) return null;
-      // Fitted, a theme of another shape leaves bars; as it is, a smaller one leaves a band.
-      const bare = d.fit ? Math.abs(theme.w * screen.h - theme.h * screen.w) > screen.w * screen.h / 100
-        : theme.w < screen.w || theme.h < screen.h;
+      const screenSize = f.status.sheet && f.status.sheet.screen && f.status.sheet.screen.size;
+      const screen = sizeOf(screenSize);
+      // A theme at a share of its size is smaller than the screen by its own
+      // choice, whatever the sizes. Otherwise both sizes are needed: fitted,
+      // a theme of another shape leaves bars; as it is, a smaller one leaves
+      // a band. A player drawing on the screen itself reports no size from
+      // X, and the check says nothing.
+      let bare;
+      if (d.scale) bare = true;
+      else if (!theme || !screen) return null;
+      else bare = d.fit ? Math.abs(theme.w * screen.h - theme.h * screen.w) > screen.w * screen.h / 100 : theme.w < screen.w || theme.h < screen.h;
       if (!bare) return null;
       return d.backdrop ? ok('backdrop', 'DIAG_BACKDROP_ON')
-        : note('backdrop', 'DIAG_BACKDROP_OFF', { theme: f.status.themeSize, screen: f.status.sheet.screen.size }, 'artwork');
+        : note('backdrop', 'DIAG_BACKDROP_OFF', { theme: f.status.themeSize || '-', screen: screenSize || '-' }, 'artwork');
     }
   },
   {

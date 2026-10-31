@@ -1380,9 +1380,30 @@
             <label id="disp-position-label"></label>
             <select id="disp-position">
               <option value="center"></option>
+              <option value="top-left"></option>
+              <option value="top"></option>
+              <option value="top-right"></option>
+              <option value="left"></option>
+              <option value="right"></option>
+              <option value="bottom-left"></option>
+              <option value="bottom"></option>
+              <option value="bottom-right"></option>
               <option value="manual"></option>
             </select>
           </div>
+          <div>
+            <label id="disp-scale-label"></label>
+            <input type="number" id="disp-scale" min="10" max="100" placeholder="100">
+          </div>
+          <div>
+            <label id="disp-margin-label"></label>
+            <input type="number" id="disp-margin" min="0" max="25" placeholder="0">
+          </div>
+          <div>
+            <label class="switch" style="margin-top:22px"><input type="checkbox" id="disp-margin-each"><span id="disp-margin-each-label"></span></label>
+          </div>
+          <div class="full hidden" id="disp-margin-edges"><div class="form"><div><label id="disp-margin-top-label"></label><input type="number" id="disp-margin-top" min="0" max="25" placeholder="0"></div><div><label id="disp-margin-right-label"></label><input type="number" id="disp-margin-right" min="0" max="25" placeholder="0"></div><div><label id="disp-margin-bottom-label"></label><input type="number" id="disp-margin-bottom" min="0" max="25" placeholder="0"></div><div><label id="disp-margin-left-label"></label><input type="number" id="disp-margin-left" min="0" max="25" placeholder="0"></div></div></div>
+          <div class="full help" id="disp-place-help"></div>
           <div id="disp-x-box">
             <label id="disp-x-label"></label>
             <input type="number" id="disp-x" min="-7680" max="7680">
@@ -2102,8 +2123,12 @@
         $('screen-dim-help').textContent = t('MANAGER_SCREEN_DIM_HELP');
         $('screen-power-help').textContent = t('MANAGER_SCREEN_POWER_HELP');
         $('disp-position-label').textContent = t('MANAGER_DISPLAY_POSITION');
-        $('disp-position').options[0].textContent = t('MANAGER_DISPLAY_CENTERED');
-        $('disp-position').options[1].textContent = t('MANAGER_DISPLAY_MANUAL');
+        Array.prototype.forEach.call($('disp-position').options, function (o) { o.textContent = o.value === 'manual' ? t('MANAGER_DISPLAY_MANUAL') : t('MANAGER_PLACE_' + o.value.toUpperCase().replace('-', '_')); });
+        $('disp-scale-label').textContent = t('MANAGER_DISPLAY_SCALE');
+        $('disp-margin-label').textContent = t('MANAGER_DISPLAY_MARGIN');
+        $('disp-margin-each-label').textContent = t('MANAGER_DISPLAY_MARGIN_EACH');
+        ['top', 'right', 'bottom', 'left'].forEach(function (e) { $('disp-margin-' + e + '-label').textContent = t('MANAGER_DISPLAY_MARGIN_' + e.toUpperCase()); });
+        $('disp-place-help').textContent = t('MANAGER_DISPLAY_PLACE_HELP');
         $('disp-x-label').textContent = t('MANAGER_DISPLAY_X');
         $('disp-y-label').textContent = t('MANAGER_DISPLAY_Y');
         $('btn-disp-save').textContent = t('MANAGER_SAVE');
@@ -2877,18 +2902,43 @@
         $('disp-y-box').style.display = manual ? '' : 'none';
       }
       $('disp-position').onchange = showDisplayXY;
+      // A share of the theme's size below 100 shows it smaller, never fitted: Fit goes off and stays off while the share stands.
+      function dispFitFollowsScale() {
+        var v = parseInt($('disp-scale').value, 10);
+        var below = v > 0 && v < 100;
+        if (below) $('disp-fit').checked = false;
+        $('disp-fit').disabled = below;
+      }
+      $('disp-scale').oninput = dispFitFollowsScale;
+      // One margin for every edge, or each edge its own.
+      function dispMarginEach() {
+        var each = $('disp-margin-each').checked;
+        $('disp-margin-edges').classList.toggle('hidden', !each);
+        $('disp-margin').disabled = each;
+      }
+      $('disp-margin-each').onchange = dispMarginEach;
       function loadDisplay() {
         api('GET', '/api/display').then(function (d) {
           $('disp-fit').checked = !!d.fit;
           $('disp-backdrop').checked = !!d.backdrop;
-          $('disp-position').value = d.position;
+          $('disp-position').value = d.position === 'manual' ? 'manual' : (d.place || 'center');
           $('disp-x').value = d.x;
           $('disp-y').value = d.y;
-          showDisplayXY();
+          $('disp-scale').value = d.scale || '';
+          var m = d.margin || { top: 0, right: 0, bottom: 0, left: 0 };
+          var equal = m.top === m.right && m.right === m.bottom && m.bottom === m.left;
+          $('disp-margin-each').checked = !equal;
+          $('disp-margin').value = equal && m.top ? m.top : '';
+          ['top', 'right', 'bottom', 'left'].forEach(function (e) { $('disp-margin-' + e).value = m[e] || ''; });
+          showDisplayXY(); dispFitFollowsScale(); dispMarginEach();
         }).catch(function (e) { toast(errorText(e), 'error'); });
       }
       $('btn-disp-save').onclick = function () {
-        var body = { fit: $('disp-fit').checked, backdrop: $('disp-backdrop').checked, position: $('disp-position').value, x: parseInt($('disp-x').value, 10) || 0, y: parseInt($('disp-y').value, 10) || 0 };
+        var pos = $('disp-position').value;
+        var pct = function (id) { var v = parseInt($(id).value, 10); return v > 0 ? Math.min(v, 25) : 0; };
+        var margin = $('disp-margin-each').checked ? { top: pct('disp-margin-top'), right: pct('disp-margin-right'), bottom: pct('disp-margin-bottom'), left: pct('disp-margin-left') } : (function () { var a = pct('disp-margin'); return { top: a, right: a, bottom: a, left: a }; })();
+        var scale = parseInt($('disp-scale').value, 10);
+        var body = { fit: $('disp-fit').checked, backdrop: $('disp-backdrop').checked, position: pos === 'manual' ? 'manual' : 'center', place: pos === 'manual' ? undefined : pos, scale: scale > 0 && scale < 100 ? scale : null, margin: margin, x: parseInt($('disp-x').value, 10) || 0, y: parseInt($('disp-y').value, 10) || 0 };
         api('POST', '/api/display', body).then(function () { toast(t('MANAGER_SAVED')); loadDisplay(); }).catch(function (e) { toast(errorText(e), 'error'); });
       };
       function loadArtwork() {
@@ -4442,10 +4492,28 @@
           ['MANAGER_ST_INPUTS', found.join(' · ')],
           ['MANAGER_SCREEN_BACKLIGHT', lights.length ? lights.join(' · ') : none],
           ['MANAGER_ST_PANEL_POWER', panelPowerText(sc.power)],
-          ['MANAGER_ST_BACKDROP', t(sc.backdrop ? 'MANAGER_ST_BACKDROP_ON' : 'MANAGER_ST_BACKDROP_OFF')]
+          ['MANAGER_ST_BACKDROP', t(sc.backdrop ? 'MANAGER_ST_BACKDROP_ON' : 'MANAGER_ST_BACKDROP_OFF')],
+          ['MANAGER_ST_ON_SCREEN', onScreenWords(sc.placement)]
         ];
         if (sc.owner && sc.owner.here) rows.splice(1, 0, ['MANAGER_ST_OWNER', ownerLines(sc.owner).concat([t('MANAGER_FACE_SIZE') + ': ' + (sc.faceSize || 'normal')]).join(' · ')]);
         return rows;
+      }
+      // How the theme sits on the screen, from the placement in force: fitted,
+      // pixel for pixel or at a share, placed or at a position, off the edges.
+      function onScreenWords(d) {
+        if (!d) return '-';
+        var how = d.fit ? t('MANAGER_ST_PLACED_FIT') : d.scale ? t('MANAGER_ST_PLACED_SCALE').replace('{scale}', d.scale) : t('MANAGER_ST_PLACED_PIXEL');
+        if (d.position === 'manual') return how + ' · ' + t('MANAGER_ST_PLACED_AT').replace('{x}', d.x).replace('{y}', d.y);
+        var place = d.place || 'center';
+        how += ' · ' + t('MANAGER_PLACE_' + place.toUpperCase().replace('-', '_'));
+        var m = d.margin || {}; var edges = [];
+        if (place !== 'center' && !d.fit) {
+          if (/top/.test(place) && m.top) edges.push(t('MANAGER_DISPLAY_MARGIN_TOP').toLowerCase() + ' ' + m.top + ' %');
+          if (/right/.test(place) && m.right) edges.push(t('MANAGER_DISPLAY_MARGIN_RIGHT').toLowerCase() + ' ' + m.right + ' %');
+          if (/bottom/.test(place) && m.bottom) edges.push(t('MANAGER_DISPLAY_MARGIN_BOTTOM').toLowerCase() + ' ' + m.bottom + ' %');
+          if (/left/.test(place) && m.left) edges.push(t('MANAGER_DISPLAY_MARGIN_LEFT').toLowerCase() + ' ' + m.left + ' %');
+        }
+        return how + (edges.length ? ' · ' + t('MANAGER_ST_OFF_EDGES') + ' ' + edges.join(', ') : '');
       }
       function renderTouch(tc) {
         if (!tc) return;

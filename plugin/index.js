@@ -2610,6 +2610,7 @@ Glass.prototype.screenSettings = function () {
         // tab and Find a problem.
         power: self.screenPower(),
         backdrop: self.displayPlacement().backdrop,
+        placement: self.displayPlacement(),
         views: (function () { var m = self.faceModule(); return { mode: m.mode, has: m.has, face: m.face }; })(),
         probe: found,
         touch: self.touchSettings()
@@ -3620,6 +3621,11 @@ Glass.prototype.getUIConfig = function () {
                 C('positionType').value.value = 1;
                 C('positionType').value.label = 'manually';
             }
+            // The share of the theme's size and where it sits, as the Manager has them.
+            var placement = self.displayPlacement();
+            C('positionScale').value = placement.scale || 100;
+            C('positionPlace').value.value = placement.place;
+            C('positionPlace').value.label = placement.place.replace('-', ' ');
             C('position_x').value = parseInt(meterConfig.current['position.x'], 10) || 0;
             minmax[1] = [C('position_x').attributes[2].min, C('position_x').attributes[3].max, C('position_x').attributes[0].placeholder];
             C('position_y').value = parseInt(meterConfig.current['position.y'], 10) || 0;
@@ -3838,6 +3844,25 @@ Glass.prototype.saveDisplayConf = function (confData) {
         noChanges = false;
     }
     var pos_fit = use_SDL2 && (confData.positionFit === true || confData.positionFit === 'true') ? 'True' : 'False';
+    // The share of the theme's size and where it sits: a page that does not
+    // send them leaves them as they stand; a share below 100 turns fit off.
+    if (confData.positionScale !== undefined) {
+        var pos_scale = parseInt(confData.positionScale, 10);
+        if (isNaN(pos_scale) || pos_scale <= 0 || pos_scale > 100) { pos_scale = 100; }
+        if (pos_scale < 10) { pos_scale = 10; }
+        if (pos_scale < 100) { pos_fit = 'False'; }
+        if (String(meterConfig.current['position.scale'] || '100') !== String(pos_scale)) {
+            meterConfig.current['position.scale'] = String(pos_scale);
+            noChanges = false;
+        }
+    }
+    if (confData.positionPlace !== undefined && confData.positionPlace !== null) {
+        var pos_place = String(confData.positionPlace.value !== undefined ? confData.positionPlace.value : confData.positionPlace).toLowerCase();
+        if (PLACES.indexOf(pos_place) !== -1 && String(meterConfig.current['position.place'] || 'center') !== pos_place) {
+            meterConfig.current['position.place'] = pos_place;
+            noChanges = false;
+        }
+    }
     if (String(meterConfig.current['position.fit']) !== pos_fit) {
         meterConfig.current['position.fit'] = pos_fit;
         noChanges = false;
@@ -6501,14 +6526,27 @@ Glass.prototype.displayPlacement = function () {
     self.loadConfigs();
     var cur = (meterConfig && meterConfig.current) || {};
     var type = String(cur['position.type'] || 'center').toLowerCase();
+    var pct = function (v, lo, hi, or) { var n = parseInt(String(v === undefined ? '' : v).replace('%', ''), 10); return isNaN(n) ? or : Math.min(hi, Math.max(lo, n)); };
+    var scale = pct(cur['position.scale'], 10, 100, 100);
+    var all = pct(cur['position.margin'], 0, 25, 0);
+    var place = String(cur['position.place'] || 'center').toLowerCase().replace(/_/g, '-');
+    if (PLACES.indexOf(place) === -1) { place = 'center'; }
     return {
-        fit: String(cur['position.fit']).toLowerCase() === 'true' || type === 'fit',
+        // Fitted only at the full size: a share below 100 shows the theme smaller, never fitted.
+        fit: (String(cur['position.fit']).toLowerCase() === 'true' || type === 'fit') && scale >= 100,
         backdrop: String(cur['screen.backdrop']).toLowerCase() === 'blur',
         position: type === 'center' || type === 'fit' ? 'center' : 'manual',
         x: parseInt(cur['position.x'], 10) || 0,
-        y: parseInt(cur['position.y'], 10) || 0
+        y: parseInt(cur['position.y'], 10) || 0,
+        // The theme at a share of its size (null for its own), where it sits
+        // when it does not fill the screen, and how far off the edges.
+        scale: scale < 100 ? scale : null,
+        place: place,
+        margin: { top: pct(cur['position.margin.top'], 0, 25, all), right: pct(cur['position.margin.right'], 0, 25, all), bottom: pct(cur['position.margin.bottom'], 0, 25, all), left: pct(cur['position.margin.left'], 0, 25, all) }
     };
 };
+// Where a theme that does not fill the screen may sit.
+var PLACES = ['center', 'top-left', 'top', 'top-right', 'left', 'right', 'bottom-left', 'bottom', 'bottom-right'];
 
 // The same, set: the meter configuration is written, the displays hear of
 // the change and the player's display starts again with it.
@@ -6526,7 +6564,24 @@ Glass.prototype.setDisplayPlacement = function (data) {
     // Either way from the screen's corner: a picture larger than the screen,
     // or one with a margin drawn into it, is placed with a negative start.
     if (isNaN(x) || isNaN(y) || Math.abs(x) > 7680 || Math.abs(y) > 4320) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
-    var wanted = { 'position.fit': fit ? 'True' : 'False', 'screen.backdrop': backdrop ? 'blur' : 'color', 'position.type': position, 'position.x': String(x), 'position.y': String(y) };
+    // The share: absent, null, 0 or 100 is the theme's own size; else 10 to 100. A share below 100 turns fit off.
+    var scale = data.scale === undefined ? (now.scale || 100) : (data.scale === null || data.scale === '' ? 100 : parseInt(data.scale, 10));
+    if (isNaN(scale) || scale < 0 || scale > 100) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    if (scale === 0) { scale = 100; }
+    if (scale < 10) { scale = 10; }
+    if (scale < 100) { fit = false; }
+    var place = data.place === undefined ? now.place : String(data.place).toLowerCase();
+    if (PLACES.indexOf(place) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    var margin = now.margin;
+    if (data.margin !== undefined && data.margin !== null) {
+        var m = typeof data.margin === 'object' ? data.margin : { top: data.margin, right: data.margin, bottom: data.margin, left: data.margin };
+        var edge = function (v, or) { if (v === undefined || v === null || v === '') { return or; } var n = parseInt(v, 10); return isNaN(n) ? NaN : n; };
+        margin = { top: edge(m.top, now.margin.top), right: edge(m.right, now.margin.right), bottom: edge(m.bottom, now.margin.bottom), left: edge(m.left, now.margin.left) };
+        if (['top', 'right', 'bottom', 'left'].some(function (e) { return isNaN(margin[e]) || margin[e] < 0 || margin[e] > 25; })) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    }
+    var wanted = { 'position.fit': fit ? 'True' : 'False', 'screen.backdrop': backdrop ? 'blur' : 'color', 'position.type': position, 'position.x': String(x), 'position.y': String(y),
+        'position.scale': String(scale), 'position.place': place,
+        'position.margin.top': String(margin.top), 'position.margin.right': String(margin.right), 'position.margin.bottom': String(margin.bottom), 'position.margin.left': String(margin.left) };
     var changed = false;
     Object.keys(wanted).forEach(function (k) {
         if (String(meterConfig.current[k]) !== wanted[k]) { meterConfig.current[k] = wanted[k]; changed = true; }

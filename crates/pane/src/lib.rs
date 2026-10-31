@@ -146,6 +146,23 @@ enum Side {
 }
 
 impl Anchor {
+    /// The anchor by its word, as the settings write it (`top-left`,
+    /// `bottom`, ...); none for a word that is no anchor.
+    pub fn parse(name: &str) -> Option<Self> {
+        Some(match name.trim().to_ascii_lowercase().as_str() {
+            "center" | "centre" => Self::Center,
+            "top-left" => Self::TopLeft,
+            "top" => Self::Top,
+            "top-right" => Self::TopRight,
+            "left" => Self::Left,
+            "right" => Self::Right,
+            "bottom-left" => Self::BottomLeft,
+            "bottom" => Self::Bottom,
+            "bottom-right" => Self::BottomRight,
+            _ => return None,
+        })
+    }
+
     fn across(self) -> Side {
         match self {
             Anchor::TopLeft | Anchor::Left | Anchor::BottomLeft => Side::Near,
@@ -1421,6 +1438,9 @@ mod tests {
             placed_rect_within((2400, 1080), screen, None, 100, Anchor::BottomRight, m),
             (-480, 0, 2400, 1080, 1.0)
         );
+        assert_eq!(Anchor::parse("Bottom-Right"), Some(Anchor::BottomRight));
+        assert_eq!(Anchor::parse("centre"), Some(Anchor::Center));
+        assert_eq!(Anchor::parse("sideways"), None);
         // The share is bounded, and a placement given beats the margins.
         assert_eq!(Margins::all(90).clamped(), Margins::all(MAX_MARGIN_PERCENT));
         assert_eq!(

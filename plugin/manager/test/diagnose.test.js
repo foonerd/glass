@@ -481,6 +481,24 @@ test('the buttons hidden by the look, an install refused for the pair or failed,
     for (const key of ['MANAGER_ST_THEME_RULE', 'MANAGER_ST_THEME_RULE_ALBUM', 'MANAGER_ST_THEME_RULE_FOLDER', 'MANAGER_ST_THEME_RULE_SOURCE']) assert.ok(s[key], lang + ' ' + key);
     assert.ok(s.THEME_TAG_RULES_DOC.indexOf('Radio') !== -1 && s.THEME_TAG_RULES_DOC.indexOf('YouTube') !== -1, lang + ' help names the sources');
   }
+  // A theme shown at a share of its size leaves the screen bare by its own choice: the backdrop check speaks whatever the theme's size.
+  const shared = healthy(); shared.display = Object.assign({}, shared.display || {}, { fit: false, scale: 75, place: 'bottom-right', backdrop: false });
+  shared.status.themeSize = shared.status.sheet.screen.size;
+  const sharedNote = one(diagnose('screen', shared), 'backdrop');
+  assert.ok(sharedNote && sharedNote.key === 'DIAG_BACKDROP_OFF', 'a theme at a share leaves the screen bare');
+  shared.display.backdrop = true;
+  assert.strictEqual(one(diagnose('screen', shared), 'backdrop').kind, 'ok');
+  // A player drawing on the screen itself reports no size from X: with a share set the check still speaks; without one it says nothing, as before.
+  shared.status.sheet.screen.size = '';
+  assert.strictEqual(one(diagnose('screen', shared), 'backdrop').kind, 'ok');
+  shared.display.scale = null; shared.display.fit = false;
+  assert.strictEqual(one(diagnose('screen', shared), 'backdrop'), undefined);
+  for (const lang of ['en', 'de', 'fr']) {
+    const s = require('../../i18n/strings_' + lang + '.json').GLASS;
+    for (const key of ['MANAGER_DISPLAY_SCALE', 'MANAGER_DISPLAY_MARGIN', 'MANAGER_DISPLAY_MARGIN_EACH', 'MANAGER_DISPLAY_PLACE_HELP', 'MANAGER_ST_ON_SCREEN', 'MANAGER_ST_PLACED_FIT', 'MANAGER_ST_PLACED_PIXEL', 'MANAGER_ST_OFF_EDGES', 'POSITION_SCALE', 'POSITION_PLACE', 'POSITION_SCALE_DOC', 'POSITION_PLACE_DOC']) assert.ok(s[key], lang + ' ' + key);
+    for (const place of ['CENTER', 'TOP_LEFT', 'TOP', 'TOP_RIGHT', 'LEFT', 'RIGHT', 'BOTTOM_LEFT', 'BOTTOM', 'BOTTOM_RIGHT']) assert.ok(s['MANAGER_PLACE_' + place], lang + ' ' + place);
+    assert.ok(s.MANAGER_ST_PLACED_SCALE.indexOf('{scale}') !== -1 && s.MANAGER_ST_PLACED_AT.indexOf('{x}') !== -1, lang);
+  }
   // Nothing to browse is the player's own: a cause with no tab to go to; sources that could not be read say nothing.
   const empty = healthy(); empty.browse = { count: 0, names: [] };
   const none = one(diagnose('browse', empty), 'sources');

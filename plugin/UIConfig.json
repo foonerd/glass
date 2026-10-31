@@ -122,6 +122,8 @@
           "positionFit",
           "screenBackdrop",
           "positionType",
+          "positionScale",
+          "positionPlace",
           "position_x",
           "position_y",
           "mouseEnabled",
@@ -184,6 +186,80 @@
             {
               "value": 1,
               "label": "manually"
+            }
+          ]
+        },
+        {
+          "id": "positionScale",
+          "element": "input",
+          "type": "number",
+          "doc": "TRANSLATE.GLASS.POSITION_SCALE_DOC",
+          "label": "TRANSLATE.GLASS.POSITION_SCALE",
+          "attributes": [
+            {
+              "placeholder": 100
+            },
+            {
+              "maxlength": 3
+            },
+            {
+              "min": 10
+            },
+            {
+              "max": 100
+            }
+          ],
+          "value": 100
+        },
+        {
+          "id": "positionPlace",
+          "element": "select",
+          "visibleIf": {
+            "field": "positionType",
+            "value": 0
+          },
+          "doc": "TRANSLATE.GLASS.POSITION_PLACE_DOC",
+          "label": "TRANSLATE.GLASS.POSITION_PLACE",
+          "value": {
+            "value": "center",
+            "label": "center"
+          },
+          "options": [
+            {
+              "value": "center",
+              "label": "center"
+            },
+            {
+              "value": "top-left",
+              "label": "top left"
+            },
+            {
+              "value": "top",
+              "label": "top"
+            },
+            {
+              "value": "top-right",
+              "label": "top right"
+            },
+            {
+              "value": "left",
+              "label": "left"
+            },
+            {
+              "value": "right",
+              "label": "right"
+            },
+            {
+              "value": "bottom-left",
+              "label": "bottom left"
+            },
+            {
+              "value": "bottom",
+              "label": "bottom"
+            },
+            {
+              "value": "bottom-right",
+              "label": "bottom right"
             }
           ]
         },

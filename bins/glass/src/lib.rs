@@ -779,8 +779,20 @@ fn session(
         let mut options = match remote.as_deref() {
             Some(remote) => remote.window_options(),
             None => WindowOptions {
-                // `position.type = fit`: the theme scaled to the screen, its shape kept.
-                fit: skin.run.fit,
+                // `position.type = fit`: the theme scaled to the screen, its
+                // shape kept; a share of its size below 100 shows it smaller
+                // instead, never fitted.
+                fit: skin.run.fit && skin.run.scale >= 100,
+                // `position.scale`, `position.place`, `position.margin.*`:
+                // the share, where it sits, how far off the edges.
+                scale: skin.run.scale,
+                anchor: pane::Anchor::parse(skin.run.place.name()).unwrap_or_default(),
+                margins: pane::Margins {
+                    top: skin.run.margins[0],
+                    right: skin.run.margins[1],
+                    bottom: skin.run.margins[2],
+                    left: skin.run.margins[3],
+                },
                 // `screen.driver` and `screen.rotation`: what draws, and the
                 // picture turned on a screen no X server turns.
                 driver: skin.run.driver.sdl_name().map(str::to_string),
