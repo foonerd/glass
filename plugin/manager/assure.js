@@ -364,6 +364,45 @@ function fill(state, mpd, renderer) {
   return { state: out, filled: filled };
 }
 
+// ---- The player's own queue ------------------------------------------
+
+// The queue item that is the state's track: the same address, as given
+// or as plain text. Null without one.
+function queueItemOf(state, queue) {
+  const uri = String(state && state.uri || '');
+  if (!uri || !Array.isArray(queue)) return null;
+  const plain = plainAddress(uri);
+  return queue.find((it) => it && typeof it === 'object' && String(it.uri || '') === uri)
+    || queue.find((it) => it && typeof it === 'object' && it.uri && plainAddress(it.uri) === plain)
+    || null;
+}
+
+// The state made whole from the player's own queue, on a copy: the names,
+// the cover and the length of the item that is the state's track, where
+// the state lacks them. Volumio knows these for a track from a media
+// server it browsed, and loses them the moment the track plays, when it
+// builds the state from MPD's bare stream address instead; pause and
+// play brings them back. No network, nothing asked.
+function fillFromQueue(state, queue) {
+  const need = wanted(state);
+  const out = Object.assign({}, state);
+  const filled = [];
+  const item = need.length ? queueItemOf(state, queue) : null;
+  if (!item) return { state: out, filled: filled };
+  const take = (field, value) => {
+    if (need.indexOf(field) === -1 || empty(value)) return;
+    out[field] = value;
+    filled.push({ field: field, from: 'queue' });
+  };
+  if (!fileTitle(item.title, item.uri)) take('title', item.title);
+  take('artist', item.artist);
+  take('album', item.album);
+  if (/^(https?:\/\/|\/)/.test(String(item.albumart || '')) && String(item.albumart).trim() !== DEFAULT_ART) take('albumart', item.albumart);
+  const seconds = Number(item.duration) || 0;
+  if (seconds > 0) take('duration', Math.round(seconds));
+  return { state: out, filled: filled };
+}
+
 // ---- The tally -------------------------------------------------------
 
 // What was filled since the backend started: how many states, which
@@ -398,8 +437,13 @@ function resetTally() {
 // calls; a renderer that stops answering is looked for again.
 async function assure(state, cache, options) {
   const opts = options || {};
+  if (!wanted(state).length) return { state: state, filled: [] };
+  // The player's own queue first: it costs nothing and knows the names
+  // of a track from a media server the player browsed.
+  const own = fillFromQueue(state, opts.queue);
+  state = own.state;
   const need = wanted(state);
-  if (!need.length) return { state: state, filled: [] };
+  if (!need.length) { noted(own.filled); return own; }
   const c = cache || {};
   const mpdAsk = (opts.askMpd || askMpd)(opts.mpd);
   let rendererAsk = Promise.resolve(null);
@@ -418,8 +462,9 @@ async function assure(state, cache, options) {
   }
   const [mpd, renderer] = await Promise.all([mpdAsk, rendererAsk]);
   const made = fill(state, mpd, renderer);
+  made.filled = own.filled.concat(made.filled);
   noted(made.filled);
   return made;
 }
 
-module.exports = { assure, fill, wanted, fileTitle, plainAddress, trackTypeOf, audioOf, parseMpd, askMpd, parseDidl, elementText, secondsOf, controlOf, pickOwn, askRenderer, discoverRenderer, searchRenderers, mpdAgrees, rendererAgrees, fact, resetTally, FIELDS, MPD_PORT, ASK_MS };
+module.exports = { assure, fill, fillFromQueue, queueItemOf, wanted, fileTitle, plainAddress, trackTypeOf, audioOf, parseMpd, askMpd, parseDidl, elementText, secondsOf, controlOf, pickOwn, askRenderer, discoverRenderer, searchRenderers, mpdAgrees, rendererAgrees, fact, resetTally, FIELDS, MPD_PORT, ASK_MS };

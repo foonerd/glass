@@ -1735,7 +1735,7 @@ Glass.prototype.onStart = function () {
         };
         if (!assure.wanted(state).length) { accept(state); return; }
         if (!self.assureCache) { self.assureCache = {}; }
-        assure.assure(state, self.assureCache).then(function (made) {
+        assure.assure(state, self.assureCache, { queue: self.channel ? self.channel.queue : null }).then(function (made) {
             if (generation !== self.stateGeneration) { return; }
             if (made.filled.length) {
                 self.logger.info(id + 'state made whole from the player: ' + made.filled.map(function (f) { return f.field + ' (' + f.from + ')'; }).join(', '));

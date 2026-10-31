@@ -140,6 +140,49 @@ test('the fill: a DLNA track named by its file, made whole from MPD and the rend
   assert.deepStrictEqual(A.fill({ status: 'pause', trackType: '' }, mpd, renderer).filled, []);
 });
 
+test("the player's own queue fills the names of a browsed track the moment it plays, as the player pushed them between tracks", () => {
+  // The shapes as a player pushed them for a track browsed from a media server: the queue item with the names, the playing state from MPD's bare address.
+  const queue = [
+    { title: 'Tell Me Why', artist: 'Neil Young', album: 'After The Gold Rush', duration: 180, uri: 'http://192.0.2.1:32469/object/0a5ab7b76760d4092615/file.mp3', albumart: 'http://192.0.2.1:32469/proxy/442e/albumart.jpg' },
+    { title: 'After The Gold Rush', artist: 'Neil Young', album: 'After The Gold Rush', duration: 0, uri: 'http://192.0.2.1:32469/object/f430713c9c5753276840/file.mp3', albumart: '' }
+  ];
+  const playing = { status: 'play', service: 'mpd', uri: 'http://192.0.2.1:32469/object/0a5ab7b76760d4092615/file.mp3', title: 'file.mp3', artist: null, album: null, trackType: 'mp3', seek: 1110, duration: 0, samplerate: '44.1 kHz', bitdepth: '24 bit', albumart: '/albumart', consume: true };
+  const made = A.fillFromQueue(playing, queue);
+  assert.deepStrictEqual({ title: made.state.title, artist: made.state.artist, album: made.state.album, albumart: made.state.albumart, duration: made.state.duration }, { title: 'Tell Me Why', artist: 'Neil Young', album: 'After The Gold Rush', albumart: 'http://192.0.2.1:32469/proxy/442e/albumart.jpg', duration: 180 });
+  assert.ok(made.filled.every((f) => f.from === 'queue') && made.filled.length === 5);
+  assert.strictEqual(playing.title, 'file.mp3', 'the given state is not written');
+  // The second item: no cover and no length to give; the names alone.
+  const second = A.fillFromQueue(Object.assign({}, playing, { uri: queue[1].uri }), queue);
+  assert.deepStrictEqual(second.filled.map((f) => f.field), ['title', 'artist', 'album']);
+  // Another track, or no queue: nothing.
+  assert.deepStrictEqual(A.fillFromQueue(Object.assign({}, playing, { uri: 'http://192.0.2.1:32469/object/other/file.mp3' }), queue).filled, []);
+  assert.deepStrictEqual(A.fillFromQueue(playing, null).filled, []);
+  assert.deepStrictEqual(A.fillFromQueue(playing, []).filled, []);
+  // A whole state wants nothing from the queue; a queue item named by its file gives no title.
+  assert.deepStrictEqual(A.fillFromQueue(Object.assign({}, playing, { title: 'Tell Me Why', artist: 'Neil Young', album: 'x', duration: 1, albumart: 'http://x/y.jpg' }), queue).filled, []);
+  assert.deepStrictEqual(A.fillFromQueue(playing, [{ title: 'file.mp3', uri: playing.uri }]).filled, []);
+  // The address matched as plain text: the queue's escaped once more.
+  assert.strictEqual(A.queueItemOf({ uri: "http://x/Don't.mp3" }, [{ uri: 'http://x/Don&apos;t.mp3', title: 'T' }]).title, 'T');
+});
+
+test('the whole asks nothing of MPD or the renderer once the queue has made the state whole', async () => {
+  A.resetTally();
+  let asks = 0;
+  const queue = [{ title: 'Tell Me Why', artist: 'Neil Young', album: 'After The Gold Rush', duration: 180, uri: 'http://192.0.2.1/o/1/file.mp3', albumart: 'http://192.0.2.1/a.jpg' }];
+  const playing = { status: 'play', uri: 'http://192.0.2.1/o/1/file.mp3', title: 'file.mp3', artist: null, album: null, trackType: 'mp3', seek: 0, duration: 0, samplerate: 'x', bitdepth: 'y', albumart: '/albumart' };
+  const made = await A.assure(playing, {}, { queue: queue, askMpd: async () => { asks += 1; return null; }, discover: async () => { asks += 1; return null; } });
+  assert.strictEqual(made.state.title, 'Tell Me Why');
+  assert.strictEqual(asks, 0, 'whole from the queue: nothing asked');
+  assert.strictEqual(A.fact().from[0], 'queue');
+  // The queue knows the names but not the type: MPD is still asked for the rest.
+  const typeless = Object.assign({}, playing, { trackType: '' });
+  const again = await A.assure(typeless, {}, { queue: queue, askMpd: async () => { asks += 1; return { song: { file: 'http://192.0.2.1/o/1/file.mp3' }, status: { state: 'play', elapsed: '0.1' } }; }, discover: async () => null });
+  assert.strictEqual(again.state.trackType, 'mp3');
+  assert.strictEqual(again.state.title, 'Tell Me Why');
+  assert.strictEqual(asks, 1);
+  A.resetTally();
+});
+
 test('MPD is asked over its socket and answered, or given up on in time', async () => {
   const server = net.createServer((socket) => {
     socket.unref();
