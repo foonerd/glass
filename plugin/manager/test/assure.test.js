@@ -69,6 +69,11 @@ test('a title that is the file name is recognised, a real one is not', () => {
   assert.ok(A.fileTitle('file', 'http://x/parts/1/file'), 'the last part of the location');
   assert.ok(A.fileTitle('Don\'t You Remember.mp3', 'http://127.0.0.1/INTERNAL/Adele/21/Don%27t%20You%20Remember.mp3'));
   assert.ok(!A.fileTitle('So Far Away', 'http://x/parts/1/file.mp3'));
+  // A JRiver stream: the file's name with the server's query after it, as the title and as the address's last part.
+  assert.ok(A.fileTitle('F40522.wav?Reader=84', 'http://192.0.2.5:52100/Music/F40522.wav?Reader=84'));
+  assert.ok(A.fileTitle('F40522.wav?Reader=84', ''));
+  assert.ok(A.fileTitle('stream?id=40522', 'http://192.0.2.5:52100/stream?id=40522'), 'the address\'s last part with its query');
+  assert.ok(!A.fileTitle('Reason With Me', 'http://192.0.2.5:52100/Music/F40521.wav?Reader=85'));
   assert.ok(!A.fileTitle('', ''));
 });
 
@@ -267,4 +272,26 @@ test('the whole: nothing wanted asks nothing; the renderer found once and droppe
   const f = A.fact();
   assert.ok(f.count >= 4 && f.fields.indexOf('trackType') !== -1 && f.from.indexOf('mpd') !== -1 && f.at);
   A.resetTally();
+});
+
+test('a JRiver stream\'s state is made whole from the queue by the file\'s path when only the server\'s query differs, and a track named in its query is not', () => {
+  // The playing state as the player pushed it on a manual start in consume mode: the file's name with the query as the title, no artist, no album, no track type.
+  const playing = { status: 'play', position: 0, title: 'F40522.wav?Reader=84', artist: null, album: null, albumart: 'http://192.0.2.5:52100/AArl/40522.jpg', uri: 'http://192.0.2.5:52100/Music/F40522.wav?Reader=84', trackType: '', seek: 11558, duration: 236, samplerate: '48 kHz', bitdepth: '32 bit', channels: 2, consume: true, service: 'mpd' };
+  assert.deepStrictEqual(A.wanted(playing), ['trackType', 'title', 'artist', 'album']);
+  const queue = [
+    { uri: 'http://192.0.2.5:52100/Music/F40521.wav?Reader=85', service: 'upnp_browser', title: 'Reason With Me', artist: 'Sinéad O\'Connor', album: 'How About I Be Me', albumart: 'http://192.0.2.5:52100/AArl/40521.jpg', duration: 240 },
+    { uri: 'http://192.0.2.5:52100/Music/F40522.wav?Reader=71', service: 'upnp_browser', title: 'I Am Stretched On Your Grave', artist: 'Sinéad O\'Connor', album: 'I Do Not Want What I Haven\'t Got', albumart: 'http://192.0.2.5:52100/AArl/40522.jpg', duration: 333 }
+  ];
+  const made = A.fillFromQueue(playing, queue);
+  assert.strictEqual(made.state.title, 'I Am Stretched On Your Grave');
+  assert.strictEqual(made.state.artist, 'Sinéad O\'Connor');
+  assert.strictEqual(made.state.album, 'I Do Not Want What I Haven\'t Got');
+  assert.deepStrictEqual(made.filled.map((f) => f.field), ['title', 'artist', 'album']);
+  // The same query as the queue's: matched as given, before the path.
+  assert.strictEqual(A.fillFromQueue(Object.assign({}, playing, { uri: queue[0].uri, title: 'F40521.wav?Reader=85' }), queue).state.title, 'Reason With Me');
+  // A track named in its query: another id is another track, never matched by the path.
+  const byId = [{ uri: 'http://192.0.2.5:52100/stream?id=1', title: 'One', artist: 'A', album: 'B' }];
+  assert.deepStrictEqual(A.fillFromQueue(Object.assign({}, playing, { uri: 'http://192.0.2.5:52100/stream?id=2', title: 'stream?id=2' }), byId).filled, []);
+  // The track type from MPD's address, by Volumio's rule: the tail after the last dot, cut at the query.
+  assert.strictEqual(A.trackTypeOf('http://192.0.2.5:52100/Music/F40522.wav?Reader=84'), 'wav');
 });

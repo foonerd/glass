@@ -53,9 +53,17 @@ function trackTypeOf(file) {
   if (f.indexOf('cdda:///') !== -1) return 'CD Audio';
   if (f.indexOf('qobuz') !== -1) return 'qobuz';
   if (f.indexOf('tidal') !== -1) return 'tidal';
+  // Volumio's rule: the tail after the last dot, ten characters at most,
+  // cut at the query (a YouTube address ends `?...&t.YouTube`).
   let t = f.split('.').pop();
   if (t.length > 10) t = '';
-  return t.split('?')[0];
+  t = t.split('?')[0];
+  if (t) return t;
+  // Where that gives nothing, the query cut first and the rule again: a
+  // stream's `F40522.wav?Reader=84` (JRiver) is a wav, where the player's
+  // own reading has a tail of thirteen and says nothing.
+  const u = f.split('?')[0].split('.').pop();
+  return u.length > 10 ? '' : u;
 }
 
 // The sample rate, bit depth and channels as Volumio words them from
@@ -268,11 +276,14 @@ function empty(v) {
 function fileTitle(title, uri) {
   const t = String(title || '').trim();
   if (!t) return false;
-  if (FILE_TITLE.test(t)) return true;
-  const last = String(uri || '').split('?')[0].split('/').filter(Boolean).pop() || '';
+  // A media server's address may carry a query after the file's name
+  // (`F40522.wav?Reader=84`, a JRiver stream): the name stands before it.
+  if (FILE_TITLE.test(t.split('?')[0])) return true;
+  const whole = String(uri || '').split('/').filter(Boolean).pop() || '';
+  const last = whole.split('?')[0];
   let decoded = last;
   try { decoded = decodeURIComponent(last); } catch (e) { /* as it came */ }
-  return !!last && (t === last || t === decoded);
+  return !!last && (t === last || t === decoded || t === whole);
 }
 
 // The fields a playing state lacks, or carries a file's name for; [] for
@@ -367,13 +378,21 @@ function fill(state, mpd, renderer) {
 // ---- The player's own queue ------------------------------------------
 
 // The queue item that is the state's track: the same address, as given
-// or as plain text. Null without one.
+// or as plain text; failing both, the same file by its path where the
+// path ends in a file's name and only the query differs (a JRiver stream's
+// `?Reader=N` is a session, not a track; a `stream?id=N` names the track
+// in its query and is never matched by its path). Null without one.
 function queueItemOf(state, queue) {
   const uri = String(state && state.uri || '');
   if (!uri || !Array.isArray(queue)) return null;
   const plain = plainAddress(uri);
-  return queue.find((it) => it && typeof it === 'object' && String(it.uri || '') === uri)
-    || queue.find((it) => it && typeof it === 'object' && it.uri && plainAddress(it.uri) === plain)
+  const items = queue.filter((it) => it && typeof it === 'object' && it.uri);
+  const pathOf = (u) => plainAddress(String(u)).split('?')[0];
+  const path = pathOf(uri);
+  const named = FILE_TITLE.test(path.split('/').pop() || '');
+  return items.find((it) => String(it.uri) === uri)
+    || items.find((it) => plainAddress(it.uri) === plain)
+    || (named && uri.indexOf('?') !== -1 ? items.find((it) => pathOf(it.uri) === path) : null)
     || null;
 }
 
