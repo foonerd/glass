@@ -544,6 +544,18 @@ const CHECKS = [
     }
   },
   {
+    // The player's state came without fields the player knows, and Glass
+    // made it whole from MPD and the UPnP renderer on the player: worth
+    // knowing when a logo, a name or a cover is not what Volumio's own
+    // page shows.
+    id: 'assured', symptoms: ['artwork', 'look', 'other'],
+    run(f) {
+      const a = f.assured;
+      if (!a || !a.count) return null;
+      return note('assured', 'DIAG_ASSURED', { count: a.count, fields: (a.fields || []).join(', ') || '-', from: (a.from || []).join(', ') || '-' });
+    }
+  },
+  {
     // The theme on show was picked by an edition tag rule for what plays,
     // from the album name, the folder name or the source: worth knowing
     // when the theme is not the one chosen on the Themes tab.

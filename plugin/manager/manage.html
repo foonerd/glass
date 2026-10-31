@@ -3090,7 +3090,7 @@
             ['MANAGER_ST_SECTION_AUDIO', [
               ['MANAGER_ST_TAP', !audio ? '-' : (audio.tapInChain ? t('MANAGER_ST_TAP_IN') : t('MANAGER_ST_TAP_OUT')) + (audio.output ? ' · ' + t('MANAGER_ST_OUTPUT') + ' ' + audio.output : '')],
               ['MANAGER_ST_PLAYER', (s.channel.status || '-') + (s.channel.service ? ' · ' + s.channel.service : '') + (s.channel.title ? ' · ' + (s.channel.artist ? s.channel.artist + ' - ' : '') + s.channel.title : '') +
-                (s.channel.status === 'play' ? ' · ' + (s.measured ? t('MANAGER_ST_MEASURED') : t('MANAGER_ST_NOT_MEASURED')) : '') + (audio && (audio.samplerate || audio.bitdepth || audio.trackType) ? ' · ' + [audio.trackType, audio.samplerate, audio.bitdepth].filter(Boolean).join(' ') : '')],
+                (s.channel.status === 'play' ? ' · ' + (s.measured ? t('MANAGER_ST_MEASURED') : t('MANAGER_ST_NOT_MEASURED')) : '') + (audio && (audio.samplerate || audio.bitdepth || audio.trackType) ? ' · ' + [audio.trackType, audio.samplerate, audio.bitdepth].filter(Boolean).join(' ') : '') + (s.assured && s.assured.count ? ' · ' + t('MANAGER_ST_ASSURED').replace('{count}', s.assured.count).replace('{fields}', (s.assured.fields || []).join(', ')).replace('{from}', (s.assured.from || []).join(', ')) : '')],
               ['MANAGER_ST_RINGS', s.rings.length ? s.rings.map(function (r) { return r.name + ' (' + r.rate + ' Hz, ' + r.channels + ' ch, ' + (r.live ? t('MANAGER_ST_RING_LIVE') : t('MANAGER_ST_RING_QUIET') + (r.writtenAgoMs !== null ? ' ' + Math.round(r.writtenAgoMs / 1000) + ' s' : '')) + ')'; }).join('; ') : t('MANAGER_ST_RINGS_NONE')],
               ['MANAGER_ST_CHANNEL', s.channel.clients + ' ' + t('MANAGER_ST_CLIENTS')]
             ]],

@@ -26,6 +26,7 @@ const { advanced } = require('./manager/statenow');
 const screenpower = require('./manager/screenpower');
 const browse = require('./manager/browse');
 const plaintext = require('./manager/plaintext');
+const assure = require('./manager/assure');
 const screenprobe = require('./manager/screenprobe');
 const playerfacts = require('./manager/playerfacts');
 const screenowner = require('./manager/screenowner');
@@ -1155,6 +1156,13 @@ Glass.prototype.searchAsk = function (value) {
 
 // What the player offers to browse, for the Manager's checks: the sources
 // of its own Browse page as the face would list them, counted and named.
+// What the state was made whole in since the backend started, for the
+// sheet and Find a problem: how many states, which fields, from which
+// of the player's sources, and when last.
+Glass.prototype.assureFact = function () {
+    return assure.fact();
+};
+
 // The edition tag rule that picked the theme on show, for the sheet and
 // Find a problem: the folder, the tag and how it was found, with the home
 // theme; null where the theme on show is the chosen one.
@@ -1591,6 +1599,13 @@ Glass.prototype.onStart = function () {
         // from the title, the artist and the album, on a copy, and counted
         // for the Status tab and Find a problem.
         state = plaintext.state(state).state;
+        // The state made whole from the player's own sources where it
+        // lacks a field (the track type after an automatic change, a
+        // title that is the file's name for a DLNA track): asked once,
+        // bounded; a state that arrives meanwhile supersedes it.
+        var generation = (self.stateGeneration || 0) + 1;
+        self.stateGeneration = generation;
+        var accept = function (state) {
         self.lastState = state;
         // The player's word on the favourites follows every state push; the
         // first after a start is asked for, the word before it having gone by.
@@ -1714,6 +1729,19 @@ Glass.prototype.onStart = function () {
 
         lastService = state.service || '';
         lastUri = state.uri || '';
+        };
+        if (!assure.wanted(state).length) { accept(state); return; }
+        if (!self.assureCache) { self.assureCache = {}; }
+        assure.assure(state, self.assureCache).then(function (made) {
+            if (generation !== self.stateGeneration) { return; }
+            if (made.filled.length) {
+                self.logger.info(id + 'state made whole from the player: ' + made.filled.map(function (f) { return f.field + ' (' + f.from + ')'; }).join(', '));
+            }
+            accept(made.state);
+        }, function (e) {
+            self.logger.warn(id + 'state assurance: ' + (e && e.message ? e.message : e));
+            if (generation === self.stateGeneration) { accept(state); }
+        });
     });
 
     // The artist fanart cascade the display asks for: personal art, the
@@ -6873,6 +6901,7 @@ Glass.prototype.statusInfo = function () {
         timeout: parseInt(self.config.get('timeout'), 10) || 0,
         activeTheme: self.activeTheme(),
         themeRule: self.themeRuleFact(),
+        assured: self.assureFact(),
         meter: self.meterSelection(),
         channel: {
             clients: self.channel ? self.channel.clients.length : 0,

@@ -462,6 +462,22 @@ test('the buttons hidden by the look, an install refused for the pair or failed,
     const s = require('../../i18n/strings_' + lang + '.json').GLASS;
     assert.ok(s.MANAGER_DIAG_MARKUP_CLEARED.indexOf('{count}') !== -1 && s.MANAGER_DIAG_MARKUP_CLEARED.indexOf('{services}') !== -1, lang);
   }
+  // The state made whole from the player's sources: a note under artwork, the look and something else; nothing made whole, nothing said.
+  const assured = healthy(); assured.assured = { count: 3, fields: ['trackType', 'title'], from: ['mpd', 'renderer'], at: '2026-10-31T04:00:00Z' };
+  ['artwork', 'look', 'other'].forEach(function (s) {
+    const x = one(diagnose(s, assured), 'assured');
+    assert.strictEqual(x.key, 'DIAG_ASSURED', s);
+    assert.strictEqual(x.kind, 'note', s);
+    assert.deepStrictEqual(x.with, { count: 3, fields: 'trackType, title', from: 'mpd, renderer' });
+  });
+  assert.strictEqual(one(diagnose('screen', assured), 'assured'), undefined);
+  const unassured = healthy(); unassured.assured = { count: 0, fields: [], from: [], at: null };
+  assert.strictEqual(one(diagnose('artwork', unassured), 'assured'), undefined);
+  assert.strictEqual(one(diagnose('artwork', healthy()), 'assured'), undefined);
+  for (const lang of ['en', 'de', 'fr']) {
+    const s = require('../../i18n/strings_' + lang + '.json').GLASS;
+    for (const slot of ['{count}', '{fields}', '{from}']) assert.ok(s.MANAGER_DIAG_ASSURED.indexOf(slot) !== -1 && s.MANAGER_ST_ASSURED.indexOf(slot) !== -1, lang + ' ' + slot);
+  }
   // The theme picked by an edition tag rule: a note under the look and something else, the Themes tab to go to; the chosen theme on show says nothing.
   const ruled = healthy(); ruled.themeRule = { folder: '1280x720_radio', tag: 'radio', by: 'source', home: '1280x720_g5_705_meters' };
   ['look', 'other'].forEach(function (s) {
