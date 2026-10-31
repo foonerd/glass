@@ -34,6 +34,6 @@
       "amd64"
     ],
     "details": "Glass draws VU meters, spectrum analysers, turntables and tape decks on the player's display from PeppyMeter themes. It is a native display, one small binary, with no Python and no browser in the path. Glass replaces PeppyMeter Screensaver: only one of the two may be enabled.",
-    "changelog": "0.10.42 The player's state is made whole from the player's own sources where it lacks a field: the track type after an automatic track change, the names, the length, the format and the cover of a track a DLNA controller pushed, from MPD and the UPnP renderer, only for the track playing."
+    "changelog": "0.10.43 A remote's screen and meter reports are taken quietly on the channel instead of logged as a problem, and the Status tab's Face row says the player stands still rather than that no frames come."
   }
 }
