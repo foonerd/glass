@@ -3124,7 +3124,7 @@
               }).join('\n')]
             ]],
             ['MANAGER_ST_SECTION_FACE', [
-              ['MANAGER_ST_FACE', !s.face ? '-' : s.face.pages + ' ' + t('MANAGER_ST_FACE_PAGES') + ' · ' + (s.face.frames ? t('MANAGER_ST_FACE_FRAMES') : t('MANAGER_ST_FACE_NO_FRAMES'))]
+              ['MANAGER_ST_FACE', !s.face ? '-' : s.face.pages + ' ' + t('MANAGER_ST_FACE_PAGES') + ' · ' + (s.face.frames ? t('MANAGER_ST_FACE_FRAMES') : (s.channel && s.channel.status === 'play' ? t('MANAGER_ST_FACE_NO_FRAMES') : t('MANAGER_ST_FACE_STILL')))]
             ]],
             ['MANAGER_ST_SECTION_HOUSE', [
               ['MANAGER_ST_LOGGING', !s.logging ? '-' : String(s.logging.level || '') + (s.logging.targets && s.logging.targets.length ? ' · ' + s.logging.targets.join(', ') : '')],

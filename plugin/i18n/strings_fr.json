@@ -579,6 +579,7 @@
     "MANAGER_ST_FACE_PAGES": "pages regardent",
     "MANAGER_ST_FACE_FRAMES": "les trames arrivent",
     "MANAGER_ST_FACE_NO_FRAMES": "pas de trames du service",
+    "MANAGER_ST_FACE_STILL": "pas d'images : le lecteur est à l'arrêt",
     "MANAGER_ST_SECTION_EVO": "glass-evo",
     "MANAGER_ST_EVO_COMPONENT": "Composant",
     "MANAGER_ST_EVO_REQUIRES": "requiert Glass",

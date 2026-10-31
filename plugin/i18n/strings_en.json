@@ -579,6 +579,7 @@
     "MANAGER_ST_FACE_PAGES": "pages watching",
     "MANAGER_ST_FACE_FRAMES": "frames flow",
     "MANAGER_ST_FACE_NO_FRAMES": "no frames from the daemon",
+    "MANAGER_ST_FACE_STILL": "no frames: the player stands still",
     "MANAGER_ST_SECTION_EVO": "glass-evo",
     "MANAGER_ST_EVO_COMPONENT": "Component",
     "MANAGER_ST_EVO_REQUIRES": "needs Glass",

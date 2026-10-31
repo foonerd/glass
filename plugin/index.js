@@ -179,6 +179,9 @@ Channel.prototype.attach = function (conn) {
                 // The player's own display says what the panel's power is.
                 self.screenReport = screenpower.report(message);
                 if (self.onScreen) { self.onScreen(self.screenReport); }
+            } else if (message && (message.kind === 'screen' || message.kind === 'showing') && conn.remote) {
+                // A remote's display says the same of its own screen and
+                // its own meter: not the player's to keep, and no problem.
             } else if (message && message.kind === 'showing' && !conn.remote) {
                 // The player's own display says which meter it shows; the
                 // remotes that follow the player hear of it.

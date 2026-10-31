@@ -579,6 +579,7 @@
     "MANAGER_ST_FACE_PAGES": "Seiten sehen zu",
     "MANAGER_ST_FACE_FRAMES": "Frames fließen",
     "MANAGER_ST_FACE_NO_FRAMES": "keine Frames vom Dienst",
+    "MANAGER_ST_FACE_STILL": "keine Frames: der Player steht still",
     "MANAGER_ST_SECTION_EVO": "glass-evo",
     "MANAGER_ST_EVO_COMPONENT": "Komponente",
     "MANAGER_ST_EVO_REQUIRES": "braucht Glass",
