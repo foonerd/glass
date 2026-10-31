@@ -251,6 +251,56 @@
     if (room[0] <= most[0] && room[1] <= most[1]) return wanted;
     return wanted * Math.min(most[0] / Math.max(room[0], 1), most[1] / Math.max(room[1], 1));
   }
+  // ---- Where the theme's frame lies on the screen --------------------------
+  // The look panel's likeness places the theme's frame on the player's
+  // screen as the display does, by the pane's own rule line for line
+  // (crates/pane: scaled_size, placed_rect_within, fitted_rect_within), so
+  // the two agree by the same numbers: the share of the frame's own size
+  // 10 to 100; each margin a share of the screen's shorter side, rounded,
+  // at most 25. Fitted, the screen inset by the margins is the box the
+  // frame fills with its shape kept, centred in it. Placed, the frame at
+  // its share sits at its place, off the edges it sits against by the
+  // margins and never past the other; centred, it keeps off nothing. A
+  // set position wins over all of it. The frame and the screen are
+  // [width, height]; the placement is the plugin's (fit, scale, place,
+  // margin, position, x, y); the box is x, y, w, h in the screen's pixels.
+  var MIN_SCALE = 10;
+  var MAX_MARGIN = 25;
+  var PLACES = ['center', 'top-left', 'top', 'top-right', 'left', 'right', 'bottom-left', 'bottom', 'bottom-right'];
+  function screenBox(frame, screen, p) {
+    p = p || {};
+    var fw = Math.max(1, parseInt(frame[0], 10) || 0), fh = Math.max(1, parseInt(frame[1], 10) || 0);
+    var sw = Math.max(1, parseInt(screen[0], 10) || 0), sh = Math.max(1, parseInt(screen[1], 10) || 0);
+    var shorter = Math.fround(Math.min(sw, sh));
+    var m = p.margin || {};
+    var bound = function (v) { var n = parseInt(v, 10); return isNaN(n) || n < 0 ? 0 : Math.min(MAX_MARGIN, n); };
+    var px = function (share) { return Math.round(Math.fround(shorter * share / 100)); };
+    var top = px(bound(m.top)), right = px(bound(m.right)), bottom = px(bound(m.bottom)), left = px(bound(m.left));
+    var x, y, w, h;
+    if (p.fit) {
+      var bw = Math.max(1, sw - left - right), bh = Math.max(1, sh - top - bottom);
+      var scale = Math.fround(Math.min(Math.fround(bw / fw), Math.fround(bh / fh)));
+      w = Math.max(1, Math.round(Math.fround(fw * scale))); h = Math.max(1, Math.round(Math.fround(fh * scale)));
+      x = left + Math.trunc((bw - w) / 2); y = top + Math.trunc((bh - h) / 2);
+    } else {
+      var share = parseInt(p.scale, 10);
+      if (isNaN(share) || share <= 0 || share > 100) share = 100;
+      if (share < MIN_SCALE) share = MIN_SCALE;
+      var s = Math.fround(share / 100);
+      w = Math.max(1, Math.round(Math.fround(fw * s))); h = Math.max(1, Math.round(Math.fround(fh * s)));
+      var place = PLACES.indexOf(p.place) === -1 ? 'center' : p.place;
+      var along = function (side, room, size, near, far) {
+        var spare = room - size;
+        if (side === 'near') return Math.min(near, Math.max(spare, 0));
+        if (side === 'far') return spare < 0 ? spare : Math.max(spare - far, 0);
+        return Math.trunc(spare / 2);
+      };
+      x = along(/left/.test(place) ? 'near' : /right/.test(place) ? 'far' : 'middle', sw, w, left, right);
+      y = along(/top/.test(place) ? 'near' : /bottom/.test(place) ? 'far' : 'middle', sh, h, top, bottom);
+    }
+    if (p.position === 'manual') { x = parseInt(p.x, 10) || 0; y = parseInt(p.y, 10) || 0; }
+    return { x: x, y: y, w: w, h: h };
+  }
   // The measures the face lays the idle screen out with, in units: the
   // screen's margin, the room a glass keeps about its words (sideways,
   // above and below), the least of that room, and the gap between a clock
@@ -324,6 +374,6 @@
     isOn: isOn, colourOf: colourOf, rgb: rgb, share: share, frostOn: frostOn, backgrounds: backgrounds,
     cells: cells, cellsText: cellsText, align: align, flexed: flexed, turned: turned, SPANS: SPANS, span: span, GRID_ROWS: GRID_ROWS, GRID_COLUMNS: GRID_COLUMNS,
     solidWord: solidWord, sizeOf: sizeOf, sizeWord: sizeWord, unitsOf: unitsOf, fitted: fitted, idleMost: idleMost, padAbout: padAbout, IDLE: IDLE,
-    sample: sample, strftime: strftime
+    sample: sample, strftime: strftime, PLACES: PLACES, screenBox: screenBox
   };
 });

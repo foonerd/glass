@@ -246,6 +246,26 @@ const CHECKS = [
     }
   },
   {
+    // The theme sits on the screen by the Display section's own setting:
+    // fitted inset by margins, at a share at its place off the edges, or at
+    // a set position. Said, so a report carries it and a likeness that
+    // disagrees has its cause named; nothing where the theme fills the
+    // screen or stands centred at its own size.
+    id: 'placement', symptoms: ['look', 'screen'],
+    run(f) {
+      const d = f.display;
+      if (!d) return null;
+      const m = d.margin || {};
+      const margins = ['top', 'right', 'bottom', 'left'].map((e) => m[e] || 0);
+      const off = margins.some((v) => v > 0);
+      if (d.position === 'manual') return ok('placement', 'DIAG_PLACEMENT_AT', { x: d.x || 0, y: d.y || 0 });
+      if (d.fit) return off ? ok('placement', 'DIAG_PLACEMENT_FIT', { margins: margins.join('/') }) : null;
+      const place = String(d.place || 'center').toLowerCase();
+      if (!d.scale && !off && place === 'center') return null;
+      return ok('placement', 'DIAG_PLACEMENT_PLACED', { scale: d.scale || 100, place: 'MANAGER_PLACE_' + place.toUpperCase().replace(/-/g, '_'), margins: margins.join('/') });
+    }
+  },
+  {
     id: 'whose', symptoms: ['screen'],
     run(f) {
       if (!f.screen) return null;

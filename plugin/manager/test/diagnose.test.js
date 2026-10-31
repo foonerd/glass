@@ -532,3 +532,25 @@ test('the buttons hidden by the look, an install refused for the pair or failed,
     assert.ok(s.MANAGER_DIAG_SOURCES.indexOf('{count}') !== -1 && s.MANAGER_DIAG_SOURCES.indexOf('{names}') !== -1, lang);
   }
 });
+
+test('the placement in force is said under the look and screen symptoms, and nothing where the theme fills the screen or stands centred at its own size', () => {
+  const f = healthy();
+  f.display = { fit: true, backdrop: true, position: 'center', x: 0, y: 0, scale: null, place: 'center', margin: { top: 0, right: 0, bottom: 0, left: 0 } };
+  assert.strictEqual(one(diagnose('look', f), 'placement'), undefined, 'fitted to the whole screen: nothing to say');
+  f.display.margin = { top: 10, right: 10, bottom: 10, left: 10 };
+  let x = one(diagnose('look', f), 'placement');
+  assert.strictEqual(x.kind, 'ok'); assert.strictEqual(x.key, 'DIAG_PLACEMENT_FIT'); assert.strictEqual(x.with.margins, '10/10/10/10');
+  assert.strictEqual(one(diagnose('screen', f), 'placement').key, 'DIAG_PLACEMENT_FIT');
+  assert.strictEqual(one(diagnose('artwork', f), 'placement'), undefined, 'not under the artwork symptom');
+  f.display = { fit: false, backdrop: true, position: 'center', x: 0, y: 0, scale: null, place: 'center', margin: { top: 0, right: 0, bottom: 0, left: 0 } };
+  assert.strictEqual(one(diagnose('look', f), 'placement'), undefined, 'pixel for pixel, centred, no margins: nothing to say');
+  f.display.scale = 50; f.display.place = 'bottom-right'; f.display.margin.bottom = 5;
+  x = one(diagnose('look', f), 'placement');
+  assert.strictEqual(x.key, 'DIAG_PLACEMENT_PLACED');
+  assert.deepStrictEqual(x.with, { scale: 50, place: 'MANAGER_PLACE_BOTTOM_RIGHT', margins: '0/0/5/0' });
+  f.display = { fit: false, backdrop: false, position: 'manual', x: 100, y: -20 };
+  x = one(diagnose('look', f), 'placement');
+  assert.strictEqual(x.key, 'DIAG_PLACEMENT_AT'); assert.deepStrictEqual(x.with, { x: 100, y: -20 });
+  f.display = null;
+  assert.strictEqual(one(diagnose('look', f), 'placement'), undefined);
+});

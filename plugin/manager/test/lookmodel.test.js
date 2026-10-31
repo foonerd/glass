@@ -170,3 +170,45 @@ test('a clock has a face and a dial a style, as glass-evo names them', () => {
   assert.strictEqual(look.colourOf(laid['clock.hands']), null, 'a word, not a colour');
 });
 
+
+// The likeness's box is the display's: the pane's own test vectors
+// (crates/pane/src/lib.rs) and the boxes the likeness drew before the
+// placement had a share, a place and margins.
+test('the screen box is the display\'s own rule: fitted inset by the margins, placed at a share off the edges, or at the set position', () => {
+  const box = (frame, screen, p) => { const b = look.screenBox(frame, screen, p); return [b.x, b.y, b.w, b.h]; };
+  const all = (n) => ({ top: n, right: n, bottom: n, left: n });
+  // As before: fitted to the whole screen, centred; pixel for pixel centred; at the set position.
+  assert.deepStrictEqual(box([1024, 600], [1280, 720], { fit: true, position: 'center' }), [25, 0, 1229, 720]);
+  assert.deepStrictEqual(box([1280, 720], [1920, 1080], { fit: true, position: 'center' }), [0, 0, 1920, 1080]);
+  assert.deepStrictEqual(box([1280, 720], [1920, 1080], { fit: false, position: 'center' }), [320, 180, 1280, 720]);
+  assert.deepStrictEqual(box([1920, 1080], [1280, 720], { fit: false, position: 'center' }), [-320, -180, 1920, 1080]);
+  assert.deepStrictEqual(box([1280, 720], [1920, 1080], { fit: false, position: 'manual', x: 100, y: -20 }), [100, -20, 1280, 720]);
+  assert.deepStrictEqual(box([1280, 720], [1280, 720], null), [0, 0, 1280, 720], 'no placement known: the frame fills its own size');
+  // fitted_rect_within: ten percent of 1080 off every edge, the box 1704x864, the frame fills its height.
+  assert.deepStrictEqual(box([1920, 1080], [1920, 1080], { fit: true, margin: all(10) }), [192, 108, 1536, 864]);
+  assert.deepStrictEqual(box([1920, 1080], [1920, 1080], { fit: true, margin: { top: 20, right: 0, bottom: 0, left: 0 } }), [(1920 - 1536) / 2, 216, 1536, 864]);
+  assert.deepStrictEqual(box([600, 1024], [1280, 720], { fit: true, margin: all(5) }), [36 + (1208 - 380) / 2, 36, 380, 648]);
+  assert.deepStrictEqual(box([1024, 600], [1280, 720], { fit: true, position: 'manual', x: 3, y: 4, margin: all(10) }).slice(0, 2), [3, 4], 'a position given beats the margins');
+  const eaten = look.screenBox([1024, 600], [10, 10], { fit: true, margin: all(25) });
+  assert.ok(eaten.w >= 1 && eaten.h >= 1, 'margins that eat the screen leave a pixel');
+  // placed_rect_within: three percent of 1080 is 32 pixels.
+  const half = (place, margin) => box([1920, 1080], [1920, 1080], { fit: false, scale: 50, place, margin });
+  assert.deepStrictEqual(half('top-left', all(3)), [32, 32, 960, 540]);
+  assert.deepStrictEqual(half('bottom-right', all(3)), [1920 - 960 - 32, 1080 - 540 - 32, 960, 540]);
+  assert.strictEqual(half('top', all(3))[0], 480, 'an edge the place does not touch keeps no margin');
+  assert.deepStrictEqual(half('center', all(3)), half('center', all(0)), 'centred keeps none');
+  assert.deepStrictEqual(half('top-left', { top: 10, right: 0, bottom: 0, left: 5 }), [54, 108, 960, 540]);
+  assert.deepStrictEqual(half('bottom-right', { top: 10, right: 0, bottom: 0, left: 5 }), [960, 540, 960, 540]);
+  assert.deepStrictEqual(box([1920, 1080], [1920, 1080], { fit: false, place: 'top-left', margin: all(10) }), [0, 0, 1920, 1080], 'never past the opposite edge');
+  assert.deepStrictEqual(box([1800, 1000], [1920, 1080], { fit: false, place: 'bottom-right', margin: all(10) }), [12, 0, 1800, 1000]);
+  assert.deepStrictEqual(box([2400, 1080], [1920, 1080], { fit: false, place: 'bottom-right', margin: all(3) }), [-480, 0, 2400, 1080], 'larger than the screen: as without margins');
+  assert.strictEqual(box([1920, 1080], [1920, 1080], { fit: false, scale: 50, place: 'top-left', position: 'manual', x: 5, y: 7, margin: all(3) })[0], 5);
+  // The bounds: a share below ten is ten, above a hundred is the frame's own; a margin above 25 is 25; a place unknown is the centre.
+  assert.deepStrictEqual(box([1000, 500], [1000, 500], { fit: false, scale: 3 }).slice(2), [100, 50]);
+  assert.deepStrictEqual(box([1000, 500], [1000, 500], { fit: false, scale: 150 }).slice(2), [1000, 500]);
+  assert.deepStrictEqual(box([1920, 1080], [1920, 1080], { fit: true, margin: all(90) }), box([1920, 1080], [1920, 1080], { fit: true, margin: all(25) }));
+  assert.deepStrictEqual(box([1280, 720], [1920, 1080], { fit: false, place: 'sideways' }), [320, 180, 1280, 720]);
+  // A large panel: a 1920x1080 theme on 3200x1800, fitted inset by ten percent, or at the bottom right off the edges.
+  assert.deepStrictEqual(box([1920, 1080], [3200, 1800], { fit: true, margin: all(10) }), [320, 180, 2560, 1440]);
+  assert.deepStrictEqual(box([1920, 1080], [3200, 1800], { fit: false, place: 'bottom-right', margin: all(10) }), [3200 - 1920 - 180, 1800 - 1080 - 180, 1920, 1080]);
+});

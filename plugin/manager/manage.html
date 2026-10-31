@@ -3197,7 +3197,8 @@
       var ISSUES = 'https://github.com/foonerd/glass/issues/new';
       function symptomTitle(id) { return t('MANAGER_DIAG_S_' + String(id).toUpperCase().replace(/-/g, '_')); }
       function findingText(x) {
-        return t('MANAGER_' + x.key).replace(/\{([a-z]+)\}/g, function (slot, name) { return x.with && x.with[name] !== undefined ? String(x.with[name]) : slot; });
+        // A fill that is a key of the page's words (a place) is said in the page's language.
+        return t('MANAGER_' + x.key).replace(/\{([a-z]+)\}/g, function (slot, name) { if (!x.with || x.with[name] === undefined) return slot; var v = String(x.with[name]); return /^MANAGER_[A-Z_]+$/.test(v) ? t(v) : v; });
       }
       function diagKinds() { return { cause: t('MANAGER_DIAG_KIND_CAUSE'), note: t('MANAGER_DIAG_KIND_NOTE'), ok: t('MANAGER_DIAG_KIND_OK') }; }
       // A diagnosis as lines of text, for the sheet's copy and for a report.
@@ -3900,11 +3901,13 @@
       // The likeness is the player's screen with the theme's frame placed on it
       // as the display places it: the frame is the theme on show's size, the
       // one every view lays the face out on (a piece that spills past it there
-      // spills here); fitted to the screen with its shape kept, or pixel for
-      // pixel, centred or at the set position, cropped where it runs past the
-      // screen. The screen's edge and the frame's edge are green hairlines:
-      // what lies between is what the screen shows. Without a screen size the
-      // box is the frame itself; without a theme size, 16:9.
+      // spills here); by the display's own rule in lookmodel.js (screenBox):
+      // fitted into the screen inset by the margins with its shape kept, or at
+      // its Scale at its Place off the edges, or at the set position, cropped
+      // where it runs past the screen. The screen's edge and the frame's edge
+      // are green hairlines: what lies between is what the screen shows.
+      // Without a screen size the box is the frame itself; without a theme
+      // size, 16:9.
       function lookFrame() {
         var m = /^(\d+)x(\d+)$/.exec((state.status && state.status.themeSize) || '');
         return m && +m[1] > 0 && +m[2] > 0 ? [+m[1], +m[2]] : [1280, 720];
@@ -3913,17 +3916,11 @@
         var frame = lookFrame();
         var f = lookUi.f || {};
         var screen = f.screen && f.screen.width > 0 && f.screen.height > 0 ? [f.screen.width, f.screen.height] : frame.slice();
-        var p = f.placement || { fit: false, position: 'center', x: 0, y: 0 };
-        var w, h, x, y;
-        if (p.fit) {
-          var scale = Math.min(screen[0] / frame[0], screen[1] / frame[1]);
-          w = Math.round(frame[0] * scale); h = Math.round(frame[1] * scale);
-        } else { w = frame[0]; h = frame[1]; }
-        if (p.position === 'manual') { x = p.x || 0; y = p.y || 0; } else { x = Math.floor((screen[0] - w) / 2); y = Math.floor((screen[1] - h) / 2); }
+        var box = LOOK.screenBox(frame, screen, f.placement);
         var pc = function (n, of) { return (n / of * 100).toFixed(3) + '%'; };
         return {
           screen: 'aspect-ratio:' + screen[0] + ' / ' + screen[1],
-          frame: 'left:' + pc(x, screen[0]) + ';top:' + pc(y, screen[1]) + ';width:' + pc(w, screen[0]) + ';height:' + pc(h, screen[1])
+          frame: 'left:' + pc(box.x, screen[0]) + ';top:' + pc(box.y, screen[1]) + ';width:' + pc(box.w, screen[0]) + ';height:' + pc(box.h, screen[1])
         };
       }
       function paintLook(cards) {
