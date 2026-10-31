@@ -511,6 +511,12 @@ impl Surface {
             }
         }
         let sdl = sdl2::init()?;
+        // A frame drawn at a size other than its own, fitted to a larger
+        // screen or shown at a share of itself, is sampled linearly, as a
+        // panel's own scaler would: nearest, SDL's default, draws the
+        // pixels as blocks and the theme looks jagged. A frame at its own
+        // size lands on its own pixels and is the same either way.
+        sdl2::hint::set("SDL_RENDER_SCALE_QUALITY", "linear");
         let video = sdl.video()?;
         // With no X server, no Wayland and no screen of its own to open,
         // SDL falls back to a driver that draws to nowhere: the display
