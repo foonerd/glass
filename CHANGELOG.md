@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.39] - 2026-10-31
+
+- **A theme drawn at a size other than its own is scaled smoothly.** A theme fitted to a larger screen, or shown at a share of itself, was sampled pixel by pixel as blocks, which on a large panel or a TV looked jagged; it is now sampled linearly, as a panel's own scaler does, on the player's screen, the Face tab, Anymote and the remotes alike, under X and on the screen itself. A theme at its own size lands on its own pixels and is as it was. In step: the Troubleshooting row on a jagged theme says so, and the remote's help no longer warns of it; nothing to diagnose. This Glass names glass-evo 0.10.39 as the least it works with, since on a screen glass-evo holds the display is glass-evo's own binary (asked on the forum).
+
 ## [0.10.38] - 2026-10-24
 
 - **The source words of the edition tag rules cover their families.** Spotify plays under two ids, the Spotify plugin's and Soloist Connect's, and the word Spotify now answers for both. Radio answers for web radio, the RTL-SDR tuner and every radio plugin, Radio Paradise, Radio Browser, FIP, Radio France, Personal Radio, Calm Radio, Controradio, JP Radio, Mother Earth Radio and Radio 357 among them, where it answered for web radio alone. FM and DAB are words of their own for the tuner, read from the station playing, and win over Radio; Podcast is a word too. A rule by a source's own id still wins over its family word, and a tag in the name over any source; the rules that matched before match as before. The help text and the Settings page say the families (asked on the forum, a follow-up). In step: nothing new to diagnose; the sheet row and the Find a problem note of the rules say which word picked the theme as before.
