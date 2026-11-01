@@ -287,6 +287,6 @@ jobs:
             printf '\n'
             echo "Built in Glass $glass at $GITHUB_SHA."
             printf '\n'
-            cat .github/release-footer.md
+            cat evotap/release-footer.md
           } > dist-evotap/notes.md
           GH_TOKEN="$EVOTAP_RELEASE_TOKEN" gh release create "v$version" --repo foonerd/evotap --title "evotap $version" --notes-file dist-evotap/notes.md dist-evotap/evotap-*.tar.gz dist-evotap/SHA256SUMS dist-evotap/SHA256SUMS.sig

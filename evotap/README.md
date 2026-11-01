@@ -105,4 +105,4 @@ The rings are a contract: the magic names the layout, the version counts the cha
 
 ## Licence
 
-MIT, as Glass. evotap is designed, built and maintained by one developer in his own time; sponsorship through GitHub Sponsors or Ko-fi is a thank-you, not a purchase.
+MIT, as Glass. evotap is part of the evo framework ([evoframework.org](https://evoframework.org)), designed, built and maintained by one developer in his own time; sponsorship of the framework through GitHub Sponsors or Ko-fi is a thank-you, not a purchase.

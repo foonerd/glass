@@ -36,11 +36,13 @@ if ! git -C "$ROOT" cat-file -e "$base^{commit}" 2>/dev/null; then
     || { echo "evotap-guard: the commit $base evotap v$version was built from is not in this clone" >&2; exit 2; }
 fi
 # shellcheck disable=SC2086
-if git -C "$ROOT" diff --quiet "$base" HEAD -- $PATHS; then
+# The working tree against that commit (not HEAD: the pass runs before
+# the commit, and an uncommitted change counts).
+if git -C "$ROOT" diff --quiet "$base" -- $PATHS; then
   echo same; exit 0
 fi
 echo "evotap-guard: evotap v$version is released, built from Glass commit $base, and the tap changed since:" >&2
 # shellcheck disable=SC2086
-git -C "$ROOT" diff --stat "$base" HEAD -- $PATHS >&2
+git -C "$ROOT" diff --stat "$base" -- $PATHS >&2
 echo "evotap-guard: move the version in bins/evotap/Cargo.toml and crates/tap/Cargo.toml" >&2
 exit 1
