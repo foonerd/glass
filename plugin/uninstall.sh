@@ -23,6 +23,81 @@ clear_data() {
   rmdir "$dir" 2>/dev/null || true
 }
 
+# The screen back to the kiosk before anything goes. A take by glass-evo
+# recorded every change in the register; the plugin's own way back cannot
+# run once this script has cleared the data folder (Volumio runs it within
+# seconds of the stop), so the units are restored here, as root, in
+# reverse order, the face's X server first. The kiosk plugins the take
+# turned off are the player's to turn on: the register, marked, goes into
+# the backups folder as screen-owner.last.json, which the next install
+# reads. SYSTEMCTL, X0_SOCKET and X0_WAIT_S are the tests' to override;
+# node is the player's own.
+give_screen_back() {
+  local dir=$1
+  local register="$dir/screen-owner.json"
+  [ -f "$register" ] || return 0
+  local sc=${SYSTEMCTL:-systemctl}
+  local x0=${X0_SOCKET:-/tmp/.X11-unix/X0}
+  local wait_s=${X0_WAIT_S:-10}
+  local steps
+  steps=$(node -e '
+    const fs = require("fs");
+    let r = null;
+    try { r = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); } catch (e) { process.exit(0); }
+    if (!r || r.owner !== "glass-evo" || r.gaveBackAt) process.exit(0);
+    const changes = Array.isArray(r.changes) ? r.changes.slice().reverse() : [];
+    for (const c of changes) {
+      if (c.kind === "own-x") console.log("own-x " + c.name);
+      else if (c.kind === "unit" && c.was && (c.was.enabled || c.was.active)) console.log("unit " + c.name + " " + (c.was.enabled ? 1 : 0) + " " + (c.was.active ? 1 : 0));
+      else if (c.kind === "plugin" && c.was && c.was.enabled) console.log("plugin " + c.name);
+    }
+  ' "$register" 2>/dev/null) || steps=""
+  local plugins=""
+  if [ -n "$steps" ]; then
+    echo "Giving the screen back to the kiosk"
+    local kind name enable start i
+    while read -r kind name enable start; do
+      case "$kind" in
+        own-x)
+          echo "  $name stopped and disabled"
+          $sc stop "$name" 2>/dev/null || true
+          $sc disable "$name" 2>/dev/null || true
+          $sc reset-failed "$name" 2>/dev/null || true
+          i=0
+          while [ -e "$x0" ] && [ "$i" -lt "$((wait_s * 10))" ]; do sleep 0.1; i=$((i + 1)); done
+          ;;
+        unit)
+          echo "  $name$([ "$enable" = 1 ] && echo ' enabled')$([ "$start" = 1 ] && echo ' started')"
+          if [ "$enable" = 1 ]; then $sc enable "$name" 2>/dev/null || true; fi
+          if [ "$start" = 1 ]; then $sc start "$name" 2>/dev/null || true; fi
+          ;;
+        plugin) plugins="$plugins $name" ;;
+      esac
+    done <<STEPS
+$steps
+STEPS
+    [ -n "$plugins" ] && echo "  the kiosk plugins the take turned off, for the next install to turn on:$plugins"
+    # A kiosk enabled at boot but not running when the take came stays as
+    # it was by the register's word; an uninstall leaves a usable screen,
+    # so an enabled kiosk is started where no X server stands.
+    if $sc is-enabled volumio-kiosk >/dev/null 2>&1 && ! $sc is-active volumio-kiosk >/dev/null 2>&1 && [ ! -e "$x0" ]; then
+      echo "  volumio-kiosk started (enabled at boot, not running when the take came)"
+      $sc start volumio-kiosk 2>/dev/null || true
+    fi
+  fi
+  mkdir -p "$dir/backups"
+  node -e '
+    const fs = require("fs");
+    try {
+      const r = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+      if (!r.gaveBackAt) { r.gaveBackAt = new Date().toISOString(); r.gaveBackBy = "uninstall"; }
+      r.pluginsPending = String(process.argv[3] || "").split(" ").filter(Boolean);
+      fs.writeFileSync(process.argv[2], JSON.stringify(r, null, 2));
+    } catch (e) {}
+  ' "$register" "$dir/backups/screen-owner.last.json" "$plugins" 2>/dev/null || true
+  rm -f "$register"
+}
+
 # Sourced for its functions alone, by the tests.
 [ -n "${GLASS_UNINSTALL_FUNCTIONS:-}" ] && return 0
 
@@ -52,6 +127,7 @@ fi
 rm -f "$PLUGIN_DIR/lib/libglasstap.so" "$PLUGIN_DIR/lib/libevotap.so" /dev/shm/glasstap.* /dev/shm/evotap.* /dev/shm/evometer.* /dev/shm/evoaudio.*
 rm -rf "$PLUGIN_DIR/fanart-cache"
 
+give_screen_back "$DATA_DIR"
 clear_data "$DATA_DIR"
 
 echo "Glass uninstalled"

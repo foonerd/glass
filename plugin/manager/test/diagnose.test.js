@@ -554,3 +554,17 @@ test('the placement in force is said under the look and screen symptoms, and not
   f.display = null;
   assert.strictEqual(one(diagnose('look', f), 'placement'), undefined);
 });
+
+test('an X server of the face standing without a register is named as a leftover, and a heal is said', () => {
+  const f = healthy();
+  f.screen.fact = Object.assign({}, f.screen.fact || {}, { ownX: true });
+  f.screen.owner = { owner: 'kiosk', register: null };
+  let x = one(diagnose('screen', f), 'leftover-x');
+  assert.strictEqual(x.kind, 'cause'); assert.strictEqual(x.key, 'DIAG_LEFTOVER_X');
+  f.screen.owner = { owner: 'glass-evo', register: { owner: 'glass-evo', takenAt: 't' } };
+  assert.strictEqual(one(diagnose('screen', f), 'leftover-x'), undefined, 'glass-evo owns it: no leftover');
+  f.screen.owner = { owner: 'kiosk', register: { owner: 'kiosk', leftoverAt: '2026-11-01T14:00:00Z' } };
+  f.screen.fact.ownX = false;
+  x = one(diagnose('face', f), 'leftover-x');
+  assert.strictEqual(x.kind, 'ok'); assert.strictEqual(x.key, 'DIAG_LEFTOVER_HEALED'); assert.strictEqual(x.with.when, '2026-11-01T14:00:00Z');
+});

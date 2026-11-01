@@ -211,3 +211,11 @@ test('the uninstall script removes the data folder\'s configuration', () => {
   const script = fs.readFileSync(path.join(__dirname, '..', '..', 'uninstall.sh'), 'utf8');
   assert.ok(/rm -rf "\$dir\/config"/.test(script), 'config/ goes with the uninstall');
 });
+
+test('the uninstall script gives the screen back before it clears the data folder', () => {
+  const script = fs.readFileSync(path.join(__dirname, '..', '..', 'uninstall.sh'), 'utf8');
+  const lines = script.split('\n').filter((l) => !/^\s*#/.test(l));
+  const back = lines.findIndex((l) => /^give_screen_back "\$DATA_DIR"/.test(l));
+  const clear = lines.findIndex((l) => /^clear_data "\$DATA_DIR"/.test(l));
+  assert.ok(back >= 0 && clear > back, 'the screen goes back, then the data');
+});

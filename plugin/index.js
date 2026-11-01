@@ -2392,6 +2392,15 @@ Glass.prototype.watchScreen = function () {
     var tick = function () {
         var fact;
         try { fact = self.screenFact(); } catch (e) { return; }
+        // A leftover of a lost register (an uninstall before 0.10.51 cleared it
+        // while the face's X server stayed): the kiosk gets the screen, once;
+        // a take under way is not a leftover.
+        if (!self.leftoverHealed && !self.screenTaking && screenowner.leftover(fact, self.readRegister())) {
+            self.leftoverHealed = true;
+            self.healLeftoverX();
+            self.screenWatcher = setTimeout(tick, 2000);
+            return;
+        }
         // Glass's own: free, or an X server brought up for the face with no kiosk on it.
         var free = screenprobe.screenFree(fact) || screenprobe.screenOwn(fact);
         var running = !!(self.meterChild && self.meterChild.exitCode === null);
@@ -3052,6 +3061,9 @@ Glass.prototype.noteFrostSuits = function () {
     if (String(meterConfig.current['face.frost.suits']) !== suits) { self.applyFaceChanges({ 'face.frost.suits': suits }, true); }
 };
 const REGISTER_FILE = DATA_DIR + '/screen-owner.json';
+// What the uninstall leaves of the register, in the backups folder it
+// keeps, for the next install to turn the kiosk plugins on again.
+const LEFTOVER_NOTE = DATA_DIR + '/backups/screen-owner.last.json';
 
 Glass.prototype.evoComponent = function () {
     return component.installedAt(EVO_DIR, this.volumioArch());
@@ -3204,6 +3216,61 @@ Glass.prototype.guardScreen = function (stopped) {
     return self.screenGoingBack;
 };
 
+// The X server brought up for the face standing without a register that
+// names glass-evo, as an uninstall before 0.10.51 left it: the unit is
+// stopped and disabled, the kiosk units started (as the note the uninstall
+// left in the backups folder says, else the kiosk unit itself), the kiosk
+// plugins that note names turned on, and the register says what was done.
+Glass.prototype.healLeftoverX = function () {
+    var self = this;
+    var systemctl = function (args) {
+        return new Promise(function (resolve) {
+            exec('/usr/bin/sudo -n /bin/systemctl ' + args, { uid: 1000, gid: 1000 }, function () { resolve(); });
+        });
+    };
+    var note = null;
+    try { note = JSON.parse(fs.readFileSync(LEFTOVER_NOTE, 'utf8')); } catch (e) { note = null; }
+    self.logger.warn(id + 'screen owner: an X server of the face stands without a register (a leftover); the kiosk gets the screen');
+    var restored = [];
+    var units = note && Array.isArray(note.changes)
+        ? note.changes.filter(function (c) { return c.kind === 'unit' && c.was && (c.was.enabled || c.was.active); }).reverse()
+        : [{ kind: 'unit', name: 'volumio-kiosk', was: { enabled: true, active: true } }];
+    var plugins = note && Array.isArray(note.pluginsPending) ? note.pluginsPending : [];
+    return systemctl('stop ' + screenowner.OWN_X_UNIT)
+        .then(function () { return systemctl('disable ' + screenowner.OWN_X_UNIT); })
+        .then(function () { return systemctl('reset-failed ' + screenowner.OWN_X_UNIT); })
+        .then(function () {
+            restored.push({ kind: 'own-x', name: screenowner.OWN_X_UNIT, action: 'stop' });
+            return waitFor(function () { return !fs.existsSync('/tmp/.X11-unix/X0'); }, 10000);
+        })
+        .then(function () {
+            return units.reduce(function (p, u) {
+                return p.then(function () { return u.was.enabled ? systemctl('enable ' + u.name) : null; })
+                    .then(function () { return u.was.active ? systemctl('start ' + u.name) : null; })
+                    .then(function () { restored.push({ kind: 'unit', name: u.name, action: 'start', enable: !!u.was.enabled, start: !!u.was.active }); });
+            }, Promise.resolve());
+        })
+        .then(function () {
+            return plugins.reduce(function (p, name) {
+                return p.then(function () {
+                    try {
+                        return Promise.resolve(self.commandRouter.enableAndStartPlugin('user_interface', name))
+                            .then(function () { restored.push({ kind: 'plugin', category: 'user_interface', name: name, action: 'on' }); }, function () { return null; });
+                    } catch (e) { return null; }
+                });
+            }, Promise.resolve());
+        })
+        .then(function () {
+            self.writeRegister({ owner: 'kiosk', leftoverAt: new Date().toISOString(), restored: restored, takenAt: note && note.takenAt ? note.takenAt : null });
+            try { fs.unlinkSync(LEFTOVER_NOTE); } catch (e) {}
+            self.probeAt = 0;
+            self.logger.info(id + 'screen owner: the leftover X server stopped and the kiosk started; ' + restored.length + ' change' + (restored.length === 1 ? '' : 's'));
+        })
+        .catch(function (e) {
+            self.logger.warn(id + 'screen owner: the leftover was not healed: ' + (e && e.message ? e.message : e));
+        });
+};
+
 // glass-evo takes the screen, or the kiosk gets it back. A take turns the
 // kiosk plugins off through their own lifecycles, waits for X to go, then
 // stops and disables the units behind the kiosk, recording each change as
@@ -3271,6 +3338,7 @@ Glass.prototype.setScreenOwner = function (owner, options) {
         }
         if (options && options.force) { self.logger.warn(id + 'screen owner: the take goes on at the user\'s word, whatever the graphics check said'); }
         var register = { owner: 'glass-evo', takenAt: new Date().toISOString(), evo: state.evo.version, mode: mode, found: self.screenFact(), changes: [] };
+        self.screenTaking = true;
         var pluginSteps = screenowner.planTakePlugins(self.kioskPluginStates());
         self.logger.info(id + 'screen owner: glass-evo takes the screen (' + pluginSteps.length + ' plugin' + (pluginSteps.length === 1 ? '' : 's') + ' to turn off)');
         return chain(pluginSteps, function (step) { return runTake(step).then(function () { register.changes.push(step); }); })
@@ -3296,6 +3364,7 @@ Glass.prototype.setScreenOwner = function (owner, options) {
             })
             .then(function () {
                 self.writeRegister(register);
+                self.screenTaking = false;
                 self.probeAt = 0;
                 // Another display on another screen: what died before the screen changed hands says nothing of it.
                 self.displayDeaths = 0;
@@ -3309,6 +3378,7 @@ Glass.prototype.setScreenOwner = function (owner, options) {
             }, function (e) {
                 register.error = problem(e);
                 self.writeRegister(register);
+                self.screenTaking = false;
                 self.logger.warn(id + 'screen owner: the take did not finish: ' + register.error);
                 return { error: 'GLASS.MANAGER_OWNER_FAILED', message: register.error };
             });

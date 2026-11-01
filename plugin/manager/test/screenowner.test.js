@@ -139,3 +139,12 @@ test('glass-evo is here where its component is installed or the screen is its ow
   assert.equal(owner.here({ owner: 'glass-evo', takenAt: 1 }, { installed: false }), true, 'the screen its own with the component gone: the way back must show');
   assert.equal(owner.here(null, undefined), false);
 });
+
+test('a leftover is the face\'s X server standing while no register names glass-evo', () => {
+  assert.strictEqual(owner.leftover({ ownX: true }, null), true, 'no register');
+  assert.strictEqual(owner.leftover({ ownX: true }, { owner: 'glass-evo', takenAt: 't', gaveBackAt: 'g' }), true, 'given back');
+  assert.strictEqual(owner.leftover({ ownX: true }, { owner: 'kiosk', leftoverAt: 'l' }), true, 'healed before and standing again');
+  assert.strictEqual(owner.leftover({ ownX: true }, { owner: 'glass-evo', takenAt: 't' }), false, 'glass-evo owns it');
+  assert.strictEqual(owner.leftover({ ownX: false }, null), false, 'no X server of the face');
+  assert.strictEqual(owner.leftover(null, null), false);
+});

@@ -4326,6 +4326,9 @@
           var because = { 'face-failed': 'MANAGER_OWNER_BACK_FACE_FAILED', 'component-missing': 'MANAGER_OWNER_BACK_COMPONENT_MISSING', 'plugin-stopped': 'MANAGER_OWNER_BACK_PLUGIN_STOPPED' }[r.gaveBackAt && r.gaveBackBecause];
           if (because) lines.push(t(because) + (r.failure ? ' (' + r.failure + ')' : ''));
         }
+        if (r && r.leftoverAt) {
+          lines.push(t('MANAGER_OWNER_LEFTOVER') + ' ' + when(r.leftoverAt));
+        }
         return lines;
       }
       // The graphics check in a line: whether the screen can be drawn on itself and by whom, what the

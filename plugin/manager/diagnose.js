@@ -266,6 +266,22 @@ const CHECKS = [
     }
   },
   {
+    // The X server brought up for the face standing while no register
+    // names glass-evo: a leftover of an uninstall before 0.10.51. The
+    // plugin's start heals it; where it has, the register says so.
+    id: 'leftover-x', symptoms: ['screen', 'face'],
+    run(f) {
+      const sc = f.screen;
+      if (!sc) return null;
+      const register = sc.owner && sc.owner.register;
+      if (register && register.leftoverAt) return ok('leftover-x', 'DIAG_LEFTOVER_HEALED', { when: register.leftoverAt });
+      const ownX = !!(sc.fact && sc.fact.ownX);
+      const evoOwns = !!(register && register.owner === 'glass-evo' && !register.gaveBackAt);
+      if (ownX && !evoOwns) return cause('leftover-x', 'DIAG_LEFTOVER_X', {}, 'screen');
+      return null;
+    }
+  },
+  {
     id: 'whose', symptoms: ['screen'],
     run(f) {
       if (!f.screen) return null;

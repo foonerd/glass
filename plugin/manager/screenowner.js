@@ -139,4 +139,12 @@ function guard(state) {
   return null;
 }
 
-module.exports = { KIOSK_PLUGINS, KIOSK_UNITS, OWN_X_UNIT, FACE_TRIES, holdMode, planTakePlugins, planTakeUnits, planGiveBack, ownedByEvo, here, holdable, faceFailures, guard };
+// A leftover of a lost register: the X server brought up for the face
+// stands (its unit active) while no register names glass-evo, as an
+// uninstall before 0.10.51 left it. The kiosk gets the screen, since
+// nothing says the face should have it.
+function leftover(fact, register) {
+  return !!(fact && fact.ownX) && !ownedByEvo(register);
+}
+
+module.exports = { KIOSK_PLUGINS, KIOSK_UNITS, OWN_X_UNIT, FACE_TRIES, holdMode, planTakePlugins, planTakeUnits, planGiveBack, ownedByEvo, here, holdable, faceFailures, guard, leftover };
