@@ -75,7 +75,7 @@ pub const MAGIC: &[u8; 8] = b"EVOMETER";
 pub const VERSION: u32 = 2;
 pub const DIR: &str = "/dev/shm";
 pub const PREFIX: &str = "evometer.";
-/// The names before the evotap rename (0.11.0): a ring written by a
+/// The names before the evotap rename (0.10.50): a ring written by a
 /// library an audio process loaded before the rename and keeps until it
 /// reopens its device. Read, swept and listed beside the new ones for a
 /// release window.

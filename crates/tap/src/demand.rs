@@ -11,7 +11,7 @@ pub use bank::{Demand, Scale};
 
 /// The file's name under the ring directory.
 pub const FILE: &str = "evotap.demand";
-/// The name from before the evotap rename (0.11.0): a plugin older than
+/// The name from before the evotap rename (0.10.50): a plugin older than
 /// the library writes only this one, so the tap falls back to it for a
 /// release window.
 pub const OLD_FILE: &str = "glasstap.demand";

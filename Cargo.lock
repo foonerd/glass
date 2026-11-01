@@ -339,6 +339,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "evotap"
+version = "0.10.49"
+dependencies = [
+ "libc",
+ "tap",
+]
+
+[[package]]
 name = "expose"
 version = "0.10.49"
 dependencies = [
@@ -483,14 +491,6 @@ dependencies = [
  "base64 0.22.1",
  "logline",
  "serde_json",
- "tap",
-]
-
-[[package]]
-name = "glasstap"
-version = "0.10.49"
-dependencies = [
- "libc",
  "tap",
 ]
 

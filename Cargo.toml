@@ -13,7 +13,7 @@ members = [
     "crates/tap",
     "crates/bank",
     "bins/glass",
-    "bins/glasstap",
+    "bins/evotap",
     "bins/glass-remote",
     "bins/glass-android",
     "bins/glass-serve",
