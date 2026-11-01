@@ -4,7 +4,7 @@ VU meters, spectrum analysers, turntables and cassette decks on a Volumio player
 
 <p align="center"><img src="https://raw.githubusercontent.com/wiki/foonerd/glass/images/display-turntable.png" width="720" alt="Glass on a player's screen"></p>
 
-The workspace version is **0.10.46**.
+The workspace version is **0.10.47**.
 
 ## Get it
 
@@ -54,7 +54,7 @@ flowchart LR
 | `glass` | `bins/glass` | The display: reads the ring and the player's state, draws at the frame rate, uploads when `DISPLAY` is set. As `glass --remote`, the same display on another machine, with its own settings page. |
 | `glass-serve` | `bins/glass-serve` | Sends the ring's frames to subscribed remotes over UDP, and to browser pages as an event stream on a local socket. |
 | `glass-face` | `bins/glass-face` | The pipeline as a WebAssembly module: the manager's Face tab draws the meters in a browser with it. |
-| `tapdump` | `bins/tapdump` | Reads the ring from the command line. |
+| `tapdump`, `evotap-cat` | `crates/tap/src/bin` | Read the rings from the command line: `tapdump` prints the measurements a hop at a time, `evotap-cat` streams the audio ring to standard output for an encoder, a recorder or a second output (the wiki's Tap page). |
 | The plugin | `plugin/` | The Volumio plugin: the settings page, the audio path, the channel to the display, the manager, remotes, upgrades. `plugin/README.md` says what is in it. |
 | The remote installer | `remote/` | Desktop entries, an icon and a user service for a Linux machine used as a remote display; Start menu entries for a Windows one; the Android app around the display. |
 
