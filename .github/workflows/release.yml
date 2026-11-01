@@ -51,7 +51,7 @@ jobs:
           save-if: false
       - run: scripts/ship.sh
       - name: The tap passes every format through byte for byte
-        run: scripts/tap_exact.sh lib/x64/libglasstap.so bin/x64/tapdump
+        run: scripts/tap_exact.sh lib/x64/libglasstap.so bin/x64/tapdump bin/x64/evotap-cat
       - run: scripts/package.sh
       - name: The zip names the commit it was built from
         run: |
