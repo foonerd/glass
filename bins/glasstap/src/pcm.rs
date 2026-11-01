@@ -12,6 +12,7 @@
 use std::collections::VecDeque;
 use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
+use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicPtr, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
@@ -122,6 +123,7 @@ mod ext {
             dir: *mut c_int,
         ) -> c_int;
         pub fn snd_pcm_delay(pcm: *mut snd_pcm_t, delayp: *mut c_long) -> c_int;
+        pub fn snd_pcm_format_size(format: c_int, samples: c_ulong) -> libc::ssize_t;
     }
 }
 
@@ -168,6 +170,17 @@ struct Tap {
     scratch: Vec<i16>,
     /// Set after a panic: the tap copies and nothing more.
     failed: bool,
+    /// The tag and the seconds of the audio ring, when the configuration
+    /// asks for one; none, and nothing of the ring runs, otherwise.
+    audio_asked: Option<(String, u32)>,
+    /// The audio ring of the stream on hand: every transfer's bytes as
+    /// they are. A new ring per shape, the old gone with its writer.
+    audio: Option<tap::audio::Writer>,
+    /// Bytes of one frame, every channel, as the stream's format has it.
+    frame_bytes: usize,
+    /// A transfer whose channels are not interleaved, gathered into frames
+    /// for the ring; sized at hw_params to the player's buffer, never grown.
+    gather: Vec<u8>,
 }
 
 fn tap<'a>(ext: *mut snd_pcm_extplug_t) -> Option<&'a mut Tap> {
@@ -224,6 +237,67 @@ impl Tap {
             self.scratch.clear();
         }
     }
+
+    /// The bytes of `frames` frames from `areas` into the audio ring, as
+    /// they are: one copy when the channels are interleaved, as a player
+    /// writes them; gathered frame by frame first when they are not.
+    /// Nothing allocates, nothing waits.
+    unsafe fn hand_audio(
+        &mut self,
+        areas: *const snd_pcm_channel_area_t,
+        offset: usize,
+        frames: usize,
+    ) {
+        let Tap {
+            audio,
+            gather,
+            frame_bytes,
+            channels,
+            ..
+        } = self;
+        let Some(writer) = audio.as_mut() else {
+            return;
+        };
+        let frame_bytes = *frame_bytes;
+        let channels = (*channels).max(1);
+        if frame_bytes == 0 || frames == 0 {
+            return;
+        }
+        let sample_bytes = frame_bytes / channels;
+        let a0 = &*areas;
+        let interleaved = a0.step as usize == frame_bytes * 8
+            && (0..channels).all(|ch| {
+                let a = &*areas.add(ch);
+                a.addr == a0.addr
+                    && a.step == a0.step
+                    && a.first as usize == a0.first as usize + ch * sample_bytes * 8
+            });
+        if interleaved {
+            let base =
+                (a0.addr as *const u8).add((a0.first as usize + offset * a0.step as usize) / 8);
+            writer.push(std::slice::from_raw_parts(base, frames * frame_bytes));
+            return;
+        }
+        let room = gather.capacity() / frame_bytes;
+        if room == 0 {
+            return;
+        }
+        let mut done = 0;
+        while done < frames {
+            let n = (frames - done).min(room);
+            gather.clear();
+            for f in done..done + n {
+                for ch in 0..channels {
+                    let a = &*areas.add(ch);
+                    let base = (a.addr as *const u8)
+                        .add((a.first as usize + (offset + f) * a.step as usize) / 8);
+                    gather.extend_from_slice(std::slice::from_raw_parts(base, sample_bytes));
+                }
+            }
+            writer.push(gather);
+            done += n;
+        }
+    }
 }
 
 unsafe extern "C" fn transfer(
@@ -250,10 +324,12 @@ unsafe extern "C" fn transfer(
     if let Some(t) = tap(ext) {
         if !t.failed && t.playback {
             let outcome = catch_unwind(AssertUnwindSafe(|| {
-                t.hand_over(src_areas, src_offset as usize, size as usize)
+                t.hand_over(src_areas, src_offset as usize, size as usize);
+                t.hand_audio(src_areas, src_offset as usize, size as usize);
             }));
             if outcome.is_err() {
                 t.failed = true;
+                t.audio = None;
                 note("hand-over failed; the tap copies and measures no more");
             }
         }
@@ -291,6 +367,39 @@ unsafe extern "C" fn hw_params(
         t.shared
             .lead
             .store(lead.min(u32::MAX as c_ulong) as u32, Ordering::Release);
+        // The audio ring, when asked for: a new ring for the new shape,
+        // the old one gone with its writer. The frame's bytes are what
+        // libasound says of the format, so a format the measurements do
+        // not read still passes to the ring as it is.
+        t.audio = None;
+        let per_sample = snd_pcm_format_size(e.format, 1);
+        t.frame_bytes = if per_sample > 0 {
+            per_sample as usize * t.channels
+        } else {
+            0
+        };
+        if let Some((tag, seconds)) = t.audio_asked.clone() {
+            if t.frame_bytes == 0 {
+                note(&format!("format {} has no size; no audio ring", e.format));
+            } else {
+                let shape = tap::audio::Shape {
+                    rate: e.rate,
+                    channels: e.channels,
+                    format: e.format,
+                    frame_bytes: t.frame_bytes as u32,
+                    one_bit: t.layout.is_some_and(|l| l.is_dsd()),
+                };
+                match tap::audio::Writer::create(Path::new(tap::ring::DIR), &tag, shape, seconds) {
+                    Ok(w) => t.audio = Some(w),
+                    Err(err) => note(&format!("no audio ring: {err}")),
+                }
+                // Room to gather a whole buffer of non-interleaved frames.
+                let room = (buffer as usize).max(1) * t.frame_bytes;
+                if t.gather.capacity() < room {
+                    t.gather = Vec::with_capacity(room);
+                }
+            }
+        }
         let shape = t.layout.map(|layout| Shape {
             rate: e.rate,
             channels: e.channels,
@@ -501,6 +610,9 @@ pub unsafe extern "C" fn _snd_pcm_glasstap_open(
             reset: AtomicBool::new(false),
             stop: AtomicBool::new(false),
         });
+        let audio_asked = settings
+            .audio
+            .then(|| (settings.ring.clone(), settings.audio_seconds));
         let worker_shared = shared.clone();
         let pcm_slot = shared.clone();
         let worker = match std::thread::Builder::new()
@@ -521,6 +633,10 @@ pub unsafe extern "C" fn _snd_pcm_glasstap_open(
             playback: stream == SND_PCM_STREAM_PLAYBACK,
             scratch: Vec::with_capacity(RELAY_SAMPLES / 4),
             failed: false,
+            audio_asked,
+            audio: None,
+            frame_bytes: 0,
+            gather: Vec::new(),
         });
         let ext = Box::leak(Box::new(snd_pcm_extplug_t {
             version: SND_PCM_EXTPLUG_VERSION,

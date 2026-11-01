@@ -17,7 +17,10 @@
 //! the scope also `meter` and `spectrum` (the FIFO paths, optional),
 //! `meter_max`, `spectrum_max`, `spectrum_size`, `decay_ms`,
 //! `logarithmic_frequency`, `logarithmic_amplitude` and `smoothing_factor`
-//! as before.
+//! as before. For the PCM form only, `audio` (0 or 1, default 0) asks for
+//! the audio ring beside the measurements, the stream's own bytes under
+//! the same tag (`tap::audio`), and `audio_seconds` (default 2, 1 to 10)
+//! says how much of the stream it holds.
 
 use std::ffi::{c_char, c_int, c_long, c_uint, c_ulong, c_void, CStr, CString};
 use std::panic::{catch_unwind, AssertUnwindSafe};
@@ -102,6 +105,7 @@ pub(crate) mod ffi {
 use ffi::*;
 
 /// What the configuration asked for.
+#[derive(Clone)]
 pub(crate) struct Settings {
     meter_fifo: Option<String>,
     spectrum_fifo: Option<String>,
@@ -115,6 +119,11 @@ pub(crate) struct Settings {
     hop: usize,
     ring: String,
     slots: usize,
+    /// The audio ring beside the measurements (`audio 1`), the PCM form
+    /// only: off unless asked, so a chain that does not ask is as it was.
+    audio: bool,
+    /// Seconds of the stream the audio ring holds (`audio_seconds`).
+    audio_seconds: u32,
 }
 
 impl Default for Settings {
@@ -129,6 +138,8 @@ impl Default for Settings {
             log_f: true,
             log_y: true,
             smoothing: 60,
+            audio: false,
+            audio_seconds: 2,
             hop: 0,
             ring: "glasstap".to_string(),
             slots: 64,
@@ -216,6 +227,19 @@ pub(crate) unsafe fn settings_from(conf: *const snd_config_t) -> Settings {
             "logarithmic_amplitude" => s.log_y = integer(node).unwrap_or(1) != 0,
             "smoothing_factor" => s.smoothing = integer(node).unwrap_or(60).clamp(0, 100) as u32,
             "fft_size" => {}
+            "audio" => {
+                s.audio = integer(node).map(|v| v != 0).unwrap_or_else(|| {
+                    string(node).is_some_and(|v| {
+                        matches!(v.to_ascii_lowercase().as_str(), "1" | "yes" | "true" | "on")
+                    })
+                })
+            }
+            "audio_seconds" => {
+                s.audio_seconds = integer(node)
+                    .unwrap_or(2)
+                    .clamp(1, tap::audio::MAX_SECONDS as i64)
+                    as u32
+            }
             "hop" => s.hop = integer(node).unwrap_or(0).clamp(0, 32_768) as usize,
             "slots" => s.slots = integer(node).unwrap_or(64).clamp(2, 4096) as usize,
             "ring" => {

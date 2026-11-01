@@ -34,11 +34,18 @@ static INSTANCE: AtomicU32 = AtomicU32::new(0);
 /// first. Returns how many went.
 #[cfg(unix)]
 pub fn sweep(dir: &Path) -> usize {
+    sweep_prefix(dir, PREFIX)
+}
+
+/// The sweep for files of any prefix laid out `<prefix><tag>.<pid>.<n>`:
+/// the measurement rings and the audio rings alike.
+#[cfg(unix)]
+pub fn sweep_prefix(dir: &Path, prefix: &str) -> usize {
     let mut gone = 0;
     let own = std::process::id() as i32;
     for entry in fs::read_dir(dir).into_iter().flatten().flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let Some(rest) = name.strip_prefix(PREFIX) else {
+        let Some(rest) = name.strip_prefix(prefix) else {
             continue;
         };
         // `<tag>.<pid>.<n>`, or `<tag>.<pid>` from earlier releases.

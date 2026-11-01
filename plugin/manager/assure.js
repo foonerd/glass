@@ -23,8 +23,9 @@ const ASK_MS = 700;
 const FIELDS = ['trackType', 'title', 'artist', 'album', 'duration', 'samplerate', 'bitdepth', 'albumart'];
 // The cover address Volumio sends for a track without one.
 const DEFAULT_ART = '/albumart';
-// A title that is the file's name: an audio extension at its end.
-const FILE_TITLE = /\.(mp3|flac|wav|aac|m4a|ogg|opus|wma|aiff?|dsf|dff|ape|wv|mp4|alac)$/i;
+// A title that is the file's name: an audio extension at its end, the
+// formats and containers a player meets (`aiff?` is .aif and .aiff).
+const FILE_TITLE = /\.(mp3|mp2|mpga|flac|wav|w64|rf64|aac|m4a|m4b|ogg|oga|opus|spx|wma|aiff?|aifc|caf|au|snd|dsf|dff|iso|ape|wv|mpc|tta|mp4|mka|mkv|webm|ac3|dts|alac)$/i;
 // The seconds MPD's position may differ from the state's for the same track.
 const SAME_TRACK_S = 5;
 
@@ -71,7 +72,7 @@ function trackTypeOf(file) {
 function audioOf(audio) {
   const parts = String(audio || '').split(':');
   if (parts.length < 2 || !parts[0]) return null;
-  const dsd = { dsd64: '2.82 MHz', dsd128: '5.64 MHz', dsd256: '11.28 MHz', dsd512: '22.58 MHz' };
+  const dsd = { dsd64: '2.82 MHz', dsd128: '5.64 MHz', dsd256: '11.28 MHz', dsd512: '22.58 MHz', dsd1024: '45.16 MHz' };
   if (dsd[parts[0]]) return { samplerate: dsd[parts[0]], bitdepth: '1 bit', channels: 2 };
   const rate = Number(parts[0]);
   if (!Number.isFinite(rate) || rate <= 0) return null;

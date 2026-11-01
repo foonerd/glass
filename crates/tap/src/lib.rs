@@ -13,8 +13,14 @@
 //!
 //! The `legacy` module writes the same two FIFOs the previous tap wrote, so
 //! the two can run side by side while the switch is made.
+//!
+//! The `audio` module is the second ring: the stream's own bytes, for any
+//! process that wants the audio, written only when the tap's
+//! configuration asks (`audio 1`) and read by `evotap-cat` or a reader of
+//! its own.
 
 pub mod analysis;
+pub mod audio;
 pub mod demand;
 pub mod dop;
 pub mod dsd;

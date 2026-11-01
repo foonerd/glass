@@ -38,6 +38,7 @@ test("the audio format is worded as Volumio words MPD's", () => {
   assert.deepStrictEqual(A.audioOf('96000:24:2'), { samplerate: '96 kHz', bitdepth: '24 bit', channels: 2 });
   assert.deepStrictEqual(A.audioOf('44100:f:2'), { samplerate: '44.1 kHz', bitdepth: '32 bit', channels: 2 });
   assert.deepStrictEqual(A.audioOf('dsd64:1:2'), { samplerate: '2.82 MHz', bitdepth: '1 bit', channels: 2 });
+  assert.deepStrictEqual(A.audioOf('dsd1024:1:2'), { samplerate: '45.16 MHz', bitdepth: '1 bit', channels: 2 });
   assert.strictEqual(A.audioOf(''), null);
   assert.strictEqual(A.audioOf('x:y'), null);
 });
@@ -66,6 +67,8 @@ test("the renderer's answers parse: the transport, the address, the duration and
 test('a title that is the file name is recognised, a real one is not', () => {
   assert.ok(A.fileTitle('file.mp3', ''));
   assert.ok(A.fileTitle('Track 01.FLAC', ''));
+  ['song.aifc', 'song.mka', 'disc.iso', 'a.w64', 'b.mpc', 'c.ac3', 'd.oga'].forEach(function (n) { assert.ok(A.fileTitle(n, ''), n); });
+  assert.ok(!A.fileTitle('song.txt', ''), 'not an audio file');
   assert.ok(A.fileTitle('file', 'http://x/parts/1/file'), 'the last part of the location');
   assert.ok(A.fileTitle('Don\'t You Remember.mp3', 'http://127.0.0.1/INTERNAL/Adele/21/Don%27t%20You%20Remember.mp3'));
   assert.ok(!A.fileTitle('So Far Away', 'http://x/parts/1/file.mp3'));
