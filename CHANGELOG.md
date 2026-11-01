@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.0] - 2026-11-01
+
+- **0.11.0, the cutover.** The audio tap stands as evotap: the ALSA plugin `type evotap` in `libevotap.so`, the `evometer` and `evoaudio` rings, the `evotap.demand` file, the readers `evotap-cat` and `evotap-dump`, released on their own at github.com/foonerd/evotap as evotap 0.1.0, the first release there, with the contract. The names from before (`glasstap`) are still answered for a release window. Nothing else changed since 0.10.54: this release gathers what the 0.10.47 to 0.10.54 pre-releases proved. In step: nothing on the player changed, no check, no sheet row.
+
 ## [0.10.54] - 2026-11-01
 
 - **evotap's release notes speak of the evo framework.** The evotap release carries a footer of its own (`evotap/release-footer.md`), inviting support of the evo framework at evoframework.org rather than of Glass, and the contract's licence paragraph says the same; evotap is 0.1.1 for it, and the guard reads the working tree, so an uncommitted change to the tap counts. Glass's own notes are as they were. In step: nothing on the player changed, no check, no sheet row.
