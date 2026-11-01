@@ -34,6 +34,6 @@
       "amd64"
     ],
     "details": "Glass draws VU meters, spectrum analysers, turntables and tape decks on the player's display from PeppyMeter themes. It is a native display, one small binary, with no Python and no browser in the path. Glass replaces PeppyMeter Screensaver: only one of the two may be enabled.",
-    "changelog": "0.10.50 The tap is evotap: the ALSA type, the library, the rings and the readers carry the evo framework's name, and a player upgraded while it plays keeps working through the change, the old names answered, read and written beside the new for a release window."
+    "changelog": "0.10.51 Uninstalling Glass gives the screen back to the kiosk, and a player that went dark after an older uninstall comes back to the kiosk by itself when this release is installed."
   }
 }
