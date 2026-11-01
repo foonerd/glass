@@ -34,6 +34,6 @@
       "amd64"
     ],
     "details": "Glass draws VU meters, spectrum analysers, turntables and tape decks on the player's display from PeppyMeter themes. It is a native display, one small binary, with no Python and no browser in the path. Glass replaces PeppyMeter Screensaver: only one of the two may be enabled.",
-    "changelog": "0.10.52 evotap is released on its own at github.com/foonerd/evotap, one signed archive per architecture with the library, the readers and the contract, cut with every Glass release, for any plugin to ship without depending on Glass."
+    "changelog": "0.10.53 evotap carries a version of its own (0.1.0), apart from Glass's: the library answers evotap_version, the readers --version, the Glass release notes say which evotap they ship, and the evotap release is cut only when the number is new, the pass refusing a tap changed under a released number."
   }
 }

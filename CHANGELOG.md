@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.53] - 2026-11-01
+
+- **evotap has a version of its own.** The tap moves at its own pace, not Glass's: its version is in its crates (0.1.0, with 1.0.0 for the first consumer plugin shipped against it), its library answers `evotap_version` and its readers `--version`, and the Glass release notes say which evotap they ship. The evotap release at github.com/foonerd/evotap is cut only when that version has none yet, tagged with evotap's number and its notes naming the Glass release and commit it was built from; the pass refuses a tap changed under a number already released. The exact-pass gate reads a capture beginning with a dash as a pattern, not an option. In step: the contract and the Tap page say so; nothing on the player changed, no check, no sheet row.
+
 ## [0.10.52] - 2026-11-01
 
 - **evotap is released on its own.** The audio tap, built and tested here, is published as its own artefact at github.com/foonerd/evotap: every Glass release cuts an evotap release of the same number, one archive per architecture (`evotap-<version>-<arch>.tar.gz`: the library, `evotap-cat`, `evotap-dump`, the contract and the licence), with `SHA256SUMS` signed by the evo release key and a manifest signed inside each archive. The contract, the rings' layouts, the keys, the readers and how a plugin ships the library under its own folder with its own snippet and tag, is the evotap repository's README and travels in every archive (`evotap/README.md` here). A plugin that wants the audio depends on evotap, not on Glass. The release workflow publishes through a token the repository holds (EVOTAP_RELEASE_TOKEN); without it the signed set is kept as a build artifact and the step says so. In step: the Tap page says where another plugin gets evotap; nothing on the player changed, no check, no sheet row.
