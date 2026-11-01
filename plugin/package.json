@@ -34,6 +34,6 @@
       "amd64"
     ],
     "details": "Glass draws VU meters, spectrum analysers, turntables and tape decks on the player's display from PeppyMeter themes. It is a native display, one small binary, with no Python and no browser in the path. Glass replaces PeppyMeter Screensaver: only one of the two may be enabled.",
-    "changelog": "0.10.49 The tap's rings come back within half a second when a logout as the volumio user removes them; the meters no longer go dark for Soloist or AirPlay after a shell closes."
+    "changelog": "0.10.50 The tap is evotap: the ALSA type, the library, the rings and the readers carry the evo framework's name, and a player upgraded while it plays keeps working through the change, the old names answered, read and written beside the new for a release window."
   }
 }
