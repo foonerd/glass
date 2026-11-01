@@ -1,5 +1,5 @@
-//! `glasstap`: the tap inside the audio player, in two forms. As an ALSA
-//! PCM (`type glasstap`, the `pcm` module) the stream passes through it
+//! `evotap`: the tap inside the audio player, in two forms. As an ALSA
+//! PCM (`type evotap`, the `pcm` module) the stream passes through it
 //! byte for byte and is measured on the way. As an ALSA scope (this file)
 //! a `meter` PCM hands it the stream a period at a time. Both publish the
 //! peak and RMS of each channel and the spectrum into the shared ring, and
@@ -141,7 +141,7 @@ impl Default for Settings {
             audio: false,
             audio_seconds: 2,
             hop: 0,
-            ring: "glasstap".to_string(),
+            ring: "evotap".to_string(),
             slots: 64,
         }
     }
@@ -183,7 +183,7 @@ fn state<'a>(scope: *mut snd_pcm_scope_t) -> Option<&'a mut State> {
 }
 
 pub(crate) fn note(msg: &str) {
-    eprintln!("glasstap: {msg}");
+    eprintln!("evotap: {msg}");
 }
 
 /// Read the tap's configuration node, the scope's or the PCM's.
@@ -249,7 +249,7 @@ pub(crate) unsafe fn settings_from(conf: *const snd_config_t) -> Settings {
                             && t.chars()
                                 .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
                     })
-                    .unwrap_or_else(|| "glasstap".to_string())
+                    .unwrap_or_else(|| "evotap".to_string())
             }
             other => note(&format!("unknown key {other} ignored")),
         }
@@ -464,13 +464,29 @@ static OPS: snd_pcm_scope_ops_t = snd_pcm_scope_ops_t {
     close: Some(close),
 };
 
+/// The entry point under the name from before the evotap rename, for a
+/// configuration that still names the scope type `glasstap`; kept for a
+/// release window.
+///
+/// # Safety
+/// As [`_snd_pcm_scope_evotap_open`].
+#[no_mangle]
+pub unsafe extern "C" fn _snd_pcm_scope_glasstap_open(
+    pcm: *mut snd_pcm_t,
+    name: *const c_char,
+    root: *mut snd_config_t,
+    conf: *mut snd_config_t,
+) -> c_int {
+    _snd_pcm_scope_evotap_open(pcm, name, root, conf)
+}
+
 /// The entry point libasound looks for when the configuration names the
-/// scope type `glasstap`.
+/// scope type `evotap`.
 ///
 /// # Safety
 /// Called by libasound with a live PCM and configuration nodes.
 #[no_mangle]
-pub unsafe extern "C" fn _snd_pcm_scope_glasstap_open(
+pub unsafe extern "C" fn _snd_pcm_scope_evotap_open(
     pcm: *mut snd_pcm_t,
     name: *const c_char,
     _root: *mut snd_config_t,

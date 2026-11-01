@@ -7,10 +7,11 @@ const os = require('os');
 const path = require('path');
 const { readRings } = require('../rings');
 
-// A measurement ring's header as the tap writes it (crates/tap/src/ring.rs).
-function measurementRing(rate, channels, pid, writtenNs) {
+// A measurement ring's header as the tap writes it (crates/tap/src/ring.rs),
+// under the magic from before the evotap rename when `old` says so.
+function measurementRing(rate, channels, pid, writtenNs, old) {
   const h = Buffer.alloc(256);
-  h.write('GLASSTAP', 0, 'latin1');
+  h.write(old ? 'GLASSTAP' : 'EVOMETER', 0, 'latin1');
   h.writeUInt32LE(2, 8);
   h.writeUInt32LE(256, 12);
   h.writeUInt32LE(rate, 16);
@@ -44,13 +45,17 @@ function audioRing(rate, channels, format, frameBytes, pid, head, writtenNs, dro
 test('the sheet reads the measurement rings and the audio rings alike, the audio ring with its format, head and drops', async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glass-rings-'));
   const now = process.hrtime.bigint();
-  fs.writeFileSync(path.join(dir, 'glasstap.glass.4242.0'), measurementRing(48000, 2, 4242, now - 100000000n));
+  fs.writeFileSync(path.join(dir, 'evometer.glass.4242.0'), measurementRing(48000, 2, 4242, now - 100000000n));
+  fs.writeFileSync(path.join(dir, 'glasstap.glass.4100.0'), measurementRing(44100, 2, 4100, now - 200000000n, true));
   fs.writeFileSync(path.join(dir, 'evoaudio.pub.4242.1'), audioRing(96000, 2, 10, 8, 4242, 123456n, now - 50000000n, 0n));
   fs.writeFileSync(path.join(dir, 'evoaudio.dsd.4243.0'), audioRing(88200, 2, 50, 8, 4243, 99n, now - 9000000000n, 64n));
+  fs.writeFileSync(path.join(dir, 'evotap.demand'), '{}');
   fs.writeFileSync(path.join(dir, 'glasstap.demand'), '{}');
   fs.writeFileSync(path.join(dir, 'other.file'), 'x');
   const rings = await readRings(dir);
-  assert.deepStrictEqual(rings.map((r) => r.name), ['evoaudio.pub.4242.1', 'glasstap.glass.4242.0', 'evoaudio.dsd.4243.0'], 'the most recently written first, the demand file and strangers left out');
+  assert.deepStrictEqual(rings.map((r) => r.name), ['evoaudio.pub.4242.1', 'evometer.glass.4242.0', 'glasstap.glass.4100.0', 'evoaudio.dsd.4243.0'], 'the most recently written first, a ring under the old name read too, the demand files and strangers left out');
+  assert.strictEqual(rings[2].tag, 'glass', 'the tag behind the old prefix');
+  assert.strictEqual(rings[2].rate, 44100);
   const audio = rings[0];
   assert.strictEqual(audio.audio, true);
   assert.strictEqual(audio.tag, 'pub');
@@ -66,7 +71,7 @@ test('the sheet reads the measurement rings and the audio rings alike, the audio
   assert.strictEqual(meter.format, undefined);
   assert.strictEqual(meter.seq, 7);
   assert.strictEqual(meter.healed, 0, 'a measurement ring never made again');
-  const dsd = rings[2];
+  const dsd = rings[3];
   assert.strictEqual(dsd.format, 'DSD_U32_LE');
   assert.strictEqual(dsd.dropped, 64);
   assert.strictEqual(dsd.live, false, 'written nine seconds ago');

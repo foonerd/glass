@@ -10,13 +10,28 @@ use std::path::{Path, PathBuf};
 pub use bank::{Demand, Scale};
 
 /// The file's name under the ring directory.
-pub const FILE: &str = "glasstap.demand";
+pub const FILE: &str = "evotap.demand";
+/// The name from before the evotap rename (0.11.0): a plugin older than
+/// the library writes only this one, so the tap falls back to it for a
+/// release window.
+pub const OLD_FILE: &str = "glasstap.demand";
 /// How often the file is looked at, in nanoseconds.
 const LOOK_EVERY_NS: u64 = 1_000_000_000;
 
 /// The demand file's path under `dir`.
 pub fn path(dir: &Path) -> PathBuf {
     dir.join(FILE)
+}
+
+/// The path of the file under its old name.
+pub fn old_path(dir: &Path) -> PathBuf {
+    dir.join(OLD_FILE)
+}
+
+/// The demand under `dir`: the file under its name, else under its old
+/// name, else none.
+pub fn read_under(dir: &Path) -> Option<Demand> {
+    read(&path(dir)).or_else(|| read(&old_path(dir)))
 }
 
 /// The demand the file holds, cleaned; `None` without a file or with one
@@ -39,19 +54,18 @@ pub fn write(path: &Path, demand: &Demand) -> std::io::Result<()> {
 
 /// The demand file watched: the demand in force, and whether it changed.
 pub struct Watch {
-    path: PathBuf,
+    dir: PathBuf,
     current: Demand,
     looked_ns: Option<u64>,
 }
 
 impl Watch {
-    /// Watch the file under `dir`, starting from what it holds now, or
-    /// the default demand without it.
+    /// Watch the file under `dir`, under its name or its old one,
+    /// starting from what it holds now, or the default demand without it.
     pub fn new(dir: &Path) -> Self {
-        let path = path(dir);
-        let current = read(&path).unwrap_or_default();
+        let current = read_under(dir).unwrap_or_default();
         Self {
-            path,
+            dir: dir.to_path_buf(),
             current,
             looked_ns: None,
         }
@@ -73,7 +87,7 @@ impl Watch {
             return None;
         }
         self.looked_ns = Some(now_ns);
-        let found = read(&self.path).unwrap_or_default();
+        let found = read_under(&self.dir).unwrap_or_default();
         if found == self.current {
             return None;
         }
@@ -111,6 +125,22 @@ mod tests {
             Some(Demand::default()),
             "a file that does not parse means the default"
         );
+        // The file under its old name alone, as a plugin from before the
+        // rename writes it, is read; the file under its name wins over it.
+        std::fs::remove_file(path(&dir)).unwrap();
+        let old = Demand::new(64, 1, Scale::Mel);
+        write(&old_path(&dir), &old).unwrap();
+        assert_eq!(read_under(&dir), Some(old));
+        assert_eq!(watch.changed(8_000_000_000), Some(old), "the old name read");
+        let fresh = Watch::new(&dir);
+        assert_eq!(
+            fresh.current(),
+            old,
+            "a new watch starts from the old name too"
+        );
+        write(&path(&dir), &wanted).unwrap();
+        assert_eq!(read_under(&dir), Some(wanted), "the new name wins");
+        assert_eq!(watch.changed(10_000_000_000), Some(wanted));
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

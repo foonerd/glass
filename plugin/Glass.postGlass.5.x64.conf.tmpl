@@ -7,26 +7,26 @@
 # plugin, so the switch above it may write it by mmap as it does the rest
 # of the chain; no side output and no loopback card are needed on x64.
 pcm.Glass {
-  type glasstap
+  type evotap
   slave.pcm "postglass"
   ring "glass"
   fft_size 2048
 }
 
-pcm_type.glasstap {
-  lib /data/plugins/user_interface/glass/lib/libglasstap.so
+pcm_type.evotap {
+  lib /data/plugins/user_interface/glass/lib/libevotap.so
 }
 
 # ---> Spotify and AirPlay name their own PCMs: the same tap.
 pcm.spotify {
-  type glasstap
+  type evotap
   slave.pcm "postglass"
   ring "glass"
   fft_size 2048
 }
 
 pcm.airplay {
-  type glasstap
+  type evotap
   slave.pcm "postglass"
   ring "glass"
   fft_size 2048

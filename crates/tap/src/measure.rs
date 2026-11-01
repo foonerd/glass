@@ -37,7 +37,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
-            ring: "glasstap".to_string(),
+            ring: "evotap".to_string(),
             hop: 0,
             slots: 64,
         }

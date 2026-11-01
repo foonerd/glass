@@ -66,8 +66,12 @@ const SpectrumConfigFile = ConfigDir + '/spectrum.txt';
 const meterFolderStr = 'meter.folder';
 const SpectrumFolderStr = 'spectrum.folder';
 // What the tap measures to: the bank the spectrum theme on show asks for,
-// written beside the rings for the tap to follow (tap::demand).
-const SpectrumDemandFile = '/dev/shm/glasstap.demand';
+// written beside the rings for the tap to follow (tap::demand). The file
+// under its name from before the evotap rename is written too, for an
+// audio process that keeps the older library until it reopens its device;
+// dropped after a release window.
+const SpectrumDemandFile = '/dev/shm/evotap.demand';
+const OldSpectrumDemandFile = '/dev/shm/glasstap.demand';
 
 // The plugin Glass replaces. Only one of the two may be enabled at a time.
 const LEGACY_PLUGIN = 'peppy_screensaver';
@@ -993,10 +997,12 @@ Glass.prototype.writeSpectrumDemand = function () {
     var self = this;
     var text;
     try { text = JSON.stringify(self.spectrumDemand()); } catch (e) { return; }
-    if (self.lastSpectrumDemand === text && fs.existsSync(SpectrumDemandFile)) { return; }
+    if (self.lastSpectrumDemand === text && fs.existsSync(SpectrumDemandFile) && fs.existsSync(OldSpectrumDemandFile)) { return; }
     try {
-        fs.writeFileSync(SpectrumDemandFile + '.part', text);
-        fs.renameSync(SpectrumDemandFile + '.part', SpectrumDemandFile);
+        [SpectrumDemandFile, OldSpectrumDemandFile].forEach(function (file) {
+            fs.writeFileSync(file + '.part', text);
+            fs.renameSync(file + '.part', file);
+        });
         self.lastSpectrumDemand = text;
         if (self.logger) { self.logger.info(id + 'spectrum demand ' + text); }
     } catch (e) {

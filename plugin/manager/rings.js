@@ -2,7 +2,7 @@
 // The tap's rings under /dev/shm, read from their headers for the status
 // sheet: the stream, the sequence, and whether the writer wrote within
 // the last seconds (the display's own notion of a live ring). Times are
-// the monotonic clock. The measurement rings (`glasstap.`,
+// the monotonic clock. The measurement rings (`evometer.`, and `glasstap.` from before the evotap rename,
 // crates/tap/src/ring.rs) and the audio rings (`evoaudio.`, the
 // stream's own bytes, written when a tap's snippet asks,
 // crates/tap/src/audio.rs) alike; an audio ring says its format, its
@@ -13,7 +13,11 @@ const fsp = require('fs').promises;
 const path = require('path');
 
 const RING_DIR = '/dev/shm';
-const RING_PREFIX = 'glasstap.';
+const RING_PREFIX = 'evometer.';
+// The name from before the evotap rename, written by a library an audio
+// process loaded before it and keeps until it reopens its device; read
+// for a release window.
+const OLD_RING_PREFIX = 'glasstap.';
 const AUDIO_RING_PREFIX = 'evoaudio.';
 const RING_LIVE_NS = 3000000000n;
 
@@ -37,7 +41,7 @@ async function readRings(dir) {
   dir = dir || RING_DIR;
   let names = [];
   try {
-    names = (await fsp.readdir(dir)).filter(function (n) { return n.startsWith(RING_PREFIX) || n.startsWith(AUDIO_RING_PREFIX); });
+    names = (await fsp.readdir(dir)).filter(function (n) { return n.startsWith(RING_PREFIX) || n.startsWith(OLD_RING_PREFIX) || n.startsWith(AUDIO_RING_PREFIX); });
   } catch (e) {
     return [];
   }
@@ -51,12 +55,13 @@ async function readRings(dir) {
       const { bytesRead } = await fd.read(header, 0, 96, 0);
       const magic = bytesRead >= 64 ? header.toString('latin1', 0, 8) : '';
       const audio = magic === 'EVOAUDIO';
-      if (!audio && magic !== 'GLASSTAP') continue;
+      if (!audio && magic !== 'EVOMETER' && magic !== 'GLASSTAP') continue;
       const written = header.readBigUInt64LE(56);
       // A write stamped a hair ahead of this reading counts as now, as the
       // display's own rule has it.
       const ago = written === 0n ? null : (written > now ? 0n : now - written);
-      const parts = name.slice(audio ? AUDIO_RING_PREFIX.length : RING_PREFIX.length).split('.');
+      const prefix = audio ? AUDIO_RING_PREFIX : (name.startsWith(OLD_RING_PREFIX) ? OLD_RING_PREFIX : RING_PREFIX);
+      const parts = name.slice(prefix.length).split('.');
       const ring = {
         name: name,
         tag: parts[0],
@@ -90,4 +95,4 @@ async function readRings(dir) {
   return rings;
 }
 
-module.exports = { readRings, RING_DIR, RING_PREFIX, AUDIO_RING_PREFIX, ALSA_FORMATS };
+module.exports = { readRings, RING_DIR, RING_PREFIX, OLD_RING_PREFIX, AUDIO_RING_PREFIX, ALSA_FORMATS };

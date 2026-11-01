@@ -49,7 +49,7 @@ if [ -f "$RENDER_MARKER" ]; then
   rm -f "$RENDER_MARKER"
 fi
 
-rm -f "$PLUGIN_DIR/lib/libglasstap.so" /dev/shm/glasstap.*
+rm -f "$PLUGIN_DIR/lib/libglasstap.so" "$PLUGIN_DIR/lib/libevotap.so" /dev/shm/glasstap.* /dev/shm/evotap.* /dev/shm/evometer.* /dev/shm/evoaudio.*
 rm -rf "$PLUGIN_DIR/fanart-cache"
 
 clear_data "$DATA_DIR"

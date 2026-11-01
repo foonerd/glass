@@ -56,23 +56,23 @@ ship() {
   local arch=$2
   local stripper=$3
   echo "ship: $arch ($triple)"
-  cargo build --release --locked --target "$triple" --bin glass --bin tapdump --bin evotap-cat --bin glass-serve -p glass -p tap -p glass-serve
-  cargo build --release --locked --target "$triple" -p glasstap
+  cargo build --release --locked --target "$triple" --bin glass --bin evotap-dump --bin evotap-cat --bin glass-serve -p glass -p tap -p glass-serve
+  cargo build --release --locked --target "$triple" -p evotap
   install -D -m 755 "target/$triple/release/glass" "bin/$arch/glass"
-  install -D -m 755 "target/$triple/release/tapdump" "bin/$arch/tapdump"
+  install -D -m 755 "target/$triple/release/evotap-dump" "bin/$arch/evotap-dump"
   install -D -m 755 "target/$triple/release/evotap-cat" "bin/$arch/evotap-cat"
   install -D -m 755 "target/$triple/release/glass-serve" "bin/$arch/glass-serve"
-  install -D -m 644 "target/$triple/release/libglasstap.so" "lib/$arch/libglasstap.so"
-  "$stripper" "bin/$arch/glass" "bin/$arch/tapdump" "bin/$arch/evotap-cat" "bin/$arch/glass-serve" "lib/$arch/libglasstap.so"
+  install -D -m 644 "target/$triple/release/libevotap.so" "lib/$arch/libevotap.so"
+  "$stripper" "bin/$arch/glass" "bin/$arch/evotap-dump" "bin/$arch/evotap-cat" "bin/$arch/glass-serve" "lib/$arch/libevotap.so"
 }
 
 ship x86_64-unknown-linux-gnu x64 strip
 ship armv7-unknown-linux-gnueabihf armv7 arm-linux-gnueabihf-strip
 install -D -m 755 bin/armv7/glass bin/arm/glass
-install -D -m 755 bin/armv7/tapdump bin/arm/tapdump
+install -D -m 755 bin/armv7/evotap-dump bin/arm/evotap-dump
 install -D -m 755 bin/armv7/evotap-cat bin/arm/evotap-cat
 install -D -m 755 bin/armv7/glass-serve bin/arm/glass-serve
-install -D -m 644 lib/armv7/libglasstap.so lib/arm/libglasstap.so
+install -D -m 644 lib/armv7/libevotap.so lib/arm/libevotap.so
 ship aarch64-unknown-linux-gnu armv8 aarch64-linux-gnu-strip
 
 # Volumio bookworm runs glibc 2.36 on every architecture. The cross
@@ -88,7 +88,7 @@ echo "ship: glibc"
 glibc_max() {
   readelf -W --dyn-syms "$1" | grep -o 'GLIBC_2\.[0-9]*' | sort -t. -k2,2n -u | tail -n1
 }
-for bin in bin/*/glass bin/*/tapdump bin/*/evotap-cat bin/*/glass-serve lib/*/libglasstap.so; do
+for bin in bin/*/glass bin/*/evotap-dump bin/*/evotap-cat bin/*/glass-serve lib/*/libevotap.so; do
   version=$(glibc_max "$bin")
   case "$version" in
     GLIBC_2.3[7-9]|GLIBC_2.[4-9]*|GLIBC_2.[1-9][0-9][0-9])
@@ -101,4 +101,4 @@ for bin in bin/*/glass bin/*/tapdump bin/*/evotap-cat bin/*/glass-serve lib/*/li
 done
 
 echo "ship: payload"
-file bin/arm/glass bin/armv7/glass bin/armv8/glass bin/x64/glass bin/x64/evotap-cat lib/arm/libglasstap.so lib/armv8/libglasstap.so lib/x64/libglasstap.so
+file bin/arm/glass bin/armv7/glass bin/armv8/glass bin/x64/glass bin/x64/evotap-cat lib/arm/libevotap.so lib/armv8/libevotap.so lib/x64/libevotap.so

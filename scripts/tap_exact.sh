@@ -1,40 +1,47 @@
 #!/bin/bash
 # Proves the tap PCM passes a stream through byte for byte: raw frames of
-# each format play through `type glasstap` into a file, and the file must
+# each format play through `type evotap` into a file, and the file must
 # begin with exactly the bytes that went in (aplay pads the last period
-# with silence). Meanwhile tapdump shows the ring the tap wrote. Then the
+# with silence). Meanwhile evotap-dump shows the ring the tap wrote. Then the
 # same with the audio ring asked for (`audio 1`): evotap-cat captures the ring
 # while the stream plays, and what it captured must be one contiguous run
 # of the input (found by its first 64 bytes), most of it, with nothing
 # lost. Needs aplay and the host's libasound; the binaries default to the
 # host build.
-#   scripts/tap_exact.sh [libglasstap.so] [tapdump] [evotap-cat]
+#   scripts/tap_exact.sh [libevotap.so] [evotap-dump] [evotap-cat]
 
 set -euo pipefail
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
 # ALSA loads the library by the path given, so it must be absolute.
-LIB=$(realpath "${1:-$ROOT/target/release/libglasstap.so}")
-DUMP=$(realpath "${2:-$ROOT/target/release/tapdump}")
+LIB=$(realpath "${1:-$ROOT/target/release/libevotap.so}")
+DUMP=$(realpath "${2:-$ROOT/target/release/evotap-dump}")
 CAT=$(realpath "${3:-$ROOT/target/release/evotap-cat}")
 WORK=$(mktemp -d)
 trap 'rm -rf "$WORK"' EXIT
 
+# The tap under its name, and under the name from before the evotap
+# rename (`type glasstap`), which the library answers to for a release
+# window so a chain not yet rewritten still loads it.
 cat > "$WORK/asound.conf" <<EOF
 </usr/share/alsa/alsa.conf>
+pcm_type.evotap { lib "$LIB" }
 pcm_type.glasstap { lib "$LIB" }
-pcm.tap { type glasstap  slave.pcm "sink"  ring "exact"  fft_size 1024 }
-pcm.tapaudio { type glasstap  slave.pcm "sink"  ring "exactaudio"  audio 1  audio_seconds 4 }
+pcm.tap { type evotap  slave.pcm "sink"  ring "exact"  fft_size 1024 }
+pcm.oldtap { type glasstap  slave.pcm "sink"  ring "exactold" }
+pcm.tapaudio { type evotap  slave.pcm "sink"  ring "exactaudio"  audio 1  audio_seconds 4 }
 pcm.sink { type file  slave.pcm "null"  file "$WORK/out.raw"  format "raw" }
 EOF
 export ALSA_CONFIG_PATH="$WORK/asound.conf"
 
-for spec in "S16_LE 48000" "S24_3LE 96000" "S32_LE 192000" "DSD_U32_LE 88200"; do
+# The old type name once, the new one for every format.
+for spec in "S16_LE 48000 oldtap" "S16_LE 48000" "S24_3LE 96000" "S32_LE 192000" "DSD_U32_LE 88200"; do
   set -- $spec
   fmt=$1
   rate=$2
+  pcm=${3:-tap}
   head -c 3000000 /dev/urandom > "$WORK/in.raw"
   rm -f "$WORK/out.raw"
-  aplay -q -t raw -f "$fmt" -r "$rate" -c 2 -D tap "$WORK/in.raw" &
+  aplay -q -t raw -f "$fmt" -r "$rate" -c 2 -D "$pcm" "$WORK/in.raw" &
   play_pid=$!
   sleep 0.5
   "$DUMP" 1 > "$WORK/dump.txt" 2>&1 || true
@@ -42,9 +49,9 @@ for spec in "S16_LE 48000" "S24_3LE 96000" "S32_LE 192000" "DSD_U32_LE 88200"; d
   size=$(stat -c %s "$WORK/in.raw")
   out=$(stat -c %s "$WORK/out.raw" 2>/dev/null || echo 0)
   if [ "$out" -ge "$size" ] && cmp -s -n "$size" "$WORK/in.raw" "$WORK/out.raw"; then
-    echo "tap: $fmt at $rate passes byte for byte ($size of $out bytes); ring: $(tail -n 1 "$WORK/dump.txt")"
+    echo "tap: $fmt at $rate through $pcm passes byte for byte ($size of $out bytes); ring: $(tail -n 1 "$WORK/dump.txt")"
   else
-    echo "tap: $fmt at $rate DIFFERS ($size in, $out out): $(cmp -n "$size" "$WORK/in.raw" "$WORK/out.raw" 2>&1 | head -n 1)"
+    echo "tap: $fmt at $rate through $pcm DIFFERS ($size in, $out out): $(cmp -n "$size" "$WORK/in.raw" "$WORK/out.raw" 2>&1 | head -n 1)"
     exit 1
   fi
 done

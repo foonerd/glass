@@ -5,7 +5,7 @@
 //!
 //! Layout, little-endian, all offsets fixed by the header:
 //!
-//! - header, 256 bytes: magic `GLASSTAP`, version, header size, sample rate,
+//! - header, 256 bytes: magic `EVOMETER` (`GLASSTAP` before the evotap rename, read too), version, header size, sample rate,
 //!   channels, FFT size, bins per channel, slot count, slot size, writer
 //!   pid, hop, then the sequence of the last slot published and the time it
 //!   was published, both written last with release ordering.
@@ -34,7 +34,7 @@ static INSTANCE: AtomicU32 = AtomicU32::new(0);
 /// first. Returns how many went.
 #[cfg(unix)]
 pub fn sweep(dir: &Path) -> usize {
-    sweep_prefix(dir, PREFIX)
+    sweep_prefix(dir, PREFIX) + sweep_prefix(dir, OLD_PREFIX)
 }
 
 /// The sweep for files of any prefix laid out `<prefix><tag>.<pid>.<n>`:
@@ -71,10 +71,16 @@ pub fn sweep_prefix(dir: &Path, prefix: &str) -> usize {
     gone
 }
 
-pub const MAGIC: &[u8; 8] = b"GLASSTAP";
+pub const MAGIC: &[u8; 8] = b"EVOMETER";
 pub const VERSION: u32 = 2;
 pub const DIR: &str = "/dev/shm";
-pub const PREFIX: &str = "glasstap.";
+pub const PREFIX: &str = "evometer.";
+/// The names before the evotap rename (0.11.0): a ring written by a
+/// library an audio process loaded before the rename and keeps until it
+/// reopens its device. Read, swept and listed beside the new ones for a
+/// release window.
+pub const OLD_MAGIC: &[u8; 8] = b"GLASSTAP";
+pub const OLD_PREFIX: &str = "glasstap.";
 pub const MAX_CHANNELS: usize = 2;
 pub const HEADER_BYTES: usize = 256;
 /// A ring written longer ago than this is a leftover of a player that stopped.
@@ -595,11 +601,13 @@ impl Reader {
         let version = get_u32(bytes, H_VERSION);
         // A ring of version 1, from a tap that measured before the bank,
         // is read too: an audio process keeps the tap it loaded until it
-        // restarts, and its raw spectrum is projected onto a bank.
-        if &bytes[H_MAGIC..H_MAGIC + 8] != MAGIC || !(1..=VERSION).contains(&version) {
+        // restarts, and its raw spectrum is projected onto a bank. So is
+        // a ring under the magic from before the evotap rename.
+        let magic = &bytes[H_MAGIC..H_MAGIC + 8];
+        if (magic != MAGIC && magic != OLD_MAGIC) || !(1..=VERSION).contains(&version) {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                "not a glasstap ring",
+                "not an evotap ring",
             ));
         }
         let info = Info {
@@ -642,13 +650,17 @@ impl Reader {
         })
     }
 
-    /// Every ring under `dir`, the most recently written first.
+    /// Every ring under `dir`, under either name, the most recently
+    /// written first.
     pub fn find(dir: &Path) -> Vec<PathBuf> {
         let mut found: Vec<(u64, PathBuf)> = fs::read_dir(dir)
             .into_iter()
             .flatten()
             .flatten()
-            .filter(|entry| entry.file_name().to_string_lossy().starts_with(PREFIX))
+            .filter(|entry| {
+                let name = entry.file_name().to_string_lossy().into_owned();
+                name.starts_with(PREFIX) || name.starts_with(OLD_PREFIX)
+            })
             .filter_map(|entry| {
                 let path = entry.path();
                 let reader = Reader::open(&path).ok()?;
@@ -766,7 +778,7 @@ mod tests {
     use super::*;
 
     fn temp_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("glasstap-ring-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("evotap-ring-{}", std::process::id()));
         fs::create_dir_all(&dir).unwrap();
         dir
     }
@@ -775,7 +787,7 @@ mod tests {
     fn rings_of_dead_processes_are_swept_and_live_ones_kept() {
         // A directory of its own: the other tests write rings in theirs and
         // remove it when they are done.
-        let dir = std::env::temp_dir().join(format!("glasstap-sweep-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("evotap-sweep-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let dead = dir.join(format!("{PREFIX}test.{}.0", i32::MAX));
@@ -800,14 +812,14 @@ mod tests {
     #[test]
     fn a_ring_of_the_previous_version_reads_as_a_raw_spectrum() {
         // A directory of its own: the other tests write rings in theirs.
-        let dir = std::env::temp_dir().join(format!("glasstap-old-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("evotap-old-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join(format!("{PREFIX}old.{}.9", std::process::id()));
         let (bins, slots) = (8usize, 2usize);
         let slot_len = slot_bytes_v1(bins);
         let mut bytes = vec![0u8; HEADER_BYTES + slots * slot_len];
-        bytes[H_MAGIC..H_MAGIC + 8].copy_from_slice(MAGIC);
+        bytes[H_MAGIC..H_MAGIC + 8].copy_from_slice(OLD_MAGIC);
         put_u32(&mut bytes, H_VERSION, 1);
         put_u32(&mut bytes, H_HEADER_BYTES, HEADER_BYTES as u32);
         put_u32(&mut bytes, H_RATE, 44_100);
@@ -834,7 +846,7 @@ mod tests {
         put_u64(&mut bytes, H_SEQ, 1);
         put_u64(&mut bytes, H_WRITTEN, now_ns());
         fs::write(&path, &bytes).unwrap();
-        let reader = Reader::open(&path).expect("the old ring is read");
+        let reader = Reader::open(&path).expect("the old ring, under the old magic, is read");
         assert_eq!(reader.info().version, 1);
         let frame = reader.latest().expect("its frame");
         assert!(frame.raw, "the spectrum is raw");
@@ -920,7 +932,7 @@ mod tests {
 
     #[test]
     fn a_ring_removed_under_its_writer_is_made_again_whole_and_a_reader_tells_the_new_file() {
-        let dir = std::env::temp_dir().join(format!("glasstap-heal-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("evotap-heal-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let demand = bank::Demand::new(16, 2, bank::Scale::Mel);

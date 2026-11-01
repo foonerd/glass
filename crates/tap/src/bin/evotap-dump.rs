@@ -1,5 +1,5 @@
 //! Print what the live ring says, a line a hop, for a look at the tap
-//! without the display: `tapdump [seconds]`.
+//! without the display: `evotap-dump [seconds]`.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
@@ -11,7 +11,7 @@ fn main() {
         .unwrap_or(5.0);
     let dir = Path::new(tap::ring::DIR);
     let Some(reader) = tap::Reader::open_live(dir) else {
-        eprintln!("tapdump: no live ring under {}", dir.display());
+        eprintln!("evotap-dump: no live ring under {}", dir.display());
         std::process::exit(1);
     };
     let info = reader.info();

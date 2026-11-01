@@ -42,7 +42,7 @@ fi
 # =============================================================================
 # CHECK: the display binary for this machine. The unzip does not keep modes.
 # =============================================================================
-chmod +x "$PLUGIN_DIR"/bin/*/glass "$PLUGIN_DIR"/bin/*/tapdump "$PLUGIN_DIR"/bin/*/evotap-cat "$PLUGIN_DIR"/bin/*/glass-serve "$PLUGIN_DIR/run_glass.sh" 2>/dev/null || true
+chmod +x "$PLUGIN_DIR"/bin/*/glass "$PLUGIN_DIR"/bin/*/evotap-dump "$PLUGIN_DIR"/bin/*/evotap-cat "$PLUGIN_DIR"/bin/*/glass-serve "$PLUGIN_DIR/run_glass.sh" 2>/dev/null || true
 if [ ! -x "$PLUGIN_DIR/bin/$ARCH/glass" ]; then
   refuse "ERROR: no display binary for architecture $ARCH (available: $(ls "$PLUGIN_DIR/bin" 2>/dev/null | tr '\n' ' '))"
 fi
@@ -80,11 +80,17 @@ fi
 # =============================================================================
 # INSTALL: the tap, the ALSA scope that measures what plays
 # =============================================================================
-if [ ! -f "$PLUGIN_DIR/lib/$ARCH/libglasstap.so" ]; then
+if [ ! -f "$PLUGIN_DIR/lib/$ARCH/libevotap.so" ]; then
   refuse "ERROR: no tap library for architecture $ARCH"
 fi
-ln -sf "$PLUGIN_DIR/lib/$ARCH/libglasstap.so" "$PLUGIN_DIR/lib/libglasstap.so"
-echo "Tap: $PLUGIN_DIR/lib/$ARCH/libglasstap.so"
+ln -sf "$PLUGIN_DIR/lib/$ARCH/libevotap.so" "$PLUGIN_DIR/lib/libevotap.so"
+# The library under its name from before the evotap rename too, for one
+# release window: a chain written before the rename names
+# lib/libglasstap.so, and an audio process that opens its device between
+# the files landing and the chain being rewritten must find a library
+# there. It answers to both type names.
+ln -sf "$PLUGIN_DIR/lib/$ARCH/libevotap.so" "$PLUGIN_DIR/lib/libglasstap.so"
+echo "Tap: $PLUGIN_DIR/lib/$ARCH/libevotap.so"
 
 # =============================================================================
 # SETUP: the engine's configuration files live under the data folder, which

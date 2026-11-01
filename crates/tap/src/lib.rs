@@ -1,6 +1,6 @@
 //! The audio tap's measurements and the ring they travel through.
 //!
-//! The tap runs inside the audio player (the `glasstap` library, an ALSA
+//! The tap runs inside the audio player (the `evotap` library, an ALSA
 //! PCM plugin the stream passes through untouched, and an ALSA scope for
 //! the `meter` PCM) and measures the stream a hop at a time: the peak and
 //! RMS of each channel and the magnitude spectrum of each channel, or for

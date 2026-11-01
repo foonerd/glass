@@ -1,4 +1,4 @@
-//! The tap as an ALSA PCM: `type glasstap` in the player's chain, with a
+//! The tap as an ALSA PCM: `type evotap` in the player's chain, with a
 //! `slave` like any filter plugin. The stream passes through byte for byte
 //! in the format the player and the slave agreed, so PCM, DoP and native
 //! DSD stay bit-perfect. On the way the audio thread copies the samples
@@ -453,7 +453,7 @@ static CALLBACKS: snd_pcm_extplug_callback_t = snd_pcm_extplug_callback_t {
     set_chmap: None,
 };
 
-static NAME: &[u8] = b"glasstap\0";
+static NAME: &[u8] = b"evotap\0";
 
 /// The measuring thread: takes what the relay holds, measures it for the
 /// stream's shape, and puts each hop into the ring when its audio is
@@ -569,15 +569,38 @@ fn run(shared: Arc<Shared>, settings: Settings) {
 /// The mark libasound looks for beside the entry point to accept its
 /// protocol version; what it holds does not matter.
 #[no_mangle]
+pub static __snd_pcm_evotap_open_dlsym_pcm_001: [usize; 3] = [0; 3];
+
+/// The same mark under the name from before the evotap rename, beside
+/// the entry point kept for a configuration that still says `type
+/// glasstap`; both go after a release window.
+#[no_mangle]
 pub static __snd_pcm_glasstap_open_dlsym_pcm_001: [usize; 3] = [0; 3];
 
-/// The entry point libasound looks for when a PCM's `type` is `glasstap`.
+/// The entry point under the old name, for a chain written before the
+/// rename and not yet rewritten.
+///
+/// # Safety
+/// As [`_snd_pcm_evotap_open`].
+#[no_mangle]
+pub unsafe extern "C" fn _snd_pcm_glasstap_open(
+    pcmp: *mut *mut snd_pcm_t,
+    name: *const c_char,
+    root: *mut snd_config_t,
+    conf: *mut snd_config_t,
+    stream: c_int,
+    mode: c_int,
+) -> c_int {
+    _snd_pcm_evotap_open(pcmp, name, root, conf, stream, mode)
+}
+
+/// The entry point libasound looks for when a PCM's `type` is `evotap`.
 ///
 /// # Safety
 /// Called by libasound with live configuration nodes; `pcmp` receives the
 /// PCM on success.
 #[no_mangle]
-pub unsafe extern "C" fn _snd_pcm_glasstap_open(
+pub unsafe extern "C" fn _snd_pcm_evotap_open(
     pcmp: *mut *mut snd_pcm_t,
     name: *const c_char,
     root: *mut snd_config_t,
@@ -590,7 +613,7 @@ pub unsafe extern "C" fn _snd_pcm_glasstap_open(
         let key = CString::new("slave").unwrap();
         let mut slave: *mut snd_config_t = std::ptr::null_mut();
         if snd_config_search(conf, key.as_ptr(), &mut slave) < 0 || slave.is_null() {
-            note("a glasstap PCM needs a slave");
+            note("an evotap PCM needs a slave");
             return -libc::EINVAL;
         }
         ignore_sigpipe();
@@ -616,7 +639,7 @@ pub unsafe extern "C" fn _snd_pcm_glasstap_open(
         let worker_shared = shared.clone();
         let pcm_slot = shared.clone();
         let worker = match std::thread::Builder::new()
-            .name("glasstap".into())
+            .name("evotap".into())
             .spawn(move || run(worker_shared, settings))
         {
             Ok(h) => h,

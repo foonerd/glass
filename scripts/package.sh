@@ -25,10 +25,10 @@ for arch in arm armv7 armv8 x64; do
   if [ -x "$ROOT/bin/$arch/glass" ]; then
     mkdir -p "$STAGE/bin/$arch" "$STAGE/lib/$arch"
     cp "$ROOT/bin/$arch/glass" "$STAGE/bin/$arch/glass"
-    [ -x "$ROOT/bin/$arch/tapdump" ] && cp "$ROOT/bin/$arch/tapdump" "$STAGE/bin/$arch/tapdump"
+    [ -x "$ROOT/bin/$arch/evotap-dump" ] && cp "$ROOT/bin/$arch/evotap-dump" "$STAGE/bin/$arch/evotap-dump"
     [ -x "$ROOT/bin/$arch/evotap-cat" ] && cp "$ROOT/bin/$arch/evotap-cat" "$STAGE/bin/$arch/evotap-cat"
     [ -x "$ROOT/bin/$arch/glass-serve" ] && cp "$ROOT/bin/$arch/glass-serve" "$STAGE/bin/$arch/glass-serve"
-    [ -f "$ROOT/lib/$arch/libglasstap.so" ] && cp "$ROOT/lib/$arch/libglasstap.so" "$STAGE/lib/$arch/libglasstap.so"
+    [ -f "$ROOT/lib/$arch/libevotap.so" ] && cp "$ROOT/lib/$arch/libevotap.so" "$STAGE/lib/$arch/libevotap.so"
   fi
 done
 
