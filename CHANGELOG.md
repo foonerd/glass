@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.54] - 2026-11-01
+
+- **evotap's release notes speak of the evo framework.** The evotap release carries a footer of its own (`evotap/release-footer.md`), inviting support of the evo framework at evoframework.org rather than of Glass, and the contract's licence paragraph says the same; evotap is 0.1.1 for it, and the guard reads the working tree, so an uncommitted change to the tap counts. Glass's own notes are as they were. In step: nothing on the player changed, no check, no sheet row.
+
 ## [0.10.53] - 2026-11-01
 
 - **evotap has a version of its own.** The tap moves at its own pace, not Glass's: its version is in its crates (0.1.0, with 1.0.0 for the first consumer plugin shipped against it), its library answers `evotap_version` and its readers `--version`, and the Glass release notes say which evotap they ship. The evotap release at github.com/foonerd/evotap is cut only when that version has none yet, tagged with evotap's number and its notes naming the Glass release and commit it was built from; the pass refuses a tap changed under a number already released. The exact-pass gate reads a capture beginning with a dash as a pattern, not an option. In step: the contract and the Tap page say so; nothing on the player changed, no check, no sheet row.
