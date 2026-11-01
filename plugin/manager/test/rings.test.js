@@ -37,6 +37,7 @@ function audioRing(rate, channels, format, frameBytes, pid, head, writtenNs, dro
   h.writeBigUInt64LE(head, 48);
   h.writeBigUInt64LE(writtenNs, 56);
   h.writeBigUInt64LE(dropped, 64);
+  h.writeUInt32LE(2, 80);
   return h;
 }
 
@@ -59,10 +60,12 @@ test('the sheet reads the measurement rings and the audio rings alike, the audio
   assert.strictEqual(audio.seq, 123456, 'the head stands where the sequence does');
   assert.strictEqual(audio.rate, 96000);
   assert.strictEqual(audio.live, true);
+  assert.strictEqual(audio.healed, 2, 'the audio ring says how often its writer made it again');
   const meter = rings[1];
   assert.strictEqual(meter.audio, false);
   assert.strictEqual(meter.format, undefined);
   assert.strictEqual(meter.seq, 7);
+  assert.strictEqual(meter.healed, 0, 'a measurement ring never made again');
   const dsd = rings[2];
   assert.strictEqual(dsd.format, 'DSD_U32_LE');
   assert.strictEqual(dsd.dropped, 64);

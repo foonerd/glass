@@ -960,6 +960,7 @@
     "MANAGER_ST_ASSURED": "vom Player ergänzt, {count} Mal: {fields} ({from})",
     "MANAGER_ST_RING_LIVE": "aktiv",
     "MANAGER_ST_RING_QUIET": "still seit",
+    "MANAGER_ST_RING_HEALED": "{n}-mal neu angelegt, nachdem eine Abmeldung sie entfernt hatte",
     "MANAGER_TAB_REMOTES": "Fernanzeigen",
     "MANAGER_TAB_SYSTEM": "System",
     "MANAGER_RM_TITLE": "Fernanzeigen",

@@ -960,6 +960,7 @@
     "MANAGER_ST_ASSURED": "complété depuis le lecteur {count} fois : {fields} ({from})",
     "MANAGER_ST_RING_LIVE": "actif",
     "MANAGER_ST_RING_QUIET": "silencieux depuis",
+    "MANAGER_ST_RING_HEALED": "recréé {n} fois après qu'une déconnexion l'a supprimé",
     "MANAGER_TAB_REMOTES": "Écrans distants",
     "MANAGER_TAB_SYSTEM": "Système",
     "MANAGER_RM_TITLE": "Écrans distants",

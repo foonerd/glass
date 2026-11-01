@@ -156,6 +156,8 @@ pub struct Info {
     pub scale: u32,
     /// The ring's version: 2 carries the bank, 1 the raw spectrum.
     pub version: u32,
+    /// How many times the writer made the file again after finding it gone.
+    pub healed: u32,
 }
 
 #[cfg(unix)]
@@ -186,6 +188,13 @@ const H_SEQ: usize = 48;
 const H_WRITTEN: usize = 56;
 #[cfg(unix)]
 const H_SCALE: usize = 64;
+/// How many times the writer made its file again after finding it gone
+/// (a logout as the writer's user removes that user's shared memory).
+#[cfg(unix)]
+const H_HEALED: usize = 68;
+/// How often a writer looks whether its file is still there.
+#[cfg(unix)]
+pub const HEAL_EVERY_NS: u64 = 500_000_000;
 
 #[cfg(unix)]
 const S_SEQ: usize = 0;
@@ -257,16 +266,16 @@ pub fn now_ns() -> u64 {
     start.elapsed().as_nanos() as u64
 }
 
-/// A mapped file. Unmapped when dropped.
+/// A mapped file. Unmapped when dropped. Shared with the audio ring.
 #[cfg(unix)]
-struct Map {
+pub(crate) struct Map {
     ptr: *mut u8,
     len: usize,
 }
 
 #[cfg(unix)]
 impl Map {
-    fn open(fd: i32, len: usize, write: bool) -> io::Result<Self> {
+    pub(crate) fn open(fd: i32, len: usize, write: bool) -> io::Result<Self> {
         let prot = if write {
             libc::PROT_READ | libc::PROT_WRITE
         } else {
@@ -283,16 +292,16 @@ impl Map {
         })
     }
 
-    fn bytes(&self) -> &[u8] {
+    pub(crate) fn bytes(&self) -> &[u8] {
         // The mapping is `len` bytes long for as long as `self` lives.
         unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
     }
 
-    fn bytes_mut(&mut self) -> &mut [u8] {
+    pub(crate) fn bytes_mut(&mut self) -> &mut [u8] {
         unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
     }
 
-    fn atomic_u64(&self, at: usize) -> &AtomicU64 {
+    pub(crate) fn atomic_u64(&self, at: usize) -> &AtomicU64 {
         // Every atomic offset is 8-aligned within a page-aligned mapping.
         unsafe { &*(self.ptr.add(at) as *const AtomicU64) }
     }
@@ -337,15 +346,73 @@ fn get_f32(bytes: &[u8], at: usize) -> f32 {
     f32::from_le_bytes([bytes[at], bytes[at + 1], bytes[at + 2], bytes[at + 3]])
 }
 
+/// Whether the file at `cpath` is gone: `stat` says there is no such
+/// file. Any other answer, the file being there or the question failing,
+/// reads as not gone. Nothing allocates.
+#[cfg(unix)]
+pub(crate) fn file_gone(cpath: &CString) -> bool {
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    (unsafe { libc::stat(cpath.as_ptr(), &mut st) }) != 0
+        && io::Error::last_os_error().raw_os_error() == Some(libc::ENOENT)
+}
+
+/// The inode of the file at `cpath`, or none.
+#[cfg(unix)]
+pub(crate) fn inode_of(cpath: &CString) -> Option<u64> {
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    (unsafe { libc::stat(cpath.as_ptr(), &mut st) } == 0).then_some(st.st_ino as u64)
+}
+
+/// Make a file of `len` bytes at `cpath` and map it for writing; the
+/// file is removed again when the mapping fails.
+#[cfg(unix)]
+pub(crate) fn create_mapped(cpath: &CString, len: usize) -> io::Result<Map> {
+    let fd = unsafe {
+        libc::open(
+            cpath.as_ptr(),
+            libc::O_RDWR | libc::O_CREAT | libc::O_CLOEXEC,
+            0o644,
+        )
+    };
+    if fd < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let sized = unsafe { libc::ftruncate(fd, len as libc::off_t) };
+    if sized != 0 {
+        let err = io::Error::last_os_error();
+        unsafe {
+            libc::close(fd);
+            libc::unlink(cpath.as_ptr());
+        }
+        return Err(err);
+    }
+    let map = Map::open(fd, len, true);
+    unsafe { libc::close(fd) };
+    match map {
+        Ok(m) => Ok(m),
+        Err(e) => {
+            unsafe { libc::unlink(cpath.as_ptr()) };
+            Err(e)
+        }
+    }
+}
+
 /// The writing side. Creating one creates the file; dropping it removes it.
+/// A file found gone (a logout as the writer's user removes that user's
+/// shared memory) is made again at the next publish, with every slot it
+/// held, at most every [`HEAL_EVERY_NS`]; the header counts the heals.
 #[cfg(unix)]
 pub struct Writer {
     map: Map,
     path: PathBuf,
+    cpath: CString,
+    len: usize,
     bins: usize,
     slots: usize,
     slot_bytes: usize,
     seq: u64,
+    healed: u32,
+    looked_ns: u64,
 }
 
 #[cfg(unix)]
@@ -373,25 +440,7 @@ impl Writer {
         let path = dir.join(format!("{PREFIX}{tag}.{}.{instance}", std::process::id()));
         let cpath = CString::new(path.to_string_lossy().as_bytes())
             .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-        let fd = unsafe {
-            libc::open(
-                cpath.as_ptr(),
-                libc::O_RDWR | libc::O_CREAT | libc::O_CLOEXEC,
-                0o644,
-            )
-        };
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let sized = unsafe { libc::ftruncate(fd, len as libc::off_t) };
-        if sized != 0 {
-            let err = io::Error::last_os_error();
-            unsafe { libc::close(fd) };
-            return Err(err);
-        }
-        let map = Map::open(fd, len, true);
-        unsafe { libc::close(fd) };
-        let mut map = map?;
+        let mut map = create_mapped(&cpath, len)?;
         {
             let bytes = map.bytes_mut();
             bytes[..len].fill(0);
@@ -411,10 +460,14 @@ impl Writer {
         Ok(Self {
             map,
             path,
+            cpath,
+            len,
             bins,
             slots,
             slot_bytes,
             seq: 0,
+            healed: 0,
+            looked_ns: now_ns(),
         })
     }
 
@@ -422,11 +475,40 @@ impl Writer {
         &self.path
     }
 
+    /// How many times the file was made again after being found gone.
+    pub fn healed(&self) -> u32 {
+        self.healed
+    }
+
+    /// The file made again if it is gone, with everything the mapping
+    /// holds, so a reader finds the ring whole; looked for at most every
+    /// [`HEAL_EVERY_NS`]. True when it was made again.
+    pub fn heal(&mut self, now: u64) -> bool {
+        if now.saturating_sub(self.looked_ns) < HEAL_EVERY_NS {
+            return false;
+        }
+        self.looked_ns = now;
+        if !file_gone(&self.cpath) {
+            return false;
+        }
+        let Ok(mut fresh) = create_mapped(&self.cpath, self.len) else {
+            return false;
+        };
+        fresh.bytes_mut().copy_from_slice(self.map.bytes());
+        self.map = fresh;
+        self.healed += 1;
+        let healed = self.healed;
+        put_u32(self.map.bytes_mut(), H_HEALED, healed);
+        true
+    }
+
     /// Publish one hop. The frame's `seq` and `time_ns` are set here.
     pub fn publish(&mut self, frame: &Frame) {
+        let now = now_ns();
+        self.heal(now);
         self.seq += 1;
         let seq = self.seq;
-        let time = now_ns();
+        let time = now;
         let at = HEADER_BYTES + ((seq as usize) % self.slots) * self.slot_bytes;
         let bins = self.bins;
         {
@@ -477,6 +559,9 @@ impl Drop for Writer {
 pub struct Reader {
     map: Map,
     path: PathBuf,
+    cpath: CString,
+    /// The inode mapped: a file made again under the same name is another.
+    ino: u64,
     info: Info,
 }
 
@@ -495,6 +580,14 @@ impl Reader {
         if fd < 0 {
             return Err(io::Error::last_os_error());
         }
+        let ino = {
+            let mut st: libc::stat = unsafe { std::mem::zeroed() };
+            if unsafe { libc::fstat(fd, &mut st) } == 0 {
+                st.st_ino as u64
+            } else {
+                0
+            }
+        };
         let map = Map::open(fd, len, false);
         unsafe { libc::close(fd) };
         let map = map?;
@@ -526,6 +619,7 @@ impl Reader {
             seq: 0,
             written_ns: 0,
             version,
+            healed: 0,
         };
         let expected = if version >= 2 {
             slot_bytes(info.bins as usize)
@@ -542,6 +636,8 @@ impl Reader {
         Ok(Self {
             map,
             path: path.to_path_buf(),
+            cpath,
+            ino,
             info,
         })
     }
@@ -574,19 +670,29 @@ impl Reader {
         &self.path
     }
 
-    /// The header, with the sequence and time of the last publish.
+    /// The header, with the sequence and time of the last publish, and
+    /// how many times the writer made the file again.
     pub fn info(&self) -> Info {
         Info {
             seq: self.map.atomic_u64(H_SEQ).load(Ordering::Acquire),
             written_ns: self.map.atomic_u64(H_WRITTEN).load(Ordering::Acquire),
+            healed: if self.info.version >= 2 {
+                get_u32(self.map.bytes(), H_HEALED)
+            } else {
+                0
+            },
             ..self.info
         }
     }
 
-    /// Written within the last few seconds and still on disk.
+    /// Written within the last few seconds, and the file mapped still the
+    /// one under its name: a file made again by its writer is another,
+    /// and the reader opens it afresh.
     pub fn is_live(&self) -> bool {
         let written = self.map.atomic_u64(H_WRITTEN).load(Ordering::Acquire);
-        written != 0 && now_ns().saturating_sub(written) < LIVE_NS && self.path.exists()
+        written != 0
+            && now_ns().saturating_sub(written) < LIVE_NS
+            && inode_of(&self.cpath) == Some(self.ino)
     }
 
     /// The last published hop, or `None` before the first, or when the
@@ -809,6 +915,56 @@ mod tests {
         let path = writer.path().to_path_buf();
         drop(writer);
         assert!(!path.exists(), "the file goes with the writer");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_ring_removed_under_its_writer_is_made_again_whole_and_a_reader_tells_the_new_file() {
+        let dir = std::env::temp_dir().join(format!("glasstap-heal-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let demand = bank::Demand::new(16, 2, bank::Scale::Mel);
+        let mut writer = Writer::create(&dir, "heal", 48_000, 2, demand, 1024, 4).unwrap();
+        let frame = Frame {
+            frames: 1024,
+            peak: [0.5, 0.25],
+            spectrum: [vec![0.5; 16], vec![0.25; 16]],
+            hold: [vec![0.5; 16], vec![0.25; 16]],
+            scale: bank::Scale::Mel,
+            window: 4096,
+            ..Frame::default()
+        };
+        writer.publish(&frame);
+        writer.publish(&frame);
+        let old = Reader::open(writer.path()).unwrap();
+        assert!(old.is_live());
+        assert_eq!(old.info().healed, 0);
+        // Gone, as a logout removes it: the writer goes on into the unlinked
+        // file until it looks, then makes the file again with its slots.
+        fs::remove_file(writer.path()).unwrap();
+        assert!(
+            !writer.heal(now_ns()),
+            "not looked at again within the interval"
+        );
+        assert!(writer.heal(now_ns() + HEAL_EVERY_NS), "made again");
+        assert!(writer.path().exists());
+        assert_eq!(writer.healed(), 1);
+        assert!(!old.is_live(), "the old mapping is another file now");
+        let fresh = Reader::open(writer.path()).unwrap();
+        assert_eq!(fresh.info().seq, 2, "the slots came along");
+        assert_eq!(fresh.info().healed, 1);
+        assert_eq!(fresh.latest().unwrap().peak, [0.5, 0.25]);
+        // The writer goes on in the new file, and a publish heals by itself.
+        writer.publish(&frame);
+        assert_eq!(fresh.info().seq, 3);
+        assert!(fresh.is_live());
+        fs::remove_file(writer.path()).unwrap();
+        // The explicit heal above looked at a moment half a second ahead; past that and the interval.
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        writer.publish(&frame);
+        assert!(writer.path().exists(), "a publish after the interval heals");
+        assert_eq!(writer.healed(), 2);
+        assert_eq!(Reader::open(writer.path()).unwrap().info().seq, 4);
         let _ = fs::remove_dir_all(&dir);
     }
 }

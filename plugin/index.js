@@ -984,13 +984,16 @@ Glass.prototype.spectrumDemand = function () {
     };
 };
 
-// Write the demand beside the rings when it changed; the tap picks it up
-// within a second and measures anew.
+// Write the demand beside the rings when it changed, or when the file is
+// gone (a logout as the volumio user removes that user's shared memory,
+// the demand file with it); the tap picks it up within a second and
+// measures anew. Called whenever the configuration is read, so a file
+// gone is back within moments.
 Glass.prototype.writeSpectrumDemand = function () {
     var self = this;
     var text;
     try { text = JSON.stringify(self.spectrumDemand()); } catch (e) { return; }
-    if (self.lastSpectrumDemand === text) { return; }
+    if (self.lastSpectrumDemand === text && fs.existsSync(SpectrumDemandFile)) { return; }
     try {
         fs.writeFileSync(SpectrumDemandFile + '.part', text);
         fs.renameSync(SpectrumDemandFile + '.part', SpectrumDemandFile);

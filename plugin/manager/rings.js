@@ -47,8 +47,8 @@ async function readRings(dir) {
     let fd = null;
     try {
       fd = await fsp.open(path.join(dir, name), 'r');
-      const header = Buffer.alloc(80);
-      const { bytesRead } = await fd.read(header, 0, 80, 0);
+      const header = Buffer.alloc(96);
+      const { bytesRead } = await fd.read(header, 0, 96, 0);
       const magic = bytesRead >= 64 ? header.toString('latin1', 0, 8) : '';
       const audio = magic === 'EVOAUDIO';
       if (!audio && magic !== 'GLASSTAP') continue;
@@ -66,7 +66,10 @@ async function readRings(dir) {
         channels: header.readUInt32LE(20),
         seq: Number(header.readBigUInt64LE(48)),
         writtenAgoMs: ago === null ? null : Number(ago / 1000000n),
-        live: ago !== null && ago >= 0n && ago < RING_LIVE_NS
+        live: ago !== null && ago >= 0n && ago < RING_LIVE_NS,
+        // How many times the writer made the file again after finding it
+        // gone (a logout as its user removes that user's shared memory).
+        healed: 0
       };
       if (audio) {
         const format = header.readUInt32LE(24);
@@ -74,6 +77,9 @@ async function readRings(dir) {
         ring.frameBytes = header.readUInt32LE(28);
         ring.capacity = Number(header.readBigUInt64LE(32));
         ring.dropped = bytesRead >= 72 ? Number(header.readBigUInt64LE(64)) : 0;
+        ring.healed = bytesRead >= 84 ? header.readUInt32LE(80) : 0;
+      } else {
+        ring.healed = bytesRead >= 72 ? header.readUInt32LE(68) : 0;
       }
       rings.push(ring);
     } catch (e) { /* a ring going away */ } finally {

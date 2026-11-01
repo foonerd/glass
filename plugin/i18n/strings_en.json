@@ -960,6 +960,7 @@
     "MANAGER_ST_ASSURED": "made whole from the player {count} times: {fields} ({from})",
     "MANAGER_ST_RING_LIVE": "live",
     "MANAGER_ST_RING_QUIET": "quiet for",
+    "MANAGER_ST_RING_HEALED": "made again {n} times after a logout removed it",
     "MANAGER_TAB_REMOTES": "Remotes",
     "MANAGER_TAB_SYSTEM": "System",
     "MANAGER_RM_TITLE": "Remote displays",

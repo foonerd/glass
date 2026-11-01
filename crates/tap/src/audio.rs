@@ -13,8 +13,9 @@
 //!   rate, channels, the ALSA format number, bytes per frame, capacity (a
 //!   power of two), writer pid, flags (bit 0: one-bit audio), then,
 //!   written last with release ordering, the head (bytes written since
-//!   the ring was made), the time of the last write, bytes dropped and
-//!   the time the ring was made.
+//!   the ring was made), the time of the last write, bytes dropped, the
+//!   time the ring was made, and how many times the writer made the file
+//!   again after finding it gone.
 //! - data: `capacity` bytes, the frames interleaved as ALSA delivers
 //!   them, at the head modulo the capacity.
 //!
@@ -22,6 +23,11 @@
 //! head again: if the writer has moved more than a capacity past the
 //! cursor meanwhile, the copy may hold bytes written over and is
 //! discarded, the cursor set to the head and the gap counted.
+//!
+//! A file found gone (a logout as the writer's user removes that user's
+//! shared memory) is made again by the writer within half a second, with
+//! its header and an empty data region, the head going on; a reader
+//! tells the new file by its inode and opens it afresh.
 
 #[cfg(unix)]
 use std::ffi::CString;
@@ -32,10 +38,10 @@ use std::io;
 #[cfg(unix)]
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
-use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU32, Ordering};
 
 #[cfg(unix)]
-use crate::ring::now_ns;
+use crate::ring::{create_mapped, file_gone, inode_of, now_ns, Map, HEAL_EVERY_NS};
 
 pub const MAGIC: &[u8; 8] = b"EVOAUDIO";
 pub const VERSION: u32 = 1;
@@ -45,9 +51,7 @@ pub const HEADER_BYTES: usize = 256;
 pub const MIN_CAPACITY: usize = 1 << 16;
 /// The most seconds a ring holds.
 pub const MAX_SECONDS: u32 = 10;
-/// A ring written longer ago than this, by a process still alive, is a
-/// stream that stands still: paused, or the player waiting. It is live.
-/// A ring whose writer is gone is a leftover; the sweep removes it.
+/// Bit 0 of the flags: one-bit audio (DSD).
 pub const FLAG_ONE_BIT: u32 = 1;
 
 /// The shape of the stream a ring carries.
@@ -74,6 +78,8 @@ pub struct Info {
     pub dropped: u64,
     pub started_ns: u64,
     pub version: u32,
+    /// How many times the writer made the file again after finding it gone.
+    pub healed: u32,
 }
 
 #[cfg(unix)]
@@ -104,6 +110,8 @@ const H_WRITTEN: usize = 56;
 const H_DROPPED: usize = 64;
 #[cfg(unix)]
 const H_STARTED: usize = 72;
+#[cfg(unix)]
+const H_HEALED: usize = 80;
 
 /// Writers made by this process so far, for their file names.
 #[cfg(unix)]
@@ -123,59 +131,6 @@ pub fn sweep(dir: &Path) -> usize {
     crate::ring::sweep_prefix(dir, PREFIX)
 }
 
-/// A mapped file, unmapped when dropped.
-#[cfg(unix)]
-struct Map {
-    ptr: *mut u8,
-    len: usize,
-}
-
-#[cfg(unix)]
-impl Map {
-    fn open(fd: i32, len: usize, write: bool) -> io::Result<Self> {
-        let prot = if write {
-            libc::PROT_READ | libc::PROT_WRITE
-        } else {
-            libc::PROT_READ
-        };
-        // A shared mapping of `len` bytes of an open file.
-        let ptr = unsafe { libc::mmap(std::ptr::null_mut(), len, prot, libc::MAP_SHARED, fd, 0) };
-        if ptr == libc::MAP_FAILED {
-            return Err(io::Error::last_os_error());
-        }
-        Ok(Self {
-            ptr: ptr as *mut u8,
-            len,
-        })
-    }
-
-    fn bytes(&self) -> &[u8] {
-        // The mapping is `len` bytes long for as long as `self` lives.
-        unsafe { std::slice::from_raw_parts(self.ptr, self.len) }
-    }
-
-    fn bytes_mut(&mut self) -> &mut [u8] {
-        unsafe { std::slice::from_raw_parts_mut(self.ptr, self.len) }
-    }
-
-    fn atomic_u64(&self, at: usize) -> &AtomicU64 {
-        // Every atomic offset is 8-aligned within a page-aligned mapping.
-        unsafe { &*(self.ptr.add(at) as *const AtomicU64) }
-    }
-}
-
-#[cfg(unix)]
-impl Drop for Map {
-    fn drop(&mut self) {
-        unsafe { libc::munmap(self.ptr as *mut libc::c_void, self.len) };
-    }
-}
-
-// The ring is shared between processes by design; the mapping itself is
-// owned by one writer or one reader at a time.
-#[cfg(unix)]
-unsafe impl Send for Map {}
-
 #[cfg(unix)]
 fn put_u32(bytes: &mut [u8], at: usize, v: u32) {
     bytes[at..at + 4].copy_from_slice(&v.to_le_bytes());
@@ -188,16 +143,27 @@ fn get_u32(bytes: &[u8], at: usize) -> u32 {
 fn put_u64(bytes: &mut [u8], at: usize, v: u64) {
     bytes[at..at + 8].copy_from_slice(&v.to_le_bytes());
 }
+#[cfg(unix)]
+fn get_u64(bytes: &[u8], at: usize) -> u64 {
+    let mut b = [0u8; 8];
+    b.copy_from_slice(&bytes[at..at + 8]);
+    u64::from_le_bytes(b)
+}
 
 /// The writing side: the audio thread's. Creating one creates the file;
-/// dropping it removes the file.
+/// dropping it removes the file. Nothing in it allocates or waits once
+/// it is made, the heal included.
 #[cfg(unix)]
 pub struct Writer {
     map: Map,
     path: PathBuf,
+    cpath: CString,
+    len: usize,
     capacity: usize,
     head: u64,
     dropped: u64,
+    healed: u32,
+    looked_ns: u64,
 }
 
 #[cfg(unix)]
@@ -213,32 +179,7 @@ impl Writer {
         let path = dir.join(format!("{PREFIX}{tag}.{}.{instance}", std::process::id()));
         let cpath = CString::new(path.to_string_lossy().as_bytes())
             .map_err(|_| io::Error::from(io::ErrorKind::InvalidInput))?;
-        let fd = unsafe {
-            libc::open(
-                cpath.as_ptr(),
-                libc::O_RDWR | libc::O_CREAT | libc::O_CLOEXEC,
-                0o644,
-            )
-        };
-        if fd < 0 {
-            return Err(io::Error::last_os_error());
-        }
-        let sized = unsafe { libc::ftruncate(fd, len as libc::off_t) };
-        if sized != 0 {
-            let err = io::Error::last_os_error();
-            unsafe { libc::close(fd) };
-            let _ = fs::remove_file(&path);
-            return Err(err);
-        }
-        let map = Map::open(fd, len, true);
-        unsafe { libc::close(fd) };
-        let mut map = match map {
-            Ok(m) => m,
-            Err(e) => {
-                let _ = fs::remove_file(&path);
-                return Err(e);
-            }
-        };
+        let mut map = create_mapped(&cpath, len)?;
         {
             let bytes = map.bytes_mut();
             bytes[..len].fill(0);
@@ -257,9 +198,13 @@ impl Writer {
         Ok(Self {
             map,
             path,
+            cpath,
+            len,
             capacity,
             head: 0,
             dropped: 0,
+            healed: 0,
+            looked_ns: now_ns(),
         })
     }
 
@@ -281,10 +226,41 @@ impl Writer {
         self.dropped
     }
 
+    /// How many times the file was made again after being found gone.
+    pub fn healed(&self) -> u32 {
+        self.healed
+    }
+
+    /// The file made again if it is gone: the header carried over, the
+    /// head going on, the data region empty (a reader behind the head
+    /// takes zeros for what it had not read; the stream itself is not
+    /// held up by a copy). Looked for at most every [`HEAL_EVERY_NS`].
+    /// True when it was made again.
+    pub fn heal(&mut self, now: u64) -> bool {
+        if now.saturating_sub(self.looked_ns) < HEAL_EVERY_NS {
+            return false;
+        }
+        self.looked_ns = now;
+        if !file_gone(&self.cpath) {
+            return false;
+        }
+        let Ok(mut fresh) = create_mapped(&self.cpath, self.len) else {
+            return false;
+        };
+        fresh.bytes_mut()[..HEADER_BYTES].copy_from_slice(&self.map.bytes()[..HEADER_BYTES]);
+        self.map = fresh;
+        self.healed += 1;
+        let healed = self.healed;
+        put_u32(self.map.bytes_mut(), H_HEALED, healed);
+        true
+    }
+
     /// Append one transfer's bytes: a copy, two at a wrap, then the head.
     /// Never waits, never allocates. A transfer longer than the ring
     /// leaves its last `capacity` bytes and counts the rest as dropped.
     pub fn push(&mut self, bytes: &[u8]) {
+        let now = now_ns();
+        self.heal(now);
         let capacity = self.capacity;
         let (bytes, lost) = if bytes.len() > capacity {
             (
@@ -313,9 +289,7 @@ impl Writer {
                 .atomic_u64(H_DROPPED)
                 .store(self.dropped, Ordering::Relaxed);
         }
-        self.map
-            .atomic_u64(H_WRITTEN)
-            .store(now_ns(), Ordering::Relaxed);
+        self.map.atomic_u64(H_WRITTEN).store(now, Ordering::Relaxed);
         self.map
             .atomic_u64(H_HEAD)
             .store(self.head, Ordering::Release);
@@ -343,6 +317,9 @@ pub struct Took {
 pub struct Reader {
     map: Map,
     path: PathBuf,
+    cpath: CString,
+    /// The inode mapped: a file made again under the same name is another.
+    ino: u64,
     info: Info,
     cursor: u64,
     lost: u64,
@@ -363,6 +340,14 @@ impl Reader {
         if fd < 0 {
             return Err(io::Error::last_os_error());
         }
+        let ino = {
+            let mut st: libc::stat = unsafe { std::mem::zeroed() };
+            if unsafe { libc::fstat(fd, &mut st) } == 0 {
+                st.st_ino as u64
+            } else {
+                0
+            }
+        };
         let map = Map::open(fd, len, false);
         unsafe { libc::close(fd) };
         let map = map?;
@@ -374,8 +359,7 @@ impl Reader {
                 "not a glass audio ring this build reads",
             ));
         }
-        let capacity = u64::from_le_bytes(bytes[H_CAPACITY..H_CAPACITY + 8].try_into().unwrap());
-        let started = u64::from_le_bytes(bytes[H_STARTED..H_STARTED + 8].try_into().unwrap());
+        let capacity = get_u64(bytes, H_CAPACITY);
         if capacity == 0
             || !capacity.is_power_of_two()
             || len < HEADER_BYTES + capacity as usize
@@ -399,13 +383,16 @@ impl Reader {
             head: 0,
             written_ns: 0,
             dropped: 0,
-            started_ns: started,
+            started_ns: get_u64(bytes, H_STARTED),
             version,
+            healed: 0,
         };
         let cursor = map.atomic_u64(H_HEAD).load(Ordering::Acquire);
         Ok(Self {
             map,
             path: path.to_path_buf(),
+            cpath,
+            ino,
             info,
             cursor,
             lost: 0,
@@ -448,12 +435,14 @@ impl Reader {
         &self.path
     }
 
-    /// The header, with the head, the last write and the drops as they stand.
+    /// The header, with the head, the last write, the drops and the heals
+    /// as they stand.
     pub fn info(&self) -> Info {
         Info {
             head: self.map.atomic_u64(H_HEAD).load(Ordering::Acquire),
             written_ns: self.map.atomic_u64(H_WRITTEN).load(Ordering::Relaxed),
             dropped: self.map.atomic_u64(H_DROPPED).load(Ordering::Relaxed),
+            healed: get_u32(self.map.bytes(), H_HEALED),
             ..self.info
         }
     }
@@ -467,15 +456,16 @@ impl Reader {
         self.lost
     }
 
-    /// The writer's process is alive and its file still there: a stream
-    /// that stands still is live too.
+    /// The writer's process is alive and the file mapped still the one
+    /// under its name: a stream that stands still is live too; a file
+    /// made again by its writer is another, and the reader opens it afresh.
     pub fn is_live(&self) -> bool {
         let pid = self.info.pid as i32;
         // A process of another user answers with EPERM: alive.
         let alive = pid > 0
             && (unsafe { libc::kill(pid, 0) } == 0
                 || io::Error::last_os_error().raw_os_error() == Some(libc::EPERM));
-        alive && self.path.exists()
+        alive && inode_of(&self.cpath) == Some(self.ino)
     }
 
     /// Bytes waiting between the cursor and the head.
@@ -712,6 +702,55 @@ mod tests {
         fs::write(&dead, b"x").unwrap();
         assert_eq!(sweep(&d), 1);
         assert!(!dead.exists() && w2.path().exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    #[test]
+    fn a_ring_removed_under_its_writer_is_made_again_and_a_reader_tells_the_new_file() {
+        let d = dir("heal");
+        let tiny = Shape {
+            rate: 1_000,
+            frame_bytes: 4,
+            ..shape()
+        };
+        let mut w = Writer::create(&d, "t", tiny, 1).unwrap();
+        w.push(&[5u8; 400]);
+        let mut old = Reader::open(w.path()).unwrap();
+        assert!(old.is_live());
+        assert_eq!(old.info().healed, 0);
+        // Gone, as a logout removes it: not looked at again within the
+        // interval, then made again with its header, the head going on.
+        fs::remove_file(w.path()).unwrap();
+        assert!(!w.heal(now_ns()));
+        assert!(w.heal(now_ns() + HEAL_EVERY_NS), "made again");
+        assert!(w.path().exists());
+        assert_eq!(w.healed(), 1);
+        assert!(!old.is_live(), "the old mapping is another file now");
+        let mut fresh = Reader::open(w.path()).unwrap();
+        assert_eq!(fresh.shape(), tiny);
+        assert_eq!(fresh.info().head, 400, "the head goes on");
+        assert_eq!(fresh.info().healed, 1);
+        assert!(fresh.is_live());
+        // The writer goes on in the new file; the fresh reader takes what
+        // comes from its opening, the old one nothing it can trust.
+        w.push(&[6u8; 40]);
+        let mut got = Vec::new();
+        assert_eq!(fresh.take(&mut got, 1 << 20).bytes, 40);
+        assert!(got.iter().all(|b| *b == 6));
+        got.clear();
+        assert_eq!(
+            old.take(&mut got, 1 << 20).bytes,
+            0,
+            "the old mapping stands still"
+        );
+        // A push after the interval heals by itself.
+        fs::remove_file(w.path()).unwrap();
+        // The explicit heal above looked at a moment half a second ahead; past that and the interval.
+        std::thread::sleep(std::time::Duration::from_millis(1200));
+        w.push(&[7u8; 8]);
+        assert!(w.path().exists(), "a push after the interval heals");
+        assert_eq!(w.healed(), 2);
+        assert_eq!(Reader::open(w.path()).unwrap().info().head, 448);
         let _ = fs::remove_dir_all(&d);
     }
 }
