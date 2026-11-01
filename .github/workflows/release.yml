@@ -72,12 +72,28 @@ jobs:
               exit 1
             fi
           done
+      # evotap on its own: the library, the readers and the contract per
+      # architecture, for the evotap repository's release (foonerd/evotap),
+      # which any plugin ships from without depending on Glass.
+      - name: Per-architecture archives of evotap
+        run: |
+          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          for arch in arm armv7 armv8 x64; do
+            top="evotap-$version-$arch"
+            rm -rf "dist/$top" && mkdir -p "dist/$top/lib" "dist/$top/bin"
+            cp "lib/$arch/libevotap.so" "dist/$top/lib/"
+            cp "bin/$arch/evotap-cat" "bin/$arch/evotap-dump" "dist/$top/bin/"
+            cp evotap/README.md LICENSE "dist/$top/"
+            tar -C dist -czf "dist/$top.tar.gz" "$top" && rm -rf "dist/$top"
+          done
+          ls -la dist/evotap-*.tar.gz
       - uses: actions/upload-artifact@v7
         with:
           name: release-linux
           path: |
             dist/glass-*.zip
             dist/glass-*-*.tar.gz
+            dist/evotap-*.tar.gz
           if-no-files-found: error
 
   windows:
@@ -157,8 +173,10 @@ jobs:
           path: artifacts
       - name: What the build jobs made, where the steps below look for it
         run: |
-          mkdir -p dist bin/windows-x64
+          mkdir -p dist dist-evotap bin/windows-x64
           cp artifacts/release-linux/* dist/
+          # evotap's archives go to their own release, not Glass's.
+          mv dist/evotap-*.tar.gz dist-evotap/
           cp artifacts/release-windows/* bin/windows-x64/
           if ls artifacts/release-android/*.apk >/dev/null 2>&1; then
             cp artifacts/release-android/*.apk dist/
@@ -207,6 +225,7 @@ jobs:
             exit 0
           fi
           scripts/sign-release.sh dist keys/release-signing.pub
+          scripts/sign-release.sh dist-evotap keys/release-signing.pub
       - name: Notes from the changelog, with the sponsorship footer
         run: |
           scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > dist/notes.md
@@ -225,3 +244,33 @@ jobs:
             dist/glass-*-android.apk
             dist/SHA256SUMS
             dist/SHA256SUMS.sig
+      # evotap's own release, in its repository, through a token that may
+      # write there (secret EVOTAP_RELEASE_TOKEN, a fine-grained token with
+      # contents read and write on foonerd/evotap). Without the secret the
+      # step says so and Glass's release stands on its own.
+      # The signed evotap set kept as an artifact as well, so a release of
+      # it can be made by hand from exactly what CI signed, should the
+      # token be missing at the tag.
+      - uses: actions/upload-artifact@v7
+        with:
+          name: evotap-release
+          path: |
+            dist-evotap/evotap-*.tar.gz
+            dist-evotap/SHA256SUMS
+            dist-evotap/SHA256SUMS.sig
+          if-no-files-found: error
+      - name: Publish evotap
+        env:
+          EVOTAP_RELEASE_TOKEN: ${{ secrets.EVOTAP_RELEASE_TOKEN }}
+        run: |
+          if [ -z "$EVOTAP_RELEASE_TOKEN" ]; then
+            echo "no EVOTAP_RELEASE_TOKEN in this repository: evotap is not published"
+            exit 0
+          fi
+          version="${GITHUB_REF_NAME#v}"
+          {
+            echo "evotap $version: the audio tap of the evo framework, built and tested in Glass $version. One archive per architecture with the library, evotap-cat, evotap-dump and the contract; SHA256SUMS signed with the evo release key."
+            printf '\n'
+            cat .github/release-footer.md
+          } > dist-evotap/notes.md
+          GH_TOKEN="$EVOTAP_RELEASE_TOKEN" gh release create "v$version" --repo foonerd/evotap --title "evotap $version" --prerelease --notes-file dist-evotap/notes.md dist-evotap/evotap-*.tar.gz dist-evotap/SHA256SUMS dist-evotap/SHA256SUMS.sig
