@@ -237,4 +237,17 @@ if grep -nE "['\"][0-9a-f]{32}['\"]" plugin/index.js plugin/manager/*.js | grep 
   exit 1
 fi
 
+# evotap's version is its own and moves with the tap: a tap changed under
+# a number already released at github.com/foonerd/evotap is refused.
+# Where GitHub cannot be asked the verdict is CI's.
+echo "check: evotap version"
+if verdict=$(scripts/evotap-guard.sh); then
+  echo "check: evotap $(scripts/evotap-version.sh) is $verdict"
+else
+  case $? in
+    2) echo "check: GitHub could not be asked about evotap's version; the verdict is CI's" ;;
+    *) exit 1 ;;
+  esac
+fi
+
 echo "check: clean"

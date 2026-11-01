@@ -464,6 +464,14 @@ static OPS: snd_pcm_scope_ops_t = snd_pcm_scope_ops_t {
     close: Some(close),
 };
 
+/// evotap's own version, as a C string that lives as long as the library:
+/// `dlsym(handle, "evotap_version")` tells a consumer which evotap it
+/// loaded, without a file to read beside it.
+#[no_mangle]
+pub extern "C" fn evotap_version() -> *const c_char {
+    concat!(env!("CARGO_PKG_VERSION"), "\0").as_ptr() as *const c_char
+}
+
 /// The entry point under the name from before the evotap rename, for a
 /// configuration that still names the scope type `glasstap`; kept for a
 /// release window.

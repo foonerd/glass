@@ -32,6 +32,8 @@ jobs:
           cache-bin: false
           save-if: ${{ github.ref == 'refs/heads/main' }}
       - run: scripts/check.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
 
   ship:
     name: cross builds

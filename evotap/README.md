@@ -6,7 +6,7 @@ evotap is built and tested in the [Glass](https://github.com/foonerd/glass) repo
 
 ## Getting it
 
-Every release carries one archive per architecture, `evotap-<version>-<arch>.tar.gz` for `arm` (armv6/armv7 32-bit), `armv7`, `armv8` (aarch64) and `x64`, holding:
+evotap has a version of its own, apart from Glass's: it moves when the tap moves, and a release is cut when the number does, tagged `v<version>`, its notes naming the Glass release and commit it was built from. A library's `evotap_version` symbol and the readers' `--version` say which evotap they are. Every release carries one archive per architecture, `evotap-<version>-<arch>.tar.gz` for `arm` (armv6/armv7 32-bit), `armv7`, `armv8` (aarch64) and `x64`, holding:
 
 | File | What |
 | --- | --- |

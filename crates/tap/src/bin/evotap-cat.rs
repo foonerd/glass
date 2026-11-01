@@ -43,7 +43,7 @@ struct Args {
 
 fn usage() -> ! {
     eprintln!(
-        "evotap-cat [--tag TAG] [--wait S] [--follow] [--gap silence|skip] [--s32] [--shape]"
+        "evotap-cat [--tag TAG] [--wait S] [--follow] [--gap silence|skip] [--s32] [--shape] [--version]"
     );
     std::process::exit(64);
 }
@@ -75,6 +75,10 @@ fn args() -> Args {
             },
             "--s32" => out.s32 = true,
             "--shape" => out.shape_only = true,
+            "--version" => {
+                println!("evotap {}", env!("CARGO_PKG_VERSION"));
+                std::process::exit(0);
+            }
             "-h" | "--help" => usage(),
             _ => usage(),
         }

@@ -87,8 +87,9 @@ for spec in "S16_LE 48000" "S24_LE 96000" "S32_LE 192000" "DSD_U32_LE 88200"; do
     echo "tap: audio ring: $fmt at $rate captured only $cap of $size bytes: $(cat "$WORK/cat.txt")"
     exit 1
   fi
-  # Where the capture begins in the input: its first 64 bytes, found once.
-  start=$(grep -obUaF "$(head -c 64 "$WORK/cap.raw")" "$WORK/in.raw" | head -n 1 | cut -d: -f1)
+  # Where the capture begins in the input: its first 64 bytes, found once
+  # (after -e: the bytes may begin with a dash, which is not an option).
+  start=$(grep -obUaF -e "$(head -c 64 "$WORK/cap.raw")" "$WORK/in.raw" | head -n 1 | cut -d: -f1)
   if [ -z "$start" ]; then
     echo "tap: audio ring: $fmt at $rate: the capture's start is not in the input"
     exit 1

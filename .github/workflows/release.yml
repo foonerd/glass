@@ -75,9 +75,13 @@ jobs:
       # evotap on its own: the library, the readers and the contract per
       # architecture, for the evotap repository's release (foonerd/evotap),
       # which any plugin ships from without depending on Glass.
-      - name: Per-architecture archives of evotap
+      - name: Per-architecture archives of evotap, named by evotap's own version
         run: |
-          version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
+          version=$(scripts/evotap-version.sh)
+          said=$(bin/x64/evotap-cat --version)
+          [ "$said" = "evotap $version" ] || { echo "evotap-cat says '$said', the tree says evotap $version" >&2; exit 1; }
+          said=$(bin/x64/evotap-dump --version)
+          [ "$said" = "evotap $version" ] || { echo "evotap-dump says '$said', the tree says evotap $version" >&2; exit 1; }
           for arch in arm armv7 armv8 x64; do
             top="evotap-$version-$arch"
             rm -rf "dist/$top" && mkdir -p "dist/$top/lib" "dist/$top/bin"
@@ -229,7 +233,7 @@ jobs:
       - name: Notes from the changelog, with the sponsorship footer
         run: |
           scripts/release-notes.sh "${GITHUB_REF_NAME#v}" > dist/notes.md
-          printf '\n' >> dist/notes.md
+          printf '\nShips evotap %s.\n\n' "$(scripts/evotap-version.sh)" >> dist/notes.md
           cat .github/release-footer.md >> dist/notes.md
       # Published as a pre-release: no player is offered it but one set to
       # take test releases. It is made the latest by hand once it has been
@@ -245,9 +249,12 @@ jobs:
             dist/SHA256SUMS
             dist/SHA256SUMS.sig
       # evotap's own release, in its repository, through a token that may
-      # write there (secret EVOTAP_RELEASE_TOKEN, a fine-grained token with
-      # contents read and write on foonerd/evotap). Without the secret the
-      # step says so and Glass's release stands on its own.
+      # write there (secret EVOTAP_RELEASE_TOKEN, a token with contents
+      # read and write on foonerd/evotap). evotap carries its own version
+      # (scripts/evotap-version.sh), so the release is cut only when that
+      # version has none yet; the guard refuses a tap changed under a
+      # number already released. Without the secret the step says so and
+      # Glass's release stands on its own.
       # The signed evotap set kept as an artifact as well, so a release of
       # it can be made by hand from exactly what CI signed, should the
       # token be missing at the tag.
@@ -259,18 +266,27 @@ jobs:
             dist-evotap/SHA256SUMS
             dist-evotap/SHA256SUMS.sig
           if-no-files-found: error
-      - name: Publish evotap
+      - name: Publish evotap, where its version has no release yet
         env:
           EVOTAP_RELEASE_TOKEN: ${{ secrets.EVOTAP_RELEASE_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: |
-          if [ -z "$EVOTAP_RELEASE_TOKEN" ]; then
-            echo "no EVOTAP_RELEASE_TOKEN in this repository: evotap is not published"
+          version=$(scripts/evotap-version.sh)
+          glass="${GITHUB_REF_NAME#v}"
+          verdict=$(scripts/evotap-guard.sh)
+          if [ "$verdict" = same ]; then
+            echo "evotap $version is released already and unchanged: nothing to publish"
             exit 0
           fi
-          version="${GITHUB_REF_NAME#v}"
+          if [ -z "$EVOTAP_RELEASE_TOKEN" ]; then
+            echo "no EVOTAP_RELEASE_TOKEN in this repository: evotap $version is not published; the signed set is the evotap-release artifact"
+            exit 0
+          fi
           {
-            echo "evotap $version: the audio tap of the evo framework, built and tested in Glass $version. One archive per architecture with the library, evotap-cat, evotap-dump and the contract; SHA256SUMS signed with the evo release key."
+            echo "evotap $version: the audio tap of the evo framework. One archive per architecture with the library, evotap-cat, evotap-dump and the contract; SHA256SUMS signed with the evo release key."
+            printf '\n'
+            echo "Built in Glass $glass at $GITHUB_SHA."
             printf '\n'
             cat .github/release-footer.md
           } > dist-evotap/notes.md
-          GH_TOKEN="$EVOTAP_RELEASE_TOKEN" gh release create "v$version" --repo foonerd/evotap --title "evotap $version" --prerelease --notes-file dist-evotap/notes.md dist-evotap/evotap-*.tar.gz dist-evotap/SHA256SUMS dist-evotap/SHA256SUMS.sig
+          GH_TOKEN="$EVOTAP_RELEASE_TOKEN" gh release create "v$version" --repo foonerd/evotap --title "evotap $version" --notes-file dist-evotap/notes.md dist-evotap/evotap-*.tar.gz dist-evotap/SHA256SUMS dist-evotap/SHA256SUMS.sig

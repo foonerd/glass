@@ -1,10 +1,15 @@
 //! Print what the live ring says, a line a hop, for a look at the tap
-//! without the display: `evotap-dump [seconds]`.
+//! without the display: `evotap-dump [seconds]`; `--version` says which
+//! evotap this is.
 
 use std::path::Path;
 use std::time::{Duration, Instant};
 
 fn main() {
+    if std::env::args().nth(1).as_deref() == Some("--version") {
+        println!("evotap {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
     let seconds: f64 = std::env::args()
         .nth(1)
         .and_then(|s| s.parse().ok())
