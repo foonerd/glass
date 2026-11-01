@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.10.49] - 2026-11-01
+
+- **The tap's rings come back when a logout removes them.** systemd-logind clears a user's shared memory under `/dev/shm` when that user's last login session ends (its `RemoveIPC` default), and with it the rings of a tap running as the `volumio` user, as Soloist and AirPlay do, and the plugin's demand file; MPD runs as its own user and was spared. The tap kept writing into the unlinked file and made no new one until the stream changed shape, so the meters went dark for Soloist or AirPlay after anyone opened and closed a shell as volumio, in every release since the tap. Now each writer looks every half second whether its file is still there and makes it again under the same name: the measurement ring with every slot it held, the audio ring with its header and an empty data region, the head going on; the header counts the heals. A reader tells a file made again by its inode and opens it afresh, so the display's meters pause for a moment and `evotap-cat` ends its segment and begins the next. The plugin writes its demand file again whenever it reads its configuration and finds the file gone. In step: the sheet's Audio rings row says how often a ring was made again; the Troubleshooting page has the row; the Tap page a section. Find a problem needs no check: the row carries the count. Found on the hanger while proving the audio ring with Soloist.
+
 ## [0.10.48] - 2026-11-01
 
 - **The release's own check names the audio ring's reader.** 0.10.47's release did not build: the byte-for-byte gate in the release workflow was not told where the cross build puts `evotap-cat` and looked in the host build's place. Both workflows name the built binary beside the library and `tapdump`. Nothing in the plugin, the display or the tap changed; 0.10.47 is what 0.10.48 ships.
