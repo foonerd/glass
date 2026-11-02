@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.1] - 2026-11-02
+
+- **A lens over what turns.** A theme may lay a picture of its own, with alpha, over the record and its art (`vinyl.lens.filename`), over the art alone (`albumart.lens.filename`) or over a reel (`reel.<side>.lens.filename`): grooves over the label, a glass glint, a cassette window. It is drawn right after the picture it covers and under everything that follows, the artwork, the needles, the texts, the tonearm and the foreground, so a texture that belongs over the art and under the arm no longer has to live in the foreground. It stands still while the picture turns under it, or turns with it (`<element>.lens.turning = True`); it is stretched to `<element>.lens.dimension`, else to the record's `vinyl.dimension`, the art's box or its own size. A theme without the keys draws as before, step for step. The fit of a theme to another screen scales the lens with the rest. In step: the theme page's Files section lists a lens file as it lists every picture, the Skin Creation Guide's drawing order and the Meters Reference name the keys, and Troubleshooting has the arm-under-a-texture and lens-missing rows; no new Find a problem check, no sheet row.
+
 ## [0.11.0] - 2026-11-01
 
 - **0.11.0, the cutover.** The audio tap stands as evotap: the ALSA plugin `type evotap` in `libevotap.so`, the `evometer` and `evoaudio` rings, the `evotap.demand` file, the readers `evotap-cat` and `evotap-dump`, released on their own at github.com/foonerd/evotap as evotap 0.1.0, the first release there, with the contract. The names from before (`glasstap`) are still answered for a release window. Nothing else changed since 0.10.54: this release gathers what the 0.10.47 to 0.10.54 pre-releases proved. In step: nothing on the player changed, no check, no sheet row.
