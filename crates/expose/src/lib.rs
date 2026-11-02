@@ -12862,7 +12862,7 @@ mod analyser_tests {
         assert!(band > 60 && band < 400, "the glow band below it: {band}");
         // The reference theme's ribbon: 1.5 to 40 wide with a 30 glow, by
         // level, in a 600 tall box: at half level the line is 21 rows.
-        let hanger = Look {
+        let ribbon = Look {
             style: lead::LookStyle::Graph,
             fill_alpha: 0.0,
             line_width: 1.5,
@@ -12875,7 +12875,7 @@ mod analyser_tests {
             bgr_alpha: 1.0,
             ..Look::default()
         };
-        let a = analyser(hanger, 100, 600, vec![0.5, 0.5], vec![0.5, 0.5]);
+        let a = analyser(ribbon, 100, 600, vec![0.5, 0.5], vec![0.5, 0.5]);
         let picture = AnalyserMotion::default().advance(&a, 0).clone();
         let core: Vec<u32> = (270..330)
             .filter(|&y| {
