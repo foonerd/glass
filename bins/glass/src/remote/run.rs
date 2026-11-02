@@ -405,8 +405,16 @@ fn status_screen(
     }
     let generation = app.generation();
     let started = Instant::now();
-    let show_window = crate::screen_available() && !run.headless;
-    let frame = status_frame(lines);
+    let show_window = crate::screen_available() && !run.headless && !app.window_hidden();
+    // On the screen the status says how to leave it, for a panel with only
+    // its touch screen.
+    let mut shown_lines = lines.to_vec();
+    if show_window {
+        shown_lines.push(
+            "Hold a finger on the screen for two seconds to leave full screen or quit.".to_string(),
+        );
+    }
+    let frame = status_frame(&shown_lines);
     let whole = expose::Rect {
         x: 0,
         y: 0,
@@ -804,6 +812,12 @@ pub fn remote_main(
         // a remote that found a service's environment variable in its own
         // (gnome-shell hands its own to every app it launches) left here
         // expecting a restart that never came.
+        // The page's Close window: the window goes and the remote runs on
+        // without one, its page with it, until the page opens it again.
+        if app.window_hidden() && window.is_some() {
+            logline::say!(Info, "remotes", "the window closed; the remote runs on");
+            drop(window.take());
+        }
         // The page's Quit: the window goes and the process leaves. Under
         // the user service the unit is stopped as well, or systemd would
         // start the display again at once.

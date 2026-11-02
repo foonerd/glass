@@ -40,6 +40,11 @@ struct Page {
     pressed: Option<Row>,
 }
 
+/// How long the hint at the bottom of the picture stays after a start.
+pub const HINT_FOR: Duration = Duration::from_secs(10);
+/// The hint's words, on the picture and on the status screen.
+pub const HINT: &str = "Hold a finger on the screen for two seconds to leave full screen or quit";
+
 /// The hold and the page, between frames.
 #[derive(Debug, Default)]
 pub struct ExitTouch {
@@ -49,6 +54,9 @@ pub struct ExitTouch {
     /// The lift of the finger that opened the page is the page's, not the
     /// theme's or the face's, which saw the finger go down.
     swallow_up: bool,
+    /// The hint at the bottom of the picture, until: for the first seconds
+    /// after the remote starts, and gone at the first touch.
+    hint_until: Option<Instant>,
 }
 
 /// The page's rows, from the top, and the header above them.
@@ -99,6 +107,21 @@ impl ExitTouch {
         self.page.is_some()
     }
 
+    /// The hint shown until a moment set for the whole run, so a session
+    /// started anew within the first seconds keeps showing it.
+    pub fn hint_until_at(&mut self, until: Instant) {
+        self.hint_until = Some(until);
+    }
+
+    pub fn hint_showing(&self, now: Instant) -> bool {
+        self.hint_until.is_some_and(|until| now < until)
+    }
+
+    /// Whether the picture has anything of this on it: the page, or the hint.
+    pub fn drawing(&self, now: Instant) -> bool {
+        self.open() || self.hint_showing(now)
+    }
+
     /// A pointer event in picture pixels: whether it is the page's, so the
     /// theme's controls and the face are not to see it, and what the page
     /// asks of the display on it.
@@ -111,6 +134,8 @@ impl ExitTouch {
         w: u32,
         h: u32,
     ) -> (bool, Option<Ask>) {
+        // The first touch takes the hint away: the user has found the screen.
+        self.hint_until = None;
         // The lift of the finger that opened the page: the page's, and no
         // tap on it, beside it, or on the theme under it.
         if self.swallow_up {
@@ -194,8 +219,11 @@ impl ExitTouch {
     /// The page over the picture: the picture dimmed, a box in the middle,
     /// a header and the rows, the pressed one lit. The theme's fonts where
     /// they have a face for the style, the display's own bitmap font else.
-    pub fn draw(&self, frame: &mut Frame, fonts: &Fonts) {
+    pub fn draw(&self, frame: &mut Frame, fonts: &Fonts, now: Instant) {
         let Some(page) = self.page.as_ref() else {
+            if self.hint_showing(now) {
+                draw_hint(frame, fonts);
+            }
             return;
         };
         let (w, h) = (frame.width, frame.height);
@@ -209,15 +237,7 @@ impl ExitTouch {
         // the display's own bitmap font scaled to the size: the page is
         // never without its words.
         let set = |style: TextStyle, size: u32, text: &str| -> Option<Frame> {
-            [style, TextStyle::Regular, TextStyle::Bold, TextStyle::Light]
-                .into_iter()
-                .find_map(|s| render_text(Some(fonts), s, size, ink, text, 0))
-                .or_else(|| {
-                    let line = bitmap_line(text);
-                    let h = size.max(8);
-                    let w = (line.width * h / line.height.max(1)).max(1);
-                    Some(fit_art(&line, w, h))
-                })
+            words(fonts, style, size, ink, text)
         };
         let title = if page.asking {
             "Quit the remote?"
@@ -246,6 +266,33 @@ impl ExitTouch {
             }
             top += row_h as i32 + pad as i32;
         }
+    }
+}
+
+/// A line of words in the theme's font for the style, else another of its
+/// faces, else the display's own bitmap font scaled to the size.
+fn words(fonts: &Fonts, style: TextStyle, size: u32, ink: [u8; 3], text: &str) -> Option<Frame> {
+    [style, TextStyle::Regular, TextStyle::Bold, TextStyle::Light]
+        .into_iter()
+        .find_map(|s| render_text(Some(fonts), s, size, ink, text, 0))
+        .or_else(|| {
+            let line = bitmap_line(text);
+            let h = size.max(8);
+            let w = (line.width * h / line.height.max(1)).max(1);
+            Some(fit_art(&line, w, h))
+        })
+}
+
+/// The hint: a dark strip along the bottom of the picture with the words.
+fn draw_hint(frame: &mut Frame, fonts: &Fonts) {
+    let (w, h) = (frame.width, frame.height);
+    let strip = (h / 12).clamp(28, 72);
+    let size = (strip * 2 / 5).max(12);
+    ui::fill(frame, 0, h as i32 - strip as i32, w, strip, [0, 0, 0, 170]);
+    if let Some(line) = words(fonts, TextStyle::Regular, size, [235, 235, 235], HINT) {
+        let x = (w as i32 - line.width as i32) / 2;
+        let y = h as i32 - strip as i32 + (strip as i32 - line.height as i32) / 2;
+        ui::blit(frame, &line, x, y, 255);
     }
 }
 
@@ -356,6 +403,37 @@ mod tests {
         assert!(!exit.open());
     }
 
+    /// The hint stands at the bottom for its seconds after a start, and goes
+    /// at the first touch or when its time is up.
+    #[test]
+    fn the_hint_shows_after_a_start_until_a_touch_or_its_time() {
+        let t0 = Instant::now();
+        let mut exit = ExitTouch::default();
+        assert!(!exit.hint_showing(t0));
+        exit.hint_until_at(t0 + HINT_FOR);
+        assert!(exit.hint_showing(t0 + Duration::from_secs(3)) && exit.drawing(t0));
+        assert!(!exit.hint_showing(t0 + HINT_FOR), "its time is up");
+        exit.hint_until_at(t0 + HINT_FOR);
+        exit.pointer(PointerKind::Down, 5, 5, t0, W, H);
+        assert!(
+            !exit.hint_showing(t0 + Duration::from_secs(1)),
+            "a touch takes it away"
+        );
+        let mut frame = Frame {
+            width: W,
+            height: H,
+            rgba: vec![200; (W * H * 4) as usize],
+            ..Frame::default()
+        };
+        let mut shown = ExitTouch::default();
+        shown.hint_until_at(t0 + HINT_FOR);
+        shown.draw(&mut frame, &Fonts::default(), t0);
+        let i = ((H - 4) * W + W / 2) as usize * 4;
+        assert!(frame.rgba[i] < 200, "the strip darkens the bottom");
+        let j = ((4 * W) + W / 2) as usize * 4;
+        assert_eq!(frame.rgba[j], 200, "the rest of the picture stays");
+    }
+
     /// The page is drawn over the picture: the middle of the box is the
     /// page's, a corner stays the dimmed picture.
     #[test]
@@ -370,7 +448,7 @@ mod tests {
             rgba: vec![200; (W * H * 4) as usize],
             ..Frame::default()
         };
-        exit.draw(&mut frame, &Fonts::default());
+        exit.draw(&mut frame, &Fonts::default(), t0 + HOLD);
         let px = |x: u32, y: u32| {
             let i = ((y * W + x) * 4) as usize;
             [frame.rgba[i], frame.rgba[i + 1], frame.rgba[i + 2]]

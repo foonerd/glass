@@ -53,6 +53,10 @@ pub struct Status {
     pub monitors: Vec<MonitorInfo>,
     /// Whether the face this display carries is drawn in this session.
     pub face_shown: bool,
+    /// The window closed from the page: the remote runs on, this page
+    /// with it, and the window comes back when the page asks.
+    #[serde(default)]
+    pub window_hidden: bool,
     /// What fills the screen where the theme leaves it bare, as this session
     /// resolved it: "the album art blurred" or "a dark colour"; empty before
     /// the first frame.
@@ -298,6 +302,9 @@ pub struct RemoteApp {
     /// The page asked the display to quit: the window goes and the process
     /// leaves, the user service stopped where it runs under one.
     quit: AtomicBool,
+    /// The page closed the window: the remote runs on without one until
+    /// the page opens it again.
+    window_hidden: AtomicBool,
     /// The paths to the player as last tried, for the page's Connection panel.
     connection: Mutex<Connection>,
     /// The page asked for a probe of the frames path; the session takes it.
@@ -327,6 +334,7 @@ impl RemoteApp {
             }),
             restart: AtomicBool::new(false),
             quit: AtomicBool::new(false),
+            window_hidden: AtomicBool::new(false),
             connection: Mutex::new(Connection {
                 probe: Probe {
                     state: "idle".to_string(),
@@ -719,6 +727,25 @@ impl RemoteApp {
 
     pub fn quit_asked(&self) -> bool {
         self.quit.load(Ordering::Acquire)
+    }
+
+    /// The page's Close window: the window goes, the remote runs on with
+    /// its page; the session on leaves, and the next opens no window.
+    pub fn hide_window(&self) {
+        self.window_hidden.store(true, Ordering::Release);
+        self.set_status(|s| s.window_hidden = true);
+        self.generation.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// The page's Open window: the next session opens the window again.
+    pub fn show_window_again(&self) {
+        self.window_hidden.store(false, Ordering::Release);
+        self.set_status(|s| s.window_hidden = false);
+        self.generation.fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub fn window_hidden(&self) -> bool {
+        self.window_hidden.load(Ordering::Acquire)
     }
 
     /// The face the display was built with, said once at the start.
@@ -1123,6 +1150,18 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
                 json!({ "ok": true, "quitting": true, "service": upgrade::under_service() }),
             );
         }
+        // The page's Close window and Open window: the window alone, the
+        // remote and this page running on either way.
+        (Method::Post, "/api/window/close") => {
+            logline::say!(Info, "remotes", "the page closed the window");
+            app.hide_window();
+            respond_json(request, 200, json!({ "ok": true, "window_hidden": true }));
+        }
+        (Method::Post, "/api/window/open") => {
+            logline::say!(Info, "remotes", "the page opened the window");
+            app.show_window_again();
+            respond_json(request, 200, json!({ "ok": true, "window_hidden": false }));
+        }
         (Method::Post, "/api/window") => {
             let body = match read_body(&mut request) {
                 Ok(v) => v,
@@ -1476,6 +1515,15 @@ mod tests {
         app.ask_quit();
         assert!(app.quit_asked());
         assert_eq!(app.generation(), before + 2);
+        // Close window and Open window do the same, and the status says which.
+        app.hide_window();
+        assert!(app.window_hidden());
+        assert_eq!(app.generation(), before + 3);
+        assert!(app.status().window_hidden);
+        app.show_window_again();
+        assert!(!app.window_hidden());
+        assert_eq!(app.generation(), before + 4);
+        assert!(!app.status().window_hidden);
         let _ = std::fs::remove_dir_all(&dir);
     }
 

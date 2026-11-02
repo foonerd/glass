@@ -769,7 +769,8 @@ fn session(
     let show_window = (screen_available()
         || screen_given().is_some()
         || skin.run.driver == lead::ScreenDriver::KmsDrm)
-        && !headless;
+        && !headless
+        && !remote.as_deref().is_some_and(|r| r.app.window_hidden());
     let write_file = output.is_some() || snapshot.is_some();
     let serving_remote = false;
     // The window: the player's is full screen at the theme's size; a
@@ -901,7 +902,15 @@ fn session(
     // of the display's own, drawn on a copy of the frame while it is open.
     let mut exit = remote::exit::ExitTouch::default();
     let mut exit_frame: Frame;
-    let mut exit_was_open = false;
+    let mut exit_was_drawing = false;
+    // The hint of the way out for the first seconds after the remote
+    // starts, across the sessions a sync or a change of theme starts anew,
+    // and gone for good at the first touch.
+    static HINT_UNTIL: std::sync::OnceLock<Instant> = std::sync::OnceLock::new();
+    static HINT_SEEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if remote.is_some() && !HINT_SEEN.load(std::sync::atomic::Ordering::Acquire) {
+        exit.hint_until_at(*HINT_UNTIL.get_or_init(|| Instant::now() + remote::exit::HINT_FOR));
+    }
     // When the player last played or the screen was last touched: past it
     // the display on a screen of its own slows to the standing rate.
     let mut active_at = Instant::now();
@@ -1334,10 +1343,12 @@ fn session(
                     frame = own;
                 }
             }
-            // The remote's own page over everything, on a copy of the frame.
-            if exit.open() {
+            // The remote's own page over everything, or its hint along the
+            // bottom, on a copy of the frame.
+            let exit_now = Instant::now();
+            if exit.drawing(exit_now) {
                 exit_frame = frame.clone();
-                exit.draw(&mut exit_frame, &assets.fonts);
+                exit.draw(&mut exit_frame, &assets.fonts, exit_now);
                 frame = &exit_frame;
             }
             let whole = [Rect {
@@ -1355,11 +1366,11 @@ fn session(
                 Show::Whole => damage = &whole,
                 Show::Kept => damage = &[],
             }
-            // The page open, and the frame after it shuts, go up whole.
-            if exit.open() || exit_was_open {
+            // The page or the hint on, and the frame after they go, go up whole.
+            if exit.drawing(exit_now) || exit_was_drawing {
                 damage = &whole;
             }
-            exit_was_open = exit.open();
+            exit_was_drawing = exit.drawing(exit_now);
             was_over = over;
             rastered_at = Instant::now();
             if let Some(window) = surface.as_mut() {
@@ -1428,6 +1439,9 @@ fn session(
                 // is the page's. Nothing of it on the player's own screen.
                 if let Some(remote) = remote.as_deref() {
                     let now = Instant::now();
+                    if !events.is_empty() {
+                        HINT_SEEN.store(true, std::sync::atomic::Ordering::Release);
+                    }
                     events.retain(|event| {
                         let (taken, ask) = exit.pointer(
                             event.kind,
