@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.7] - 2026-11-02
+
+- **A theme's transparency is read: what its pictures leave transparent shows what is behind the theme.** The screen picture (`screen.bgr`) was copied without its alpha, so the colour an editor leaves under a transparent area, usually white, showed on the screen, and a translucent pixel showed its colour whole. Now the screen picture and the face land by their own alpha, and a frame that leaves pixels less than opaque is blended over what is behind the theme: the album art blurred when the Display setting "Blurred album art behind the theme" (the remote's "Behind the theme") is on, else the dark colour. A snapshot, or a picture the display writes, is laid over the dark colour. A theme whose pictures are opaque draws as before, pixel for pixel; a background with anti-aliased edge pixels drawn at a fraction of alpha differs by rounding on those pixels alone. The Status row "Behind a smaller theme" reads "Behind the theme". Asked on the forum. In step: the Troubleshooting row and the Themes, Meters-Reference, Skin-Creation-Guide, Manager and Remotes pages; no Find a problem check, no sheet row.
+
 ## [0.11.6] - 2026-11-02
 
 - **Close window closes the page's own browser window.** The remote opens its settings page in a Chromium or Chrome of its own where one is installed, in app mode with a profile of the remote's own, and a second "Glass Remote Settings" launch asks the running remote to open it the same way, so the window is the remote's to close: **Close window** in the top bar ends it. `GLASS_BROWSER` names another program to open the page with. Where the page came up the system's way, in the default browser, the page closes itself if its browser allows a page to, and says so if not. 0.11.5's Close window had closed the remote's own display window instead, which was not the ask; that is gone. In step: the Remotes page and the Troubleshooting row; no Find a problem check, no sheet row.
