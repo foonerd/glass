@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.6] - 2026-11-02
+
+- **Close window closes the page's own browser window.** The remote opens its settings page in a Chromium or Chrome of its own where one is installed, in app mode with a profile of the remote's own, and a second "Glass Remote Settings" launch asks the running remote to open it the same way, so the window is the remote's to close: **Close window** in the top bar ends it. `GLASS_BROWSER` names another program to open the page with. Where the page came up the system's way, in the default browser, the page closes itself if its browser allows a page to, and says so if not. 0.11.5's Close window had closed the remote's own display window instead, which was not the ask; that is gone. In step: the Remotes page and the Troubleshooting row; no Find a problem check, no sheet row.
+
 ## [0.11.5] - 2026-11-02
 
 - **Close window on the remote's page, and the way out said on the screen.** The settings page's top bar has **Close window** beside Restart and Quit: the remote's window closes and the remote runs on with its page; the button then reads **Open window** and brings the window back. On the remote's own screen the way out is said where the user looks: the status screen, shown with no player, carries "Hold a finger on the screen for two seconds to leave full screen or quit", and a theme on show carries the same along its bottom for the first ten seconds after the remote starts, gone at the first touch. The page's help names the hold beside Escape, F and Q. In step: the Remotes page and the Troubleshooting row; no Find a problem check, no sheet row.
