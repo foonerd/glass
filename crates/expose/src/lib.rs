@@ -323,6 +323,7 @@ pub fn raster(scene: &Scene) -> Frame {
             vinyl: None,
             tonearm: None,
             reels: (None, None),
+            lenses: LensStack::default(),
             indicators: None,
             base: None,
             changer: None,
@@ -659,12 +660,108 @@ pub struct Stack<'a> {
     pub tonearm: Option<&'a Frame>,
     /// The reel pictures, the album's scaled to the theme's.
     pub reels: (Option<&'a Frame>, Option<&'a Frame>),
+    /// The lenses over the record, the art and the reels, each at its size.
+    pub lenses: LensStack<'a>,
     /// The indicators' prepared pictures, when the meter has indicators.
     pub indicators: Option<&'a IndicatorAssets>,
     /// The screen picture and meter face composed once; the frame starts as a copy of it.
     pub base: Option<&'a Frame>,
     /// The changer's layers as last drawn, with the turning disc's angle.
     pub changer: Option<ChangerStack<'a>>,
+}
+
+/// The lenses' pictures as `Stack` takes them: over the record, over the
+/// art, over each reel. `None` where the theme names no lens there.
+#[derive(Clone, Copy, Default)]
+pub struct LensStack<'a> {
+    pub vinyl: Option<&'a Frame>,
+    pub art: Option<&'a Frame>,
+    pub reels: (Option<&'a Frame>, Option<&'a Frame>),
+}
+
+/// The lenses a meter's skin names (`vinyl.lens.*`, `albumart.lens.*`,
+/// `reel.<side>.lens.*`), decoded once and stretched to their size: the
+/// record's to `vinyl.lens.dimension`, else `vinyl.dimension`; the art's to
+/// `albumart.lens.dimension`, else the art's box; a reel's to
+/// `reel.<side>.lens.dimension`, else the picture's own size.
+#[derive(Default)]
+pub struct Lenses {
+    pub vinyl: Option<Frame>,
+    pub art: Option<Frame>,
+    pub reels: (Option<Frame>, Option<Frame>),
+}
+
+impl Lenses {
+    pub fn load(skin: &lead::SkinDesc) -> Self {
+        let lens = |spec: Option<&lead::LensSpec>, size: Option<(u32, u32)>| -> Option<Frame> {
+            let spec = spec?;
+            let picture = read_png(Path::new(&spec.file))?;
+            match spec.dimension.or(size) {
+                Some((w, h)) if w > 0 && h > 0 && (w, h) != (picture.width, picture.height) => {
+                    Some(fit_art(&picture, w, h))
+                }
+                _ => Some(picture),
+            }
+        };
+        let vinyl = skin.vinyl.as_ref();
+        let art = skin.art.as_ref();
+        let reel = |side: Option<&lead::ReelSpec>| lens(side.and_then(|r| r.lens.as_ref()), None);
+        Self {
+            vinyl: lens(
+                vinyl.and_then(|v| v.lens.as_ref()),
+                vinyl.and_then(|v| v.dimension),
+            ),
+            art: lens(art.and_then(|a| a.lens.as_ref()), art.map(|a| (a.w, a.h))),
+            reels: (
+                reel(skin.reels.as_ref().and_then(|r| r.left.as_ref())),
+                reel(skin.reels.as_ref().and_then(|r| r.right.as_ref())),
+            ),
+        }
+    }
+
+    /// The pictures as `Stack` takes them.
+    pub fn stack(&self) -> LensStack<'_> {
+        LensStack {
+            vinyl: self.vinyl.as_ref(),
+            art: self.art.as_ref(),
+            reels: (self.reels.0.as_ref(), self.reels.1.as_ref()),
+        }
+    }
+
+    pub fn bytes(&self) -> usize {
+        bytes_of([&self.vinyl, &self.art, &self.reels.0, &self.reels.1])
+    }
+}
+
+/// A lens over a turning picture: the theme's picture centred on the
+/// picture's centre, still, or turned about it by `degrees` when the theme
+/// turns the lens with the picture.
+fn lens_op<'a>(
+    reaches: &mut Reaches,
+    lens: &'a Frame,
+    centre: (f32, f32),
+    degrees: Option<f32>,
+) -> Op<'a> {
+    match degrees {
+        Some(degrees) => {
+            let reach = reaches.reach(lens, centre_of(lens));
+            Op::Turn {
+                src: lens,
+                pivot_image: centre_of(lens),
+                pivot_screen: centre,
+                degrees,
+                smooth: false,
+                reach,
+            }
+        }
+        None => blit_op(
+            lens,
+            (
+                (centre.0 - lens.width as f32 / 2.0).round() as i32,
+                (centre.1 - lens.height as f32 / 2.0).round() as i32,
+            ),
+        ),
+    }
 }
 
 /// Theme order: full-screen picture, meter face, album art, folder layers, needles, meter
@@ -884,14 +981,21 @@ pub fn raster_over<'m>(
         {
             if let (Some(side), Some(picture)) = (side, picture) {
                 let reach = reaches.reach(picture, centre_of(picture));
+                let centre = (side.center.0 as f32, side.center.1 as f32);
                 ops.push(Op::Turn {
                     src: picture,
                     pivot_image: centre_of(picture),
-                    pivot_screen: (side.center.0 as f32, side.center.1 as f32),
+                    pivot_screen: centre,
                     degrees: -reel_angles[i],
                     smooth: false,
                     reach,
                 });
+                // The reel's lens, over the reel and under what follows.
+                let lenses = [stack.lenses.reels.0, stack.lenses.reels.1];
+                if let (Some(spec), Some(lens)) = (&side.lens, lenses[i]) {
+                    let turn = spec.turning.then_some(-reel_angles[i]);
+                    ops.push(lens_op(reaches, lens, centre, turn));
+                }
             }
         }
     }
@@ -987,6 +1091,33 @@ pub fn raster_over<'m>(
                     color,
                 });
             }
+        }
+    }
+    // The lenses over the record and over the art: the theme's pictures
+    // laid on the turning ones, still unless the theme turns them, and
+    // under everything from here on: the artwork, the needles, the texts,
+    // the tonearm, the foreground.
+    if let (Some(v), Some(lens)) = (&scene.vinyl, stack.lenses.vinyl) {
+        if let Some(spec) = &v.spec.lens {
+            let centre = (v.spec.center.0 as f32, v.spec.center.1 as f32);
+            let turn = spec.turning.then_some(-angle);
+            ops.push(lens_op(reaches, lens, centre, turn));
+        }
+    }
+    if let (Some(place), Some(lens)) = (&scene.art, stack.lenses.art) {
+        if let Some(spec) = &place.lens {
+            let turning = place.rotation && place.rpm > 0.0;
+            let own = (
+                place.x as f32 + place.w as f32 / 2.0,
+                place.y as f32 + place.h as f32 / 2.0,
+            );
+            // Turning art sits on the record's centre; its lens goes with it.
+            let centre = match (&scene.vinyl, turning) {
+                (Some(v), true) => (v.spec.center.0 as f32, v.spec.center.1 as f32),
+                _ => own,
+            };
+            let turn = (spec.turning && turning).then_some(-angle);
+            ops.push(lens_op(reaches, lens, centre, turn));
         }
     }
     plan_folder_layers(scene, stack.folder_pictures, ZOrder::Background, &mut ops);
@@ -5128,6 +5259,7 @@ mod changer_tests {
                     vinyl: None,
                     tonearm: None,
                     reels: (None, None),
+                    lenses: LensStack::default(),
                     indicators: None,
                     base: None,
                     changer: Some(ChangerStack {
@@ -10284,6 +10416,8 @@ pub struct MeterAssets {
     pub tonearm: Option<Frame>,
     /// The theme's reel pictures; an album's reel is scaled to their size.
     pub reels: (Option<Frame>, Option<Frame>),
+    /// The lenses over the record, the art and the reels, at their size.
+    pub lenses: Lenses,
     /// The indicators' prepared states and pictures.
     pub indicators: Option<IndicatorAssets>,
     /// The screen picture and face composed once per meter; the pictures
@@ -10303,6 +10437,7 @@ impl MeterAssets {
             ),
             ("tonearm", bytes_of([&self.tonearm])),
             ("reels", bytes_of([&self.reels.0, &self.reels.1])),
+            ("lenses", self.lenses.bytes()),
             ("mask", bytes_of([&self.art_mask])),
             (
                 "spectrum",
@@ -10392,6 +10527,7 @@ impl MeterAssets {
                     .and_then(|r| r.right.as_ref())
                     .and_then(|r| read_png(Path::new(&r.theme_file))),
             ),
+            lenses: Lenses::load(skin),
             indicators: skin.indicators.as_ref().map(IndicatorAssets::load),
         }
     }
@@ -11400,6 +11536,7 @@ mod tests {
                     vinyl: None,
                     tonearm: None,
                     reels: (None, None),
+                    lenses: LensStack::default(),
                     indicators: None,
                     base: None,
                     changer: None,
@@ -11427,6 +11564,7 @@ mod tests {
                     vinyl: None,
                     tonearm: None,
                     reels: (None, None),
+                    lenses: LensStack::default(),
                     indicators: None,
                     base: None,
                     changer: None,
@@ -11441,6 +11579,112 @@ mod tests {
                 "frame at {now} ms is the same on one and three threads"
             );
         }
+    }
+
+    #[test]
+    fn a_lens_lies_over_the_art_and_under_the_arm() {
+        // Still art in a box, a lens over its middle, a tonearm lying across
+        // the lens: the lens shows where the arm is not, the arm where it is,
+        // the art outside the lens; without the lens the art shows through.
+        let art = sprite(60, 60, [200, 0, 0, 255]);
+        let lens = sprite(20, 20, [0, 200, 0, 255]);
+        let arm = sprite(40, 3, [0, 0, 200, 255]);
+        let flat = TonearmSpec {
+            file: String::new(),
+            pivot_screen: (120, 60),
+            pivot_image: (1, 1),
+            rest: 0.0,
+            start: 0.0,
+            end: 0.0,
+            drop_s: 0.0,
+            lift_s: 0.0,
+        };
+        let scene = |with_lens: bool| Scene {
+            skin: "test".into(),
+            width: 240,
+            height: 120,
+            art: Some(Art {
+                x: 90,
+                y: 30,
+                w: 60,
+                h: 60,
+                file: String::new(),
+                mask: String::new(),
+                border: 0,
+                border_color: [255, 255, 255],
+                rotation: false,
+                rpm: 0.0,
+                lens: with_lens.then(|| lead::LensSpec {
+                    file: "lens.png".into(),
+                    turning: false,
+                    dimension: None,
+                }),
+            }),
+            tonearm: Some(flat.clone()),
+            playing: true,
+            ..Scene::default()
+        };
+        let paint = |with_lens: bool| {
+            let mut motion = Motion::new(1, None);
+            raster_over(
+                &scene(with_lens),
+                Stack {
+                    screen: None,
+                    face: None,
+                    front: None,
+                    needle: None,
+                    needle_right: None,
+                    face_at: (0, 0),
+                    fonts: None,
+                    art: Some(&art),
+                    icon: None,
+                    spectra: &[],
+                    folder_pictures: &[],
+                    fanart: (None, None),
+                    vinyl: None,
+                    tonearm: Some(&arm),
+                    reels: (None, None),
+                    lenses: LensStack {
+                        art: with_lens.then_some(&lens),
+                        ..LensStack::default()
+                    },
+                    indicators: None,
+                    base: None,
+                    changer: None,
+                },
+                &mut motion,
+                0,
+            )
+            .frame
+            .clone()
+        };
+        let with = paint(true);
+        assert_eq!(
+            sample(&with, 95, 35)[..3],
+            [200, 0, 0],
+            "art outside the lens"
+        );
+        assert_eq!(
+            sample(&with, 112, 52)[..3],
+            [0, 200, 0],
+            "the lens over the art"
+        );
+        assert_eq!(
+            sample(&with, 130, 60)[..3],
+            [0, 0, 200],
+            "the arm over the lens"
+        );
+        let without = paint(false);
+        assert_eq!(
+            sample(&without, 112, 52)[..3],
+            [200, 0, 0],
+            "no lens, the art shows"
+        );
+        assert_eq!(
+            sample(&without, 130, 60)[..3],
+            [0, 0, 200],
+            "the arm as before"
+        );
     }
 
     #[test]
@@ -11476,6 +11720,7 @@ mod tests {
                 border_color: [255, 255, 255],
                 rotation: true,
                 rpm: 45.0,
+                lens: None,
             }),
             playing: true,
             texts: vec![Text {
@@ -11531,6 +11776,7 @@ mod tests {
                 vinyl: None,
                 tonearm: None,
                 reels: (None, None),
+                lenses: LensStack::default(),
                 indicators: None,
                 base: Some(&base),
                 changer: None,

@@ -125,7 +125,7 @@ function remoteRows(remotes, latest, standing) {
 
 // The keys of a theme's text that name a picture, as the display's own
 // reader (lead's tailor) has them: a `*` is one segment, a `**` one or more.
-const PICTURE_KEYS = ['bgr.filename', 'fgr.filename', 'indicator.filename', 'bar.filename', 'reflection.filename', 'albumart.mask', 'vinyl.filename', 'reel.*.filename', 'tonearm.filename', 'button.*.image', '*.head.image', '*.knob.image', '*.slider.tip', '*.slider.track', '*.icon', '*.marker.*.image', 'screen.bgr'];
+const PICTURE_KEYS = ['bgr.filename', 'fgr.filename', 'indicator.filename', 'bar.filename', 'reflection.filename', 'albumart.mask', 'vinyl.filename', 'reel.*.filename', 'tonearm.filename', '**.lens.filename', 'button.*.image', '*.head.image', '*.knob.image', '*.slider.tip', '*.slider.track', '*.icon', '*.marker.*.image', 'screen.bgr'];
 // A record's, a reel's or the tonearm's picture may be a list whose earlier
 // names are looked for in the track's own folder; only the last is the theme's.
 const LAST_OF_LIST = ['vinyl.filename', 'tonearm.filename', 'reel.*.filename'];

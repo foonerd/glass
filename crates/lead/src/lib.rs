@@ -598,10 +598,57 @@ pub struct ArtSpec {
     /// Turns per minute, `albumart.rotation.speed` times the player's multiplier.
     #[serde(default)]
     pub rpm: f32,
+    /// `albumart.lens.*`: a picture laid over the art, under everything
+    /// that moves above it.
+    #[serde(default)]
+    pub lens: Option<LensSpec>,
 }
 
 fn white() -> [u8; 3] {
     [255, 255, 255]
+}
+
+/// A lens: a picture of the theme, with alpha, laid over a turning picture
+/// (the record with its art, the art alone, a reel) and under the needles,
+/// the texts, the tonearm and the foreground. A groove texture, a glass
+/// glint, a window. Still by default, so the picture turns under it;
+/// `turning = True` turns it with the picture.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LensSpec {
+    /// `<element>.lens.filename`, as a path.
+    pub file: String,
+    /// `<element>.lens.turning`: turns with the picture under it.
+    #[serde(default)]
+    pub turning: bool,
+    /// `<element>.lens.dimension`: the picture is stretched to this. Absent,
+    /// the record's `vinyl.dimension`, the art's box, or the picture's own size.
+    #[serde(default)]
+    pub dimension: Option<(u32, u32)>,
+}
+
+/// `<prefix>.lens.*` of a meter section: the lens when `<prefix>.lens.filename`
+/// names a file, with `get` reading the section's values and `path`
+/// placing a file under the theme's folder.
+fn lens_under<'a>(
+    get: impl Fn(&str) -> Option<&'a str>,
+    prefix: &str,
+    path: impl Fn(&str) -> String,
+) -> Option<LensSpec> {
+    let file = get(&format!("{prefix}.lens.filename"))?.trim();
+    if file.is_empty() || file.eq_ignore_ascii_case("none") {
+        return None;
+    }
+    let dimension = get(&format!("{prefix}.lens.dimension")).and_then(|v| {
+        let mut parts = v.split(',');
+        let w: u32 = parts.next()?.trim().parse().ok()?;
+        let h: u32 = parts.next()?.trim().parse().ok()?;
+        (w > 0 && h > 0).then_some((w, h))
+    });
+    Some(LensSpec {
+        file: path(file),
+        turning: truthy(get(&format!("{prefix}.lens.turning"))),
+        dimension,
+    })
 }
 
 /// How the type area shows the track type.
@@ -5059,6 +5106,13 @@ pub fn meter_art(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<ArtSp
     let border_color = get("font.color")
         .and_then(color_triplet)
         .unwrap_or([255, 255, 255]);
+    let under_theme = |file: &str| {
+        if theme_dir.is_empty() {
+            file.to_string()
+        } else {
+            format!("{}/{}", theme_dir.trim_end_matches('/'), file)
+        }
+    };
     Some(ArtSpec {
         x,
         y,
@@ -5071,6 +5125,7 @@ pub fn meter_art(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<ArtSp
         rpm: get("albumart.rotation.speed")
             .and_then(|v| v.trim().parse::<f32>().ok())
             .unwrap_or(0.0),
+        lens: lens_under(get, "albumart", under_theme),
     })
 }
 
@@ -5184,6 +5239,9 @@ pub struct ReelSpec {
     pub center: (i32, i32),
     /// Turns a minute before the spool multiplier: `reel.rotation.speed`.
     pub rpm: f32,
+    /// `reel.<side>.lens.*`: a picture over the reel, under what moves above it.
+    #[serde(default)]
+    pub lens: Option<LensSpec>,
 }
 
 /// The two reels of a cassette meter and how they run.
@@ -5258,6 +5316,7 @@ pub fn meter_reels(
             album_file,
             center,
             rpm,
+            lens: lens_under(get, &["reel.", side].concat(), path),
         })
     };
     let (left, right) = (reel("left"), reel("right"));
@@ -5473,6 +5532,10 @@ pub struct VinylSpec {
     /// Turns per minute: `albumart.rotation.speed` times the multiplier, or a
     /// stand-in reel's `reel.rotation.speed`.
     pub rpm: f32,
+    /// `vinyl.lens.*`: a picture over the record and its art, under what
+    /// moves above them.
+    #[serde(default)]
+    pub lens: Option<LensSpec>,
 }
 
 /// `vinyl.*` of a meter. With a tonearm but no vinyl, a single reel stands
@@ -5568,6 +5631,7 @@ pub fn meter_vinyl(
         dimension: upair("vinyl.dimension").filter(|&(w, h)| w > 0 && h > 0),
         clockwise: direction != "ccw",
         rpm: (rpm * settings.speed).abs(),
+        lens: lens_under(get, "vinyl", path),
     })
 }
 
@@ -6328,6 +6392,63 @@ mod tests {
             meter_vinyl("[x]\nvinyl.filename = a.png\n", "x", "", &settings),
             None,
             "no centre, no record"
+        );
+    }
+
+    #[test]
+    fn a_lens_lies_over_the_record_the_art_or_a_reel() {
+        let settings = RotationSettings::default();
+        let m = "[t]\nalbumart.pos = 195,235\nalbumart.dimension = 198,198\nalbumart.rotation = True\nalbumart.rotation.speed = 30\n\
+            albumart.lens.filename = label-glass.png\nalbumart.lens.turning = True\n\
+            vinyl.filename = disc.png\nvinyl.center = 293,334\nvinyl.dimension = 400,400\n\
+            vinyl.lens.filename = grooves.png\nvinyl.lens.dimension = 420,420\n\
+            [c]\nreel.left.filename = left.png\nreel.left.center = 360,321\nreel.left.lens.filename = window.png\nreel.left.lens.turning = yes\n\
+            reel.right.filename = right.png\nreel.right.center = 957,321\nreel.right.lens.filename = none\n\
+            [p]\nvinyl.filename = disc.png\nvinyl.center = 1,1\nvinyl.lens.filename = \nvinyl.lens.dimension = 0,9\n";
+        let vinyl = meter_vinyl(m, "t", "/th", &settings).unwrap();
+        assert_eq!(
+            vinyl.lens,
+            Some(LensSpec {
+                file: "/th/grooves.png".into(),
+                turning: false,
+                dimension: Some((420, 420)),
+            }),
+            "the record's lens is still unless asked, sized as asked"
+        );
+        let art = meter_art(m, "t", "/th").unwrap();
+        assert_eq!(
+            art.lens,
+            Some(LensSpec {
+                file: "/th/label-glass.png".into(),
+                turning: true,
+                dimension: None,
+            }),
+            "the art's lens turns with it when asked"
+        );
+        let reels = meter_reels(m, "c", "/th", &settings).unwrap();
+        assert_eq!(
+            reels.left.unwrap().lens,
+            Some(LensSpec {
+                file: "/th/window.png".into(),
+                turning: true,
+                dimension: None,
+            })
+        );
+        assert_eq!(
+            reels.right.unwrap().lens,
+            None,
+            "`none` is no lens, as it is no picture elsewhere"
+        );
+        let plain = meter_vinyl(m, "p", "", &settings).unwrap();
+        assert_eq!(plain.lens, None, "an empty file name is no lens");
+        assert_eq!(
+            meter_vinyl(m, "t", "", &settings)
+                .unwrap()
+                .lens
+                .unwrap()
+                .file,
+            "grooves.png",
+            "without a theme folder the file stands as written"
         );
     }
 

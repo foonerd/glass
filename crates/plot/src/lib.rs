@@ -73,6 +73,9 @@ pub struct Art {
     pub rotation: bool,
     #[serde(default)]
     pub rpm: f32,
+    /// `albumart.lens.*`: the theme's picture over the art.
+    #[serde(default)]
+    pub lens: Option<lead::LensSpec>,
 }
 
 fn white() -> [u8; 3] {
@@ -269,6 +272,7 @@ pub fn art(skin: &SkinDesc, meta: &Metadata) -> Option<Art> {
         border_color: spec.border_color,
         rotation: spec.rotation,
         rpm: spec.rpm * skin.rotation.speed,
+        lens: spec.lens.clone(),
     })
 }
 
@@ -1091,6 +1095,7 @@ mod tests {
             border_color: [1, 2, 3],
             rotation: false,
             rpm: 0.0,
+            lens: None,
         });
         assert_eq!(art(&skin, &waiting), None);
         let ready = Metadata {

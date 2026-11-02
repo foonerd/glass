@@ -462,6 +462,7 @@ impl Page {
                 vinyl: showing.pictures.vinyl(),
                 tonearm: assets.tonearm.as_ref(),
                 reels: showing.pictures.reels(&scene, assets),
+                lenses: assets.lenses.stack(),
                 indicators: assets.indicators.as_ref(),
                 base: Some(&assets.base),
                 changer: showing.pictures.changer(),

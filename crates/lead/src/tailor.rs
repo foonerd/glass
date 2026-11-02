@@ -157,6 +157,11 @@ const RULES: &[(&str, Kind)] = &[
     ("tonearm.pivot.screen", Kind::Point),
     ("tonearm.pivot.image", Kind::Offset),
     ("tonearm.filename", Kind::Picture),
+    // The lenses over the record (`vinyl.lens.*`), the art (`albumart.lens.*`)
+    // and the reels (`reel.<side>.lens.*`): one picture, its size, a flag.
+    ("**.lens.filename", Kind::Picture),
+    ("**.lens.dimension", Kind::Size),
+    ("**.lens.turning", Kind::Keep),
     // The CD changer.
     ("changer.slots", Kind::Keep),
     ("changer.orientation", Kind::Keep),
@@ -772,7 +777,7 @@ mod tests {
 
     #[test]
     fn the_files_a_theme_names_are_read_as_the_display_reads_them() {
-        let text = "[gold]\nmeter.type = circular\n# bgr.filename = old.png\nbgr.filename = gold-bgr.png\nbutton.play.image = play.png, play-lit.png\nvinyl.filename = disc.png,vinyl_disc.png\nreel.left.filename = tape.png, reel-left.png\ntonearm.filename = arm.png\nvolume.knob.image = knob.png\ntime.total.font = fonts/Mine.ttf\nfont.light = Light.ttf\nalbumart.mask = none\nscreen.bgr = sky.png\n[silver]\nbgr.filename = gold-bgr.png\n";
+        let text = "[gold]\nmeter.type = circular\n# bgr.filename = old.png\nbgr.filename = gold-bgr.png\nbutton.play.image = play.png, play-lit.png\nvinyl.filename = disc.png,vinyl_disc.png\nreel.left.filename = tape.png, reel-left.png\ntonearm.filename = arm.png\nvinyl.lens.filename = grooves.png\nreel.left.lens.filename = window.png\nalbumart.lens.filename = glint.png\nvolume.knob.image = knob.png\ntime.total.font = fonts/Mine.ttf\nfont.light = Light.ttf\nalbumart.mask = none\nscreen.bgr = sky.png\n[silver]\nbgr.filename = gold-bgr.png\n";
         let named = files_named(text);
         let pairs: Vec<(&str, &str)> = named
             .iter()
@@ -791,6 +796,10 @@ mod tests {
                 ("vinyl.filename", "vinyl_disc.png"),
                 ("reel.left.filename", "reel-left.png"),
                 ("tonearm.filename", "arm.png"),
+                // A lens is the theme's picture alone, never a list.
+                ("vinyl.lens.filename", "grooves.png"),
+                ("reel.left.lens.filename", "window.png"),
+                ("albumart.lens.filename", "glint.png"),
                 ("volume.knob.image", "knob.png"),
                 ("time.total.font", "fonts/Mine.ttf"),
                 ("screen.bgr", "sky.png"),
@@ -863,6 +872,7 @@ mod tests {
             "flash",
             "fm",
             "graph",
+            "grooves.png",
             "high",
             "horizontal",
             "ice",
@@ -896,6 +906,7 @@ mod tests {
             "qobuz",
             "radio",
             "rainbow",
+            "reel.",
             "reel.png",
             "regular",
             "repeat",

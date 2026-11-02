@@ -198,6 +198,14 @@ test('every file a theme names is found, missing, optional or elsewhere, as the 
   assert.deepStrictEqual(themeFilesSummary(files), { named: 11, found: 6, missing: 3, optional: 2 });
   assert.ok(fileIsOptional('time.elapsed.font') && fileIsOptional('progress.knob.image') && !fileIsOptional('bgr.filename') && !fileIsOptional('font.light'));
   assert.ok(keyMatches('*.marker.*.image', 'volume.marker.3.image') && keyMatches('reel.*.filename', 'reel.right.filename') && !keyMatches('*.icon', 'a.b.icon'));
+  // A lens over the record, the art or a reel is a picture of the theme's own, never a list.
+  assert.ok(keyMatches('**.lens.filename', 'vinyl.lens.filename') && keyMatches('**.lens.filename', 'reel.left.lens.filename') && keyMatches('**.lens.filename', 'albumart.lens.filename'));
+  const lensed = themeFiles('[t]\nvinyl.filename = disc.png\nvinyl.center = 1,1\nvinyl.lens.filename = grooves.png\nalbumart.lens.filename = glint.png\n', '/t/gold', '', exists);
+  assert.deepStrictEqual(lensed.map((f) => [f.key, f.file, f.state]), [
+    ['vinyl.filename', 'disc.png', 'missing'],
+    ['vinyl.lens.filename', 'grooves.png', 'missing'],
+    ['albumart.lens.filename', 'glint.png', 'missing']
+  ]);
   assert.deepStrictEqual(themeFiles('', '/t', '', exists), []);
 });
 
