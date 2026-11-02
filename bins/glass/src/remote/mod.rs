@@ -291,8 +291,12 @@ pub struct RemoteApp {
     /// date, and where an upgrade stands.
     product: Mutex<Option<upgrade::Product>>,
     upgrade: Mutex<upgrade::State>,
-    /// An upgrade is in place: the display is to become the new binary.
+    /// An upgrade is in place, or the page asked: the display is to start
+    /// again as the binary in its place.
     restart: AtomicBool,
+    /// The page asked the display to quit: the window goes and the process
+    /// leaves, the user service stopped where it runs under one.
+    quit: AtomicBool,
     /// The paths to the player as last tried, for the page's Connection panel.
     connection: Mutex<Connection>,
     /// The page asked for a probe of the frames path; the session takes it.
@@ -321,6 +325,7 @@ impl RemoteApp {
                 ..Default::default()
             }),
             restart: AtomicBool::new(false),
+            quit: AtomicBool::new(false),
             connection: Mutex::new(Connection {
                 probe: Probe {
                     state: "idle".to_string(),
@@ -691,9 +696,28 @@ impl RemoteApp {
         }
     }
 
-    /// Whether an upgrade is in place and the display is to become it.
+    /// Whether an upgrade is in place and the display is to become it, or
+    /// the page asked for a start again.
     pub fn restart_asked(&self) -> bool {
         self.restart.load(Ordering::Acquire)
+    }
+
+    /// The page's Restart: the display starts again as the binary in its
+    /// place, in its own process; the session on leaves for it.
+    pub fn ask_restart(&self) {
+        self.restart.store(true, Ordering::Release);
+        self.generation.fetch_add(1, Ordering::AcqRel);
+    }
+
+    /// The page's Quit: the window goes and the process leaves; the
+    /// session on leaves for it.
+    pub fn ask_quit(&self) {
+        self.quit.store(true, Ordering::Release);
+        self.generation.fetch_add(1, Ordering::AcqRel);
+    }
+
+    pub fn quit_asked(&self) -> bool {
+        self.quit.load(Ordering::Acquire)
     }
 
     /// The face the display was built with, said once at the start.
@@ -1081,6 +1105,23 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
         }
         // The window, live: full screen, or a window so the desktop behind
         // it can be used (Escape and F on the keyboard do the same).
+        // The page's two buttons beside Apply: the display starts again as
+        // the binary in its place, or leaves. For a panel with no keyboard,
+        // where Escape and Q cannot be pressed.
+        (Method::Post, "/api/restart") => {
+            logline::say!(Info, "remotes", "the page asked for a start again");
+            app.ask_restart();
+            respond_json(request, 200, json!({ "ok": true, "restarting": true }));
+        }
+        (Method::Post, "/api/quit") => {
+            logline::say!(Info, "remotes", "the page asked the display to quit");
+            app.ask_quit();
+            respond_json(
+                request,
+                200,
+                json!({ "ok": true, "quitting": true, "service": upgrade::under_service() }),
+            );
+        }
         (Method::Post, "/api/window") => {
             let body = match read_body(&mut request) {
                 Ok(v) => v,
@@ -1413,6 +1454,28 @@ mod tests {
         assert_eq!(probe_verdict(0, Some(3), true), Some("blocked"));
         assert_eq!(probe_verdict(0, Some(0), true), Some("not-sent"));
         assert_eq!(probe_verdict(0, None, true), Some("no-answer"));
+    }
+
+    /// The page's Restart and Quit each raise the generation, so the
+    /// session on leaves for them, and stand until the loop reads them.
+    #[test]
+    fn restart_and_quit_asked_on_the_page_leave_the_session() {
+        let dir = std::env::temp_dir().join(format!("glass-remote-ask-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let app = RemoteApp::new(
+            dir.join("config.json"),
+            dir.clone(),
+            RemoteConfig::default(),
+        );
+        let before = app.generation();
+        assert!(!app.restart_asked() && !app.quit_asked());
+        app.ask_restart();
+        assert!(app.restart_asked());
+        assert_eq!(app.generation(), before + 1);
+        app.ask_quit();
+        assert!(app.quit_asked());
+        assert_eq!(app.generation(), before + 2);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A connect's failure is one of four words, by its kind.

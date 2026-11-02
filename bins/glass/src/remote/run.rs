@@ -768,9 +768,9 @@ pub fn remote_main(
                     "remotes",
                     "upgrade: {new} did not hold on; {old} is back in place"
                 );
-                if super::upgrade::under_service() {
-                    return ExitCode::from(1);
-                }
+                // The one put back starts here, in this process, whoever
+                // started it: a service keeps its process, a desktop launch
+                // has nothing that would start it again.
                 return match super::upgrade::become_new(exe) {
                     Ok(()) => ExitCode::SUCCESS,
                     Err(why) => {
@@ -798,13 +798,31 @@ pub fn remote_main(
     let mut window: Option<(WindowOptions, Surface)> = None;
     loop {
         // An upgrade is in place: the window goes, and the display starts
-        // again as the new binary, by the service that keeps it running or
-        // by becoming it.
+        // again as the new binary by becoming it, in this process, whoever
+        // started it. A service sees its process go on; a desktop launch,
+        // which nothing would start again, goes on as well. Until 0.11.1
+        // a remote that found a service's environment variable in its own
+        // (gnome-shell hands its own to every app it launches) left here
+        // expecting a restart that never came.
+        // The page's Quit: the window goes and the process leaves. Under
+        // the user service the unit is stopped as well, or systemd would
+        // start the display again at once.
+        if app.quit_asked() {
+            drop(window.take());
+            if let Some((unit, user)) = super::upgrade::service_unit() {
+                logline::say!(Info, "remotes", "quit: stopping {unit}");
+                let mut stop = std::process::Command::new("systemctl");
+                if user {
+                    stop.arg("--user");
+                }
+                let _ = stop.args(["--no-block", "stop", &unit]).spawn();
+            } else {
+                logline::say!(Info, "remotes", "quit: the page asked; leaving");
+            }
+            return ExitCode::SUCCESS;
+        }
         if app.restart_asked() {
             drop(window.take());
-            if super::upgrade::under_service() {
-                return ExitCode::SUCCESS;
-            }
             let became = match exe.as_deref() {
                 Some(exe) => super::upgrade::become_new(exe),
                 None => Err("this binary's own path is not known".to_string()),

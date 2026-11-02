@@ -1601,6 +1601,13 @@
       </div>
     </section>
     <section class="view" id="view-system">
+      <div class="panel" id="sys-panel">
+        <div class="row" style="justify-content:space-between">
+          <h2 id="sys-title" style="margin:0"></h2>
+          <div class="row"><button class="small" id="btn-sys-restart"></button><button class="small" id="btn-sys-reboot"></button></div>
+        </div>
+        <div class="help" id="sys-help" style="margin-top:8px"></div>
+      </div>
       <div class="panel" id="upd-panel">
         <div class="row" style="justify-content:space-between">
           <h2 id="upd-title" style="margin:0"></h2>
@@ -2167,6 +2174,10 @@
         $('btn-diag-open').textContent = t('MANAGER_DIAG_OPEN'); $('diag-title').textContent = t('MANAGER_DIAG_OPEN'); $('btn-diag-close').textContent = t('MANAGER_DIAG_CLOSE'); $('btn-diag-back').textContent = t('MANAGER_DIAG_BACK'); $('btn-diag-again').textContent = t('MANAGER_DIAG_AGAIN');
         $('btn-status-reveal').textContent = t('MANAGER_ST_REVEAL');
         $('btn-status-copy').textContent = t('MANAGER_ST_COPY');
+        $('sys-title').textContent = t('MANAGER_SYS_TITLE');
+        $('btn-sys-reboot').textContent = t('MANAGER_SYS_REBOOT');
+        $('btn-sys-restart').textContent = t('MANAGER_SYS_RESTART');
+        $('sys-help').textContent = t('MANAGER_SYS_HELP');
         $('upd-title').textContent = t('MANAGER_UPD_TITLE');
         $('btn-upd-check').textContent = t('MANAGER_UPD_CHECK');
         $('btn-upd-notes').textContent = t('MANAGER_UPD_NOTES');
@@ -4843,6 +4854,33 @@
         };
         setTimeout(tick, 400);
       }
+
+      // The player itself: a reboot, or the backend alone started again.
+      // Each asks first; then the page says so and follows the player down
+      // and back, reloading itself when the Manager answers again.
+      function followPlayer(waiting) {
+        $('sys-help').textContent = waiting;
+        var gone = false; var started = Date.now();
+        var look = function () {
+          if (Date.now() - started > 10 * 60 * 1000) { $('sys-help').textContent = t('MANAGER_SYS_HELP'); return; }
+          fetch('/api/status', { cache: 'no-store' }).then(function (r) { if (!r.ok) throw new Error('HTTP ' + r.status); return r.json(); })
+            .then(function () { if (gone) { location.reload(); } else { setTimeout(look, 3000); } })
+            .catch(function () { gone = true; setTimeout(look, 3000); });
+        };
+        setTimeout(look, 3000);
+      }
+      $('btn-sys-reboot').onclick = function () {
+        confirmDialog(t('MANAGER_SYS_REBOOT_TITLE'), t('MANAGER_SYS_REBOOT_MSG'), t('MANAGER_SYS_REBOOT')).then(function (ok) {
+          if (!ok) return;
+          api('POST', '/api/system/reboot').then(function () { followPlayer(t('MANAGER_SYS_WAITING')); }).catch(function (e) { toast(e.message, 'error'); });
+        });
+      };
+      $('btn-sys-restart').onclick = function () {
+        confirmDialog(t('MANAGER_SYS_RESTART_TITLE'), t('MANAGER_SYS_RESTART_MSG'), t('MANAGER_SYS_RESTART')).then(function (ok) {
+          if (!ok) return;
+          api('POST', '/api/system/restart-backend').then(function () { followPlayer(t('MANAGER_SYS_WAITING')); }).catch(function (e) { toast(e.message, 'error'); });
+        });
+      };
 
       $('btn-upd-check').onclick = function () { loadUpdate(true); };
       $('btn-upd-notes').onclick = function () { $('upd-notes').classList.toggle('hidden'); };

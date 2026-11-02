@@ -1120,11 +1120,43 @@ pub fn settled(cache: &Path) {
     let _ = std::fs::remove_file(cache.join(NOTE));
 }
 
-/// How the display becomes the binary now in its place: under the user
-/// service it leaves and is started again; started any other way it
-/// replaces itself.
+/// Whether this process is the user service's (`glass-remote.service`), by
+/// its own control group, for the page's word on how the display was
+/// started. Not by an environment variable: gnome-shell runs as a service
+/// of its own and hands its `INVOCATION_ID` to every app it launches, so a
+/// remote started from the desktop entry carried a service's variable
+/// without a service, which until 0.11.1 made it leave at an upgrade's
+/// restart and wait for a start that nothing gave. The restart itself no
+/// longer asks: the display becomes the new binary in its own process
+/// whoever started it.
 pub fn under_service() -> bool {
-    std::env::var_os("INVOCATION_ID").is_some()
+    service_unit().is_some()
+}
+
+/// The systemd service unit this process runs under, and whether it is a
+/// user's (`systemctl --user`) rather than the system's; none under a
+/// desktop launch, a terminal, or on Windows.
+pub fn service_unit() -> Option<(String, bool)> {
+    std::fs::read_to_string("/proc/self/cgroup")
+        .ok()
+        .and_then(|text| service_unit_of_cgroup(&text))
+}
+
+/// The service unit a `/proc/self/cgroup` text places the process in: the
+/// path's last segment where it ends in `.service` (a desktop launch sits
+/// in a `.scope`, a terminal in a session scope), with whether the path
+/// runs under a user's manager.
+pub fn service_unit_of_cgroup(text: &str) -> Option<(String, bool)> {
+    text.lines()
+        .filter_map(|line| line.splitn(3, ':').nth(2))
+        .map(str::trim_end)
+        .find_map(|path| {
+            let leaf = path.rsplit('/').next()?;
+            // The user's own manager (`user@1000.service`) is a service too,
+            // and every process of the session is under it: not a unit of ours.
+            (leaf.ends_with(".service") && !leaf.starts_with("user@"))
+                .then(|| (leaf.to_string(), path.starts_with("/user.slice/")))
+        })
 }
 
 /// Whether an upgrade is on trial: the note of it is in the cache until a
@@ -1218,6 +1250,43 @@ pub struct State {
 mod tests {
     use super::*;
     use std::io::Write;
+
+    fn service_of_cgroup(text: &str) -> bool {
+        service_unit_of_cgroup(text).is_some()
+    }
+
+    /// The user service is told by the process's own control group, never
+    /// by a variable a desktop app may inherit from the shell.
+    #[test]
+    fn a_service_is_known_by_its_control_group() {
+        assert_eq!(
+            service_unit_of_cgroup(
+                "0::/user.slice/user-1000.slice/user@1000.service/app.slice/glass-remote.service\n"
+            ),
+            Some(("glass-remote.service".to_string(), true))
+        );
+        assert_eq!(
+            service_unit_of_cgroup("0::/system.slice/glass-remote.service\n"),
+            Some(("glass-remote.service".to_string(), false))
+        );
+        assert!(
+            !service_of_cgroup("1:name=systemd:/user.slice/user-1000.slice/user@1000.service\n"),
+            "the user's own manager is not a unit of ours"
+        );
+        assert!(
+            !service_of_cgroup(
+                "0::/user.slice/user-1000.slice/user@1000.service/app.slice/app-gnome-glass\\x2dremote-420512.scope\n"
+            ),
+            "a desktop launch is a scope, under the user manager's own service"
+        );
+        assert!(!service_of_cgroup(
+            "0::/user.slice/user-1000.slice/user@1000.service/session.slice/org.gnome.Shell@wayland.service/x.scope\n"
+        ));
+        assert!(!service_of_cgroup(
+            "12:pids:/user.slice/user-1000.slice/session-2.scope\n"
+        ));
+        assert!(!service_of_cgroup(""));
+    }
 
     fn glass() -> Product {
         product(false, None).expect("the standalone is Glass")

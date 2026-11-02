@@ -63,6 +63,8 @@
   <div><h1>Glass Remote</h1><div class="sub" id="subtitle"></div></div>
   <div class="grow"></div>
   <span class="dirty hidden" id="dirty">Changes not applied yet</span>
+  <button id="btn-restart" title="The display starts again as the binary in its place">Restart</button>
+  <button id="btn-quit" title="The display's window goes and the remote leaves; under the user service the service is stopped">Quit</button>
   <button class="primary" id="btn-apply">Apply</button>
 </div>
 <div class="container">
@@ -225,17 +227,49 @@
   'use strict';
   var $ = function (id) { return document.getElementById(id); };
   var esc = function (s) { return String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
-  var state = { config: null, themes: [], local: [], status: null, dirty: false };
+  var state = { config: null, themes: [], local: [], status: null, dirty: false, restarting: null };
   function toast(text, kind) { var el = document.createElement('div'); el.className = 'toast' + (kind ? ' ' + kind : ''); el.textContent = text; $('toasts').appendChild(el); setTimeout(function () { el.remove(); }, kind === 'error' ? 7000 : 3500); }
+  var STOPPED = 'The remote did not answer: it has stopped, or its page moved. Start it again and reload this page.';
+  // An upgrade's restart: the remote becomes the new binary in its own
+  // process, and its page is away for a moment. This page knows (the state
+  // said "restarting", or the remote was mid-upgrade when it went quiet),
+  // says so instead of "start it again", and follows: once the remote
+  // answers again it reloads itself as the new version's page; a page port
+  // changed with the settings is followed too. Ninety seconds of silence
+  // is a stop after all.
+  var FOLLOW_FOR_MS = 90000;
+  function restarting(s) {
+    if (state.restarting) return;
+    state.restarting = { since: Date.now(), version: s && s.product ? s.product.version : '', port: state.config ? state.config.page_port : null };
+  }
+  function followRestart() {
+    var r = state.restarting;
+    if (!r) return;
+    if (Date.now() - r.since > FOLLOW_FOR_MS) { state.restarting = null; state.following = false; $('unreached').textContent = STOPPED; $('unreached').classList.remove('hidden'); return; }
+    $('unreached').textContent = 'The remote is starting again as the new version; this page follows it.';
+    $('unreached').classList.remove('hidden');
+    var here = fetch('/api/state', { cache: 'no-store' }).then(function (res) { return res.ok ? res.json() : Promise.reject(new Error('HTTP ' + res.status)); });
+    here.then(function (s) {
+      if (s && s.upgrade && s.upgrade.phase === 'restarting') { setTimeout(followRestart, 1000); return; }
+      // Back, and as the new version: the page is the new one's.
+      location.reload();
+    }).catch(function () {
+      var moved = r.port && String(r.port) !== location.port;
+      if (!moved) { setTimeout(followRestart, 1000); return; }
+      // The settings moved the page to another port: look there, and go.
+      var there = location.protocol + '//' + location.hostname + ':' + r.port + '/';
+      fetch(there + 'api/state', { mode: 'no-cors', cache: 'no-store' }).then(function () { location.href = there; }).catch(function () { setTimeout(followRestart, 1000); });
+    });
+  }
   function api(method, url, body) {
     var opts = { method: method, headers: {} };
     if (body !== undefined) { opts.headers['Content-Type'] = 'application/json'; opts.body = JSON.stringify(body); }
     return fetch(url, opts).catch(function () {
-      // No answer at all: the remote has stopped (Escape or Q closes its window), or its page moved.
-      var e = new Error('The remote did not answer: it has stopped, or its page moved. Start it again and reload this page.');
+      // No answer at all: a restart in flight, which this page follows; or
+      // the remote has stopped (Escape or Q closes its window), or its page moved.
+      var e = new Error(state.restarting ? 'The remote is starting again.' : STOPPED);
       e.code = 'unreached';
-      $('unreached').textContent = e.message;
-      $('unreached').classList.remove('hidden');
+      if (state.restarting) { if (!state.following) { state.following = true; followRestart(); } } else if (!state.quit) { $('unreached').textContent = e.message; $('unreached').classList.remove('hidden'); }
       throw e;
     }).then(function (res) { return res.json().catch(function () { return {}; }).then(function (data) { if (!res.ok) { var e = new Error(data.message || data.error || ('HTTP ' + res.status)); e.code = data.error; throw e; } return data; }); });
   }
@@ -249,7 +283,16 @@
     var u = s.upgrade || {};
     $('upgrade-panel').classList.toggle('hidden', !p);
     if (!p) return;
+    // The page is the version's that served it: when the remote answers as
+    // another version, after a restart so quick its page never went away,
+    // this page reloads itself as the new one's.
+    if (!state.loadedVersion) state.loadedVersion = p.version;
+    else if (p.version !== state.loadedVersion && u.phase !== 'installing' && u.phase !== 'restarting') { location.reload(); return; }
     var idle = u.phase === 'idle';
+    // The restart that follows an install is followed by this page; an
+    // install that ended without one (its error is shown) is not.
+    if (u.phase === 'installing' || u.phase === 'restarting') restarting(s);
+    else if (idle && state.restarting && state.restarting.version === p.version && !state.following) state.restarting = null;
     var lines = ['This remote is ' + p.name + ' ' + p.version + (p.name === 'Glass' ? '.' : ', on Glass ' + s.release + '.')];
     if (u.latest) lines.push((u.available ? 'The release offered is ' + u.latest.version : 'That is the release offered') + (u.latest.test ? ', a test release' : '') + (u.latest.source === 'player' ? ', from the player\'s shelf.' : '.'));
     var doing = { checking: 'Looking at the releases.', installing: 'Putting it in place.', restarting: 'Starting again as the new version.' }[u.phase];
@@ -782,10 +825,39 @@
     api('POST', '/api/config', c).then(function (d) { state.config = d.config; setDirty(false); toast(portChanged ? 'Applied. The page moves to port ' + c.page_port + ' when the remote starts again.' : 'Applied.'); fill(d.config); renderPlayers(d.config); }).catch(function (e) { toast(e.message, 'error'); });
   };
 
+  // ---- Restart and Quit, for a panel with no keyboard ----
+  // Each asks twice: the first press arms the button for six seconds, the
+  // second press does it, so a touch by accident does nothing.
+  function armed(button, word, then) {
+    var label = button.textContent;
+    if (button.getAttribute('data-armed')) { button.removeAttribute('data-armed'); button.textContent = label.replace(/\?.*$/, ''); then(); return; }
+    button.setAttribute('data-armed', '1'); button.textContent = word + '? Press again';
+    setTimeout(function () { if (button.getAttribute('data-armed')) { button.removeAttribute('data-armed'); button.textContent = word; } }, 6000);
+  }
+  $('btn-restart').onclick = function () {
+    armed($('btn-restart'), 'Restart', function () {
+      api('POST', '/api/restart').then(function () {
+        toast('The remote starts again; this page follows it.');
+        restarting(state.status ? { product: { version: state.loadedVersion } } : null);
+      }).catch(function (e) { if (e.code !== 'unreached') toast(e.message, 'error'); });
+    });
+  };
+  $('btn-quit').onclick = function () {
+    armed($('btn-quit'), 'Quit', function () {
+      api('POST', '/api/quit').then(function (d) {
+        $('unreached').textContent = d.service ? 'The remote has quit and its service is stopped. Start it again with the service, or from the menu.' : 'The remote has quit. Start it again from the menu, or run glass --remote.';
+        $('unreached').classList.remove('hidden');
+        state.quit = true;
+      }).catch(function (e) { if (e.code !== 'unreached') toast(e.message, 'error'); });
+    });
+  };
+
   function loadOrSay() {
     return load().then(loadThemes).catch(function (e) {
-      $('unreached').textContent = 'This page could not read the remote\'s state (' + e.message + '). The remote may have stopped: start it again and reload this page.';
-      $('unreached').classList.remove('hidden');
+      if (!state.restarting && !state.quit) {
+        $('unreached').textContent = 'This page could not read the remote\'s state (' + e.message + '). The remote may have stopped: start it again and reload this page.';
+        $('unreached').classList.remove('hidden');
+      }
       setTimeout(loadOrSay, 5000);
     });
   }

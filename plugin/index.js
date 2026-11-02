@@ -6934,6 +6934,21 @@ Glass.prototype.restartBackend = function () {
     }
 };
 
+// The player rebooted from the Manager's System tab, through the backend's
+// own call, as the Volumio menu's Reboot does: no command of our own, no
+// permission beyond the plugin's.
+Glass.prototype.rebootPlayer = function () {
+    var self = this;
+    self.logger.info(id + 'system: rebooting the player, asked on the Manager');
+    try {
+        if (!self.commandRouter || typeof self.commandRouter.reboot !== 'function') { return { error: 'no-reboot', message: 'the backend offers no reboot call' }; }
+        setTimeout(function () { try { self.commandRouter.reboot(); } catch (e) { self.logger.error(id + 'system: reboot: ' + (e && e.message ? e.message : e)); } }, 1500);
+        return { ok: true };
+    } catch (e) {
+        return { error: 'reboot', message: e && e.message ? e.message : String(e) };
+    }
+};
+
 // What the status page shows about the plugin and the display.
 // The fonts as the Status tab says them: each style's kind and name, and
 // how many fonts were uploaded; no checksums, this is read often.

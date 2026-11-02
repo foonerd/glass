@@ -1085,6 +1085,19 @@ class Manager {
       });
     };
 
+    // The player itself, from the System tab's top: a reboot through the
+    // backend's own call, or a restart of the backend alone. Asked on the
+    // forum for a player with no keyboard at hand.
+    app.post('/api/system/reboot', wrap(async function (req, res) {
+      const result = self.plugin.rebootPlayer();
+      if (result && result.error) return res.status(500).json(result);
+      res.status(202).json({ ok: true, rebooting: true });
+    }));
+    app.post('/api/system/restart-backend', wrap(async function (req, res) {
+      self.plugin.restartBackend();
+      res.status(202).json({ ok: true, restarting: true });
+    }));
+
     app.post('/api/update/install', wrap(async function (req, res) {
       const view = self.updater.view();
       if (!view.available) return res.status(400).json({ error: 'up-to-date' });
