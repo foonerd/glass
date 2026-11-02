@@ -1,6 +1,6 @@
 {
   "name": "glass",
-  "version": "0.5.0",
+  "version": "0.11.8",
   "description": "Glass: VU meters, spectrum, turntables and reels on the player's display",
   "main": "index.js",
   "author": "foonerd; audio path from PeppyMeter Screensaver by 2aCD (original) and Just a Nerd",
