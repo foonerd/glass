@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.4] - 2026-11-02
+
+- **A remote can be left from its own screen.** For a panel with only its touch screen, no keyboard and no other device at hand: hold a finger still for two seconds anywhere on the picture, and the display shows a page of its own over everything, with Leave full screen, Quit the remote and Cancel; Quit asks once more; a tap beside the page shuts it. It is the remote's own, there whatever the theme shows and whether or not the Glass interface is on, in the theme's font or the display's own where the theme has none. Nothing of it on the player's screen. In step: the Remotes page and the Troubleshooting row; no Find a problem check, no sheet row.
+
 ## [0.11.3] - 2026-11-02
 
 - **0.11.2's build did not ship: the Quit's stop of a user service reached for a newer glibc.** The standard library's spawn refers to glibc 2.39's `pidfd_spawnp`, which Volumio's 2.36 lacks, and the ship gate refused the binaries. The stop is started through `posix_spawnp` directly, as the upgrade's own checks are. 0.11.2 is a tag without a release on both repositories; this release carries everything 0.11.2 meant to.
