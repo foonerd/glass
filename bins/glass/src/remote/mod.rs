@@ -5,6 +5,7 @@
 //! at once a frame.
 
 pub mod config;
+pub mod exit;
 pub mod run;
 pub mod signing;
 pub mod upgrade;

@@ -10624,7 +10624,7 @@ pub fn read_png(path: &Path) -> Option<Frame> {
 
 /// A line in the built-in 8 by 8 font at twice its size, for a text whose
 /// style has no font.
-fn bitmap_line(text: &str) -> Frame {
+pub fn bitmap_line(text: &str) -> Frame {
     use font8x8::UnicodeFonts;
     let scale = 2u32;
     let count = text.chars().count().max(1) as u32;

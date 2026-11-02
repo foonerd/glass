@@ -897,6 +897,11 @@ fn session(
     // The panel's power: the player's word, the face's idle black, a touch.
     let mut screen = screen::ScreenPower::default();
     let mut wake_screen = false;
+    // A remote's way out by touch alone: a finger held still opens a page
+    // of the display's own, drawn on a copy of the frame while it is open.
+    let mut exit = remote::exit::ExitTouch::default();
+    let mut exit_frame: Frame;
+    let mut exit_was_open = false;
     // When the player last played or the screen was last touched: past it
     // the display on a screen of its own slows to the standing rate.
     let mut active_at = Instant::now();
@@ -1329,6 +1334,12 @@ fn session(
                     frame = own;
                 }
             }
+            // The remote's own page over everything, on a copy of the frame.
+            if exit.open() {
+                exit_frame = frame.clone();
+                exit.draw(&mut exit_frame, &assets.fonts);
+                frame = &exit_frame;
+            }
             let whole = [Rect {
                 x: 0,
                 y: 0,
@@ -1344,6 +1355,11 @@ fn session(
                 Show::Whole => damage = &whole,
                 Show::Kept => damage = &[],
             }
+            // The page open, and the frame after it shuts, go up whole.
+            if exit.open() || exit_was_open {
+                damage = &whole;
+            }
+            exit_was_open = exit.open();
             was_over = over;
             rastered_at = Instant::now();
             if let Some(window) = surface.as_mut() {
@@ -1405,6 +1421,46 @@ fn session(
                     // panel comes on at the top of the next frame.
                     events.clear();
                     wake_screen = true;
+                }
+                // A remote's way out by touch alone, before anything else
+                // sees the touch: a finger held still for two seconds opens
+                // the display's own page, and while it is open every touch
+                // is the page's. Nothing of it on the player's own screen.
+                if let Some(remote) = remote.as_deref() {
+                    let now = Instant::now();
+                    events.retain(|event| {
+                        let (taken, ask) = exit.pointer(
+                            event.kind,
+                            event.x,
+                            event.y,
+                            now,
+                            skin.width,
+                            skin.height,
+                        );
+                        match ask {
+                            Some(remote::exit::Ask::LeaveFullscreen) => {
+                                logline::say!(
+                                    Info,
+                                    "remotes",
+                                    "the screen's page: leaving full screen"
+                                );
+                                remote.app.request_window(WindowMode::Windowed);
+                            }
+                            Some(remote::exit::Ask::Quit) => {
+                                logline::say!(Info, "remotes", "the screen's page: quit");
+                                remote.app.ask_quit();
+                            }
+                            None => {}
+                        }
+                        !taken
+                    });
+                    if exit.tick(now) {
+                        logline::say!(
+                            Info,
+                            "remotes",
+                            "a finger held: the way out is on the screen"
+                        );
+                    }
                 }
                 let mut acted = false;
                 let mut dismiss = false;
