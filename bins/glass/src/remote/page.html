@@ -63,7 +63,7 @@
   <div><h1>Glass Remote</h1><div class="sub" id="subtitle"></div></div>
   <div class="grow"></div>
   <span class="dirty hidden" id="dirty">Changes not applied yet</span>
-  <button id="btn-window" title="The remote's window closes and the remote runs on with this page; the window comes back when asked">Close window</button>
+  <button id="btn-window" title="This browser window closes: the remote ends the browser it opened the page in, or the page closes itself">Close window</button>
   <button id="btn-restart" title="The display starts again as the binary in its place">Restart</button>
   <button id="btn-quit" title="The display's window goes and the remote leaves; under the user service the service is stopped">Quit</button>
   <button class="primary" id="btn-apply">Apply</button>
@@ -168,7 +168,7 @@
       <div><label class="switch" style="margin-top:22px"><input type="checkbox" id="d-margin-each"><span>Each edge its own</span></label></div>
       <div class="full hidden" id="d-margin-edges"><div class="form"><div><label>Top</label><input type="number" id="d-margin-top" min="0" max="25" placeholder="0"></div><div><label>Right</label><input type="number" id="d-margin-right" min="0" max="25" placeholder="0"></div><div><label>Bottom</label><input type="number" id="d-margin-bottom" min="0" max="25" placeholder="0"></div><div><label>Left</label><input type="number" id="d-margin-left" min="0" max="25" placeholder="0"></div></div><div class="help">Fitted, the theme fills the screen inset by these shares, its shape kept: equal margins centre it, unequal ones shift it, so a screen of any size is sized and placed in percent. Placed, it keeps off the edges its place puts it against, so it is not pressed against the frame; centred, it keeps off none. A margin never pushes the theme past the opposite edge.</div></div>
       <div class="full"><label>Behind a smaller theme</label><select id="d-backdrop"><option value="player">as the player says</option><option value="color">a dark colour</option><option value="blur">the album art blurred</option></select><div class="help">A share below 100 turns Fit off. The player's word is its own Screen setting for its screen; a dark colour or the album art blurred is this remote's own. The Status panel says which is in force.</div></div>
-      <div class="full"><button class="small" id="btn-win-leave">Leave full screen now</button> <button class="small" id="btn-win-full">Full screen now</button><div class="help">For this run only, so this page can be used on the same machine while the display keeps showing; the setting above is what the next start takes. On the keyboard, Escape leaves full screen, F returns to it, Q quits the remote. On the screen itself, hold a finger still for two seconds anywhere on the picture: a page with Leave full screen, Quit the remote and Cancel comes up. Close window in the top bar closes the window and keeps the remote running with this page; it then reads Open window.</div></div>
+      <div class="full"><button class="small" id="btn-win-leave">Leave full screen now</button> <button class="small" id="btn-win-full">Full screen now</button><div class="help">For this run only, so this page can be used on the same machine while the display keeps showing; the setting above is what the next start takes. On the keyboard, Escape leaves full screen, F returns to it, Q quits the remote. On the screen itself, hold a finger still for two seconds anywhere on the picture: a page with Leave full screen, Quit the remote and Cancel comes up. Close window in the top bar closes this browser window: the remote opens its page in a Chromium or Chrome of its own where one is installed (GLASS_BROWSER names another), so the window is its to close; a page opened another way closes itself where its browser allows.</div></div>
     </div>
   </div>
 
@@ -614,7 +614,6 @@
   }
   function renderStatus(st) {
     var rows = statusRows(st);
-    $('btn-window').textContent = st && st.window_hidden ? 'Open window' : 'Close window';
     var c = state.config; var p = c && c.active ? c.players[c.active] : null;
     var manager = p ? 'http://' + p.host + ':' + p.manager_port + '/' : '';
     $('status').innerHTML = rows.map(function (r) { return '<tr><td>' + esc(r[0]) + '</td><td>' + esc(r[1]) + '</td></tr>'; }).join('') +
@@ -836,14 +835,18 @@
     button.setAttribute('data-armed', '1'); button.textContent = word + '? Press again';
     setTimeout(function () { if (button.getAttribute('data-armed')) { button.removeAttribute('data-armed'); button.textContent = word; } }, 6000);
   }
-  // Close window and Open window: the window alone, the remote and this
-  // page running on either way; one press, since it is undone by the next.
+  // Close window: this browser window. The remote ends the browser it opened
+  // the page in, where it opened one of its own; else the page closes
+  // itself, which a browser allows when the page is all its window holds.
   $('btn-window').onclick = function () {
-    var hidden = !!(state.status && state.status.window_hidden);
-    api('POST', hidden ? '/api/window/open' : '/api/window/close').then(function (d) {
-      if (state.status) { state.status.window_hidden = !!d.window_hidden; renderStatus(state.status); }
-      toast(d.window_hidden ? 'The window is closed; the remote runs on with this page.' : 'The window is back.');
-    }).catch(function (e) { toast(e.message, 'error'); });
+    api('POST', '/api/settings/close').then(function (d) {
+      if (!d.closed) {
+        window.close();
+        setTimeout(function () {
+          if (!window.closed) toast('This browser keeps the page open: close its tab or window with the browser\'s own control.', 'error');
+        }, 600);
+      }
+    }).catch(function (e) { if (e.code !== 'unreached') toast(e.message, 'error'); });
   };
   $('btn-restart').onclick = function () {
     armed($('btn-restart'), 'Restart', function () {

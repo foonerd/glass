@@ -53,10 +53,6 @@ pub struct Status {
     pub monitors: Vec<MonitorInfo>,
     /// Whether the face this display carries is drawn in this session.
     pub face_shown: bool,
-    /// The window closed from the page: the remote runs on, this page
-    /// with it, and the window comes back when the page asks.
-    #[serde(default)]
-    pub window_hidden: bool,
     /// What fills the screen where the theme leaves it bare, as this session
     /// resolved it: "the album art blurred" or "a dark colour"; empty before
     /// the first frame.
@@ -302,9 +298,11 @@ pub struct RemoteApp {
     /// The page asked the display to quit: the window goes and the process
     /// leaves, the user service stopped where it runs under one.
     quit: AtomicBool,
-    /// The page closed the window: the remote runs on without one until
-    /// the page opens it again.
-    window_hidden: AtomicBool,
+    /// The browser this remote opened its settings page in, by its process,
+    /// so the page's Close window can close it: a Chromium in its app mode
+    /// with a profile of the remote's own. None where the system's own way
+    /// opened the page, which leaves no process to close.
+    settings_browser: Mutex<Option<i32>>,
     /// The paths to the player as last tried, for the page's Connection panel.
     connection: Mutex<Connection>,
     /// The page asked for a probe of the frames path; the session takes it.
@@ -334,7 +332,7 @@ impl RemoteApp {
             }),
             restart: AtomicBool::new(false),
             quit: AtomicBool::new(false),
-            window_hidden: AtomicBool::new(false),
+            settings_browser: Mutex::new(None),
             connection: Mutex::new(Connection {
                 probe: Probe {
                     state: "idle".to_string(),
@@ -729,23 +727,27 @@ impl RemoteApp {
         self.quit.load(Ordering::Acquire)
     }
 
-    /// The page's Close window: the window goes, the remote runs on with
-    /// its page; the session on leaves, and the next opens no window.
-    pub fn hide_window(&self) {
-        self.window_hidden.store(true, Ordering::Release);
-        self.set_status(|s| s.window_hidden = true);
-        self.generation.fetch_add(1, Ordering::AcqRel);
+    /// The browser this remote opened its page in, by its process id.
+    pub fn note_browser(&self, pid: i32) {
+        *self
+            .settings_browser
+            .lock()
+            .unwrap_or_else(|e| e.into_inner()) = Some(pid);
     }
 
-    /// The page's Open window: the next session opens the window again.
-    pub fn show_window_again(&self) {
-        self.window_hidden.store(false, Ordering::Release);
-        self.set_status(|s| s.window_hidden = false);
-        self.generation.fetch_add(1, Ordering::AcqRel);
-    }
-
-    pub fn window_hidden(&self) -> bool {
-        self.window_hidden.load(Ordering::Acquire)
+    /// The page's Close window: the browser this remote opened is told to
+    /// end, and its window goes with it. False where no browser of ours is
+    /// open, which leaves the page to close itself where its browser lets it.
+    pub fn close_browser(&self) -> bool {
+        let pid = self
+            .settings_browser
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .take();
+        match pid {
+            Some(pid) if pid > 0 => end_process(pid),
+            _ => false,
+        }
     }
 
     /// The face the display was built with, said once at the start.
@@ -1150,17 +1152,30 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
                 json!({ "ok": true, "quitting": true, "service": upgrade::under_service() }),
             );
         }
-        // The page's Close window and Open window: the window alone, the
-        // remote and this page running on either way.
-        (Method::Post, "/api/window/close") => {
-            logline::say!(Info, "remotes", "the page closed the window");
-            app.hide_window();
-            respond_json(request, 200, json!({ "ok": true, "window_hidden": true }));
+        // The page's Close window: the browser this remote opened the page
+        // in is ended, window and all; where the page came up another way
+        // the page closes itself, if its browser lets a page do that.
+        (Method::Post, "/api/settings/close") => {
+            let closed = app.close_browser();
+            logline::say!(
+                Info,
+                "remotes",
+                "the page asked to close its window: {}",
+                if closed {
+                    "the browser of ours ended"
+                } else {
+                    "no browser of ours; the page closes itself"
+                }
+            );
+            respond_json(request, 200, json!({ "ok": true, "closed": closed }));
         }
-        (Method::Post, "/api/window/open") => {
-            logline::say!(Info, "remotes", "the page opened the window");
-            app.show_window_again();
-            respond_json(request, 200, json!({ "ok": true, "window_hidden": false }));
+        // A second `glass --remote --settings` on this machine asks the
+        // remote already running to open the page in a browser of its own,
+        // so that Close window can close it.
+        (Method::Post, "/api/settings/open") => {
+            let url = format!("http://127.0.0.1:{}/", app.config().page_port);
+            run::open_browser(app, &app.cache, &url);
+            respond_json(request, 200, json!({ "ok": true, "url": url }));
         }
         (Method::Post, "/api/window") => {
             let body = match read_body(&mut request) {
@@ -1423,6 +1438,18 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
     }
 }
 
+/// A process of ours told to end, by its id: true when the word reached it.
+#[cfg(unix)]
+fn end_process(pid: i32) -> bool {
+    // SAFETY: a signal to a process id this process started and noted.
+    unsafe { libc::kill(pid, libc::SIGTERM) == 0 }
+}
+
+#[cfg(not(unix))]
+fn end_process(_pid: i32) -> bool {
+    false
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1515,15 +1542,12 @@ mod tests {
         app.ask_quit();
         assert!(app.quit_asked());
         assert_eq!(app.generation(), before + 2);
-        // Close window and Open window do the same, and the status says which.
-        app.hide_window();
-        assert!(app.window_hidden());
-        assert_eq!(app.generation(), before + 3);
-        assert!(app.status().window_hidden);
-        app.show_window_again();
-        assert!(!app.window_hidden());
-        assert_eq!(app.generation(), before + 4);
-        assert!(!app.status().window_hidden);
+        // Close window with no browser of ours: nothing to end, the page
+        // is told so; a noted process that is gone is nothing to end either.
+        assert!(!app.close_browser());
+        app.note_browser(i32::MAX - 1);
+        assert!(!app.close_browser(), "a process that is not there");
+        assert!(!app.close_browser(), "noted once, taken once");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

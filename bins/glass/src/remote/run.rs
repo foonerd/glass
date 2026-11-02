@@ -405,7 +405,7 @@ fn status_screen(
     }
     let generation = app.generation();
     let started = Instant::now();
-    let show_window = crate::screen_available() && !run.headless && !app.window_hidden();
+    let show_window = crate::screen_available() && !run.headless;
     // On the screen the status says how to leave it, for a panel with only
     // its touch screen.
     let mut shown_lines = lines.to_vec();
@@ -553,7 +553,7 @@ fn page_already_up(port: u16) -> Option<String> {
 /// refers to glibc 2.39's `pidfd_spawnp`, and a binary linked against a
 /// 2.39 sysroot then refuses to load on Volumio's glibc 2.36.
 #[cfg(all(unix, not(target_os = "android")))]
-fn start_detached(program: &str, args: &[&str]) -> Result<(), String> {
+fn start_detached(program: &str, args: &[&str]) -> Result<i32, String> {
     use std::ffi::CString;
     let c = |text: &str| CString::new(text).map_err(|e| e.to_string());
     let program_c = c(program)?;
@@ -601,20 +601,65 @@ fn start_detached(program: &str, args: &[&str]) -> Result<(), String> {
         // SAFETY: waiting on a child this process started.
         unsafe { libc::waitpid(pid, &mut status, 0) };
     });
-    Ok(())
+    Ok(pid)
 }
 
 #[cfg(any(not(unix), target_os = "android"))]
-fn start_detached(program: &str, args: &[&str]) -> Result<(), String> {
+fn start_detached(program: &str, args: &[&str]) -> Result<i32, String> {
     std::process::Command::new(program)
         .args(args)
         .spawn()
-        .map(|_| ())
+        .map(|child| child.id() as i32)
         .map_err(|e| e.to_string())
 }
 
-/// Open `url` in the user's browser, without waiting on it.
-fn open_browser(url: &str) {
+/// Open `url`, the settings page, in a browser: the program `GLASS_BROWSER`
+/// names, given the address alone; else a Chromium or Chrome on the PATH in
+/// its app mode, a window of the page alone with a profile of the remote's
+/// own, so the browser is a process of ours; else the system's own way.
+/// A browser of ours is noted, so the page's Close window can close it,
+/// which a page cannot do for itself in every browser.
+pub(super) fn open_browser(app: &RemoteApp, cache: &std::path::Path, url: &str) {
+    let own = std::env::var("GLASS_BROWSER")
+        .ok()
+        .map(|b| b.trim().to_string())
+        .filter(|b| !b.is_empty());
+    let profile = cache.join("settings-browser");
+    let data = format!("--user-data-dir={}", profile.display());
+    let page = format!("--app={url}");
+    let tries: Vec<(String, Vec<&str>)> = match own.as_deref() {
+        Some(program) => vec![(program.to_string(), vec![url])],
+        None => [
+            "chromium",
+            "chromium-browser",
+            "google-chrome",
+            "google-chrome-stable",
+        ]
+        .iter()
+        .map(|b| {
+            (
+                b.to_string(),
+                vec![
+                    page.as_str(),
+                    data.as_str(),
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                ],
+            )
+        })
+        .collect(),
+    };
+    for (program, args) in &tries {
+        if let Ok(pid) = start_detached(program, args) {
+            app.note_browser(pid);
+            logline::say!(
+                Info,
+                "remotes",
+                "settings page opened with {program} (process {pid}): {url}"
+            );
+            return;
+        }
+    }
     #[cfg(target_os = "windows")]
     let result = start_detached("cmd", &["/C", "start", "", url]);
     #[cfg(target_os = "macos")]
@@ -622,11 +667,28 @@ fn open_browser(url: &str) {
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     let result = start_detached("xdg-open", &[url]);
     match result {
-        Ok(()) => logline::say!(Info, "remotes", "settings page opened in a browser: {url}"),
+        Ok(_) => logline::say!(
+            Info,
+            "remotes",
+            "settings page opened the system's way: {url}; its window is the browser's to close"
+        ),
         Err(err) => {
             eprintln!("glass: could not open a browser ({err}); the settings page is {url}")
         }
     }
+}
+
+/// A remote already running here asked to open its page in a browser of
+/// its own, so that the page's Close window can close it.
+fn ask_running_remote_to_open(port: u16) -> bool {
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(5)))
+        .build()
+        .new_agent();
+    agent
+        .post(&format!("http://127.0.0.1:{port}/api/settings/open"))
+        .send_empty()
+        .is_ok()
 }
 
 /// Run as a remote. `target` is a player's host, `discover`, or `auto` for
@@ -739,7 +801,7 @@ pub fn remote_main(
                 config_path.display()
             );
             if open_settings {
-                open_browser(&format!("http://127.0.0.1:{port}/"));
+                open_browser(&app, &cache_dir, &format!("http://127.0.0.1:{port}/"));
             }
             Some(port)
         }
@@ -749,8 +811,8 @@ pub fn remote_main(
             if let Some(release) = page_already_up(wanted_port) {
                 let url = format!("http://127.0.0.1:{wanted_port}/");
                 logline::say!(Info, "remotes", "a remote (Glass {release}) is already running here; its settings page is {url}");
-                if open_settings {
-                    open_browser(&url);
+                if open_settings && !ask_running_remote_to_open(wanted_port) {
+                    open_browser(&app, &cache_dir, &url);
                 }
                 return ExitCode::SUCCESS;
             }
@@ -812,12 +874,6 @@ pub fn remote_main(
         // a remote that found a service's environment variable in its own
         // (gnome-shell hands its own to every app it launches) left here
         // expecting a restart that never came.
-        // The page's Close window: the window goes and the remote runs on
-        // without one, its page with it, until the page opens it again.
-        if app.window_hidden() && window.is_some() {
-            logline::say!(Info, "remotes", "the window closed; the remote runs on");
-            drop(window.take());
-        }
         // The page's Quit: the window goes and the process leaves. Under
         // the user service the unit is stopped as well, or systemd would
         // start the display again at once.

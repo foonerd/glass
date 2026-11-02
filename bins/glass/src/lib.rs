@@ -769,8 +769,7 @@ fn session(
     let show_window = (screen_available()
         || screen_given().is_some()
         || skin.run.driver == lead::ScreenDriver::KmsDrm)
-        && !headless
-        && !remote.as_deref().is_some_and(|r| r.app.window_hidden());
+        && !headless;
     let write_file = output.is_some() || snapshot.is_some();
     let serving_remote = false;
     // The window: the player's is full screen at the theme's size; a
