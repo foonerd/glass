@@ -1437,7 +1437,8 @@ mod tests {
         // found free may be taken by another process between the look and
         // the connect, which answers "open" and says nothing of this code:
         // such a port is passed over for the next free one, a few times.
-        let mut free = (20000..21000).filter(|p| std::net::TcpListener::bind(("127.0.0.1", *p)).is_ok());
+        let mut free =
+            (20000..21000).filter(|p| std::net::TcpListener::bind(("127.0.0.1", *p)).is_ok());
         let mut taken_meanwhile = Vec::new();
         let refused = loop {
             let port = free.next().expect("a free port below the ephemeral range");
