@@ -5,7 +5,7 @@ use std::fs::File;
 use std::io::{self, Write};
 use std::path::Path;
 
-use expose::{Frame, Rect};
+use expose::{Frame, Rect, BG};
 use plot::Scene;
 use sdl2::event::Event;
 use sdl2::keyboard::Keycode;
@@ -293,6 +293,10 @@ pub struct Surface {
     /// The picture under a frame that leaves part of the window bare, the
     /// window's size; none shows the black.
     backdrop: Option<Texture>,
+    /// Whether the frames leave pixels less than opaque: such a frame is
+    /// blended over the backdrop, or over the dark colour where there is
+    /// none; an opaque frame is copied.
+    translucent: bool,
     /// The backlight the kernel lists for the panel, where there is one.
     backlight: Option<std::path::PathBuf>,
     /// The panel's power as last switched, and by what means.
@@ -613,6 +617,7 @@ impl Surface {
             creator,
             texture: None,
             backdrop: None,
+            translucent: false,
             backlight: backlight::find(),
             power: Power { on: true, by: None },
             pump,
@@ -724,6 +729,21 @@ impl Surface {
             .map_err(|err| err.to_string())?;
         self.backdrop = Some(texture);
         Ok(())
+    }
+
+    /// Whether the frames to come leave pixels less than opaque. Such a
+    /// frame is blended over the backdrop, or over the dark colour where
+    /// there is none, so what the theme left uncovered or clear shows what
+    /// is behind it; an opaque frame is copied, as before. It stands until
+    /// the next call.
+    pub fn set_translucent(&mut self, on: bool) {
+        if self.translucent == on {
+            return;
+        }
+        self.translucent = on;
+        if let Some(texture) = self.texture.as_mut() {
+            texture.set_blend_mode(blend_mode(on));
+        }
     }
 
     /// The window's size in the picture's own orientation, a quarter turn
@@ -956,10 +976,11 @@ impl Surface {
                 // With `unsafe_textures` a texture is freed by hand.
                 unsafe { old.destroy() };
             }
-            let texture = self
+            let mut texture = self
                 .creator
                 .create_texture_streaming(PixelFormatEnum::RGBA32, frame.width, frame.height)
                 .map_err(|err| err.to_string())?;
+            texture.set_blend_mode(blend_mode(self.translucent));
             self.texture = Some(texture);
         }
         let texture = self.texture.as_mut().expect("texture was just made");
@@ -1019,15 +1040,37 @@ impl Surface {
         self.last_offset = (x, y);
         self.last_scale = scale;
         self.last_window = (window_w, window_h);
-        // The backdrop under a frame that leaves part of the window bare:
-        // the whole window, turned as the frame is. A frame that covers the
-        // window has nothing under it to show.
+        // Where the frame is drawn, in the window's own pixels: the placed
+        // rectangle, or, turned, one of the frame's drawn size about the
+        // point the turned picture's centre lands on, since SDL turns a
+        // picture about the centre of the rectangle it is given.
+        let drawn = if self.rotation == 0 {
+            (x, y, w.max(1), h.max(1))
+        } else {
+            let centre = rotated_center(
+                (x as f32 + w as f32 / 2.0, y as f32 + h as f32 / 2.0),
+                self.rotation,
+                (window_w, window_h),
+            );
+            let (w, h) = (w.max(1), h.max(1));
+            (
+                centre.0.round() as i32 - w as i32 / 2,
+                centre.1.round() as i32 - h as i32 / 2,
+                w,
+                h,
+            )
+        };
+        // The backdrop under a frame that leaves part of the window bare,
+        // and under a translucent frame, which shows it through where the
+        // theme left the screen uncovered or clear: the whole window,
+        // turned as the frame is. An opaque frame that covers the window
+        // has nothing under it to show.
         if let Some(backdrop) = self.backdrop.as_ref() {
             let bare = x > 0
                 || y > 0
                 || x + (w as i32) < (logical_w as i32)
                 || y + (h as i32) < (logical_h as i32);
-            if bare {
+            if bare || self.translucent {
                 if self.rotation == 0 {
                     self.canvas
                         .copy(backdrop, None, None)
@@ -1052,29 +1095,28 @@ impl Surface {
                 }
             }
         }
+        // A translucent frame without a backdrop lies on the dark colour,
+        // where the theme left the screen uncovered or clear, as the frame
+        // itself carried it while it was opaque; the bare window stays black.
+        if self.translucent && self.backdrop.is_none() {
+            let (fx, fy, fw, fh) = footprint(drawn, self.rotation);
+            self.canvas
+                .set_draw_color(sdl2::pixels::Color::RGB(BG[0], BG[1], BG[2]));
+            self.canvas
+                .fill_rect(sdl2::rect::Rect::new(fx, fy, fw, fh))
+                .map_err(|err| err.to_string())?;
+        }
+        let dest = sdl2::rect::Rect::new(drawn.0, drawn.1, drawn.2, drawn.3);
         if self.rotation == 0 {
-            let dest = sdl2::rect::Rect::new(x, y, w.max(1), h.max(1));
             self.canvas
                 .copy(texture, None, dest)
                 .map_err(|err| err.to_string())?;
         } else {
-            // SDL turns the picture about the centre of the rectangle it is
-            // given, so that centre goes where the turned picture's centre lands.
-            let centre = rotated_center(
-                (x as f32 + w as f32 / 2.0, y as f32 + h as f32 / 2.0),
-                self.rotation,
-                (window_w, window_h),
-            );
-            let turned = sdl2::rect::Rect::from_center(
-                (centre.0.round() as i32, centre.1.round() as i32),
-                w.max(1),
-                h.max(1),
-            );
             self.canvas
                 .copy_ex(
                     texture,
                     None,
-                    turned,
+                    dest,
                     self.rotation as f64,
                     None,
                     false,
@@ -1104,6 +1146,29 @@ impl Surface {
         self.canvas.present();
         Ok(if touched { Shown::Touched } else { Shown::Kept })
     }
+}
+
+/// How a frame's texture lands on the window: blended by its alpha when
+/// the frames are translucent, else copied.
+fn blend_mode(translucent: bool) -> sdl2::render::BlendMode {
+    if translucent {
+        sdl2::render::BlendMode::Blend
+    } else {
+        sdl2::render::BlendMode::None
+    }
+}
+
+/// The window pixels a frame drawn in `drawn` (x, y, w, h) covers once
+/// turned by `rotation` about that rectangle's centre: the rectangle
+/// itself, or, a quarter turn, one of the swapped size about the same
+/// centre, as SDL places it.
+pub fn footprint(drawn: (i32, i32, u32, u32), rotation: u32) -> (i32, i32, u32, u32) {
+    let (x, y, w, h) = drawn;
+    if !matches!(rotation, 90 | 270) {
+        return drawn;
+    }
+    let (cx, cy) = (x + w as i32 / 2, y + h as i32 / 2);
+    (cx - h as i32 / 2, cy - w as i32 / 2, h, w)
 }
 
 /// Where a frame fitted to a window goes: scaled by one factor both ways
@@ -1223,13 +1288,23 @@ pub fn write_ppm(path: impl AsRef<Path>, frame: &Frame) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::{
-        asked_for, finger_pixel, fitted_rect, fitted_rect_within, keep_mouse, kms, placed_rect,
-        placed_rect_within, rotated_center, scaled_size, shows_nothing, through, unrotate_point,
-        Anchor, Margins, IDENTITY, MAX_MARGIN_PERCENT, TOUCH_MOUSEID,
+        asked_for, finger_pixel, fitted_rect, fitted_rect_within, footprint, keep_mouse, kms,
+        placed_rect, placed_rect_within, rotated_center, scaled_size, shows_nothing, through,
+        unrotate_point, Anchor, Margins, IDENTITY, MAX_MARGIN_PERCENT, TOUCH_MOUSEID,
     };
 
     fn connector(name: &str, status: &str) -> (String, String) {
         (name.to_string(), status.to_string())
+    }
+
+    #[test]
+    fn a_turned_frame_covers_the_swapped_rectangle_about_the_same_centre() {
+        // Upright, or turned half way, the frame covers where it is drawn.
+        assert_eq!(footprint((10, 20, 400, 300), 0), (10, 20, 400, 300));
+        assert_eq!(footprint((10, 20, 400, 300), 180), (10, 20, 400, 300));
+        // A quarter turn about the centre (210, 170): 300 wide, 400 tall.
+        assert_eq!(footprint((10, 20, 400, 300), 90), (60, -30, 300, 400));
+        assert_eq!(footprint((10, 20, 400, 300), 270), (60, -30, 300, 400));
     }
 
     #[test]

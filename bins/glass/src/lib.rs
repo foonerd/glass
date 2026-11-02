@@ -1186,6 +1186,10 @@ fn session(
                     let _ = std::fs::create_dir_all(&folder);
                     let stem = skin.name.replace('/', "_");
                     let file = folder.join(format!("{stem}.png"));
+                    // A snapshot is the screen without a backdrop: what the
+                    // theme leaves clear shows the dark colour, not a hole.
+                    let flat = expose::over_bg(frame);
+                    let frame = &flat;
                     match write_png(&file, frame) {
                         Ok(()) => logline::say!(Info, "display", "snapshot {}", file.display()),
                         Err(err) => eprintln!("glass: snapshot {}: {err}", file.display()),
@@ -1406,6 +1410,9 @@ fn session(
                         eprintln!("glass: backdrop: {err}");
                     }
                 }
+                // A theme whose pictures leave the screen uncovered or clear
+                // somewhere is blended over the backdrop, or the dark colour.
+                window.set_translucent(assets.translucent);
                 // The panel off: no frame goes up, the window's events are
                 // pumped alone, and a finger or a button on it wakes.
                 let shown = match if screen.off() {
@@ -1656,6 +1663,10 @@ fn session(
                 }
             }
             if let Some(path) = output {
+                // The picture is the screen without a backdrop: what the
+                // theme leaves clear shows the dark colour, not a hole.
+                let flat = expose::over_bg(frame);
+                let frame = &flat;
                 let written = if path.to_ascii_lowercase().ends_with(".png") {
                     write_png(std::path::Path::new(path), frame)
                 } else {

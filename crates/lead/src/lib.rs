@@ -3195,9 +3195,9 @@ pub struct RunSettings {
     #[serde(default)]
     pub margins: [u32; 4],
     /// `screen.backdrop = blur`: where the theme does not cover the
-    /// screen, the album art blurred and dimmed instead of the dark colour,
-    /// as the player's own page shows it behind its controls. The colour
-    /// unless said.
+    /// screen, and where its pictures are transparent, the album art
+    /// blurred and dimmed instead of the dark colour, as the player's own
+    /// page shows it behind its controls. The colour unless said.
     #[serde(default)]
     pub backdrop: bool,
     /// `screen.driver`: what draws the window, `auto` unless said.

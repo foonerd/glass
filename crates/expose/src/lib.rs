@@ -17,7 +17,9 @@ use lead::{
 use lead::{GaugeSpec, GaugeStyle, StateIndicator, StateLook, TonearmSpec};
 use plot::{Art, Fanart, Indicators, Scene, Text, TypeArea};
 
-const BG: [u8; 4] = [12, 12, 16, 255];
+/// The dark colour behind a theme: what shows where the theme's pictures
+/// leave the screen uncovered or transparent and no backdrop is on.
+pub const BG: [u8; 4] = [12, 12, 16, 255];
 
 /// Theme fonts, loaded once per meter. A style whose file is missing or
 /// unreadable stays `None`, and its texts fall back to the built-in bitmap
@@ -3338,7 +3340,9 @@ fn blit_into(
     }
 }
 
-/// Source-over one straight-alpha pixel onto the opaque frame.
+/// Source-over one straight-alpha pixel onto the frame. An opaque pixel
+/// under it takes the short path; a pixel the theme left less than opaque
+/// takes the general one, its own alpha kept in the sum.
 fn blend(dst: &mut [u8], d: usize, color: [u8; 4]) {
     let a = color[3] as u32;
     if a == 0 {
@@ -3347,6 +3351,19 @@ fn blend(dst: &mut [u8], d: usize, color: [u8; 4]) {
     if a == 255 {
         dst[d..d + 3].copy_from_slice(&color[..3]);
         dst[d + 3] = 255;
+        return;
+    }
+    let da = dst[d + 3] as u32;
+    if da != 255 {
+        // Straight alpha over straight alpha, rounded to the nearest level.
+        let oa = a + (da * (255 - a) + 127) / 255;
+        let keep = da * (255 - a);
+        let half = oa * 255 / 2;
+        for c in 0..3 {
+            let num = color[c] as u32 * a * 255 + dst[d + c] as u32 * keep;
+            dst[d + c] = ((num + half) / (oa * 255)) as u8;
+        }
+        dst[d + 3] = oa as u8;
         return;
     }
     let inv = 255 - a;
@@ -10423,6 +10440,9 @@ pub struct MeterAssets {
     /// The screen picture and face composed once per meter; the pictures
     /// themselves are not kept.
     pub base: Frame,
+    /// Whether the base leaves any pixel less than opaque, so the window
+    /// shows what is behind the theme through it.
+    pub translucent: bool,
 }
 
 impl MeterAssets {
@@ -10501,8 +10521,10 @@ impl MeterAssets {
             face.as_ref(),
             skin.face_at,
         );
+        let translucent = translucent(&base);
         Self {
             base,
+            translucent,
             front: load_theme(&skin.theme_dir, &skin.front).map(Spans::new),
             indicator,
             indicator_right,
@@ -10533,8 +10555,12 @@ impl MeterAssets {
     }
 }
 
-/// The static background: the dark fill, the screen picture over it, and
-/// the meter face at its position.
+/// The static background: the screen picture from the top left, as far as
+/// it reaches, and the meter face at its position, each landed by its own
+/// alpha. What neither covers, and what their pictures leave transparent,
+/// stays transparent: the screen shows what is behind the theme there, the
+/// album art blurred where that is on, else [`BG`]. Neither picture is
+/// scaled: a theme is authored at its own resolution.
 pub fn compose_base(
     width: u32,
     height: u32,
@@ -10549,16 +10575,34 @@ pub fn compose_base(
         height,
         rgba: vec![0u8; (width * height * 4) as usize],
     };
-    for px in frame.rgba.as_chunks_mut::<4>().0 {
-        px.copy_from_slice(&BG);
-    }
     if let Some(screen) = screen {
-        copy_top_left(&mut frame, screen);
+        blit_op(screen, (0, 0)).paint(&mut Band::whole(&mut frame));
     }
     if let Some(face) = face {
         blit_op(face, (face_at.0 as i32, face_at.1 as i32)).paint(&mut Band::whole(&mut frame));
     }
     frame
+}
+
+/// Whether any pixel of the frame is less than opaque: such a frame is
+/// shown over what is behind it.
+pub fn translucent(frame: &Frame) -> bool {
+    frame.rgba.as_chunks::<4>().0.iter().any(|px| px[3] != 255)
+}
+
+/// The frame over [`BG`]: the screen as it shows without a backdrop, for a
+/// picture that is kept or shown on its own. An opaque frame comes back
+/// as it is.
+pub fn over_bg(frame: &Frame) -> Frame {
+    let mut flat = frame.clone();
+    for px in flat.rgba.as_chunks_mut::<4>().0 {
+        if px[3] != 255 {
+            let (c, a) = (*px, px[3] as u32);
+            px.copy_from_slice(&BG);
+            blend(px, 0, [c[0], c[1], c[2], a as u8]);
+        }
+    }
+    flat
 }
 
 fn place(fallback: Rect, at: Option<(i32, i32)>, width: u32, height: u32) -> Rect {
@@ -10577,18 +10621,6 @@ fn place(fallback: Rect, at: Option<(i32, i32)>, width: u32, height: u32) -> Rec
         y,
         w: fallback.w.min(width - x).max(1),
         h: fallback.h.min(height - y).max(1),
-    }
-}
-
-/// Copy a picture's top left over the frame's, as far as both reach. It is
-/// not scaled: a theme is authored at its own resolution.
-fn copy_top_left(dst: &mut Frame, src: &Frame) {
-    let copy_w = dst.width.min(src.width) as usize;
-    let copy_h = dst.height.min(src.height) as usize;
-    for y in 0..copy_h {
-        let from = y * src.width as usize * 4;
-        let to = y * dst.width as usize * 4;
-        dst.rgba[to..to + copy_w * 4].copy_from_slice(&src.rgba[from..from + copy_w * 4]);
     }
 }
 
@@ -10839,7 +10871,86 @@ mod tests {
         let top = sample(&frame, layout.left_meter.x, layout.left_meter.y);
         let right_top = sample(&frame, layout.right_meter.x, layout.right_meter.y);
         assert_eq!(top, METER);
-        assert_eq!(right_top, BG);
+        // No picture under the right meter: the frame sees through there,
+        // and the screen puts the dark colour or the backdrop behind it.
+        assert_eq!(right_top, [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn a_screen_picture_lands_by_its_alpha_and_the_rest_sees_through() {
+        // Three pixels: opaque red, half-clear green, clear white.
+        let screen = Frame {
+            blend: Blend::Normal,
+            width: 3,
+            height: 1,
+            rgba: vec![255, 0, 0, 255, 0, 255, 0, 128, 255, 255, 255, 0],
+        };
+        let base = compose_base(4, 2, Some(&screen), None, (0, 0));
+        assert_eq!(sample(&base, 0, 0), [255, 0, 0, 255]);
+        assert_eq!(
+            sample(&base, 1, 0),
+            [0, 255, 0, 128],
+            "a half-clear pixel is kept as it is"
+        );
+        assert_eq!(
+            sample(&base, 2, 0),
+            [0, 0, 0, 0],
+            "a clear pixel's own colour does not show"
+        );
+        assert_eq!(
+            sample(&base, 3, 0),
+            [0, 0, 0, 0],
+            "beyond the picture the frame sees through"
+        );
+        assert_eq!(sample(&base, 0, 1), [0, 0, 0, 0]);
+        assert!(translucent(&base));
+        // An opaque face over it is the face.
+        let face = sprite(2, 1, [10, 20, 30, 255]);
+        let base = compose_base(4, 2, Some(&screen), Some(&face), (1, 0));
+        assert_eq!(sample(&base, 1, 0), [10, 20, 30, 255]);
+        assert_eq!(sample(&base, 2, 0), [10, 20, 30, 255]);
+        // A face's clear pixel leaves the screen's pixel under it.
+        let clear = sprite(1, 1, [0, 0, 0, 0]);
+        let base = compose_base(4, 2, Some(&screen), Some(&clear), (1, 0));
+        assert_eq!(sample(&base, 1, 0), [0, 255, 0, 128]);
+        // An opaque screen picture makes the base the picture itself.
+        let opaque = sprite(4, 2, [1, 2, 3, 255]);
+        let base = compose_base(4, 2, Some(&opaque), None, (0, 0));
+        assert_eq!(base.rgba, opaque.rgba);
+        assert!(!translucent(&base));
+    }
+
+    #[test]
+    fn a_pixel_blends_over_a_translucent_one_with_both_alphas_in_the_sum() {
+        // Over a clear pixel the colour lands as it is.
+        let mut px = [0u8, 0, 0, 0];
+        blend(&mut px, 0, [200, 100, 50, 128]);
+        assert_eq!(px, [200, 100, 50, 128]);
+        // Over a half-clear black: alpha 128 + 128 * 127 / 255 = 192, and
+        // the white weighs its 128 of that 192.
+        let mut px = [0u8, 0, 0, 128];
+        blend(&mut px, 0, [255, 255, 255, 128]);
+        assert_eq!(px, [170, 170, 170, 192]);
+        // Over an opaque pixel the sum is as it was: opaque, half way.
+        let mut px = [0u8, 0, 0, 255];
+        blend(&mut px, 0, [255, 255, 255, 128]);
+        assert_eq!(px, [128, 128, 128, 255]);
+    }
+
+    #[test]
+    fn a_frame_over_the_dark_colour_is_opaque_and_an_opaque_one_is_itself() {
+        let mut frame = sprite(2, 1, [255, 255, 255, 255]);
+        frame.rgba[4..8].copy_from_slice(&[255, 255, 255, 0]);
+        let flat = over_bg(&frame);
+        assert_eq!(sample(&flat, 0, 0), [255, 255, 255, 255]);
+        assert_eq!(
+            sample(&flat, 1, 0),
+            BG,
+            "a clear pixel shows the dark colour, not its own white"
+        );
+        assert!(!translucent(&flat));
+        let opaque = sprite(2, 1, [9, 8, 7, 255]);
+        assert_eq!(over_bg(&opaque).rgba, opaque.rgba);
     }
 
     fn sprite(width: u32, height: u32, color: [u8; 4]) -> Frame {
