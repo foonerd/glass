@@ -811,11 +811,13 @@ pub fn remote_main(
             drop(window.take());
             if let Some((unit, user)) = super::upgrade::service_unit() {
                 logline::say!(Info, "remotes", "quit: stopping {unit}");
-                let mut stop = std::process::Command::new("systemctl");
+                let mut args = vec!["--no-block", "stop", unit.as_str()];
                 if user {
-                    stop.arg("--user");
+                    args.insert(0, "--user");
                 }
-                let _ = stop.args(["--no-block", "stop", &unit]).spawn();
+                if let Err(why) = super::upgrade::spawn_quiet("systemctl", &args) {
+                    logline::say!(Warn, "remotes", "quit: {why}");
+                }
             } else {
                 logline::say!(Info, "remotes", "quit: the page asked; leaving");
             }

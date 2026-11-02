@@ -872,6 +872,68 @@ fn beside(exe: &Path, suffix: &str) -> PathBuf {
     exe.with_file_name(named)
 }
 
+/// A program started and left to itself, found on the PATH, its standard
+/// streams on /dev/null: for `systemctl stop` at the page's Quit. Through
+/// `posix_spawnp` directly, as `version_said` is, for the same reason: the
+/// standard library's spawn refers to glibc 2.39's `pidfd_spawnp`, which
+/// Volumio's glibc 2.36 does not have.
+#[cfg(all(unix, not(target_os = "android")))]
+pub fn spawn_quiet(program: &str, args: &[&str]) -> Result<(), String> {
+    use std::ffi::CString;
+    extern "C" {
+        static environ: *const *mut libc::c_char;
+    }
+    let c = |s: &str| CString::new(s).map_err(|e| e.to_string());
+    let program_c = c(program)?;
+    let args_c: Vec<CString> = std::iter::once(c(program))
+        .chain(args.iter().map(|a| c(a)))
+        .collect::<Result<_, _>>()?;
+    let mut argv: Vec<*mut libc::c_char> = args_c
+        .iter()
+        .map(|a| a.as_ptr() as *mut libc::c_char)
+        .collect();
+    argv.push(std::ptr::null_mut());
+    let null = c("/dev/null")?;
+    let mut pid: libc::pid_t = 0;
+    // SAFETY: every pointer handed over lives until the call returns, the
+    // argument array ends with a null, and the file actions are set up and
+    // torn down around the one call.
+    let rc = unsafe {
+        let mut actions: libc::posix_spawn_file_actions_t = std::mem::zeroed();
+        libc::posix_spawn_file_actions_init(&mut actions);
+        for (fd, flags) in [
+            (0, libc::O_RDONLY),
+            (1, libc::O_WRONLY),
+            (2, libc::O_WRONLY),
+        ] {
+            libc::posix_spawn_file_actions_addopen(&mut actions, fd, null.as_ptr(), flags, 0);
+        }
+        let rc = libc::posix_spawnp(
+            &mut pid,
+            program_c.as_ptr(),
+            &actions,
+            std::ptr::null(),
+            argv.as_ptr(),
+            environ,
+        );
+        libc::posix_spawn_file_actions_destroy(&mut actions);
+        rc
+    };
+    if rc == 0 {
+        Ok(())
+    } else {
+        Err(format!(
+            "{program}: {}",
+            std::io::Error::from_raw_os_error(rc)
+        ))
+    }
+}
+
+#[cfg(not(all(unix, not(target_os = "android"))))]
+pub fn spawn_quiet(program: &str, _args: &[&str]) -> Result<(), String> {
+    Err(format!("{program}: not started on this system"))
+}
+
 /// What a binary answers to `--version`, its first line; an error where it
 /// does not start, does not answer in time or ends in failure. Started
 /// through `posix_spawn` directly, its answer taken from a file: the
