@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.5] - 2026-11-02
+
+- **Close window on the remote's page, and the way out said on the screen.** The settings page's top bar has **Close window** beside Restart and Quit: the remote's window closes and the remote runs on with its page; the button then reads **Open window** and brings the window back. On the remote's own screen the way out is said where the user looks: the status screen, shown with no player, carries "Hold a finger on the screen for two seconds to leave full screen or quit", and a theme on show carries the same along its bottom for the first ten seconds after the remote starts, gone at the first touch. The page's help names the hold beside Escape, F and Q. In step: the Remotes page and the Troubleshooting row; no Find a problem check, no sheet row.
+
 ## [0.11.4] - 2026-11-02
 
 - **A remote can be left from its own screen.** For a panel with only its touch screen, no keyboard and no other device at hand: hold a finger still for two seconds anywhere on the picture, and the display shows a page of its own over everything, with Leave full screen, Quit the remote and Cancel; Quit asks once more; a tap beside the page shuts it. It is the remote's own, there whatever the theme shows and whether or not the Glass interface is on, in the theme's font or the display's own where the theme has none. Nothing of it on the player's screen. In step: the Remotes page and the Troubleshooting row; no Find a problem check, no sheet row.
