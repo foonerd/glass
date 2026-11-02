@@ -568,3 +568,18 @@ test('an X server of the face standing without a register is named as a leftover
   x = one(diagnose('face', f), 'leftover-x');
   assert.strictEqual(x.kind, 'ok'); assert.strictEqual(x.key, 'DIAG_LEFTOVER_HEALED'); assert.strictEqual(x.with.when, '2026-11-01T14:00:00Z');
 });
+
+test('a theme on show that cannot be drawn is the cause when the meters never appear, and only then', function () {
+  const f = healthy();
+  f.status.themeMissing = { why: 'not-installed', theme: '1280x720_gone' };
+  const r = diagnose('no-meters', f);
+  assert.strictEqual(r.found, true);
+  assert.strictEqual(one(r, 'theme-missing').key, 'DIAG_THEME_MISSING_NOT_INSTALLED');
+  assert.deepStrictEqual(one(r, 'theme-missing').with, { theme: '1280x720_gone', meter: '-' });
+  f.status.themeMissing = { why: 'meter-unknown', theme: '1280x720_theme', meter: 'gold' };
+  assert.deepStrictEqual(one(diagnose('screen', f), 'theme-missing').with, { theme: '1280x720_theme', meter: 'gold' });
+  f.status.themeMissing = null;
+  assert.strictEqual(one(diagnose('no-meters', f), 'theme-missing'), undefined);
+  delete f.status.themeMissing;
+  assert.strictEqual(one(diagnose('no-meters', f), 'theme-missing'), undefined);
+});

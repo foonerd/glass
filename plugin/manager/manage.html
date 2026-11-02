@@ -1975,6 +1975,12 @@
       var state = { themes: null, active: '', catalog: null, status: null, jobs: {}, meterSel: null, previews: {}, currentTheme: null };
       var $ = function (id) { return document.getElementById(id); };
       var t = function (key) { return S[key] !== undefined ? S[key] : key; };
+      // Why the theme on show cannot be drawn, for the Display row; nothing where it can.
+      var noThemeText = function (m) {
+        if (!m || !m.why) return '';
+        var key = 'MANAGER_ST_NO_THEME_' + String(m.why).toUpperCase().replace(/-/g, '_');
+        return ' · ' + t('MANAGER_ST_NO_THEME') + ': ' + t(key).replace('{theme}', m.theme || '-').replace('{meter}', m.meter || '-');
+      };
       var esc = function (s) { return String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
       var fmtBytes = function (n) { if (!n && n !== 0) return ''; if (n < 1024) return n + ' B'; if (n < 1048576) return (n / 1024).toFixed(0) + ' kB'; if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB'; return (n / 1073741824).toFixed(2) + ' GB'; };
       var fmtDate = function (iso) { if (!iso) return ''; var d = new Date(iso); if (isNaN(d.getTime())) return String(iso); var p = function (n) { return n < 10 ? '0' + n : n; }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); };
@@ -3093,7 +3099,7 @@
               ['MANAGER_ST_LEGACY', s.legacy ? t('MANAGER_ST_YES') : t('MANAGER_ST_NO')]
             ]],
             ['MANAGER_ST_SECTION_SCREEN', [
-              ['MANAGER_ST_DISPLAY', s.headless ? t('DISPLAY_OUTPUT_NONE') : (s.running ? t('MANAGER_ST_RUNNING') : t('MANAGER_ST_IDLE')) + ' · DISPLAY=:' + s.display + ' · ' + t('MANAGER_ST_TIMEOUT') + ' ' + s.timeout + ' s' + (s.running && s.showing && s.showing.rate && s.performance && s.showing.rate < s.performance.values.frameRate ? ' · ' + t('MANAGER_ST_GOVERNED') + ' ' + s.showing.rate + ' fps' : '')],
+              ['MANAGER_ST_DISPLAY', s.headless ? t('DISPLAY_OUTPUT_NONE') : (s.running ? t('MANAGER_ST_RUNNING') : t('MANAGER_ST_IDLE') + noThemeText(s.themeMissing)) + ' · DISPLAY=:' + s.display + ' · ' + t('MANAGER_ST_TIMEOUT') + ' ' + s.timeout + ' s' + (s.running && s.showing && s.showing.rate && s.performance && s.showing.rate < s.performance.values.frameRate ? ' · ' + t('MANAGER_ST_GOVERNED') + ' ' + s.showing.rate + ' fps' : '')],
               ['MANAGER_ST_SCREEN', !screen ? '-' : (screen.size ? t('MANAGER_ST_SCREEN_SIZE') + ' ' + screen.size : t('MANAGER_ST_NO_SCREEN')) + (s.themeSize ? ' · ' + t('MANAGER_ST_THEME_SIZE') + ' ' + s.themeSize : '') + ' · ' + (screen.mouse ? t('MANAGER_ST_MOUSE_ON') : t('MANAGER_ST_MOUSE_OFF')) + (s.running && screen.since ? ' · ' + t('MANAGER_ST_SINCE') + ' ' + fmtDate(screen.since) : '')],
             ].concat(sc ? screenRows(sc) : [], [
               ['MANAGER_TOUCH_TITLE', !s.interactive ? '-' : t('INTERACTIVE_' + String(s.interactive).toUpperCase())],

@@ -398,6 +398,50 @@ pub fn installed_themes() -> Vec<(String, Vec<String>)> {
     themes
 }
 
+/// Why the theme on show cannot be drawn, in a line, or none: no theme
+/// named in the configuration, its folder not there, no `meters.txt` in
+/// it, no meter in that, or the meter named not among them. The player's
+/// display opens no window on such a theme, so the screen stays whoever's
+/// it was, and the plugin says why.
+pub fn theme_missing(skin: &SkinDesc) -> Option<String> {
+    theme_missing_in(&config_text().unwrap_or_default(), &config_path(), skin)
+}
+
+fn theme_missing_in(text: &str, config_path: &str, skin: &SkinDesc) -> Option<String> {
+    let Some(dir) = theme_dir_from(text, config_path) else {
+        return Some("no theme is named in the configuration (meter.folder)".to_string());
+    };
+    let folder = dir
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    if !dir.is_dir() {
+        return Some(format!(
+            "the theme on show, {folder}, is not installed: no folder {}",
+            dir.display()
+        ));
+    }
+    let Some(meters) = lead::read_to_string(&dir.join("meters.txt")) else {
+        return Some(format!("the theme on show, {folder}, has no meters.txt"));
+    };
+    let sections = meter_sections(&meters);
+    if sections.is_empty() {
+        return Some(format!(
+            "the theme on show, {folder}, has no meter in its meters.txt"
+        ));
+    }
+    let name = skin.name.trim();
+    if !name.is_empty()
+        && !name.eq_ignore_ascii_case("random")
+        && !sections.iter().any(|s| s == name)
+    {
+        return Some(format!(
+            "the meter {name} is not in the theme on show, {folder}"
+        ));
+    }
+    None
+}
+
 /// The meters of the installed theme, after overrides.
 pub fn installed_meter_names() -> Vec<String> {
     let Some(text) = config_text() else {
@@ -3344,6 +3388,69 @@ pub fn input_from_records(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_theme_that_cannot_be_drawn_is_said_in_a_line() {
+        let base = std::env::temp_dir().join(format!("glass-missing-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let config = base.join("meter.txt").to_string_lossy().into_owned();
+        let text = |folder: &str, meter: &str| {
+            format!(
+                "[current]\nbase.folder = {}\nmeter.folder = {folder}\nmeter = {meter}\n",
+                base.display()
+            )
+        };
+        let mut skin = SkinDesc::basic();
+        // No theme named at all.
+        let none = format!(
+            "[current]\nbase.folder = {}\nmeter.folder =\n",
+            base.display()
+        );
+        assert_eq!(
+            theme_missing_in(&none, &config, &skin).as_deref(),
+            Some("no theme is named in the configuration (meter.folder)")
+        );
+        // Named, not there.
+        let why = theme_missing_in(&text("gone", "random"), &config, &skin).unwrap();
+        assert!(
+            why.starts_with("the theme on show, gone, is not installed"),
+            "{why}"
+        );
+        // There, without meters.txt; then with an empty one.
+        std::fs::create_dir_all(base.join("bare")).unwrap();
+        assert_eq!(
+            theme_missing_in(&text("bare", "random"), &config, &skin).as_deref(),
+            Some("the theme on show, bare, has no meters.txt")
+        );
+        std::fs::write(base.join("bare/meters.txt"), "# nothing\n").unwrap();
+        assert_eq!(
+            theme_missing_in(&text("bare", "random"), &config, &skin).as_deref(),
+            Some("the theme on show, bare, has no meter in its meters.txt")
+        );
+        // A theme with a meter: drawn for random, for that meter, not for another.
+        std::fs::write(
+            base.join("bare/meters.txt"),
+            "[blue]\nmeter.type = circular\n",
+        )
+        .unwrap();
+        skin.name = "random".into();
+        assert_eq!(
+            theme_missing_in(&text("bare", "random"), &config, &skin),
+            None
+        );
+        skin.name = "blue".into();
+        assert_eq!(
+            theme_missing_in(&text("bare", "blue"), &config, &skin),
+            None
+        );
+        skin.name = "gold".into();
+        assert_eq!(
+            theme_missing_in(&text("bare", "gold"), &config, &skin).as_deref(),
+            Some("the meter gold is not in the theme on show, bare")
+        );
+        let _ = std::fs::remove_dir_all(&base);
+    }
+
     use super::*;
 
     fn queued(title: &str, uri: &str) -> QueueItem {

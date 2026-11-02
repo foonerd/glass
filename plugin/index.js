@@ -2187,6 +2187,20 @@ Glass.prototype.startDisplayOnce = function () {
                         // The display's lines reach the journal as it writes them,
                         // through the same gate as the plugin's own.
                         var env = self.launchEnv();
+                        // No theme that can be drawn: no window over the kiosk, and the reason said once.
+                        // The face (glass-evo's binary) has pages of its own and runs without one.
+                        if (!env.GLASS_BIN) {
+                            var missing = self.themeMissing();
+                            if (missing) {
+                                var missingLine = themeMissingLine(missing);
+                                if (self.displayBlocked !== missingLine) {
+                                    self.displayBlocked = missingLine;
+                                    self.logger.warn(id + 'the display is not started: ' + missingLine);
+                                }
+                                return;
+                            }
+                        }
+                        self.displayBlocked = '';
                         // After a death at launch the graphics libraries are asked to say what they do, so the journal names what would not load.
                         Object.assign(env, relaunch.diagnosing(Math.max(self.displayDeaths || 0, self.faceFailures || 0)));
                         var child = spawn('/bin/sh', [LaunchScript], { uid: 1000, gid: 1000, env: env, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -2212,7 +2226,11 @@ Glass.prototype.startDisplayOnce = function () {
                         child.on('error', function (e) { lastErr.push(String(e && e.message ? e.message : e)); });
                         child.on('exit', function (code, signal) {
                             var error = (code === 0) ? null : new Error(signal ? 'signal ' + signal : 'exit ' + code);
-                            if (error !== null) {
+                            // Exit 3: no theme to show, the display opened no window and left. No fault, no death.
+                            var noTheme = code === 3;
+                            if (noTheme) {
+                                self.logger.warn(id + 'the display found no theme to show and left; it is not started again until the theme on show is there');
+                            } else if (error !== null) {
                                 // Why, in a line: the display's last word, the faults said before it, and a library the loader does not know.
                                 var why = relaunch.reason(error.message, lastErr, 600);
                                 if (relaunch.aboutGraphics(why)) {
@@ -2244,7 +2262,7 @@ Glass.prototype.startDisplayOnce = function () {
                                 // screen's watcher). A display the plugin itself ended is no death.
                                 var ranMs = Date.now() - (child.startedAt || 0);
                                 var ended = signal === 'SIGTERM' || signal === 'SIGKILL' || signal === 'SIGINT';
-                                self.displayDeaths = relaunch.deaths(self.displayDeaths || 0, { clean: error === null || ended, ranMs: ranMs });
+                                self.displayDeaths = relaunch.deaths(self.displayDeaths || 0, { clean: error === null || ended || noTheme, ranMs: ranMs });
                                 // On a screen of its own the watcher starts it, not the screensaver's delay: the waits begin at a second.
                                 var ownScreen = !!child.face;
                                 if (!ownScreen) { try { ownScreen = !!self.screenOurs(); } catch (e) { /* as a screensaver */ } }
@@ -6550,6 +6568,41 @@ Glass.prototype.themeList = function () {
     return list;
 };
 
+// Why the theme on show cannot be drawn, or null: no theme set, its folder
+// not under the templates, no meters.txt in it, no meter in that, or a
+// meter chosen that is not in it. The display is not started on such a
+// theme, so the kiosk keeps the screen; the Status tab and Find a problem
+// say why. The display checks the same for itself and leaves with exit 3.
+Glass.prototype.themeMissing = function () {
+    var self = this;
+    self.loadConfigs();
+    var theme = self.activeTheme();
+    if (!theme) { return { why: 'none', theme: '' }; }
+    var dir = base_folder_P + theme;
+    if (!fs.existsSync(dir)) { return { why: 'not-installed', theme: theme }; }
+    if (!fs.existsSync(dir + '/meters.txt')) { return { why: 'no-meters-file', theme: theme }; }
+    var sections = themeSections(dir + '/meters.txt');
+    if (sections.length === 0) { return { why: 'no-meters', theme: theme }; }
+    var raw = String((meterConfig && meterConfig.current && meterConfig.current.meter) || 'random').trim();
+    if (raw && raw.toLowerCase() !== 'random') {
+        var unknown = raw.split(',').map(function (s) { return s.trim(); }).filter(Boolean).filter(function (n) { return sections.indexOf(n) === -1; });
+        if (unknown.length) { return { why: 'meter-unknown', theme: theme, meter: unknown.join(', ') }; }
+    }
+    return null;
+};
+
+// The journal's line for a theme that cannot be drawn.
+function themeMissingLine(m) {
+    switch (m.why) {
+        case 'none': return 'no theme is set';
+        case 'not-installed': return 'the theme on show, ' + m.theme + ', is not installed (no folder under the templates)';
+        case 'no-meters-file': return 'the theme on show, ' + m.theme + ', has no meters.txt';
+        case 'no-meters': return 'the theme on show, ' + m.theme + ', has no meter in its meters.txt';
+        case 'meter-unknown': return 'the meter ' + m.meter + ' is not in the theme on show, ' + m.theme;
+        default: return 'the theme on show cannot be drawn';
+    }
+}
+
 Glass.prototype.activateTheme = function (folder) {
     var self = this;
     if (!safeFolderName(folder)) { return { changed: false, error: 'invalid' }; }
@@ -6997,6 +7050,7 @@ Glass.prototype.statusInfo = function () {
         headless: self.config.get('headless') === true,
         timeout: parseInt(self.config.get('timeout'), 10) || 0,
         activeTheme: self.activeTheme(),
+        themeMissing: self.themeMissing(),
         themeRule: self.themeRuleFact(),
         assured: self.assureFact(),
         meter: self.meterSelection(),

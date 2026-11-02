@@ -62,6 +62,10 @@ enum Outcome {
     Reload(&'static str),
 }
 
+/// The display's exit when the theme on show cannot be drawn: it opened
+/// no window, and the plugin reads this as no fault of the display's.
+const NO_THEME_EXIT: u8 = 3;
+
 /// Whether a fade may start now: the engine's lock file is older than the
 /// fade plus a second, or absent. Touching it claims the fade.
 fn fade_lock_free(duration_s: f32) -> bool {
@@ -642,6 +646,16 @@ fn session(
         Some(name) => intake::installed_skin_named(Some(&name)),
         None => intake::installed_skin(),
     };
+    // The player's own display opens no window on a theme that cannot be
+    // drawn: the screen stays whoever's it was, the kiosk's, and the
+    // plugin says why. A remote shows its status screen without a theme,
+    // and the face has pages of its own.
+    if remote.is_none() && face.is_none() {
+        if let Some(why) = intake::theme_missing(&skin) {
+            eprintln!("glass: no theme to show: {why}");
+            return Outcome::Exit(ExitCode::from(NO_THEME_EXIT));
+        }
+    }
     let mut source = match remote.as_deref_mut() {
         None => TapSource::installed().with_skin(&skin),
         Some(remote) => match remote.source(&skin) {
@@ -887,6 +901,8 @@ fn session(
     }
     let mut run_flag_checked = Instant::now();
     let mut leave: Option<&'static str> = None;
+    // The theme went while the display ran: it leaves, and says so by its exit.
+    let mut no_theme = false;
     // What lay over the theme on the frame before this one.
     let mut was_over = Over::default();
     // The album art blurred behind a theme that leaves part of the screen
@@ -960,6 +976,13 @@ fn session(
         ($name:expr) => {{
             let name: String = $name;
             skin = intake::installed_skin_named(Some(&name));
+            if remote.is_none() && face.is_none() {
+                if let Some(why) = intake::theme_missing(&skin) {
+                    eprintln!("glass: no theme to show: {why}");
+                    no_theme = true;
+                    leave = Some("no theme to show");
+                }
+            }
             source.set_skin(&skin);
             assets = MeterAssets::load(&skin);
             pictures.clear();
@@ -1841,6 +1864,7 @@ fn session(
     }
     match reload {
         Some(why) => Outcome::Reload(why),
+        None if no_theme => Outcome::Exit(ExitCode::from(NO_THEME_EXIT)),
         None => Outcome::Exit(ExitCode::SUCCESS),
     }
 }

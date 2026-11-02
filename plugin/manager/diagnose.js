@@ -456,6 +456,25 @@ const CHECKS = [
     }
   },
   {
+    // The theme on show cannot be drawn, so the display is not started and
+    // the kiosk keeps the screen: the cause wherever the meters are missed.
+    id: 'theme-missing', symptoms: ['no-meters', 'screen', 'other'],
+    run(f) {
+      const m = f.status.themeMissing;
+      if (!m || !m.why) return null;
+      const keys = {
+        'none': 'DIAG_THEME_MISSING_NONE',
+        'not-installed': 'DIAG_THEME_MISSING_NOT_INSTALLED',
+        'no-meters-file': 'DIAG_THEME_MISSING_NO_METERS_FILE',
+        'no-meters': 'DIAG_THEME_MISSING_NO_METERS',
+        'meter-unknown': 'DIAG_THEME_MISSING_METER_UNKNOWN'
+      };
+      const key = keys[m.why];
+      if (!key) return null;
+      return cause('theme-missing', key, { theme: m.theme || '-', meter: m.meter || '-' }, 'themes');
+    }
+  },
+  {
     // The theme on show names files that are not there: a cause where the
     // display cannot do without them, a note where it does (a field's
     // font, a knob's picture).
