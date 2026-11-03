@@ -7044,14 +7044,11 @@ Glass.prototype.ensureEnabledInRegistry = function () {
     });
 };
 
-// Restart the player's backend a moment from now. The request goes to
-// systemd as one restart job, which it carries out on its own once
-// queued: a stop followed by a start from inside the service would end
-// with the stop, since the stop takes every process of the service with
-// it, the one waiting to start it again included.
-// Playback paused before an upgrade restarts the backend: a player that
-// plays is paused and given up to three seconds to say so; one that stands
-// still is left as it is. Resolves either way.
+// Playback paused before the backend restarts: a player that plays is
+// paused and given up to three seconds to say so, so the music does not
+// cut off mid-note and comes back where it stood, and the display sees a
+// pause rather than a vanished player; one that stands still is left as
+// it is. Resolves either way.
 Glass.prototype.pauseForRestart = function () {
     var self = this;
     var state = self.lastState || {};
@@ -7069,15 +7066,25 @@ Glass.prototype.pauseForRestart = function () {
     });
 };
 
+// Restart the player's backend a moment from now, playback paused first.
+// The one place Glass restarts the backend: an upgrade or a rollback, a
+// return to stable, the System tab's restart. The request goes to systemd
+// as one restart job, which it carries out on its own once queued: a stop
+// followed by a start from inside the service would end with the stop,
+// since the stop takes every process of the service with it, the one
+// waiting to start it again included. Resolves once the restart is asked.
 Glass.prototype.restartBackend = function () {
     var self = this;
-    self.logger.info(id + 'upgrade: restarting the backend');
-    try {
-        var child = require('child_process').spawn('/bin/sh', ['-c', 'sleep 3; sudo -n /bin/systemctl --no-block restart volumio'], { detached: true, stdio: 'ignore' });
-        child.unref();
-    } catch (e) {
-        self.logger.error(id + 'upgrade: restart: ' + (e && e.message ? e.message : e));
-    }
+    var issue = function () {
+        self.logger.info(id + 'upgrade: restarting the backend');
+        try {
+            var child = require('child_process').spawn('/bin/sh', ['-c', 'sleep 3; sudo -n /bin/systemctl --no-block restart volumio'], { detached: true, stdio: 'ignore' });
+            child.unref();
+        } catch (e) {
+            self.logger.error(id + 'upgrade: restart: ' + (e && e.message ? e.message : e));
+        }
+    };
+    return self.pauseForRestart().then(issue, issue);
 };
 
 // The player rebooted from the Manager's System tab, through the backend's

@@ -1761,10 +1761,6 @@ class Manager {
     self.exclusive(async function () {
       try {
         const staged = rollback ? await self.updater.stagePrevious(job) : await self.updater.download(job);
-        // The backend goes down with the install: playback is paused first,
-        // so the music does not cut off mid-note and comes back where it
-        // stood, and the display sees a pause rather than a vanished player.
-        try { await self.plugin.pauseForRestart(); } catch (e) { self.logger.warn('glass: manager: not paused before the restart: ' + (e && e.message ? e.message : e)); }
         // The component here is brought to what that Glass works with
         // first, a glass-evo zip kept from an earlier upload used before
         // any is fetched.
