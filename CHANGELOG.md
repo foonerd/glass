@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.12] - 2026-11-03
+
+- **The picture of the screen comes upright.** On a screen set turned, the display draws the picture turned on the panel, and 0.11.10's picture came as the panel holds it, turned the other way. The display now turns the grab back by the screen's rotation before writing it, so the picture is the screen as the eye sees it. Asked on a turned screen. In step: the Screen page's line; no Find a problem check, no sheet row.
+
 ## [0.11.11] - 2026-11-03
 
 - **Meters ahead of the sound reaches the tap.** 0.11.10 wrote the lead into the display's configuration and showed it on the Status tab, but the demand file the tap reads carried 0 whatever was set: the plugin took the number from the spectrum configuration's section instead of the meter configuration's. The demand now carries the lead set, and the tap publishes the hops ahead by it. In step: nothing new; the Status row and the Troubleshooting paragraph stand.
