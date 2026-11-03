@@ -2,6 +2,11 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.11] - 2026-11-03
+
+- **Play here.** An extra, off unless set on the Manager's System tab: a **Play here** button on Anymote and on the Face tab plays what the player plays on the device that shows the page, a quarter to half a second behind the room, the player's own stream as it is (16-bit as 16-bit, 24-bit as 24-bit, at its rate), at full level before the player's volume, with a volume of the page's own. On a phone the sound goes on with the screen locked, the track on the lock screen with a control to stop. A DSD stream is said to play on the player only; the ninth listener at once is told so. The sound travels over the Manager's own port alone (a WebSocket at `/anymote/listen`, proxied to the loopback); nothing else is opened on the player. The server of the wire is outcast-lite 0.1.5, a signed component the plugin ships beside the display's binary (`components/outcast-lite.lock`, verified at packaging with the evo release key), started when the first listener asks and gone half a minute after the last. **Sends up to** caps the sample rate on the player (as it is, 96 kHz, 48 kHz) for a weak link or a television. Asked on the forum. In step: the Status tab's Audio section says whether the sound is served, to how many and in what shape; Find a problem has the symptom "Play here is silent or missing" with its checks; Troubleshooting has the rows; the Anymote, Manager and Tap pages; the words in all eleven languages.
+- **The tap's audio ring is on in Glass's own snippet** (`audio 1` in the three sections), the ring Play here serves from; the exact-bytes gate (`scripts/tap_exact.sh`) proves the stream to the DAC unchanged with the ring on, as it has since 0.10.47. One copy of the stream per period into shared memory, two seconds of it.
+
 ## [0.11.10] - 2026-11-03
 
 The maintenance release: the whole backlog, in one cut.
