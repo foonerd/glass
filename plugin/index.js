@@ -990,8 +990,9 @@ Glass.prototype.spectrumDemand = function () {
         channels: channels || 2,
         scale: scale || 'log',
         window: window || 0,
-        // Meters ahead of the sound, in milliseconds: the tap publishes each hop that much before its audio is heard.
-        ahead_ms: leadMs(current)
+        // Meters ahead of the sound, in milliseconds, from the meter configuration (`current` here is the
+        // spectrum configuration's): the tap publishes each hop that much before its audio is heard.
+        ahead_ms: leadMs((meterConfig && meterConfig.current) || {})
     };
 };
 
