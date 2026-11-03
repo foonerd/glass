@@ -211,6 +211,15 @@
   </div>
 
   <div class="panel">
+    <h2>Play here</h2>
+    <div class="form">
+      <div class="full"><label><input type="checkbox" id="ph-on"> Play the player's sound on this remote</label></div>
+      <div><label>Volume on this remote, 0 to 100</label><input type="number" id="ph-gain" min="0" max="100" step="1" value="80"></div>
+      <div class="full help">The player's own stream, taken over its Manager's port while the player's System tab has Play here on, played through this machine's audio output a quarter to half a second behind the room. Both take effect at once, without Apply; the Glass interface's Play here tile and its slider do the same. The Status panel says what the sound is doing.</div>
+    </div>
+  </div>
+
+  <div class="panel">
     <h2>This remote</h2>
     <div class="form">
       <div><label>Name, as the player's manager lists it</label><input type="text" id="r-name" placeholder="Kitchen"></div>
@@ -353,6 +362,7 @@
       $('subtitle').textContent = 'Glass ' + s.release + ' · protocol ' + s.protocol + (s.face ? ' · with ' + s.face : '');
       // The choice is there only on a display built with the Glass interface (the bundle).
       $('face-panel').classList.toggle('hidden', !s.face);
+      fillPlayHere(s.status && s.status.play_here);
       $('face-help').textContent = s.face ? 'This remote is the bundle: the display with ' + s.face + ' in it, a clock and the date when the player stands still and a bar of controls. The first choice shows them when the player\'s own screen does, which is when glass-evo holds it. The controls need a touch screen or a mouse here; the clock needs neither.' : '';
       $('paths').textContent = 'Configuration: ' + s.configPath + ' · cache: ' + s.cache;
       renderUpgrade(s);
@@ -594,6 +604,7 @@
       ['Screen', st.screen && st.screen[0] ? st.screen[0] + 'x' + st.screen[1] : ''],
       ['On the screen', onScreenWords(st)],
       ['Synced', st.synced || '']].concat(state.face ? [['Glass interface', st.face_shown ? 'shown' : 'not shown'], ['Controls', st.controls || (st.face_shown ? 'not drawn yet' : '')]] : []).concat([
+      ['Play here', st.play_here ? st.play_here.state + (st.play_here.shape ? ' · ' + st.play_here.shape : '') + (st.play_here.on ? ' · volume ' + st.play_here.gain : '') : ''],
       ['This page', st.page || '']
     ]);
   }
@@ -876,7 +887,18 @@
     });
   }
   loadOrSay();
-  setInterval(function () { api('GET', '/api/state').then(function (s) { renderStatus(s.status); renderUpgrade(s); }).catch(function () {}); }, 2000);
+  // ---- play here: applied at once, never through Apply ----
+  function fillPlayHere(ph) {
+    if (!ph) return;
+    $('ph-on').checked = !!ph.on;
+    if (document.activeElement !== $('ph-gain')) $('ph-gain').value = ph.gain;
+  }
+  function askPlayHere(body) {
+    api('POST', '/api/play-here', body).then(function (d) { fillPlayHere(d.play_here); }).catch(function (e) { toast(e.message, 'error'); });
+  }
+  $('ph-on').onchange = function () { askPlayHere({ on: $('ph-on').checked }); };
+  $('ph-gain').onchange = function () { var g = parseInt($('ph-gain').value, 10); askPlayHere({ gain: isNaN(g) ? 80 : Math.max(0, Math.min(100, g)) }); };
+  setInterval(function () { api('GET', '/api/state').then(function (s) { renderStatus(s.status); renderUpgrade(s); fillPlayHere(s.status && s.status.play_here); }).catch(function () {}); }, 2000);
 })();
 </script>
 </body>

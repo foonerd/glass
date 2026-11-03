@@ -1724,6 +1724,70 @@ impl Power {
     }
 }
 
+/// This machine's audio output through SDL, for a remote display that
+/// plays the player's sound: a device opened at a stream's rate and
+/// channels, SDL converting to what the hardware takes, fed on SDL's own
+/// audio thread from a `Pull` of the caller's. Opened on the thread that
+/// opened the window, as SDL's context asks; with no output to open (no
+/// device, no driver) the error says so and the picture is not touched.
+pub mod audio {
+    use sdl2::audio::{AudioCallback, AudioDevice, AudioSpecDesired};
+
+    /// What fills the output: asked for `out` samples, interleaved by
+    /// channel, as floats within minus one and one, on SDL's audio thread;
+    /// silence is zeros.
+    pub trait Pull: Send + 'static {
+        fn pull(&mut self, out: &mut [f32]);
+    }
+
+    struct Feed<P: Pull>(P);
+
+    impl<P: Pull> AudioCallback for Feed<P> {
+        type Channel = f32;
+
+        fn callback(&mut self, out: &mut [f32]) {
+            self.0.pull(out);
+        }
+    }
+
+    /// An open output, playing from its `Pull` until dropped.
+    pub struct Output<P: Pull> {
+        device: AudioDevice<Feed<P>>,
+        driver: String,
+    }
+
+    impl<P: Pull> Output<P> {
+        /// Opened at `rate` and `channels`, SDL's own conversion between
+        /// them and the device's, and started.
+        pub fn open(rate: u32, channels: u8, pull: P) -> Result<Self, String> {
+            let audio = sdl2::init()?.audio()?;
+            let driver = audio.current_audio_driver().to_string();
+            let wanted = AudioSpecDesired {
+                freq: Some(rate as i32),
+                channels: Some(channels),
+                samples: None,
+            };
+            let device = audio.open_playback(None, &wanted, |_| Feed(pull))?;
+            device.resume();
+            Ok(Self { device, driver })
+        }
+
+        /// SDL's audio driver in use: pulseaudio, alsa, wasapi, aaudio,
+        /// dummy and the rest.
+        pub fn driver(&self) -> &str {
+            &self.driver
+        }
+
+        pub fn rate(&self) -> u32 {
+            self.device.spec().freq.max(0) as u32
+        }
+
+        pub fn channels(&self) -> u8 {
+            self.device.spec().channels
+        }
+    }
+}
+
 /// The panel's backlight as the kernel lists it under `/sys/class/backlight`:
 /// its power and its brightness, by their files. The files are the
 /// kernel's; where an image leaves them root's alone, every write fails

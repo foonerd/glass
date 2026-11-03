@@ -404,10 +404,26 @@ pub struct RemoteConfig {
     /// 0.9.10. A port in use falls back to one the system chooses.
     #[serde(default = "default_frames_port")]
     pub frames_port: u16,
+    /// Play here: the player's sound on this remote, through this
+    /// machine's audio output, while the player serves it (its System
+    /// tab's switch). Set live from the page and from the face's tile,
+    /// never through Apply; kept here across runs.
+    #[serde(default)]
+    pub play_here: bool,
+    /// The volume of that sound on this remote, 0 to 100, the player's
+    /// stream being at full level.
+    #[serde(default = "default_play_here_gain")]
+    pub play_here_gain: u8,
 }
 
 fn default_frames_port() -> u16 {
     intake::remote::DEFAULT_REMOTE_FRAMES_PORT
+}
+
+pub const DEFAULT_PLAY_HERE_GAIN: u8 = 80;
+
+fn default_play_here_gain() -> u8 {
+    DEFAULT_PLAY_HERE_GAIN
 }
 
 /// When a remote that carries a face shows it: where the player's own
@@ -480,6 +496,8 @@ impl Default for RemoteConfig {
             test_releases: false,
             upload_install: false,
             frames_port: intake::remote::DEFAULT_REMOTE_FRAMES_PORT,
+            play_here: false,
+            play_here_gain: DEFAULT_PLAY_HERE_GAIN,
         }
     }
 }
@@ -528,6 +546,7 @@ impl RemoteConfig {
         if self.page_port == 0 {
             self.page_port = DEFAULT_PAGE_PORT;
         }
+        self.play_here_gain = self.play_here_gain.min(100);
         self.themes_dir = self
             .themes_dir
             .take()

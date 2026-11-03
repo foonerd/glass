@@ -1088,9 +1088,20 @@ fn session(
             }
         }
         let input = source.poll();
-        // The face's commands go the way the theme's buttons go.
+        // A remote plays the player's sound here when asked: the listener
+        // and the output follow the switch and the player's word.
+        if let Some(remote) = remote.as_deref_mut() {
+            remote.play_here_tick(&mut source, input.play_here.served);
+        }
+        // The face's commands go the way the theme's buttons go; Play
+        // here's are a remote's own and stay here.
         if let Some(face) = face.as_deref_mut() {
             for command in face.commands() {
+                if let Some(remote) = remote.as_deref_mut() {
+                    if remote.play_here_command(&command) {
+                        continue;
+                    }
+                }
                 source.command(&command);
             }
         }

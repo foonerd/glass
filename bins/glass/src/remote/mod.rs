@@ -6,6 +6,7 @@
 
 pub mod config;
 pub mod exit;
+pub mod playhere;
 pub mod run;
 pub mod signing;
 pub mod upgrade;
@@ -67,6 +68,9 @@ pub struct Status {
     pub software: bool,
     /// Whose the player's screen is, as the last sync heard it.
     pub face_owner: String,
+    /// Play here on this remote: the switch, the volume, what the sound is
+    /// doing in words, and the stream's shape while one is on.
+    pub play_here: playhere::PlayHereStatus,
 }
 
 /// What this machine has for the display to run, for the page's
@@ -316,14 +320,21 @@ pub struct RemoteApp {
     assets: Mutex<Option<intake::support::AssetsReport>>,
     /// The home of the session on: where the player's files are kept here.
     home: Mutex<Option<PathBuf>>,
+    /// Play here's switch and volume: live state, set from the page and
+    /// from the face's tile, read by the session each frame; kept in the
+    /// configuration quietly, with no new generation, since the sound
+    /// going on or off is no reason to start the session again.
+    play_here: Mutex<(bool, u8)>,
 }
 
 impl RemoteApp {
     pub fn new(path: PathBuf, cache: PathBuf, config: RemoteConfig) -> Arc<Self> {
+        let play_here = (config.play_here, config.play_here_gain.min(100));
         Arc::new(Self {
             path,
             cache,
             config: Mutex::new(config),
+            play_here: Mutex::new(play_here),
             generation: AtomicU64::new(1),
             status: Mutex::new(Status::default()),
             window_request: Mutex::new(None),
@@ -795,6 +806,11 @@ impl RemoteApp {
         let mut guard = self.config.lock().unwrap_or_else(|e| e.into_inner());
         let mut next = guard.clone();
         change(&mut next);
+        // Play here's switch and volume are live state with a route of
+        // their own: a configuration applied whole does not move them.
+        let (on, gain) = self.play_here();
+        next.play_here = on;
+        next.play_here_gain = gain;
         next.tidy();
         next.check()?;
         next.save(&self.path)?;
@@ -805,6 +821,36 @@ impl RemoteApp {
     }
 
     /// Ask the display to change how its window sits, live.
+    /// Play here's switch and volume as wanted now.
+    pub fn play_here(&self) -> (bool, u8) {
+        *self.play_here.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    /// The switch or the volume moved, from the page or the face: applied
+    /// at once and kept in the configuration file without a new
+    /// generation, so the session runs on. What stands after.
+    pub fn set_play_here(&self, on: Option<bool>, gain: Option<u8>) -> (bool, u8) {
+        let now = {
+            let mut live = self.play_here.lock().unwrap_or_else(|e| e.into_inner());
+            if let Some(on) = on {
+                live.0 = on;
+            }
+            if let Some(gain) = gain {
+                live.1 = gain.min(100);
+            }
+            *live
+        };
+        let mut guard = self.config.lock().unwrap_or_else(|e| e.into_inner());
+        if (guard.play_here, guard.play_here_gain) != now {
+            guard.play_here = now.0;
+            guard.play_here_gain = now.1;
+            if let Err(e) = guard.save(&self.path) {
+                logline::say!(Warn, "remotes", "play here: the setting was not kept: {e}");
+            }
+        }
+        now
+    }
+
     pub fn request_window(&self, mode: pane::WindowMode) {
         *self
             .window_request
@@ -1252,6 +1298,37 @@ fn handle(app: &Arc<RemoteApp>, mut request: Request) {
                 Err(e) => respond_error(request, 400, "refused", e),
             }
         }
+        // Play here: the player's sound on this remote, its switch and its
+        // volume, applied at once and never through Apply.
+        (Method::Get, "/api/play-here") => {
+            respond_json(request, 200, json!({ "play_here": app.status().play_here }));
+        }
+        (Method::Post, "/api/play-here") => {
+            let body = match read_body(&mut request) {
+                Ok(v) => v,
+                Err(e) => return respond_error(request, 400, "bad-json", e),
+            };
+            let on = body.get("on").and_then(Value::as_bool);
+            let gain = body
+                .get("gain")
+                .and_then(Value::as_u64)
+                .map(|g| g.min(100) as u8);
+            if on.is_none() && gain.is_none() {
+                return respond_error(
+                    request,
+                    400,
+                    "bad-play-here",
+                    "on (true or false) or gain (0 to 100)",
+                );
+            }
+            let (on, gain) = app.set_play_here(on, gain);
+            let status = app.status().play_here;
+            respond_json(
+                request,
+                200,
+                json!({ "ok": true, "play_here": playhere::PlayHereStatus { on, gain, ..status } }),
+            );
+        }
         (Method::Post, "/api/player") => {
             let body = match read_body(&mut request) {
                 Ok(v) => v,
@@ -1467,6 +1544,41 @@ mod tests {
         assert_eq!(percent_decode("a%20b+c%2Fd"), "a b c/d");
         assert_eq!(percent_decode("bad%zz"), "bad%zz");
         assert_eq!(percent_decode("tail%2"), "tail%2");
+    }
+
+    #[test]
+    fn play_here_is_kept_quietly_and_a_configuration_applied_whole_leaves_it() {
+        let dir = std::env::temp_dir().join(format!("glass-remote-ph-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let path = dir.join("config.json");
+        let app = RemoteApp::new(path.clone(), dir.join("cache"), RemoteConfig::default());
+        assert_eq!(app.play_here(), (false, config::DEFAULT_PLAY_HERE_GAIN));
+        let before = app.generation();
+        assert_eq!(app.set_play_here(Some(true), None), (true, 80));
+        assert_eq!(
+            app.set_play_here(None, Some(130)),
+            (true, 100),
+            "the volume is held to 100"
+        );
+        assert_eq!(
+            app.generation(),
+            before,
+            "the sound going on is no new session"
+        );
+        let (kept, _) = RemoteConfig::load(&path);
+        assert!(kept.play_here);
+        assert_eq!(kept.play_here_gain, 100);
+        // The page's Apply sends the whole configuration as it loaded it,
+        // with the switch as it was then: the live word stands.
+        let stale = RemoteConfig {
+            gain_db: 3.0,
+            ..Default::default()
+        };
+        let after = app.update(|c| *c = stale).unwrap();
+        assert_eq!(after.gain_db, 3.0);
+        assert!(after.play_here, "Apply did not turn the sound off");
+        assert_eq!(after.play_here_gain, 100);
+        let _ = std::fs::remove_dir_all(dir);
     }
 
     #[test]

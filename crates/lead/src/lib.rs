@@ -3844,12 +3844,17 @@ pub struct Themes {
 
 /// Play here, the player's sound on the device that draws the face: whether
 /// the player serves it (`served`, the plugin's switch, said on its config
-/// line) and what the host does with it (`on`, `gain` 0 to 100, the host's
-/// own word, a line a page makes for its module and never sends anywhere).
+/// line), whether this host can play it (`here`: a page in a browser, a
+/// remote display with an audio output; the player's own screen never),
+/// and what the host does with it (`on`, `gain` 0 to 100, the host's own
+/// word, a line a page makes for its module and never sends anywhere, or a
+/// remote's own state).
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct PlayHere {
     #[serde(default)]
     pub served: bool,
+    #[serde(default)]
+    pub here: bool,
     #[serde(default)]
     pub on: bool,
     #[serde(default)]

@@ -2099,6 +2099,14 @@ impl TapSource {
     }
 
     /// Take the hops from elsewhere: a remote display's wire.
+    /// Whether this host plays the player's sound itself, as a remote with
+    /// an audio output does (Play here on the face then offers it when the
+    /// player serves the sound); a page in a browser says so for itself.
+    pub fn with_sound_here(mut self, here: bool) -> Self {
+        self.play_here.here = here;
+        self
+    }
+
     pub fn with_hops(mut self, hops: Box<dyn Hops>) -> Self {
         self.hops = hops;
         self
@@ -2203,7 +2211,12 @@ impl TapSource {
             hops: Box::new(IdleHops),
             config_seen: None,
             language: String::new(),
-            play_here: Default::default(),
+            // A page in a browser plays the sound itself; a remote says so
+            // with `with_sound_here`; the player's own screen never does.
+            play_here: lead::PlayHere {
+                here: cfg!(target_arch = "wasm32"),
+                ..Default::default()
+            },
             showing_seen: None,
             show_asked: None,
             probed_seen: None,

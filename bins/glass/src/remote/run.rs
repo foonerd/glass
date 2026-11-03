@@ -12,6 +12,7 @@ use pane::{Anchor, Shown, Surface, WindowMode, WindowOptions};
 use std::process::ExitCode;
 
 use super::config::{Place, Player, RemoteConfig, ThemeChoice, WindowMode as ConfiguredMode};
+use super::playhere;
 use super::RemoteApp;
 use crate::{session, Outcome, Run};
 
@@ -45,6 +46,8 @@ pub struct RemoteSession {
     /// again the moment it can be read, as when the app has been given
     /// access to the device's files.
     unread_text: Option<std::path::PathBuf>,
+    /// Play here: the player's sound on this machine while it is wanted.
+    play_here: playhere::Run,
 }
 
 struct ProbeRun {
@@ -155,7 +158,10 @@ impl RemoteSession {
             self.beacon.address(),
             self.beacon.channel_port
         );
+        // A remote plays the player's sound itself: the face offers Play
+        // here when the player serves it.
         Ok(TapSource::installed()
+            .with_sound_here(true)
             .with_hops(Box::new(hops))
             .with_channel(channel)
             .with_skin(skin))
@@ -164,6 +170,18 @@ impl RemoteSession {
     /// Whether the settings changed since this session began.
     pub fn settings_changed(&self) -> bool {
         self.app.generation() != self.generation
+    }
+
+    /// A command of the face's that is this remote's own (Play here's
+    /// switch and volume): taken here, never sent to the player.
+    pub fn play_here_command(&mut self, command: &intake::Command) -> bool {
+        self.play_here.command(&self.app, command)
+    }
+
+    /// Once a frame: the player's sound here as wanted and served, the
+    /// face told the host's word, the Status panel's row kept.
+    pub fn play_here_tick(&mut self, source: &mut TapSource, served: bool) {
+        self.play_here.tick(&self.app, &self.beacon, source, served);
     }
 
     /// Once a second, what the page shows about the session.
@@ -1177,6 +1195,7 @@ pub fn remote_main(
             page,
             probe: None,
             unread_text,
+            play_here: playhere::Run::new(),
         };
         if let ThemeChoice::Own { meter, .. } | ThemeChoice::Local { meter, .. } = &player.theme {
             logline::say!(
