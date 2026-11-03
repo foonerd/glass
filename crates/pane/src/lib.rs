@@ -1129,12 +1129,18 @@ impl Surface {
             let (path, _) = self.grab.take().expect("the grab is set");
             match self.canvas.read_pixels(None, PixelFormatEnum::RGBA32) {
                 Ok(rgba) => {
-                    let shown = Frame {
-                        blend: expose::Blend::Normal,
-                        width: window_w,
-                        height: window_h,
-                        rgba,
-                    };
+                    // The window's pixels are in the panel's own orientation;
+                    // turned back by the picture's rotation, the picture comes
+                    // as the eye sees it on the screen.
+                    let shown = turned_back(
+                        Frame {
+                            blend: expose::Blend::Normal,
+                            width: window_w,
+                            height: window_h,
+                            rgba,
+                        },
+                        self.rotation,
+                    );
                     match expose::write_png(&path, &shown) {
                         Ok(()) => println!("glass: grab {}", path.display()),
                         Err(err) => eprintln!("glass: grab: {err}"),
@@ -1145,6 +1151,42 @@ impl Surface {
         }
         self.canvas.present();
         Ok(if touched { Shown::Touched } else { Shown::Kept })
+    }
+}
+
+/// A grab of the window turned back by the picture's clockwise rotation,
+/// so a picture drawn turned on a turned panel comes upright: the window
+/// rotated counter-clockwise by `rotation` degrees (0, 90, 180 or 270;
+/// anything else leaves it as it is).
+pub fn turned_back(frame: Frame, rotation: u32) -> Frame {
+    let (w, h) = (frame.width as usize, frame.height as usize);
+    let src = &frame.rgba;
+    let (out_w, out_h, place): (
+        usize,
+        usize,
+        fn(usize, usize, usize, usize) -> (usize, usize),
+    ) = match rotation {
+        // Counter-clockwise a quarter: the right edge becomes the top.
+        90 => (h, w, |x, y, w, _h| (y, w - 1 - x)),
+        180 => (w, h, |x, y, w, h| (w - 1 - x, h - 1 - y)),
+        // Counter-clockwise three quarters: the left edge becomes the top.
+        270 => (h, w, |x, y, _w, h| (h - 1 - y, x)),
+        _ => return frame,
+    };
+    let mut rgba = vec![0u8; out_w * out_h * 4];
+    for y in 0..h {
+        for x in 0..w {
+            let (ox, oy) = place(x, y, w, h);
+            let from = (y * w + x) * 4;
+            let to = (oy * out_w + ox) * 4;
+            rgba[to..to + 4].copy_from_slice(&src[from..from + 4]);
+        }
+    }
+    Frame {
+        blend: frame.blend,
+        width: out_w as u32,
+        height: out_h as u32,
+        rgba,
     }
 }
 
@@ -1290,11 +1332,49 @@ mod tests {
     use super::{
         asked_for, finger_pixel, fitted_rect, fitted_rect_within, footprint, keep_mouse, kms,
         placed_rect, placed_rect_within, rotated_center, scaled_size, shows_nothing, through,
-        unrotate_point, Anchor, Margins, IDENTITY, MAX_MARGIN_PERCENT, TOUCH_MOUSEID,
+        turned_back, unrotate_point, Anchor, Frame, Margins, IDENTITY, MAX_MARGIN_PERCENT,
+        TOUCH_MOUSEID,
     };
 
     fn connector(name: &str, status: &str) -> (String, String) {
         (name.to_string(), status.to_string())
+    }
+
+    #[test]
+    fn a_grab_turned_back_puts_the_picture_upright() {
+        // A 3 by 2 window, each pixel its own number.
+        let px = |n: u8| [n, n, n, 255];
+        let window = Frame {
+            blend: expose::Blend::Normal,
+            width: 3,
+            height: 2,
+            rgba: [px(1), px(2), px(3), px(4), px(5), px(6)].concat(),
+        };
+        let at = |f: &Frame, x: u32, y: u32| f.rgba[((y * f.width + x) * 4) as usize];
+        // Untouched where nothing is turned.
+        assert_eq!(turned_back(window.clone(), 0).rgba, window.rgba);
+        // Counter-clockwise a quarter: 2 wide, 3 tall; the right column
+        // (3, 6) becomes the top row, read left to right.
+        let back = turned_back(window.clone(), 90);
+        assert_eq!((back.width, back.height), (2, 3));
+        assert_eq!([at(&back, 0, 0), at(&back, 1, 0)], [3, 6]);
+        assert_eq!([at(&back, 0, 2), at(&back, 1, 2)], [1, 4]);
+        // Half a turn: the order reversed.
+        let half = turned_back(window.clone(), 180);
+        assert_eq!(
+            half.rgba,
+            [px(6), px(5), px(4), px(3), px(2), px(1)].concat()
+        );
+        // Three quarters: the left column (1, 4) becomes the top row, from the bottom up.
+        let three = turned_back(window.clone(), 270);
+        assert_eq!((three.width, three.height), (2, 3));
+        assert_eq!([at(&three, 0, 0), at(&three, 1, 0)], [4, 1]);
+        assert_eq!([at(&three, 0, 2), at(&three, 1, 2)], [6, 3]);
+        // Turning back one way and the other way is the window again.
+        assert_eq!(
+            turned_back(turned_back(window.clone(), 90), 270).rgba,
+            window.rgba
+        );
     }
 
     #[test]
