@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.15] - 2026-11-03
+
+- **Save as a look.** The look panel keeps the look as adjusted under a name of your own, written as a face theme among the player's own looks (a folder with a face.txt under the player's faces), listed with the looks and chosen at once; **Remove this look**, pressed twice, takes a saved look away. A name a shipped look carries is refused, so the shipped look stays what it is. The API: `POST /api/face/looks`, `DELETE /api/face/looks/:name`. In step: the Manager page; two checks in the look panel's harness; no Find a problem check, no sheet row.
+- **Playback paused before an upgrade restarts the backend.** An upgrade or a rollback of Glass pauses a playing player and gives it three seconds to say so before the install restarts the backend, so the music does not cut off mid-note and comes back where it stood. There is no automatic take of a release that would need to wait; a release is taken by a press.
+- The font rasteriser fault Glass works around since 0.7.96 is reported upstream, with its reproduction; the idle face's redraw rule (Same while nothing changes) is stated on the record.
+
 ## [0.11.14] - 2026-11-03
 
 - **The likeness keeps the bar's band without drawing the bar when the look lets it leave the idle screen.** Since the bar could leave the idle screen (`buttons.idle = leave`), the look panel's likeness for "When nothing plays" still drew the bar while the screen showed none, the pieces standing where they stood: the likeness and the screen no longer agreed. Now the idle likeness draws no bar in that case and keeps its band, as the face keeps the room above the bar whether or not the bar is there; the help under the likeness says so. The look panel's regression checks in a real browser now run before every tag, with two checks for this. Asked on a player with that look.
