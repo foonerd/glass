@@ -2,6 +2,11 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.14] - 2026-11-03
+
+- **The likeness keeps the bar's band without drawing the bar when the look lets it leave the idle screen.** Since the bar could leave the idle screen (`buttons.idle = leave`), the look panel's likeness for "When nothing plays" still drew the bar while the screen showed none, the pieces standing where they stood: the likeness and the screen no longer agreed. Now the idle likeness draws no bar in that case and keeps its band, as the face keeps the room above the bar whether or not the bar is there; the help under the likeness says so. The look panel's regression checks in a real browser now run before every tag, with two checks for this. Asked on a player with that look.
+- **A remote's Status says the controls' composition on the path a remote draws through.** 0.11.13 said it only on the player's own path; a remote's page showed the Controls row empty.
+
 ## [0.11.13] - 2026-11-03
 
 - **The names of the days and the months on the face in the player's language.** The plugin tells the display the player's language on its channel, and the glass-evo face names the days and the months in it, on the player's screen and on remotes alike: every language Volumio offers (28, from Catalan to Vietnamese), English where the player names none or one not here.
