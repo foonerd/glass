@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.15] - 2026-11-03
+
+- **The Play here card's headset as a picture.** The card carried Lucide's thin outline of a pair of headphones over its word, meagre at a card's size; it now carries a headset drawn as a shaded picture in its own greys, the band with a highlight along it, the hinges, and two cups with their pads, drawn by the face at whatever size the card asks. The sheet's small tile keeps the outline. In step: glass-evo's page; a least-only cut of Glass, nothing of the plugin's own changes; no Find a problem check, no sheet row, no new words of the plugin's.
+
 ## [0.11.14] - 2026-11-03
 
 - **The Play here page laid out for a hand at arm's length.** The device's own volume as a thick slider with a large knob and its number across the left two thirds of the page, and one large card at the right, Stop in the warm colour while the sound plays and Play while it stands, as the Power page's cards are. The Stop of 0.11.13 was a small button in the header, too small for a car dash. The rest stands: the sheet's tile starts the sound as it opens the page; the page leaves by itself eight seconds after the last touch. In step: glass-evo's page and the Anymote page; no Find a problem check, no sheet row, no new words of the plugin's.
