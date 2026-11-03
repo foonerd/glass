@@ -49,6 +49,8 @@ const CONFIG = [
   ['fanart_personal_key', ALWAYS], ['fanart*', 'show'],
   ['viewsFace', 'look'],
   ['timeout', 'behaviour'], ['persist_duration', 'behaviour'], ['persist_display', 'behaviour'], ['carDash*', 'behaviour'],
+  // Play here, the sound to a page: an extra the user turned on, and its cap.
+  ['playHere', 'behaviour'], ['playHereCap', 'behaviour'],
   ['animation', 'tuning'], ['frameRate', 'tuning'], ['rotationFPS', 'tuning'], ['rotationQuality', 'tuning'], ['transitionType', 'tuning'],
   ['perfProfile', 'tuning'], ['logLevel', 'tuning'], ['logTargets', 'tuning'],
   ['testReleases', 'tests'],

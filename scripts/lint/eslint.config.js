@@ -21,6 +21,8 @@ const browser = names([
   'window', 'document', 'navigator', 'location', 'localStorage',
   'indexedDB', 'requestAnimationFrame', 'cancelAnimationFrame',
   'EventSource', 'Event', 'FileReader', 'FormData', 'Blob', 'File',
+  // Play here: the sound's socket, the audio element and the lock screen's words.
+  'WebSocket', 'Audio', 'MediaMetadata',
   // The browser module the Face tab and Anymote load before their own script.
   'GlassFace'
 ]);

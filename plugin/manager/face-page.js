@@ -395,7 +395,7 @@
       var message = null;
       try { message = JSON.parse(line); } catch (err) { return; }
       if (message && message.kind === 'showing' && message.meter) face.playerMeter = message.meter;
-      if (message && message.kind === 'state' && message.state) { face.status = String(message.state.status || ''); truth(); }
+      if (message && message.kind === 'state' && message.state) { face.status = String(message.state.status || ''); face.playerState = message.state; truth(); phSession(); }
       if (message && message.kind === 'persist') { face.persist = { mode: message.mode || '', seconds: message.seconds || 0, startedAt: message.startedAt || 0, stays: !!message.stays }; truth(); }
       // What the views carry changed: the other module, if this is not it.
       if (message && message.kind === 'views') {
@@ -615,6 +615,184 @@
     if (stage.requestFullscreen) stage.requestFullscreen().catch(function () {});
   }
 
+  // ---- Play here: the player's sound on this page --------------------------
+  // The lite's PCM over the Manager's WebSocket route (/anymote/listen),
+  // played by Web Audio on the context's clock a quarter second ahead (the
+  // jitter buffer), with the page's own gain (the stream is at the player's
+  // full level, before its volume), routed through a media stream and an
+  // audio element where the browser has them, so a phone keeps playing with
+  // its screen locked and shows the track on its lock screen. The control
+  // shows only where the player's switch is on. The wire is outcast's
+  // contract; pcm.js decodes the frames.
+  var PH_LEAD = 0.25;
+  var ph = { available: false, wanted: false, ws: null, ctx: null, gain: null, dest: null, el: null, segment: null, at: 0, retry: null, backoff: 1000, state: '', rateRefused: 0, gainValue: 0.8 };
+
+  function phSay(key, fill) {
+    var text = key ? face.t(key) : '';
+    if (fill) Object.keys(fill).forEach(function (k) { text = text.replace('{' + k + '}', fill[k]); });
+    ph.state = key || '';
+    say(text, key === 'MANAGER_PLAY_HERE_OFF' || key === 'MANAGER_PLAY_HERE_UNAVAILABLE' || key === 'MANAGER_PLAY_HERE_FULL' || key === 'MANAGER_PLAY_HERE_RATE');
+  }
+
+  function phButton() {
+    var b = $('btn-play-here');
+    if (!b) return;
+    b.classList.toggle('hidden', !ph.available);
+    b.textContent = face.t(ph.wanted ? 'MANAGER_PLAY_HERE_STOP' : 'MANAGER_PLAY_HERE');
+    var g = $('play-here-gain');
+    if (g) { g.classList.toggle('hidden', !(ph.available && ph.wanted)); g.setAttribute('aria-label', face.t('MANAGER_PLAY_HERE_GAIN')); }
+  }
+
+  // Whether the player serves its sound now: the switch on and the lite there.
+  function phAsk() {
+    return fetch('/api/play-here').then(function (r) { return r.ok ? r.json() : null; }).then(function (p) {
+      ph.available = !!(p && p.on && p.available);
+      phButton();
+    }).catch(function () { ph.available = false; phButton(); });
+  }
+
+  function phStart() {
+    ph.wanted = true;
+    phButton();
+    if (!ph.ctx) {
+      var AC = window.AudioContext || window.webkitAudioContext;
+      if (!AC) { ph.wanted = false; phButton(); phSay('MANAGER_PLAY_HERE_UNAVAILABLE'); return; }
+      ph.ctx = new AC();
+      ph.gain = ph.ctx.createGain();
+      ph.gain.gain.value = ph.gainValue;
+      try {
+        ph.dest = ph.ctx.createMediaStreamDestination();
+        ph.gain.connect(ph.dest);
+        ph.el = new Audio();
+        ph.el.srcObject = ph.dest.stream;
+      } catch (e) { ph.dest = null; ph.el = null; ph.gain.connect(ph.ctx.destination); }
+    }
+    // Inside the tap that asked: iOS resumes a context only then.
+    if (ph.ctx.state === 'suspended') ph.ctx.resume().catch(function () {});
+    if (ph.el) ph.el.play().catch(function () {});
+    phSession();
+    phConnect();
+  }
+
+  function phConnect() {
+    if (!ph.wanted || ph.ws) return;
+    if (ph.retry) { clearTimeout(ph.retry); ph.retry = null; }
+    var url = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/anymote/listen';
+    var ws;
+    try { ws = new WebSocket(url); } catch (e) { phSay('MANAGER_PLAY_HERE_UNAVAILABLE'); return; }
+    ws.binaryType = 'arraybuffer';
+    ph.ws = ws;
+    ph.segment = null; ph.at = 0;
+    phSay('MANAGER_PLAY_HERE_CONNECTING');
+    ws.onopen = function () { ph.backoff = 1000; if (!ph.segment) phSay('MANAGER_PLAY_HERE_WAITING'); };
+    ws.onmessage = function (e) {
+      if (typeof e.data === 'string') { phText(e.data); return; }
+      phPcm(e.data);
+    };
+    ws.onerror = function () { /* the close follows */ };
+    ws.onclose = function () {
+      if (ph.ws !== ws) return;
+      ph.ws = null; ph.segment = null; ph.at = 0;
+      if (!ph.wanted) return;
+      var full = ph.state === 'MANAGER_PLAY_HERE_FULL';
+      // The player's word before trying again: the switch gone off is the
+      // end of it; anything else is tried again with a backoff of a second
+      // or two (the lite leaves when nobody listens and comes back on the
+      // next ask).
+      phAsk().then(function () {
+        if (!ph.wanted) return;
+        if (!ph.available) { ph.wanted = false; phButton(); phSay('MANAGER_PLAY_HERE_OFF'); return; }
+        phSay(full ? 'MANAGER_PLAY_HERE_FULL' : 'MANAGER_PLAY_HERE_CONNECTING');
+        ph.retry = setTimeout(phConnect, ph.backoff);
+        ph.backoff = Math.min(ph.backoff * 2, 4000);
+      });
+    };
+  }
+
+  function phText(text) {
+    var m = null;
+    try { m = JSON.parse(text); } catch (e) { return; }
+    if (!m || typeof m.type !== 'string') return;
+    if (m.type === 'segment') {
+      ph.segment = m; ph.at = 0; ph.rateRefused = 0;
+      phSay(m.one_bit ? 'MANAGER_PLAY_HERE_DSD' : 'MANAGER_PLAY_HERE_PLAYING');
+    } else if (m.type === 'end') {
+      ph.segment = null; ph.at = 0;
+      phSay('MANAGER_PLAY_HERE_WAITING');
+    } else if (m.type === 'gap') {
+      ph.at = 0;
+    } else if (m.type === 'full') {
+      phSay('MANAGER_PLAY_HERE_FULL');
+    }
+  }
+
+  function phPcm(buffer) {
+    var seg = ph.segment;
+    if (!seg || !ph.ctx || !window.GlassPcm) return;
+    var channels = window.GlassPcm.decode(seg, buffer);
+    if (!channels || !channels[0].length) return;
+    var buf;
+    try { buf = ph.ctx.createBuffer(channels.length, channels[0].length, seg.rate); } catch (e) {
+      // A rate this browser cannot take: said once per segment; the cap on
+      // the player's System tab brings the stream down.
+      if (ph.rateRefused !== seg.rate) { ph.rateRefused = seg.rate; phSay('MANAGER_PLAY_HERE_RATE', { rate: seg.rate }); }
+      return;
+    }
+    for (var c = 0; c < channels.length; c++) buf.getChannelData(c).set(channels[c]);
+    var src = ph.ctx.createBufferSource();
+    src.buffer = buf;
+    src.connect(ph.gain);
+    var now = ph.ctx.currentTime;
+    if (ph.at < now + 0.02) ph.at = now + PH_LEAD;
+    src.start(ph.at);
+    ph.at += buf.duration;
+  }
+
+  function phStop() {
+    ph.wanted = false;
+    if (ph.retry) { clearTimeout(ph.retry); ph.retry = null; }
+    if (ph.ws) { var ws = ph.ws; ph.ws = null; try { ws.close(); } catch (e) { /* closed already */ } }
+    ph.segment = null; ph.at = 0;
+    if (ph.ctx && ph.ctx.state === 'running') ph.ctx.suspend().catch(function () {});
+    if (ph.el) { try { ph.el.pause(); } catch (e) { /* not playing */ } }
+    if ('mediaSession' in navigator) { try { navigator.mediaSession.playbackState = 'none'; } catch (e) { /* no session */ } }
+    phSay('');
+    phButton();
+  }
+
+  // The lock screen's words: the player's state as the feed brings it.
+  function phSession() {
+    if (!ph.wanted || !('mediaSession' in navigator)) return;
+    var s = face.playerState || {};
+    var art = String(s.albumart || '');
+    if (art && art.charAt(0) === '/') art = location.protocol + '//' + location.hostname + ':3000' + art;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({ title: s.title || 'Volumio', artist: s.artist || '', album: s.album || '', artwork: art ? [{ src: art }] : [] });
+      navigator.mediaSession.playbackState = 'playing';
+      navigator.mediaSession.setActionHandler('pause', phStop);
+      navigator.mediaSession.setActionHandler('stop', phStop);
+    } catch (e) { /* no session: the sound plays anyway */ }
+  }
+
+  function phInit() {
+    var button = $('btn-play-here');
+    if (!button) return;
+    button.addEventListener('click', function () { if (ph.wanted) phStop(); else phStart(); });
+    var g = $('play-here-gain');
+    if (g) {
+      try {
+        var kept = localStorage.getItem('glass-play-here-gain');
+        if (kept !== null && !isNaN(parseInt(kept, 10))) { ph.gainValue = Math.max(0, Math.min(1, parseInt(kept, 10) / 100)); g.value = String(Math.round(ph.gainValue * 100)); }
+      } catch (e) { /* no storage: the default */ }
+      g.addEventListener('input', function () {
+        ph.gainValue = Math.max(0, Math.min(1, parseInt(g.value, 10) / 100));
+        if (ph.gain) ph.gain.gain.value = ph.gainValue;
+        try { localStorage.setItem('glass-play-here-gain', g.value); } catch (e) { /* no storage */ }
+      });
+    }
+    phAsk();
+  }
+
   window.GlassFace = {
     init: function (options) {
       face.t = options.t || face.t;
@@ -622,6 +800,7 @@
       face.fit = !!options.fit;
       var button = $('btn-face-full');
       if (button) button.addEventListener('click', fullScreen);
+      phInit();
       if (face.fit) {
         window.addEventListener('resize', fitted);
         document.addEventListener('fullscreenchange', function () {

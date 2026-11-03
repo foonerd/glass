@@ -27,6 +27,7 @@ const sheetfacts = require('./sheetfacts');
 const backgrounds = require('./backgrounds');
 const { Component, ComponentError, leastOf, pair, manifestFactsOf } = require('./component');
 const { Held } = require('./held');
+const { PlayHere } = require('./playhere');
 const pairing = require('./pairing');
 const { Shelf, MAX_ARCHIVE_BYTES: MAX_SHELF_ARCHIVE } = require('./shelf');
 const views = require('./views');
@@ -115,6 +116,14 @@ class Manager {
     // A release zip brought by hand that cannot go in alone, kept for the
     // other zip of the pair.
     this.held = new Held({ dir: path.join(paths.dataDir, 'held'), logger: this.logger });
+    // Play here: the lite the plugin ships beside the display's binary,
+    // started on demand behind the switch, proxied at its one route.
+    this.playHere = new PlayHere({
+      binary: path.join(paths.pluginPath, 'bin', plugin.volumioArch(), 'outcast-lite'),
+      logger: this.logger,
+      on: function () { return plugin.playHereOn(); },
+      cap: function () { return plugin.playHereCap(); }
+    });
     this.shelf = new Shelf({
       dir: path.join(paths.dataDir, 'shelf'),
       ceilingMb: function () { return typeof plugin.shelfCeilingMb === 'function' ? plugin.shelfCeilingMb() : undefined; },
@@ -174,6 +183,9 @@ class Manager {
         resolve();
       });
       server.on('error', reject);
+      // The one upgrade the Manager takes: Play here's WebSocket, proxied
+      // to the lite on the loopback; every other is destroyed there.
+      server.on('upgrade', function (req, socket, head) { self.playHere.upgrade(req, socket, head); });
     });
     self.logger.info('glass: manager listening on port ' + self.port);
     // A look at the latest release a minute after start and once a day after.
@@ -700,6 +712,9 @@ class Manager {
       const m = self.plugin.faceModule();
       res.json({ ok: true, changed: result.changed, mode: m.mode, has: m.has, face: m.face });
     }));
+    app.get('/face/pcm.js', function (req, res) {
+      res.sendFile(path.join(__dirname, 'pcm.js'), { maxAge: 0 });
+    });
     app.get('/face/face-page.js', function (req, res) {
       res.sendFile(path.join(__dirname, 'face-page.js'), { maxAge: 0 });
     });
@@ -1142,6 +1157,33 @@ class Manager {
 
     // Install from a file: an extra for a player that cannot reach
     // GitHub's files, off unless turned on. Off, the uploads are refused.
+    // Play here: the switch and the rate cap, and what the lite says. The
+    // route for the sound itself is the WebSocket upgrade at
+    // /anymote/listen (the server's 'upgrade' handler), not an API route.
+    app.get('/api/play-here', function (req, res) {
+      res.json(self.playHere.view());
+    });
+    app.post('/api/play-here', wrap(async function (req, res) {
+      const body = req.body || {};
+      const changed = {};
+      if (body.on !== undefined) {
+        if (typeof body.on !== 'boolean') return res.status(400).json({ error: 'bad-request', message: 'on must be true or false' });
+        const result = self.plugin.setPlayHereOn(body.on);
+        changed.on = result.changed;
+        // Off: the lite leaves now and the pages find the route refusing.
+        if (result.changed && !body.on) self.playHere.stop('the switch went off');
+      }
+      if (body.cap !== undefined) {
+        const result = self.plugin.setPlayHereCap(body.cap);
+        if (result.error) return res.status(400).json({ error: result.error, message: 'cap is one of ' + result.caps.join(', ') });
+        changed.cap = result.changed;
+        // The cap is a start argument: a running lite leaves, listeners
+        // reconnect and the next ask starts it with the new cap.
+        if (result.changed) self.playHere.stop('the cap changed');
+      }
+      res.json(Object.assign({ ok: true, changed: changed }, self.playHere.view()));
+    }));
+
     app.post('/api/update/upload-switch', wrap(async function (req, res) {
       const body = req.body || {};
       if (typeof body.upload !== 'boolean') return res.status(400).json({ error: 'bad-request', message: 'upload must be true or false' });
@@ -1439,6 +1481,7 @@ class Manager {
         installed: Object.keys(this.catalog.installed).length
       },
       rings: rings,
+      playHere: this.playHere.view(),
       diskFree: free,
       hostname: os.hostname(),
       upgrade: { last: (this.updater.state && this.updater.state.last) || null, previous: this.updater.previous(), test: this.plugin.testReleases(), job: this.lastInstallJob(), held: this.held.summary() },

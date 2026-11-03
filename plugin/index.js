@@ -2163,6 +2163,38 @@ Glass.prototype.setUploadInstall = function (on) {
     return { changed: true, upload: wanted };
 };
 
+// Play here: the player's sound served to Anymote and the Face tab through
+// the Manager (manager/playhere.js). Off unless set: off, the pages hide
+// the control and the route refuses. The cap is the sample rate above
+// which the sound is resampled on the player (0, as it is); one of the
+// rates the Manager offers.
+const PLAY_HERE_CAPS = [0, 48000, 96000];
+Glass.prototype.playHereOn = function () {
+    return this.config.get('playHere') === true;
+};
+
+Glass.prototype.setPlayHereOn = function (on) {
+    var wanted = on === true;
+    if (this.playHereOn() === wanted) { return { changed: false, on: wanted }; }
+    this.config.set('playHere', wanted);
+    this.logger.info(id + 'play here ' + (wanted ? 'is on' : 'is off'));
+    return { changed: true, on: wanted };
+};
+
+Glass.prototype.playHereCap = function () {
+    var cap = parseInt(this.config.get('playHereCap'), 10);
+    return PLAY_HERE_CAPS.indexOf(cap) === -1 ? 0 : cap;
+};
+
+Glass.prototype.setPlayHereCap = function (cap) {
+    var wanted = parseInt(cap, 10);
+    if (PLAY_HERE_CAPS.indexOf(wanted) === -1) { return { error: 'bad-cap', caps: PLAY_HERE_CAPS }; }
+    if (this.playHereCap() === wanted) { return { changed: false, cap: wanted }; }
+    this.config.set('playHereCap', wanted);
+    this.logger.info(id + 'play here sends ' + (wanted ? 'up to ' + wanted + ' Hz' : 'the stream as it is'));
+    return { changed: true, cap: wanted };
+};
+
 // The ceiling of the shelf for remotes, in megabytes: the archives the
 // player keeps for its remotes' machines never weigh more together. Held
 // inside the shelf's bounds; the default where nothing is set.

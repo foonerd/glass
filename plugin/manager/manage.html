@@ -1346,7 +1346,8 @@
       <div class="panel">
         <div class="row" style="justify-content:space-between;align-items:center">
           <h2 id="face-title" style="margin:0"></h2>
-          <div class="row"><button class="small" id="btn-face-anymote"></button><button class="small"
+          <div class="row"><input type="range" class="hidden" id="play-here-gain" min="0" max="100" value="80" style="width:7em"><button
+              class="small hidden" id="btn-play-here"></button><button class="small" id="btn-face-anymote"></button><button class="small"
               id="btn-face-full"></button></div>
         </div>
         <div class="help" id="face-help" style="margin:10px 0"></div>
@@ -1645,6 +1646,14 @@
         <div style="margin-top:12px">
           <label class="switch"><input type="checkbox" id="upd-test"><span id="upd-test-label"></span></label>
           <div class="help" id="upd-test-help"></div>
+        </div>
+        <div style="margin-top:12px">
+          <div><b id="play-here-title"></b></div>
+          <label class="switch"><input type="checkbox" id="play-here-on"><span id="play-here-label"></span></label>
+          <div class="help" id="play-here-help"></div>
+          <div class="row hidden" id="play-here-cap-row" style="margin-top:6px"><label for="play-here-cap" id="play-here-cap-label"></label>
+            <select id="play-here-cap"><option value="0"></option><option value="48000"></option><option value="96000"></option></select></div>
+          <div class="help hidden" id="play-here-cap-help"></div>
         </div>
         <div style="margin-top:12px">
           <label class="switch"><input type="checkbox" id="upd-upload"><span id="upd-upload-label"></span></label>
@@ -1985,6 +1994,7 @@
   <div class="lightbox" id="lightbox"><img id="lightbox-img" alt=""></div>
   <div class="toasts" id="toasts"></div>
 
+  <script src="/face/pcm.js"></script>
   <script src="/face/face-page.js"></script>
   <script src="/look/lookmodel.js"></script>
   <script src="/diag/report.js"></script>
@@ -3136,7 +3146,16 @@
               ['MANAGER_ST_PLAYER', (s.channel.status || '-') + (s.channel.service ? ' · ' + s.channel.service : '') + (s.channel.title ? ' · ' + (s.channel.artist ? s.channel.artist + ' - ' : '') + s.channel.title : '') +
                 (s.channel.status === 'play' ? ' · ' + (s.measured ? t('MANAGER_ST_MEASURED') : t('MANAGER_ST_NOT_MEASURED')) : '') + (audio && (audio.samplerate || audio.bitdepth || audio.trackType) ? ' · ' + [audio.trackType, audio.samplerate, audio.bitdepth].filter(Boolean).join(' ') : '') + (s.assured && s.assured.count ? ' · ' + t('MANAGER_ST_ASSURED').replace('{count}', s.assured.count).replace('{fields}', (s.assured.fields || []).join(', ')).replace('{from}', (s.assured.from || []).join(', ')) : '')],
               ['MANAGER_ST_RINGS', s.rings.length ? s.rings.map(function (r) { return r.name + ' (' + r.rate + ' Hz, ' + r.channels + ' ch, ' + (r.audio ? r.format + ', ' : '') + (r.healed ? t('MANAGER_ST_RING_HEALED').replace('{n}', r.healed) + ', ' : '') + (r.live ? t('MANAGER_ST_RING_LIVE') : t('MANAGER_ST_RING_QUIET') + (r.writtenAgoMs !== null ? ' ' + Math.round(r.writtenAgoMs / 1000) + ' s' : '')) + ')'; }).join('; ') : t('MANAGER_ST_RINGS_NONE')],
-              ['MANAGER_ST_CHANNEL', s.channel.clients + ' ' + t('MANAGER_ST_CLIENTS')]
+              ['MANAGER_ST_CHANNEL', s.channel.clients + ' ' + t('MANAGER_ST_CLIENTS')],
+              ['MANAGER_ST_PLAY_HERE', (function (p) {
+                if (!p) return '-';
+                if (!p.on) return t('MANAGER_ST_PLAY_HERE_OFF');
+                if (!p.available) return t('MANAGER_ST_PLAY_HERE_MISSING');
+                var capped = p.cap ? ' · ' + t('MANAGER_ST_PLAY_HERE_CAPPED').replace('{cap}', p.cap) : '';
+                if (!p.running || !p.segment) return t('MANAGER_ST_PLAY_HERE_IDLE') + capped;
+                var shape = p.segment.rate + ' Hz, ' + p.segment.bits + '-bit, ' + p.segment.channels + ' ch' + (p.segment.one_bit ? ' (DSD)' : '');
+                return t('MANAGER_ST_PLAY_HERE_ON').replace('{listeners}', p.listeners).replace('{shape}', shape) + capped;
+              })(s.playHere)]
             ]],
             ['MANAGER_ST_SECTION_THEMES', [
               ['MANAGER_ST_THEME', s.activeTheme + (s.themeRule && s.themeRule.folder ? ' · ' + t('MANAGER_ST_THEME_RULE') + ' ' + s.themeRule.tag + ' (' + t({ album: 'MANAGER_ST_THEME_RULE_ALBUM', folder: 'MANAGER_ST_THEME_RULE_FOLDER', source: 'MANAGER_ST_THEME_RULE_SOURCE' }[s.themeRule.by] || 'MANAGER_ST_THEME_RULE_SOURCE') + ')' : '') + ' · ' + ({ random: t('MANAGER_MODE_RANDOM'), list: t('MANAGER_MODE_LIST'), single: t('MANAGER_MODE_SINGLE') }[s.meter.mode] || s.meter.mode) + (s.meter.mode !== 'random' ? ': ' + s.meter.names.join(', ') : '') + (s.showing && s.showing.meter ? ' · ' + t('MANAGER_ST_SHOWING') + ' ' + s.showing.meter : '')],
@@ -4688,8 +4707,42 @@
         api('GET', '/api/logs?lines=300').then(function (d) { pre.textContent = d.lines.length ? d.lines.join('\n') : t('MANAGER_LOG_EMPTY'); pre.scrollTop = pre.scrollHeight; }).catch(function (e) { pre.textContent = errorText(e); });
       };
 
+      // ---- Play here ----------------------------------------------------------
+      // The player's sound served to Anymote and the Face tab: the switch
+      // (off unless set: the pages hide the control and the route refuses)
+      // and the rate cap, both the player's.
+      function renderPlayHere(p) {
+        $('play-here-title').textContent = t('MANAGER_PLAY_HERE_TITLE');
+        $('play-here-label').textContent = t('MANAGER_PLAY_HERE_SWITCH');
+        $('play-here-help').textContent = t('MANAGER_PLAY_HERE_HELP');
+        $('play-here-cap-label').textContent = t('MANAGER_PLAY_HERE_CAP');
+        $('play-here-cap-help').textContent = t('MANAGER_PLAY_HERE_CAP_HELP');
+        [['0', 'MANAGER_PLAY_HERE_CAP_NONE'], ['48000', 'MANAGER_PLAY_HERE_CAP_48'], ['96000', 'MANAGER_PLAY_HERE_CAP_96']].forEach(function (o) {
+          var option = $('play-here-cap').querySelector('option[value="' + o[0] + '"]');
+          if (option) option.textContent = t(o[1]);
+        });
+        $('play-here-on').checked = !!p.on;
+        $('play-here-cap').value = String(p.cap || 0);
+        $('play-here-cap-row').classList.toggle('hidden', !p.on);
+        $('play-here-cap-help').classList.toggle('hidden', !p.on);
+      }
+      function loadPlayHere() {
+        return api('GET', '/api/play-here').then(renderPlayHere).catch(function () { /* an older plugin behind this page */ });
+      }
+      $('play-here-on').onchange = function () {
+        var box = $('play-here-on');
+        box.disabled = true;
+        api('POST', '/api/play-here', { on: box.checked }).then(function (p) { renderPlayHere(p); toast(t('MANAGER_SAVED')); })
+          .catch(function (e) { box.checked = !box.checked; toast(errorText(e), 'error'); }).then(function () { box.disabled = false; });
+      };
+      $('play-here-cap').onchange = function () {
+        api('POST', '/api/play-here', { cap: parseInt($('play-here-cap').value, 10) }).then(function (p) { renderPlayHere(p); toast(t('MANAGER_SAVED')); })
+          .catch(function (e) { toast(errorText(e), 'error'); loadPlayHere(); });
+      };
+
       // ---- upgrading Glass ---------------------------------------------------
       function loadUpdate(force) {
+        loadPlayHere();
         var call = force ? api('POST', '/api/update/check') : api('GET', '/api/update');
         $('upd-body').textContent = t('MANAGER_LOADING');
         return call.then(renderUpdate).catch(function (e) {

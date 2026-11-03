@@ -9,13 +9,19 @@
 // and found right), the string that says it with the values to fill in,
 // and the Manager's tab where it is set, when there is one.
 
-const SYMPTOMS = ['no-meters', 'not-moving', 'restarts', 'touch', 'screen', 'artwork', 'remotes', 'face', 'look', 'forecast', 'browse', 'slow', 'other'];
+const SYMPTOMS = ['no-meters', 'not-moving', 'restarts', 'touch', 'screen', 'artwork', 'remotes', 'face', 'look', 'forecast', 'browse', 'play-here', 'slow', 'other'];
 const graphicsFault = require('./graphics').fault;
 
 // A size as the sheet writes it, `1280x720`, as numbers; null for anything else.
 function sizeOf(text) {
   const m = /^(\d+)x(\d+)$/.exec(String(text || '').trim());
   return m ? { w: parseInt(m[1], 10), h: parseInt(m[2], 10) } : null;
+}
+
+// A segment's shape as the lite says it, in words: `44100 Hz, 16-bit, 2 ch`.
+function shapeOf(segment) {
+  if (!segment) return '-';
+  return segment.rate + ' Hz, ' + segment.bits + '-bit, ' + segment.channels + ' ch' + (segment.capped ? ' (capped)' : '') + (segment.one_bit ? ' (DSD)' : '');
 }
 
 const cause = (check, key, fill, go) => ({ check, kind: 'cause', key, with: fill || {}, go: go || null });
@@ -468,6 +474,28 @@ const CHECKS = [
       const e = f.status.evo;
       const names = e && e.look && e.look.unknownSkies;
       return names && names.length ? note('evo-skies', 'DIAG_EVO_SKIES_UNKNOWN', { names: names.join(', ') }) : null;
+    }
+  },
+  {
+    // Play here, the player's sound to a page: off, said and no more; on,
+    // the lite missing from the build, the lite's own fault, no live audio
+    // ring of the tap while the player plays (the tap not in the chain, or
+    // its snippet without `audio 1`), a one-bit stream, every slot taken;
+    // else the sound served, as the lite says it.
+    id: 'play-here', symptoms: ['play-here', 'other'],
+    run(f) {
+      const p = f.status.playHere;
+      if (!p) return null;
+      if (!p.on) return note('play-here', 'DIAG_PLAY_HERE_OFF', {}, 'system');
+      if (!p.available) return cause('play-here', 'DIAG_PLAY_HERE_MISSING', {}, 'system');
+      if (p.error) return cause('play-here', 'DIAG_PLAY_HERE_LITE', { error: p.error }, 'system');
+      const playing = !!(f.status.channel && f.status.channel.status === 'play');
+      const ring = (f.status.rings || []).some((r) => r.audio && r.tag === 'glass' && r.live);
+      if (playing && !ring) return cause('play-here', 'DIAG_PLAY_HERE_NO_RING', {}, 'system');
+      if (p.segment && p.segment.one_bit) return note('play-here', 'DIAG_PLAY_HERE_DSD', {}, null);
+      if (p.running && p.listeners >= p.max) return note('play-here', 'DIAG_PLAY_HERE_FULL', { max: p.max }, null);
+      if (p.running && p.segment) return ok('play-here', 'DIAG_PLAY_HERE_OK', { listeners: p.listeners, shape: shapeOf(p.segment) });
+      return null;
     }
   },
   {

@@ -1,0 +1,8 @@
+# outcast-lite, the player's sound over a WebSocket for Play here: one small static
+# binary from the Outcast release this names, one archive per architecture, verified
+# against the evo release key (keys/release-signing.pub) before anything of it is packed
+# (scripts/fetch-components.sh), then carried in the plugin zip as bin/<arch>/outcast-lite
+# and covered by the zip's own MANIFEST as every other file.
+NAME=outcast-lite
+VERSION=0.1.5
+REPOSITORY=foonerd/outcast

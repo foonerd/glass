@@ -60,7 +60,7 @@ jobs:
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
           for arch in arm armv7 armv8 x64; do
-            tar -C . --transform "s,^,glass-$version-$arch/," -czf "dist/glass-$version-$arch.tar.gz" "bin/$arch" "lib/$arch" remote/README.md remote/linux
+            tar -C . --exclude="bin/$arch/outcast-lite" --transform "s,^,glass-$version-$arch/," -czf "dist/glass-$version-$arch.tar.gz" "bin/$arch" "lib/$arch" remote/README.md remote/linux
           done
           # What a remote needs is a few megabytes; anything more is the
           # build's leavings, never to be published again.

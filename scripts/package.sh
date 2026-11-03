@@ -32,6 +32,22 @@ for arch in arm armv7 armv8 x64; do
   fi
 done
 
+# The lite (outcast-lite), the player's sound over a WebSocket for Play
+# here: not built here but taken from its own release at the version
+# components/outcast-lite.lock names, verified before anything of it is
+# packed (scripts/fetch-components.sh), one static binary per architecture
+# beside the display's.
+"$ROOT/scripts/fetch-components.sh" outcast-lite
+LITE_VERSION=$(sed -n 's/^VERSION=//p' "$ROOT/components/outcast-lite.lock")
+for arch in arm armv7 armv8 x64; do
+  if [ -d "$STAGE/bin/$arch" ]; then
+    lite="$ROOT/target/components/outcast-lite/$arch/outcast-lite-$LITE_VERSION-$arch/bin/outcast-lite"
+    [ -f "$lite" ] || { echo "package: no outcast-lite $LITE_VERSION for $arch at $lite" >&2; exit 1; }
+    cp "$lite" "$STAGE/bin/$arch/outcast-lite"
+    chmod 755 "$STAGE/bin/$arch/outcast-lite"
+  fi
+done
+
 # The multi-script text fonts, from the glass_fonts repository at a pinned
 # commit, checked by digest: 16 MB each, fetched at packaging rather than
 # kept in this repository. PeppyFont-Italic and the DSEG7 set are in git.
