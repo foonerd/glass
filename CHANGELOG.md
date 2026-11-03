@@ -2,6 +2,12 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.16] - 2026-11-03
+
+- **The changer's sled on the other side of the row.** A theme may put the sled (the pickup under the arm's housing) on either side of the discs' centre line with `changer.sled.side`: `left` or `right` of a vertical row, `above` or `below` a horizontal one; left and above, as before, when the theme leaves it out. The Tailor keeps the word with the theme. Asked on the forum for a skin built from the record changer, where the arm belongs on the right.
+- **Playback paused before every restart of the backend.** 0.11.15 paused a playing player before an upgrade or a rollback from a release; the pause now sits where the restart itself is asked, so an upgrade from a file, a return to stable and the System tab's own restart pause it too.
+- Diagnostics: no Find a problem check, sheet row or Troubleshooting line is needed; a theme key and the manner of the restart.
+
 ## [0.11.15] - 2026-11-03
 
 - **Save as a look.** The look panel keeps the look as adjusted under a name of your own, written as a face theme among the player's own looks (a folder with a face.txt under the player's faces), listed with the looks and chosen at once; **Remove this look**, pressed twice, takes a saved look away. A name a shipped look carries is refused, so the shipped look stays what it is. The API: `POST /api/face/looks`, `DELETE /api/face/looks/:name`. In step: the Manager page; two checks in the look panel's harness; no Find a problem check, no sheet row.
