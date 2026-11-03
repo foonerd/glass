@@ -2,6 +2,15 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.13] - 2026-11-03
+
+- **The names of the days and the months on the face in the player's language.** The plugin tells the display the player's language on its channel, and the glass-evo face names the days and the months in it, on the player's screen and on remotes alike: every language Volumio offers (28, from Catalan to Vietnamese), English where the player names none or one not here.
+- **Rotation with the display plugins, said whole.** Glass turns a screen only where it draws the panel itself (KMS, or an X server of its own); under a kiosk's X server the Touch Display or Display Configuration plugin's turn stands and Glass's own is not applied. The probe now suggests the kernel command line's turn where the Pi Screen Setup plugin wrote one (`video=…,rotate=`), after the Touch Display plugin's angle. Find a problem notes the Display Configuration plugin's files left under `/etc/X11/xorg.conf.d` with the plugin off while Glass draws on an X server of its own. The Screen page carries every case.
+- **A remote's controls said.** The remote's Status panel has a Controls row: shown or hidden, by the look's word or by this remote's own; the journal says the same once per change.
+- **A glass-evo update in the header.** The Manager's header badge for a newer glass-evo, as for Glass; the glass-evo release's manifest is published as an asset of its own and read before any download, so the System tab says the least Glass a release needs.
+- **A meter switch keeps the pictures still in use.** The pictures a theme's meters share stand through a switch (a slot cleared at the switch decoded again off the frame loop and left a frame without it); a picture asked for in another box shows nothing until the one for that box is ready. The timing tests assert their bound on a machine of ours, not on a shared runner.
+- The browsed play and the plus were proven on a player's own queue. In step: the Screen page's table, the Remotes page, the Manager page; a Find a problem note; no sheet row.
+
 ## [0.11.12] - 2026-11-03
 
 - **The picture of the screen comes upright.** On a screen set turned, the display draws the picture turned on the panel, and 0.11.10's picture came as the panel holds it, turned the other way. The display now turns the grab back by the screen's rotation before writing it, so the picture is the screen as the eye sees it. Asked on a turned screen. In step: the Screen page's line; no Find a problem check, no sheet row.
