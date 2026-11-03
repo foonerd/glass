@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.14] - 2026-11-03
+
+- **The Play here page laid out for a hand at arm's length.** The device's own volume as a thick slider with a large knob and its number across the left two thirds of the page, and one large card at the right, Stop in the warm colour while the sound plays and Play while it stands, as the Power page's cards are. The Stop of 0.11.13 was a small button in the header, too small for a car dash. The rest stands: the sheet's tile starts the sound as it opens the page; the page leaves by itself eight seconds after the last touch. In step: glass-evo's page and the Anymote page; no Find a problem check, no sheet row, no new words of the plugin's.
+
 ## [0.11.13] - 2026-11-03
 
 - **The Play here page fits its panel and leaves by itself.** 0.11.12's page laid a tile and two lines of prose that overflowed a look's sheet, the foot line across the tile's word and the tile behind the bar. The page is now the header with the way out and a Stop button (Play while stopped), and the slider with its number, in the panel's own height whatever shape the look names; a tap on the sheet's tile starts the sound as it opens the page, and the page leaves by itself eight seconds after the last touch, never under a finger, the sound playing on and the tile saying "Playing here" until Stop. Seen on a player's screen the same hour. In step: glass-evo's page and the Anymote page; no Find a problem check, no sheet row, no new words of the plugin's.
