@@ -1,6 +1,6 @@
 {
   "name": "glass",
-  "version": "0.11.8",
+  "version": "0.11.10",
   "description": "Glass: VU meters, spectrum, turntables and reels on the player's display",
   "main": "index.js",
   "author": "foonerd; audio path from PeppyMeter Screensaver by 2aCD (original) and Just a Nerd",
@@ -34,6 +34,6 @@
       "amd64"
     ],
     "details": "Glass draws VU meters, spectrum analysers, turntables and tape decks on the player's display from PeppyMeter themes. It is a native display, one small binary, with no Python and no browser in the path. Glass replaces PeppyMeter Screensaver: only one of the two may be enabled.",
-    "changelog": "0.11.8 The display is not started without a theme to show, so the kiosk keeps the screen: the Status tab and Find a problem say which theme is missing."
+    "changelog": "0.11.10 Meters ahead of the sound, a Display setting of 0 to 200 milliseconds for a screen that runs behind the sound; Picture of the screen on the Screen tab; evotap 0.1.1."
   }
 }
