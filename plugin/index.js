@@ -7045,10 +7045,11 @@ Glass.prototype.ensureEnabledInRegistry = function () {
 };
 
 // Playback paused before the backend restarts: a player that plays is
-// paused and given up to three seconds to say so, so the music does not
-// cut off mid-note and comes back where it stood, and the display sees a
-// pause rather than a vanished player; one that stands still is left as
-// it is. Resolves either way.
+// paused and given up to three seconds to say so, so the backend goes
+// down with the player at rest rather than mid-track and the display sees
+// a pause rather than a vanished player; one that stands still is left as
+// it is. The restarted backend stops the player at its start (Volumio's
+// own doing), so it stands stopped at the same track. Resolves either way.
 Glass.prototype.pauseForRestart = function () {
     var self = this;
     var state = self.lastState || {};

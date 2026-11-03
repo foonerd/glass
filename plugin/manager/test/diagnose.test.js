@@ -4,6 +4,10 @@ const test = require('node:test');
 const assert = require('node:assert');
 const { SYMPTOMS, CHECKS, diagnose, lineTime } = require('../diagnose');
 const strings = require('../../i18n/strings_en.json').GLASS;
+// Every language the plugin ships, from the folder: a check's words must be
+// there in each of them.
+const LANGUAGES = require('node:fs').readdirSync(require('node:path').join(__dirname, '../../i18n'))
+  .map((f) => (f.match(/^strings_([a-z]+)\.json$/) || [])[1]).filter(Boolean).sort();
 
 const NOW = Date.parse('2026-10-01T05:00:00+01:00');
 
@@ -291,7 +295,7 @@ test('the three system faults the Troubleshooting page knows are each named with
   const older = find({ asked: true, applies: true, ok: false, failed: 'card', driver: 'drm-rp1-dsi', renderNode: null, cardError: '', reason: '/dev/dri/card0 could not be opened: Permission denied (os error 13)', mesa: agree, x: x });
   assert.strictEqual(older.key, 'DIAG_GRAPHICS_BROKEN');
   // The strings exist in every language, with their holes.
-  for (const lang of ['en', 'de', 'fr']) {
+  for (const lang of LANGUAGES) {
     const s = require('../../i18n/strings_' + lang + '.json').GLASS;
     assert.ok(s.MANAGER_DIAG_GRAPHICS_NO_GPU.indexOf('{driver}') !== -1, lang);
     assert.ok(s.MANAGER_DIAG_GRAPHICS_NO_RIGHT.indexOf('{reason}') !== -1, lang);
@@ -347,7 +351,7 @@ test('the panel switched off is named with its means, dark when nothing could sw
   assert.strictEqual(one(diagnose('screen', f), 'panel-power'), undefined, 'set and not dimmed now says nothing');
   f.power = { display: true, power: 'on', by: 'backlight', idle: { on: false, level: null, bright: null, dimmed: false } };
   assert.strictEqual(one(diagnose('screen', f), 'panel-power'), undefined, 'the switch off says nothing');
-  for (const lang of ['en', 'de', 'fr']) {
+  for (const lang of LANGUAGES) {
     const s = require('../../i18n/strings_' + lang + '.json').GLASS;
     assert.ok(s.MANAGER_DIAG_PANEL_DIMMED.indexOf('{level}') !== -1 && s.MANAGER_DIAG_PANEL_DIMMED.indexOf('{bright}') !== -1, lang);
     for (const key of ['MANAGER_SCREEN_DIM', 'MANAGER_SCREEN_BRIGHTNESS_IDLE', 'MANAGER_SCREEN_DIM_HELP', 'MANAGER_SCREEN_DIM_SET', 'MANAGER_SCREEN_DIMMED_NOW']) assert.ok(s[key], lang + ' ' + key);
@@ -396,7 +400,7 @@ test('the buttons hidden by the look, an install refused for the pair or failed,
   assert.strictEqual(one(diagnose('touch', leaves), 'buttons').kind, 'ok');
   leaves.status.evo.buttons = false;
   assert.strictEqual(one(diagnose('touch', leaves), 'buttons').key, 'DIAG_BUTTONS_HIDDEN', 'hidden is hidden, whatever the idle word');
-  for (const lang of ['en', 'de', 'fr']) {
+  for (const lang of LANGUAGES) {
     const s = require('../../i18n/strings_' + lang + '.json').GLASS;
     for (const key of ['MANAGER_DIAG_BUTTONS_SHOWN_IDLE_LEAVES', 'MANAGER_ST_EVO_BUTTONS_IDLE_LEAVE', 'MANAGER_LOOK_BUTTONS_IDLE', 'MANAGER_LOOK_BUTTONS_IDLE_STAY', 'MANAGER_LOOK_BUTTONS_IDLE_LEAVE', 'MANAGER_LOOK_BUTTONS_IDLE_HINT']) assert.ok(s[key], lang + ' ' + key);
   }
@@ -440,7 +444,7 @@ test('the buttons hidden by the look, an install refused for the pair or failed,
   assert.strictEqual(one(diagnose('other', healthy()), 'held-zip'), undefined);
   const unsaidHeld = healthy(); delete unsaidHeld.held;
   assert.strictEqual(one(diagnose('other', unsaidHeld), 'held-zip'), undefined);
-  for (const lang of ['en', 'de', 'fr']) {
+  for (const lang of LANGUAGES) {
     const s = require('../../i18n/strings_' + lang + '.json').GLASS;
     for (const key of ['MANAGER_DIAG_HELD_GLASS', 'MANAGER_DIAG_HELD_EVO']) assert.ok(s[key].indexOf('{version}') !== -1 && s[key].indexOf('{needs}') !== -1, lang + ' ' + key);
     for (const key of ['MANAGER_UPD_HELD_GLASS', 'MANAGER_UPD_HELD_EVO', 'MANAGER_ST_HELD_GLASS', 'MANAGER_ST_HELD_EVO']) assert.ok(s[key].indexOf('{version}') !== -1 && s[key].indexOf('{needs}') !== -1, lang + ' ' + key);
@@ -458,7 +462,7 @@ test('the buttons hidden by the look, an install refused for the pair or failed,
   const unmarked = healthy(); unmarked.markup = { count: 0, services: [], at: null };
   assert.strictEqual(one(diagnose('browse', unmarked), 'markup'), undefined);
   assert.strictEqual(one(diagnose('browse', healthy()), 'markup'), undefined);
-  for (const lang of ['en', 'de', 'fr']) {
+  for (const lang of LANGUAGES) {
     const s = require('../../i18n/strings_' + lang + '.json').GLASS;
     assert.ok(s.MANAGER_DIAG_MARKUP_CLEARED.indexOf('{count}') !== -1 && s.MANAGER_DIAG_MARKUP_CLEARED.indexOf('{services}') !== -1, lang);
   }
@@ -474,7 +478,7 @@ test('the buttons hidden by the look, an install refused for the pair or failed,
   const unassured = healthy(); unassured.assured = { count: 0, fields: [], from: [], at: null };
   assert.strictEqual(one(diagnose('artwork', unassured), 'assured'), undefined);
   assert.strictEqual(one(diagnose('artwork', healthy()), 'assured'), undefined);
-  for (const lang of ['en', 'de', 'fr']) {
+  for (const lang of LANGUAGES) {
     const s = require('../../i18n/strings_' + lang + '.json').GLASS;
     for (const slot of ['{count}', '{fields}', '{from}']) assert.ok(s.MANAGER_DIAG_ASSURED.indexOf(slot) !== -1 && s.MANAGER_ST_ASSURED.indexOf(slot) !== -1, lang + ' ' + slot);
   }
@@ -491,7 +495,7 @@ test('the buttons hidden by the look, an install refused for the pair or failed,
   assert.strictEqual(one(diagnose('look', healthy()), 'theme-rule'), undefined);
   const unruled = healthy(); unruled.themeRule = null;
   assert.strictEqual(one(diagnose('look', unruled), 'theme-rule'), undefined);
-  for (const lang of ['en', 'de', 'fr']) {
+  for (const lang of LANGUAGES) {
     const s = require('../../i18n/strings_' + lang + '.json').GLASS;
     for (const slot of ['{folder}', '{tag}', '{by}', '{home}']) assert.ok(s.MANAGER_DIAG_THEME_RULE.indexOf(slot) !== -1, lang + ' ' + slot);
     for (const key of ['MANAGER_ST_THEME_RULE', 'MANAGER_ST_THEME_RULE_ALBUM', 'MANAGER_ST_THEME_RULE_FOLDER', 'MANAGER_ST_THEME_RULE_SOURCE']) assert.ok(s[key], lang + ' ' + key);
@@ -509,7 +513,7 @@ test('the buttons hidden by the look, an install refused for the pair or failed,
   assert.strictEqual(one(diagnose('screen', shared), 'backdrop').kind, 'ok');
   shared.display.scale = null; shared.display.fit = false;
   assert.strictEqual(one(diagnose('screen', shared), 'backdrop'), undefined);
-  for (const lang of ['en', 'de', 'fr']) {
+  for (const lang of LANGUAGES) {
     const s = require('../../i18n/strings_' + lang + '.json').GLASS;
     for (const key of ['MANAGER_DISPLAY_SCALE', 'MANAGER_DISPLAY_MARGIN', 'MANAGER_DISPLAY_MARGIN_EACH', 'MANAGER_DISPLAY_PLACE_HELP', 'MANAGER_ST_ON_SCREEN', 'MANAGER_ST_PLACED_FIT', 'MANAGER_ST_PLACED_PIXEL', 'MANAGER_ST_OFF_EDGES', 'POSITION_SCALE', 'POSITION_PLACE', 'POSITION_SCALE_DOC', 'POSITION_PLACE_DOC']) assert.ok(s[key], lang + ' ' + key);
     for (const place of ['CENTER', 'TOP_LEFT', 'TOP', 'TOP_RIGHT', 'LEFT', 'RIGHT', 'BOTTOM_LEFT', 'BOTTOM', 'BOTTOM_RIGHT']) assert.ok(s['MANAGER_PLACE_' + place], lang + ' ' + place);
@@ -524,7 +528,7 @@ test('the buttons hidden by the look, an install refused for the pair or failed,
   const unread = healthy(); unread.browse = null;
   assert.strictEqual(one(diagnose('browse', unread), 'sources'), undefined);
   // The symptom and the rows have their words in every language, the findings with their holes.
-  for (const lang of ['en', 'de', 'fr']) {
+  for (const lang of LANGUAGES) {
     const s = require('../../i18n/strings_' + lang + '.json').GLASS;
     for (const key of ['MANAGER_DIAG_S_BROWSE', 'MANAGER_DIAG_BUTTONS_SHOWN', 'MANAGER_DIAG_BUTTONS_HIDDEN', 'MANAGER_DIAG_NO_SOURCES', 'MANAGER_ST_EVO_BUTTONS', 'MANAGER_ST_EVO_BUTTONS_SHOWN', 'MANAGER_ST_EVO_BUTTONS_HIDDEN', 'MANAGER_ST_LAST_JOB', 'MANAGER_ST_LAST_JOB_NONE', 'MANAGER_ST_JOB_DONE', 'MANAGER_ST_JOB_FAILED']) assert.ok(s[key], lang + ' ' + key);
     assert.ok(s.MANAGER_DIAG_INSTALL_NEEDS_PAIR.indexOf('{name}') !== -1 && s.MANAGER_DIAG_INSTALL_NEEDS_PAIR.indexOf('{message}') !== -1, lang);
