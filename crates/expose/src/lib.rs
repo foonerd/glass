@@ -4393,10 +4393,18 @@ pub fn moving_parts(
     } else {
         spec.sled_file.as_str()
     };
-    let (sx, sy) = if spec.horizontal {
-        (ax, spec.pos.1 as f32 - pose.radius)
+    // The sled sits its radius off the discs' centre line, across the bar:
+    // above a horizontal row and left of a vertical one unless the theme's
+    // `changer.sled.side` puts it on the other side.
+    let off = if spec.sled_beyond {
+        pose.radius
     } else {
-        (spec.pos.0 as f32 - pose.radius, ay)
+        -pose.radius
+    };
+    let (sx, sy) = if spec.horizontal {
+        (ax, spec.pos.1 as f32 + off)
+    } else {
+        (spec.pos.0 as f32 + off, ay)
     };
     let mut parts = Vec::with_capacity(4);
     for (file, cx, cy) in [(sled_file, sx, sy), (spec.head_file.as_str(), ax, ay)] {
@@ -4530,6 +4538,7 @@ mod changer_tests {
             fade_s: 0.5,
             sled_start: None,
             sled_end: None,
+            sled_beyond: false,
             toc_s: 0.4,
             rpm: 50.0,
             sled_on_file: file("sled_on.png"),
@@ -4865,6 +4874,53 @@ mod changer_tests {
     /// to the disc and through the read, the layers' key changes once, when
     /// the arm arrives over a slot, while the parts stand at many places.
     #[test]
+    fn the_sled_sits_on_the_side_of_the_row_the_theme_names() {
+        let (dir, spec) = theme("sled-side");
+        let mut cache = ChangerCache::default();
+        let mut pose =
+            ChangerMotion::default().advance(&scene(&spec, Vec::new(), 0.0, 0.0, false), 0);
+        pose.radius = 40.0;
+        pose.along = 400.0;
+        fn sled_centre(
+            spec: &lead::ChangerSpec,
+            cache: &mut ChangerCache,
+            pose: &ChangerPose,
+        ) -> (i32, i32) {
+            let parts = moving_parts(spec, cache, pose);
+            assert_eq!(
+                parts.len(),
+                2,
+                "the sled and the head, no shadow in this theme"
+            );
+            // The sled picture is 60 by 10: its centre from its top left.
+            (parts[0].at.0 + 30, parts[0].at.1 + 5)
+        }
+        // A horizontal row: the sled above the discs' centre line, its
+        // radius off it, or below when the theme says so.
+        assert_eq!(sled_centre(&spec, &mut cache, &pose), (400, 260));
+        let below = lead::ChangerSpec {
+            sled_beyond: true,
+            ..spec.clone()
+        };
+        assert_eq!(sled_centre(&below, &mut cache, &pose), (400, 340));
+        // A vertical row: left of the line, or right.
+        let upright = lead::ChangerSpec {
+            horizontal: false,
+            pos: (300, 100),
+            head_park: (300, 40),
+            ..spec.clone()
+        };
+        pose.along = 100.0;
+        assert_eq!(sled_centre(&upright, &mut cache, &pose), (260, 100));
+        let right = lead::ChangerSpec {
+            sled_beyond: true,
+            ..upright
+        };
+        assert_eq!(sled_centre(&right, &mut cache, &pose), (340, 100));
+        let _ = std::fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn a_move_of_the_sled_or_the_arm_composes_nothing_again() {
         let (dir, spec) = theme("moves");
         let cover = dir.join("cover.png").to_string_lossy().to_string();
@@ -4959,6 +5015,7 @@ mod changer_tests {
             fade_s: 0.5,
             sled_start: Some(70),
             sled_end: Some(164),
+            sled_beyond: false,
             toc_s: 0.8,
             rpm: 50.0,
             sled_on_file: file("sled_dark_on.png"),

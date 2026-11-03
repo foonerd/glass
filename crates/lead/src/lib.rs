@@ -5389,6 +5389,11 @@ pub struct ChangerSpec {
     /// radius, when the theme leaves them out.
     pub sled_start: Option<u32>,
     pub sled_end: Option<u32>,
+    /// `changer.sled.side`: which side of the discs' centre line the sled
+    /// sits on, its radius off it: `left` or `right` of a vertical row,
+    /// `above` or `below` a horizontal one. True for the far side (right,
+    /// below); the near side when the theme leaves it out.
+    pub sled_beyond: bool,
     /// `changer.toc.duration`: seconds the sled takes to read the lead-in
     /// once the disc is up to speed, sweeping a little out and back with
     /// the laser on, before it seeks to the track.
@@ -5484,6 +5489,8 @@ pub fn meter_changer(meters_txt: &str, meter: &str, theme_dir: &str) -> Option<C
         fade_s: seconds("changer.fade.duration", 0.5),
         sled_start: get("changer.sled.start").and_then(|v| v.parse().ok()),
         sled_end: get("changer.sled.end").and_then(|v| v.parse().ok()),
+        sled_beyond: get("changer.sled.side")
+            .is_some_and(|v| matches!(v.trim().to_ascii_lowercase().as_str(), "right" | "below")),
         toc_s: seconds("changer.toc.duration", 0.8),
         rpm: get("changer.rotation.speed")
             .and_then(|v| v.parse::<f32>().ok())
@@ -5723,6 +5730,25 @@ mod tests {
         let zero = meter_changer(&format!("{base}changer.rotation.speed = 0\n"), "m", "")
             .expect("a changer");
         assert_eq!(zero.rpm, 50.0);
+    }
+
+    #[test]
+    fn the_sleds_side_is_the_themes_word_or_the_near_one() {
+        let base = "[m]\nchanger.pos = 10,20\nchanger.pitch = 100\nchanger.disc.size = 80\nchanger.head.park = 0,0\n";
+        let unsaid = meter_changer(base, "m", "").expect("a changer");
+        assert!(!unsaid.sled_beyond);
+        for (word, beyond) in [
+            ("right", true),
+            ("below", true),
+            (" Below ", true),
+            ("left", false),
+            ("above", false),
+            ("elsewhere", false),
+        ] {
+            let said = meter_changer(&format!("{base}changer.sled.side = {word}\n"), "m", "")
+                .expect("a changer");
+            assert_eq!(said.sled_beyond, beyond, "{word:?}");
+        }
     }
 
     #[test]

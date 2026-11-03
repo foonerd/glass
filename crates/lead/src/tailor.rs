@@ -179,6 +179,7 @@ const RULES: &[(&str, Kind)] = &[
     ("changer.fade.duration", Kind::Keep),
     ("changer.sled.start", Kind::Len),
     ("changer.sled.end", Kind::Len),
+    ("changer.sled.side", Kind::Keep),
     ("changer.toc.duration", Kind::Keep),
     ("changer.rotation.speed", Kind::Keep),
     ("changer.disc.filename", Kind::Picture),
