@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.11] - 2026-11-03
+
+- **Meters ahead of the sound reaches the tap.** 0.11.10 wrote the lead into the display's configuration and showed it on the Status tab, but the demand file the tap reads carried 0 whatever was set: the plugin took the number from the spectrum configuration's section instead of the meter configuration's. The demand now carries the lead set, and the tap publishes the hops ahead by it. In step: nothing new; the Status row and the Troubleshooting paragraph stand.
+
 ## [0.11.10] - 2026-11-03
 
 - **Meters ahead of the sound.** A new Display setting in the Manager's Appearance tab, 0 to 200 milliseconds, 0 unless set: for a screen whose own path to the eye runs behind the sound, a TV over HDMI among them. The tap publishes each measurement that much before its audio is heard, so the needles and the sound meet at the eye; remote displays follow it, since the hops reach them the same way. The key is `screen.lead` in the display's configuration; the plugin carries it to the tap in the demand file as `ahead_ms`, which evotap 0.1.1 reads (a demand without it reads as before, and a lead of nothing is left off the file). The Status tab's Screen row says the lead in force. In step: the Status row and a Troubleshooting paragraph; no Find a problem check.
