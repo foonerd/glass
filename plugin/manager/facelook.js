@@ -100,4 +100,40 @@ function frostSuits(boardClass) {
   return ['pi4', 'pi5', 'x64'].indexOf(String(boardClass)) !== -1;
 }
 
-module.exports = { PREFIX, settingsOf, plan, planAll, resetPlan, frostSuits, themeKeys };
+// The sections of a face theme in the order the shipped Example writes them;
+// a section not here comes after, in the order met.
+const SECTIONS = ['colours', 'glass', 'buttons', 'power', 'clock', 'date', 'weather', 'measure', 'idle'];
+
+// A face theme's text from a look's keys, as a folder's face.txt: the name and
+// a line about it under [theme], then every key under its section. Keys set
+// elsewhere (the size, the board's word) and the look's own name are left
+// out; a name or a value that is not one is refused, so the file written
+// is one themeKeys reads back whole.
+function themeText(name, description, keys) {
+  const title = String(name || '').trim();
+  if (!/^[A-Za-z0-9][A-Za-z0-9 _-]{0,47}$/.test(title)) return { error: 'bad-name' };
+  const says = String(description || '').trim().replace(/[\r\n]+/g, ' ').slice(0, 120);
+  const bySection = {};
+  for (const key of Object.keys(keys || {})) {
+    if (!NAME.test(key) || OWN.indexOf(key) !== -1 || key === 'theme' || key.indexOf('theme.') === 0) continue;
+    const value = keys[key];
+    if (value === null || value === undefined || value === '') continue;
+    const text = String(value).trim();
+    if (!VALUE.test(text)) return { error: 'bad-value', name: key };
+    const at = key.indexOf('.');
+    const section = at > 0 ? key.slice(0, at) : '';
+    (bySection[section] = bySection[section] || []).push([at > 0 ? key.slice(at + 1) : key, text]);
+  }
+  const order = SECTIONS.concat(Object.keys(bySection).filter((s) => s && SECTIONS.indexOf(s) === -1).sort());
+  const lines = ['# A face theme for glass-evo, saved from the Glass Manager\'s look panel.', '', '[theme]', 'name = ' + title];
+  if (says) lines.push('description = ' + says.replace(/^#/, ''));
+  if (bySection['']) { lines.push(''); bySection[''].forEach(([k, v]) => lines.push(k + ' = ' + v)); }
+  for (const section of order) {
+    if (!bySection[section]) continue;
+    lines.push('', '[' + section + ']');
+    bySection[section].forEach(([k, v]) => lines.push(k + ' = ' + v));
+  }
+  return { text: lines.join('\n') + '\n', name: title };
+}
+
+module.exports = { PREFIX, settingsOf, plan, planAll, resetPlan, frostSuits, themeKeys, themeText };

@@ -6618,6 +6618,37 @@ function themeMissingLine(m) {
     }
 }
 
+// A look saved under a name: the keys the look panel holds, written as a
+// face theme under the player's own faces, where the list reads it from and
+// the face loads it. A name a shipped look carries is refused, so the shipped
+// one stays what it is; a name already saved is written over.
+Glass.prototype.saveLook = function (name, description, keys) {
+    var made = facelook.themeText(name, description, keys);
+    if (made.error) { return { error: 'GLASS.MANAGER_LOOK_NAME_BAD', message: made.name || '' }; }
+    if (fs.existsSync(EVO_LOOKS_DIR + '/' + made.name)) { return { error: 'GLASS.MANAGER_LOOK_NAME_SHIPPED' }; }
+    var dir = FACES_DIR + '/' + made.name;
+    try {
+        fs.mkdirSync(dir, { recursive: true });
+        fs.writeFileSync(dir + '/face.txt.part', made.text);
+        fs.renameSync(dir + '/face.txt.part', dir + '/face.txt');
+    } catch (e) {
+        return { error: 'GLASS.MANAGER_LOOK_SAVE_FAILED', message: e && e.message ? e.message : String(e) };
+    }
+    this.logger.info(id + 'face: the look "' + made.name + '" saved under the faces');
+    return { ok: true, name: made.name };
+};
+
+// A saved look removed: the player's own faces only, never a shipped one.
+Glass.prototype.removeLook = function (name) {
+    var title = String(name || '').trim();
+    if (!/^[A-Za-z0-9][A-Za-z0-9 _-]{0,47}$/.test(title)) { return { error: 'GLASS.MANAGER_LOOK_NAME_BAD' }; }
+    var dir = FACES_DIR + '/' + title;
+    if (!fs.existsSync(dir + '/face.txt')) { return { error: 'GLASS.MANAGER_LOOK_NOT_FOUND' }; }
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch (e) { return { error: 'GLASS.MANAGER_LOOK_SAVE_FAILED', message: e && e.message ? e.message : String(e) }; }
+    this.logger.info(id + 'face: the look "' + title + '" removed from the faces');
+    return { ok: true, name: title };
+};
+
 Glass.prototype.activateTheme = function (folder) {
     var self = this;
     if (!safeFolderName(folder)) { return { changed: false, error: 'invalid' }; }
@@ -7018,6 +7049,26 @@ Glass.prototype.ensureEnabledInRegistry = function () {
 // queued: a stop followed by a start from inside the service would end
 // with the stop, since the stop takes every process of the service with
 // it, the one waiting to start it again included.
+// Playback paused before an upgrade restarts the backend: a player that
+// plays is paused and given up to three seconds to say so; one that stands
+// still is left as it is. Resolves either way.
+Glass.prototype.pauseForRestart = function () {
+    var self = this;
+    var state = self.lastState || {};
+    if (state.status !== 'play') { return Promise.resolve(false); }
+    self.logger.info(id + 'upgrade: playback paused before the backend restarts');
+    try { self.commandRouter.volumioPause(); } catch (e) { return Promise.resolve(false); }
+    return new Promise(function (resolve) {
+        var waited = 0;
+        var look = function () {
+            var now = (self.lastState || {}).status;
+            if (now !== 'play' || waited >= 3000) { return resolve(now !== 'play'); }
+            waited += 250; setTimeout(look, 250);
+        };
+        setTimeout(look, 250);
+    });
+};
+
 Glass.prototype.restartBackend = function () {
     var self = this;
     self.logger.info(id + 'upgrade: restarting the backend');

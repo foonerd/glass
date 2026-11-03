@@ -2,7 +2,7 @@
 
 const test = require('node:test');
 const assert = require('node:assert');
-const { settingsOf, plan, planAll, resetPlan, frostSuits, themeKeys } = require('../facelook');
+const { settingsOf, plan, planAll, resetPlan, frostSuits, themeKeys, themeText } = require('../facelook');
 
 const current = { 'screen.rotation': '270', 'face.size': 'car', 'face.frost.suits': 'true', 'face.theme': 'Midnight', 'face.colours.accent': '#ff8800', 'face.glass.bar': '0.6', 'face.': 'x' };
 
@@ -63,4 +63,16 @@ test('a reset with a request: the look removed, the request set, a key named aga
 test('frost suits the boards with room for it', function () {
   ['pi5', 'pi4', 'x64'].forEach((c) => assert.ok(frostSuits(c), c));
   ['pi3', 'zero2', 'pi1', 'pi', 'other', 'other4', undefined].forEach((c) => assert.ok(!frostSuits(c), String(c)));
+});
+
+test('a look saved under a name is a face theme its reader gets back whole', function () {
+  const keys = { 'colours.accent': '#ff8800', 'glass.bar': '0.6', 'clock.face': 'flip', 'date.format': '%A, %-d %B %Y', size: 'car', 'frost.suits': 'true', theme: 'Midnight', 'theme.description': 'x', 'weather.span': 'hours2', 'clock.ink': '' };
+  const made = themeText('My evening look', 'Warm, with the flip clock', keys);
+  assert.ok(made.text, JSON.stringify(made));
+  assert.ok(made.text.indexOf('[theme]\nname = My evening look\ndescription = Warm, with the flip clock') !== -1);
+  const back = themeKeys(made.text);
+  assert.deepStrictEqual(back, { 'theme.name': 'My evening look', 'theme.description': 'Warm, with the flip clock', 'colours.accent': '#ff8800', 'glass.bar': '0.6', 'clock.face': 'flip', 'date.format': '%A, %-d %B %Y', 'weather.span': 'hours2' });
+  assert.ok(made.text.indexOf('[colours]') < made.text.indexOf('[clock]') && made.text.indexOf('[clock]') < made.text.indexOf('[date]'), 'the sections in the Example\'s order');
+  assert.deepStrictEqual(themeText('../evil', '', keys), { error: 'bad-name' });
+  assert.deepStrictEqual(themeText('Fine', '', { 'clock.ink': 'bad\nline' }), { error: 'bad-value', name: 'clock.ink' });
 });

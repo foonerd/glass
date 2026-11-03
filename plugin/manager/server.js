@@ -623,6 +623,20 @@ class Manager {
       res.json(result);
     });
 
+    // A look saved under a name from the look panel, and one removed.
+    app.post('/api/face/looks', wrap(async function (req, res) {
+      const body = req.body || {};
+      const result = await self.exclusive(function () { return self.plugin.saveLook(body.name, body.description, body.keys); });
+      if (result.error) return res.status(400).json(result);
+      res.json(result);
+    }));
+
+    app.delete('/api/face/looks/:name', wrap(async function (req, res) {
+      const result = await self.exclusive(function () { return self.plugin.removeLook(req.params.name); });
+      if (result.error) return res.status(result.error === 'GLASS.MANAGER_LOOK_NOT_FOUND' ? 404 : 400).json(result);
+      res.json(result);
+    }));
+
     // Interactive controls: as the theme says, on, or off.
     app.get('/api/touch', function (req, res) {
       res.json({ interactive: self.plugin.interactiveMode() });
@@ -1747,6 +1761,10 @@ class Manager {
     self.exclusive(async function () {
       try {
         const staged = rollback ? await self.updater.stagePrevious(job) : await self.updater.download(job);
+        // The backend goes down with the install: playback is paused first,
+        // so the music does not cut off mid-note and comes back where it
+        // stood, and the display sees a pause rather than a vanished player.
+        try { await self.plugin.pauseForRestart(); } catch (e) { self.logger.warn('glass: manager: not paused before the restart: ' + (e && e.message ? e.message : e)); }
         // The component here is brought to what that Glass works with
         // first, a glass-evo zip kept from an earlier upload used before
         // any is fetched.

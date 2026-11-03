@@ -1589,7 +1589,13 @@
           </div>
           <div class="look-adjust">
             <div class="help"><span id="look-adjust-title"></span> <span id="look-adjusted" hidden>· <span
-                  id="look-adjusted-word"></span> <button class="textlink" id="btn-look-plain"></button></span></div>
+                  id="look-adjusted-word"></span> <button class="textlink" id="btn-look-plain"></button></span>
+              · <button class="textlink" id="btn-look-save-as"></button> <button class="textlink" id="btn-look-remove" hidden></button></div>
+            <div class="row" id="look-save-row" hidden style="align-items:center;gap:8px;margin:6px 0 10px">
+              <input type="text" id="look-save-name" maxlength="48" size="28" spellcheck="false">
+              <button class="small" id="btn-look-save-do"></button>
+              <span class="help" id="look-save-help"></span>
+            </div>
             <div id="look-sections"></div>
           </div>
         </div>
@@ -3974,6 +3980,9 @@
         var scale = { large: 1.4, car: 2 }[$('screen-face').value] || 1;
         var place = lookPlace(v);
         if (cards) { $('look-cards').innerHTML = lookCards(scale); lookPictures(); }
+        // A saved look of the player's own may be removed; a shipped one and the built-in not.
+        var chosenLook = lookFind(lookUi.chosen);
+        $('btn-look-remove').hidden = !(chosenLook && chosenLook.shipped === false);
         Array.prototype.forEach.call($('look-cards').children, function (card) {
           // The picture's tile is marked while its chooser is open; a look's card while it is the one chosen.
           var on = card.hasAttribute('data-idle-pic') ? !!lookUi.pictures : card.getAttribute('data-look') === lookUi.chosen;
@@ -4088,6 +4097,10 @@
         lookUi.f = f;
         api('GET', '/api/weather').then(function (w) { lookUi.weather = w; paintWeather(); paintLook(); }).catch(function () { /* an older plugin behind this page */ });
         lookUi.chosen = lookFind(s.theme) ? s.theme : '';
+        $('btn-look-save-as').textContent = t('MANAGER_LOOK_SAVE_AS');
+        $('btn-look-save-do').textContent = t('MANAGER_LOOK_SAVE_DO');
+        $('look-save-help').textContent = t('MANAGER_LOOK_SAVE_HELP');
+        $('btn-look-remove').textContent = t('MANAGER_LOOK_REMOVE');
         lookUi.base = lookBase(lookUi.chosen);
         lookUi.v = LOOK.lay(lookUi.base, s);
         lookUi.saved = { chosen: lookUi.chosen, v: LOOK.lay(lookUi.v) };
@@ -4249,6 +4262,43 @@
       $('look-sections').onkeydown = function (e) { if (e.key === 'Enter' && e.target.id === 'look-weather-name') { e.preventDefault(); weatherSearch(); } };
       $('look-sections').oninput = function (e) { if (e.target.getAttribute('data-key')) lookInput(e.target); };
       $('btn-look-plain').onclick = function () { lookUi.v = LOOK.lay(lookUi.base); lookOwnPatterns(); paintLook(); };
+      // A look saved under a name: the values as adjusted here, written as a face
+      // theme among the player's own; the new card chosen once it is listed.
+      $('btn-look-save-as').onclick = function () {
+        var row = $('look-save-row');
+        row.hidden = !row.hidden;
+        if (!row.hidden) { $('look-save-name').placeholder = t('MANAGER_LOOK_SAVE_NAME'); $('look-save-name').focus(); }
+      };
+      $('btn-look-save-do').onclick = function () {
+        var name = $('look-save-name').value.trim();
+        if (!name) { $('look-save-name').focus(); return; }
+        var keys = {};
+        Object.keys(lookUi.v || {}).forEach(function (k) { if (k !== 'theme' && k.indexOf('theme.') !== 0 && k !== 'size' && k !== 'frost.suits') keys[k] = lookUi.v[k]; });
+        $('btn-look-save-do').disabled = true;
+        api('POST', '/api/face/looks', { name: name, description: '', keys: keys }).then(function (r) {
+          toast(t('MANAGER_LOOK_SAVED_AS') + ' ' + r.name);
+          $('look-save-row').hidden = true; $('look-save-name').value = '';
+          return loadLook().then(function () { var card = Array.prototype.filter.call($('look-cards').querySelectorAll('.look-card[data-look]'), function (c) { return c.getAttribute('data-look') === r.name; })[0]; if (card) card.click(); });
+        }).catch(function (e) { toast(errorText(e), 'error'); }).then(function () { $('btn-look-save-do').disabled = false; });
+      };
+      // A saved look removed: pressed twice, the second press within a few seconds.
+      $('btn-look-remove').onclick = function () {
+        var name = lookUi.chosen;
+        var found = lookFind(name);
+        if (!name || !found || found.shipped) return;
+        if (!$('btn-look-remove').dataset.armed) {
+          $('btn-look-remove').dataset.armed = '1';
+          $('btn-look-remove').textContent = t('MANAGER_LOOK_REMOVE_SURE');
+          setTimeout(function () { delete $('btn-look-remove').dataset.armed; $('btn-look-remove').textContent = t('MANAGER_LOOK_REMOVE'); }, 5000);
+          return;
+        }
+        delete $('btn-look-remove').dataset.armed;
+        $('btn-look-remove').textContent = t('MANAGER_LOOK_REMOVE');
+        api('DELETE', '/api/face/looks/' + encodeURIComponent(name)).then(function (r) {
+          toast(t('MANAGER_LOOK_REMOVED') + ' ' + r.name);
+          return loadLook().then(function () { var card = $('look-cards').querySelector('.look-card[data-look=""]'); if (card) card.click(); });
+        }).catch(function (e) { toast(errorText(e), 'error'); });
+      };
       // Every key the panel sets goes with the save, removed where the look
       // already says it, so the settings hold the user's adjustments alone;
       // one that is stored as it stands is left as it is.
