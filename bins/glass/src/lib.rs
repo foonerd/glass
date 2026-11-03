@@ -592,6 +592,30 @@ fn face_keys_with_remote<'a>(
     }
 }
 
+/// The bar of controls as composed for a remote, in words for its Status
+/// panel and the journal: shown or hidden, and whose word that was.
+fn controls_word(
+    keys: &std::collections::BTreeMap<String, String>,
+    remote: Option<&RemoteSession>,
+) -> String {
+    let own = remote.and_then(|r| r.app.buttons().over_look()).is_some();
+    let shown = match keys
+        .get("buttons.show")
+        .map(|v| v.trim().to_ascii_lowercase())
+    {
+        Some(v) if matches!(v.as_str(), "off" | "false" | "0" | "no" | "hidden") => "hidden",
+        _ => "shown",
+    };
+    format!(
+        "{shown}, {}",
+        if own {
+            "this remote's word"
+        } else {
+            "the look's word"
+        }
+    )
+}
+
 fn session(
     run: &Run,
     mut remote: Option<&mut RemoteSession>,
@@ -903,6 +927,8 @@ fn session(
     let mut leave: Option<&'static str> = None;
     // The theme went while the display ran: it leaves, and says so by its exit.
     let mut no_theme = false;
+    // The controls' composition as last said to a remote's status.
+    let mut controls_said: Option<String> = None;
     // A picture of the screen was asked: the next frame goes up whole, so
     // the grab comes at once on a screen that stands still.
     let mut grab_whole = false;
@@ -1356,6 +1382,16 @@ fn session(
             };
             if let Some(face) = face.as_deref_mut() {
                 let face_keys = face_keys_with_remote(&skin.run.face, remote.as_deref());
+                // A remote's Status panel says how the controls were
+                // composed, and the journal once per change.
+                if let Some(remote) = remote.as_deref() {
+                    let word = controls_word(&face_keys, Some(remote));
+                    if controls_said.as_deref() != Some(word.as_str()) {
+                        logline::say!(Info, "remotes", "controls {word}");
+                        remote.app.set_status(|s| s.controls = word.clone());
+                        controls_said = Some(word);
+                    }
+                }
                 let view = View {
                     input: &input,
                     fonts: &assets.fonts,

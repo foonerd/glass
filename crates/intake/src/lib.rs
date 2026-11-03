@@ -1944,6 +1944,8 @@ pub struct TapSource {
     hops: Box<dyn Hops>,
     /// The configuration change the channel last announced, until taken.
     config_seen: Option<(String, String, String)>,
+    /// The player's language as its last config line said.
+    language: String,
     showing_seen: Option<(String, String)>,
     show_asked: Option<String>,
     /// The plugin's answer to a probe request, until taken.
@@ -2197,6 +2199,7 @@ impl TapSource {
         Self {
             hops: Box::new(IdleHops),
             config_seen: None,
+            language: String::new(),
             showing_seen: None,
             show_asked: None,
             probed_seen: None,
@@ -2831,7 +2834,13 @@ impl Source for TapSource {
                     version,
                     theme,
                     meter,
-                } => self.config_seen = Some((version, theme, meter)),
+                    language,
+                } => {
+                    if !language.is_empty() {
+                        self.language = language;
+                    }
+                    self.config_seen = Some((version, theme, meter));
+                }
                 Event::Showing { theme, meter } => self.showing_seen = Some((theme, meter)),
                 Event::Show { meter } => self.show_asked = Some(meter),
                 Event::Weather(weather) => self.weather_held = weather,
@@ -3037,6 +3046,7 @@ impl Source for TapSource {
 
         Input {
             levels: self.levels_held,
+            language: self.language.clone(),
             bins: Bins {
                 values: self.spectrum_held.clone(),
                 bank: self.bank_held.clone(),
@@ -3379,6 +3389,7 @@ pub fn input_from_records(
         .unwrap_or_default();
     let bins = decode_spectrum(spectrum, spectrum_bins).unwrap_or_default();
     Input {
+        language: String::new(),
         levels,
         bins: Bins {
             values: bins,

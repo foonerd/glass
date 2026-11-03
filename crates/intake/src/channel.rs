@@ -33,6 +33,8 @@ pub enum Event {
         version: String,
         theme: String,
         meter: String,
+        /// The player's language code, for the words a face draws.
+        language: String,
     },
     /// The meter the player's own display shows, for remotes that follow it.
     Showing { theme: String, meter: String },
@@ -517,6 +519,7 @@ pub fn decode(line: &[u8]) -> Option<Event> {
             version: text("version"),
             theme: text("theme"),
             meter: text("meter"),
+            language: text("language"),
         }),
         "showing" => Some(Event::Showing {
             theme: text("theme"),
@@ -887,6 +890,7 @@ mod tests {
         assert_eq!(
             events[1],
             Event::Config {
+                language: String::new(),
                 version: "abcd1234".into(),
                 theme: "1280x720_x".into(),
                 meter: "gold".into()

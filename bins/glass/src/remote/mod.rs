@@ -53,6 +53,9 @@ pub struct Status {
     pub monitors: Vec<MonitorInfo>,
     /// Whether the face this display carries is drawn in this session.
     pub face_shown: bool,
+    /// The bar of controls as this session composed it: shown or hidden,
+    /// by the look or by this remote's own word; empty before the face drew.
+    pub controls: String,
     /// What fills the screen where the theme leaves it bare, as this session
     /// resolved it: "the album art blurred" or "a dark colour"; empty before
     /// the first frame.

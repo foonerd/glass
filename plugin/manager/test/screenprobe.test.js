@@ -95,13 +95,15 @@ test('gather reads the machine through its readers and never fails on what is mi
   assert.equal(found.connectors[0].name, 'DSI-2');
   assert.equal(found.inputs.touch.length, 1);
   assert.deepEqual(found.backlights[0], { name: '11-0045', brightness: 31, max: 31, power: 0 });
-  assert.deepEqual(found.holders, { kiosk: true, xserver: true, touchDisplay: true, displayConfiguration: false });
+  assert.deepEqual(found.holders, { kiosk: true, xserver: true, touchDisplay: true, displayConfiguration: false, displayConfigurationConfs: [] });
   assert.equal(found.touchDisplayAngle, 270);
+  assert.equal(found.cmdlineRotation, null, 'no turn on a command line the readers do not have');
   assert.deepEqual(found.suggestion, { rotation: 270, pointer: 'hide', panel: 'DSI-2' });
   const bare = probe.gather({ readFile() { throw new Error('nothing'); }, readDir() { throw new Error('nothing'); }, exists() { return false; }, exec() { throw new Error('nothing'); } });
   assert.deepEqual(bare.connectors, []);
   assert.deepEqual(bare.inputs, { touch: [], mice: [], keyboards: [], remotes: [] });
-  assert.deepEqual(bare.holders, { kiosk: false, xserver: false, touchDisplay: false, displayConfiguration: false });
+  assert.deepEqual(bare.holders, { kiosk: false, xserver: false, touchDisplay: false, displayConfiguration: false, displayConfigurationConfs: [] });
+  assert.equal(bare.cmdlineRotation, null);
   assert.deepEqual(bare.suggestion, { rotation: 0, pointer: 'hide', panel: null });
 });
 
@@ -131,4 +133,19 @@ test('SDL is told the card with the connected screen, whatever order the cards c
   assert.equal(kmsCard({ connectors: [{ card: 'card1', name: 'HDMI-A-1', status: 'disconnected' }] }), null);
   assert.equal(kmsCard({}), null);
   assert.equal(kmsCard(undefined), null);
+});
+
+test('the kernel command line\'s turn is read as the Pi Screen Setup plugin writes it, and suggested', () => {
+  assert.equal(probe.parseCmdlineRotation('quiet video=DSI-1:800x480@60,rotate=270 plymouth=0'), 270);
+  assert.equal(probe.parseCmdlineRotation('quiet video=DSI-2:720x1280,rotation=90'), 90);
+  assert.equal(probe.parseCmdlineRotation('console=tty1 fbcon=rotate:2'), 180);
+  assert.equal(probe.parseCmdlineRotation('quiet video=HDMI-A-1:1920x1080@60'), null);
+  assert.equal(probe.parseCmdlineRotation(''), null);
+  const portrait = { connectors: [{ name: 'DSI-2', status: 'connected', portrait: true }], inputs: { mice: [] }, touchDisplayAngle: null, cmdlineRotation: 90 };
+  assert.equal(probe.suggest(portrait).rotation, 90, 'the command line\'s turn where the Touch Display plugin has none');
+  assert.equal(probe.suggest(Object.assign({}, portrait, { touchDisplayAngle: 270 })).rotation, 270, 'the Touch Display plugin\'s angle first');
+  assert.equal(probe.suggest(Object.assign({}, portrait, { cmdlineRotation: null })).rotation, 270, 'else the common mounting');
+  const landscape = { connectors: [{ name: 'HDMI-A-1', status: 'connected', portrait: false }], inputs: { mice: [] }, touchDisplayAngle: null, cmdlineRotation: 180 };
+  assert.equal(probe.suggest(landscape).rotation, 180, 'a landscape panel the kernel turns');
+  assert.equal(probe.suggest(Object.assign({}, landscape, { cmdlineRotation: null })).rotation, 0);
 });

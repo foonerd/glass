@@ -583,3 +583,15 @@ test('a theme on show that cannot be drawn is the cause when the meters never ap
   delete f.status.themeMissing;
   assert.strictEqual(one(diagnose('no-meters', f), 'theme-missing'), undefined);
 });
+
+test('the Display Configuration plugin\'s X files left under Glass\'s own X server are noted, and only then', function () {
+  const f = healthy();
+  f.screen = { free: true, fact: { ownX: true }, rotation: 0, probe: { holders: { displayConfiguration: false, displayConfigurationConfs: ['95-display-configuration-touch.conf'] }, suggestion: { rotation: 0, pointer: 'hide', panel: null } } };
+  const hit = one(diagnose('touch', f), 'x-confs-left');
+  assert.strictEqual(hit.key, 'DIAG_X_CONFS_LEFT');
+  assert.deepStrictEqual(hit.with, { files: '95-display-configuration-touch.conf' });
+  f.screen.probe.holders.displayConfiguration = true;
+  assert.strictEqual(one(diagnose('touch', f), 'x-confs-left'), undefined, 'the plugin on: its files are its own');
+  f.screen.probe.holders.displayConfiguration = false; f.screen.fact.ownX = false;
+  assert.strictEqual(one(diagnose('screen', f), 'x-confs-left'), undefined, 'under the kiosk\'s X the files are the kiosk\'s');
+});

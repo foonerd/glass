@@ -3866,6 +3866,10 @@ pub struct Input {
     /// standby handler in Volumio's hands. False until the player has said.
     #[serde(default)]
     pub standby: bool,
+    /// The player's language, as its settings say (`en`, `de`, `fr`, ...), for
+    /// the words a face draws: the names of the days and the months.
+    #[serde(default)]
+    pub language: String,
     /// The plugin's last answer to this display's `themes` ask, with the
     /// previews that have landed; none until one was asked.
     #[serde(default)]

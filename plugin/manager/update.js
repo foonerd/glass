@@ -74,6 +74,8 @@ function parseRelease(body, pattern) {
     prerelease: !!body.prerelease,
     url: String(asset.browser_download_url || ''),
     asset: String(asset.name || ''),
+    // The release's manifest as an asset of its own (glass-evo from 0.11.13), for what it needs before the download.
+    manifest: (function () { const m = body.assets.find((a) => String(a.name || '') === 'manifest.json'); return m ? String(m.browser_download_url || '') : null; })(),
     bytes: Number(asset.size) || 0,
     sha256: digest ? digest[1] : null,
     // The sums and their signature, where the release is signed; null before signing.

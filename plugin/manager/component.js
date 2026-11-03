@@ -273,6 +273,15 @@ class Component {
     const fresh = this.latest && this.checkedAt && (Date.now() - new Date(this.checkedAt).getTime()) < CHECK_TTL_MS;
     if (!force && fresh) return this.view();
     this.latest = await offered(this.fetch, this.releasesUrl, !!this.test(), ASSET);
+    // The manifest published beside the zip says the least Glass the release needs,
+    // so the Manager can say so before anything is downloaded; the zip's own copy still rules at the install.
+    if (this.latest && this.latest.manifest) {
+      try {
+        const res = await this.fetch(this.latest.manifest, { limit: 65536 });
+        const m = manifestOf(res.body.toString('utf8'));
+        this.latest.requires = m.requires;
+      } catch (e) { /* the manifest comes with the zip anyway */ }
+    }
     this.checkedAt = new Date().toISOString();
     const file = path.join(this.stateDir, 'latest.json');
     await fsp.writeFile(file + '.tmp', JSON.stringify({ latest: this.latest, checkedAt: this.checkedAt }));

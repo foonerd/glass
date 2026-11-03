@@ -1262,6 +1262,7 @@
       <div class="sub" id="subtitle"></div>
     </div>
     <button class="badge orange hidden" id="upd-badge" style="border:none;cursor:pointer;padding:5px 10px"></button>
+    <button class="badge orange hidden" id="evo-badge" style="border:none;cursor:pointer;padding:5px 10px;margin-left:6px"></button>
     <div class="grow"></div>
     <button id="btn-close" class="hidden"></button>
   </div>
@@ -4645,6 +4646,14 @@
         if (u && u.available) badge.textContent = t('MANAGER_UPD_BADGE') + ' ' + u.latest.version;
       }
       $('upd-badge').onclick = function () { showView('system'); };
+      $('evo-badge').onclick = function () { showView('system'); };
+      // Versions as numbers, for the least Glass a glass-evo asks.
+      function versionBefore(a, b) {
+        var pa = String(a || '').split('.').map(function (n) { return parseInt(n, 10) || 0; });
+        var pb = String(b || '').split('.').map(function (n) { return parseInt(n, 10) || 0; });
+        for (var i = 0; i < 3; i++) { if ((pa[i] || 0) !== (pb[i] || 0)) return (pa[i] || 0) < (pb[i] || 0); }
+        return false;
+      }
       function renderUpdate(u) {
         state.update = u;
         updateBadge(u);
@@ -4816,6 +4825,13 @@
           lines.push('<div>' + esc(t('MANAGER_UPD_LATEST')) + ' <b>' + esc(v.latest.version) + '</b>' + (v.latest.publishedAt ? ' <span class="muted">(' + esc(fmtDate(v.latest.publishedAt)) + ')</span>' : '') +
             (v.latest.prerelease ? ' <span class="badge">' + esc(t('MANAGER_UPD_TEST_BADGE')) + '</span>' : '') +
             (here ? (v.available ? badge('orange', 'MANAGER_STATE_UPDATE') : (v.behind || v.outdated ? '' : badge('green', 'MANAGER_UPD_UPTODATE'))) : '') + '</div>');
+        }
+        // The header says when a newer glass-evo is known, as it does for Glass.
+        $('evo-badge').classList.toggle('hidden', !(here && v.available && v.latest));
+        if (here && v.available && v.latest) $('evo-badge').textContent = t('MANAGER_EVO_BADGE') + ' ' + v.latest.version;
+        // The release's manifest, read before the download, says the least Glass it needs.
+        if (v.available && v.latest && v.latest.requires && state.status && versionBefore(state.status.version, v.latest.requires)) {
+          lines.push('<div class="help">' + esc(t('MANAGER_EVO_NEEDS_GLASS') + ' ' + v.latest.requires + '.') + '</div>');
         }
         if (v.outdated) lines.push('<div>' + esc(t('MANAGER_EVO_OUTDATED') + ' ' + v.least + '.') + '</div>');
         if (v.behind) lines.push('<div class="help">' + esc(t('MANAGER_EVO_BEHIND') + ' ' + v.least + '.') + '</div>');

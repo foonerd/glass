@@ -109,16 +109,32 @@ function parseBacklights(text) {
   return lights.filter(l => l.max !== null && !isNaN(l.max));
 }
 
-// The suggestion the probe makes, from what it found and what the Touch
-// Display plugin has on file: the rotation for a portrait panel (the
-// plugin's angle when it has one, else 270, the way the common Pi panels
-// are mounted), and whether the pointer shows (a mouse shows it, a touch
-// panel alone hides it).
+// The turn the kernel command line gives the panel, as the Pi Screen Setup
+// plugin writes it (`video=CONNECTOR:MODE,rotate=N` or `,rotation=N`, else
+// `fbcon=rotate:K` quarter turns), in degrees; null where it says nothing.
+function parseCmdlineRotation(text) {
+  const s = String(text || '');
+  let m = /(?:^|\s)video=[A-Za-z0-9-]+:[^\s]*?,rotat(?:e|ion)=(\d+)/.exec(s);
+  if (m) { const n = parseInt(m[1], 10) % 360; return [0, 90, 180, 270].indexOf(n) !== -1 ? n : null; }
+  m = /(?:^|\s)fbcon=rotate:([0-3])/.exec(s);
+  if (m) return parseInt(m[1], 10) * 90;
+  return null;
+}
+
+// The suggestion the probe makes, from what it found and what the display
+// plugins have on file: the rotation for a portrait panel (the Touch
+// Display plugin's angle when it has one, else the kernel command line's
+// turn when the Pi Screen Setup plugin wrote one, else 270, the way the
+// common Pi panels are mounted), the command line's turn for any other
+// panel, and whether the pointer shows (a mouse shows it, a touch panel
+// alone hides it).
 function suggest(found) {
   const panel = (found.connectors || []).find(c => c.status === 'connected') || null;
+  const angle = [90, 180, 270].indexOf(found.touchDisplayAngle) !== -1 ? found.touchDisplayAngle : null;
+  const fromCmdline = [90, 180, 270].indexOf(found.cmdlineRotation) !== -1 ? found.cmdlineRotation : null;
   const rotation = panel && panel.portrait
-    ? ([90, 180, 270].indexOf(found.touchDisplayAngle) !== -1 ? found.touchDisplayAngle : 270)
-    : 0;
+    ? (angle !== null ? angle : (fromCmdline !== null ? fromCmdline : 270))
+    : (fromCmdline !== null ? fromCmdline : 0);
   const pointer = (found.inputs && found.inputs.mice.length) ? 'show' : 'hide';
   return { rotation: rotation, pointer: pointer, panel: panel ? panel.name : null };
 }
@@ -167,6 +183,10 @@ function gather(deps) {
   const touchDisplay = safe(() => JSON.parse(d.readFile('/data/configuration/user_interface/touch_display/config.json')), null);
   const angle = touchDisplay && touchDisplay.angle ? parseInt(touchDisplay.angle.value, 10) : NaN;
   const kiosk = safe(() => d.exec('systemctl', ['is-active', 'volumio-kiosk']).trim() === 'active', false);
+  const cmdlineText = safe(() => d.readFile('/proc/cmdline'), '');
+  // The Display Configuration plugin's files for the X server stay under
+  // /etc/X11 whether the plugin is on or not; they apply to any X server.
+  const dcConfs = safe(() => d.readDir('/etc/X11/xorg.conf.d'), []).filter(n => /display-configuration/.test(n));
   const found = {
     board: safe(() => d.readFile('/proc/device-tree/model').replace(/\0/g, '').trim(), ''),
     connectors: parseDrm(drmText),
@@ -176,9 +196,11 @@ function gather(deps) {
       kiosk: kiosk,
       xserver: d.exists('/tmp/.X11-unix/X0'),
       touchDisplay: enabled('user_interface', 'touch_display'),
-      displayConfiguration: enabled('user_interface', 'display_configuration')
+      displayConfiguration: enabled('user_interface', 'display_configuration'),
+      displayConfigurationConfs: dcConfs
     },
-    touchDisplayAngle: isNaN(angle) ? null : angle
+    touchDisplayAngle: isNaN(angle) ? null : angle,
+    cmdlineRotation: parseCmdlineRotation(cmdlineText)
   };
   found.suggestion = suggest(found);
   return found;
@@ -230,4 +252,4 @@ function kmsCard(found) {
   return connected.length ? parseInt(connected[0].slice(4), 10) : null;
 }
 
-module.exports = { parseInputDevices, parseUdev, classifyInputs, parseDrm, parseBacklights, suggest, pointerShown, screenFree, screenOwn, wouldDraw, kmsCard, gather };
+module.exports = { parseInputDevices, parseUdev, classifyInputs, parseDrm, parseBacklights, parseCmdlineRotation, suggest, pointerShown, screenFree, screenOwn, wouldDraw, kmsCard, gather };

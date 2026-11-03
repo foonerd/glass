@@ -4674,7 +4674,8 @@ Glass.prototype.saveRotationConf = function (confData) {
 Glass.prototype.pushRemoteConfig = function () {
   var self = this;
   if (!self.channel || !remoteConfigVersion) { return; }
-  self.channel.push({ kind: 'config', version: remoteConfigVersion, theme: self.activeTheme(), meter: String((meterConfig && meterConfig.current && meterConfig.current.meter) || '') });
+  var language = ''; try { language = String(self.commandRouter.sharedVars.get('language_code') || ''); } catch (e) { /* no word on it */ }
+  self.channel.push({ kind: 'config', language: language, version: remoteConfigVersion, theme: self.activeTheme(), meter: String((meterConfig && meterConfig.current && meterConfig.current.meter) || '') });
 };
 
 Glass.prototype.updateConfigVersion = function () {

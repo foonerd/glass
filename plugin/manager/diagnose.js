@@ -282,6 +282,21 @@ const CHECKS = [
     }
   },
   {
+    // The Display Configuration plugin's files for the X server (a touch
+    // matrix, a resolution) stay under /etc/X11 and apply to the X server
+    // Glass brings up for itself; with the plugin off they are nobody's.
+    id: 'x-confs-left', symptoms: ['screen', 'touch'],
+    run(f) {
+      const sc = f.screen;
+      if (!sc || !sc.probe || !sc.probe.holders) return null;
+      const h = sc.probe.holders;
+      const confs = Array.isArray(h.displayConfigurationConfs) ? h.displayConfigurationConfs : [];
+      const ownX = !!(sc.fact && sc.fact.ownX);
+      if (ownX && confs.length && !h.displayConfiguration) return note('x-confs-left', 'DIAG_X_CONFS_LEFT', { files: confs.join(', ') }, 'screen');
+      return null;
+    }
+  },
+  {
     id: 'whose', symptoms: ['screen'],
     run(f) {
       if (!f.screen) return null;

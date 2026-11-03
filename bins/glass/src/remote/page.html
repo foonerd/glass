@@ -593,7 +593,7 @@
       ['Theme', st.theme ? st.theme + (st.meter ? ' · ' + st.meter : '') : ''],
       ['Screen', st.screen && st.screen[0] ? st.screen[0] + 'x' + st.screen[1] : ''],
       ['On the screen', onScreenWords(st)],
-      ['Synced', st.synced || '']].concat(state.face ? [['Glass interface', st.face_shown ? 'shown' : 'not shown']] : []).concat([
+      ['Synced', st.synced || '']].concat(state.face ? [['Glass interface', st.face_shown ? 'shown' : 'not shown'], ['Controls', st.controls || (st.face_shown ? 'not drawn yet' : '')]] : []).concat([
       ['This page', st.page || '']
     ]);
   }
