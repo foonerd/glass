@@ -706,6 +706,9 @@
       justify-content: space-around;
     }
 
+    /* The band kept while the bar has left the idle screen: nothing drawn, the height stood. */
+    .lp-bar.left { visibility: hidden; }
+
     .lp-bar svg {
       height: 50%;
     }
@@ -3507,7 +3510,12 @@
           });
         }
         var fill = words('buttons');
-        html += '<div class="lp-bar"' + open('buttons') + ' style="' + glass('buttons.glass', v['buttons.tint'], '0 1px') + '">' + ['previous', opts.mode === 'idle' ? 'play' : 'pause', 'next', 'minus', 'plus', 'more'].map(function (name) {
+        // The bar: drawn as the screen shows it. When the look lets the bar leave
+        // the idle screen (buttons.idle = leave) the idle likeness draws none, but
+        // keeps its band, as the face keeps the room above the bar whether or not
+        // the bar is there.
+        var barLeft = opts.mode === 'idle' && String(v['buttons.idle'] || 'stay') === 'leave';
+        html += '<div class="lp-bar' + (barLeft ? ' left' : '') + '"' + open('buttons') + ' style="' + glass('buttons.glass', v['buttons.tint'], '0 1px') + '">' + ['previous', opts.mode === 'idle' ? 'play' : 'pause', 'next', 'minus', 'plus', 'more'].map(function (name) {
           return '<svg viewBox="0 0 24 24" style="fill:' + fill + '">' + LOOK_ICONS[name] + '</svg>';
         }).join('') + '</div>';
         var dimmed = opts.dim ? 'linear-gradient(rgba(0,0,0,' + opts.dim + '),rgba(0,0,0,' + opts.dim + ')),' : '';

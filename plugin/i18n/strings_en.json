@@ -1251,7 +1251,7 @@
     "MANAGER_LOOK_PLAYING": "While music plays",
     "MANAGER_LOOK_SAFE": "Safe margins",
     "MANAGER_LOOK_SAFE_HINT": "Green hairlines at the screen's edge and the theme's frame's edge, over everything the likeness draws: what lies between them is what the screen shows.",
-    "MANAGER_LOOK_PREVIEW_HELP": "A likeness of the player's screen. The buttons show when the screen is touched. Click a part to adjust it.",
+    "MANAGER_LOOK_PREVIEW_HELP": "A likeness of the player's screen. The buttons show when the screen is touched, and not at all while nothing plays when the look lets the bar leave the idle screen. Click a part to adjust it.",
     "MANAGER_LOOK_PICK": "Click to adjust",
     "MANAGER_LOOK_ADJUST": "Adjust this look",
     "MANAGER_LOOK_ADJUSTED": "Adjusted.",

@@ -1562,6 +1562,16 @@ fn session(
                 // theme's controls and the touch rules do not.
                 if let Some(face) = face.as_deref_mut() {
                     let face_keys = face_keys_with_remote(&skin.run.face, remote.as_deref());
+                    // The remote draws the face here: its Status panel says how
+                    // the controls were composed, and the journal once per change.
+                    if let Some(remote) = remote.as_deref() {
+                        let word = controls_word(&face_keys, Some(remote));
+                        if controls_said.as_deref() != Some(word.as_str()) {
+                            logline::say!(Info, "remotes", "controls {word}");
+                            remote.app.set_status(|s| s.controls = word.clone());
+                            controls_said = Some(word);
+                        }
+                    }
                     let view = View {
                         input: &input,
                         fonts: &assets.fonts,
