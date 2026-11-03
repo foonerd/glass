@@ -316,6 +316,11 @@ Channel.prototype.push = function (message) {
     if (self.onPush) { self.onPush(message); }
 };
 
+// Whether a display of the player's own is connected.
+Channel.prototype.hasLocal = function () {
+    return this.clients.some(function (c) { return !c.remote; });
+};
+
 // A line for the player's own display alone: a remote's screen is its own.
 Channel.prototype.pushLocal = function (message) {
     var self = this;
@@ -984,9 +989,17 @@ Glass.prototype.spectrumDemand = function () {
         bins: Math.min(256, Math.max(1, bins || 256)),
         channels: channels || 2,
         scale: scale || 'log',
-        window: window || 0
+        window: window || 0,
+        // Meters ahead of the sound, in milliseconds: the tap publishes each hop that much before its audio is heard.
+        ahead_ms: leadMs(current)
     };
 };
+
+// `screen.lead`: milliseconds the meters run ahead of the sound, 0 to 200, 0 unless set.
+function leadMs(current) {
+    var n = parseInt(String((current || {})['screen.lead'] || '0'), 10);
+    return isNaN(n) ? 0 : Math.min(200, Math.max(0, n));
+}
 
 // Write the demand beside the rings when it changed, or when the file is
 // gone (a logout as the volumio user removes that user's shared memory,
@@ -6698,6 +6711,7 @@ Glass.prototype.displayPlacement = function () {
         // Fitted only at the full size: a share below 100 shows the theme smaller, never fitted.
         fit: (String(cur['position.fit']).toLowerCase() === 'true' || type === 'fit') && scale >= 100,
         backdrop: String(cur['screen.backdrop']).toLowerCase() === 'blur',
+        lead: leadMs(cur),
         position: type === 'center' || type === 'fit' ? 'center' : 'manual',
         x: parseInt(cur['position.x'], 10) || 0,
         y: parseInt(cur['position.y'], 10) || 0,
@@ -6722,6 +6736,9 @@ Glass.prototype.setDisplayPlacement = function (data) {
     var backdrop = data.backdrop === undefined ? now.backdrop : (data.backdrop === true || data.backdrop === 'true');
     var position = data.position === undefined ? now.position : String(data.position);
     if (['center', 'manual'].indexOf(position) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    // Meters ahead of the sound: absent keeps the setting, empty or null is 0, else 0 to 200 milliseconds.
+    var lead = data.lead === undefined ? now.lead : (data.lead === null || data.lead === '' ? 0 : parseInt(data.lead, 10));
+    if (isNaN(lead) || lead < 0 || lead > 200) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
     var x = data.x === undefined ? now.x : parseInt(data.x, 10);
     var y = data.y === undefined ? now.y : parseInt(data.y, 10);
     // Either way from the screen's corner: a picture larger than the screen,
@@ -6742,7 +6759,7 @@ Glass.prototype.setDisplayPlacement = function (data) {
         margin = { top: edge(m.top, now.margin.top), right: edge(m.right, now.margin.right), bottom: edge(m.bottom, now.margin.bottom), left: edge(m.left, now.margin.left) };
         if (['top', 'right', 'bottom', 'left'].some(function (e) { return isNaN(margin[e]) || margin[e] < 0 || margin[e] > 25; })) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
     }
-    var wanted = { 'position.fit': fit ? 'True' : 'False', 'screen.backdrop': backdrop ? 'blur' : 'color', 'position.type': position, 'position.x': String(x), 'position.y': String(y),
+    var wanted = { 'position.fit': fit ? 'True' : 'False', 'screen.backdrop': backdrop ? 'blur' : 'color', 'screen.lead': String(lead), 'position.type': position, 'position.x': String(x), 'position.y': String(y),
         'position.scale': String(scale), 'position.place': place,
         'position.margin.top': String(margin.top), 'position.margin.right': String(margin.right), 'position.margin.bottom': String(margin.bottom), 'position.margin.left': String(margin.left) };
     var changed = false;
@@ -6755,8 +6772,31 @@ Glass.prototype.setDisplayPlacement = function (data) {
         if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
         uiNeedsUpdate = true;
         self.updateUIConfig();
+        // The lead reaches the tap through the demand, without a restart of anything.
+        self.writeSpectrumDemand();
     }
     return { ok: true, changed: changed };
+};
+
+// A picture of the screen: the player's own display writes the window's
+// pixels as shown at its next frame, where this asks; the file comes
+// back, or why there is none (no display of the player's own connected,
+// or one that did not write within the wait).
+Glass.prototype.screenPicture = function () {
+    var self = this;
+    var file = DATA_DIR + '/screen.png';
+    return new Promise(function (resolve) {
+        if (!self.channel || !self.channel.hasLocal()) { return resolve({ error: 'GLASS.MANAGER_SCREEN_PICTURE_NONE' }); }
+        try { fs.removeSync(file); } catch (e) { /* none to remove */ }
+        self.channel.pushLocal({ kind: 'grab', path: file });
+        var started = Date.now();
+        var look = function () {
+            if (fs.existsSync(file)) { return resolve({ ok: true, path: file }); }
+            if (Date.now() - started > 6000) { return resolve({ error: 'GLASS.MANAGER_SCREEN_PICTURE_LATE' }); }
+            setTimeout(look, 150);
+        };
+        setTimeout(look, 150);
+    });
 };
 
 // The artist fanart slideshow's settings.
@@ -7051,6 +7091,7 @@ Glass.prototype.statusInfo = function () {
         timeout: parseInt(self.config.get('timeout'), 10) || 0,
         activeTheme: self.activeTheme(),
         themeMissing: self.themeMissing(),
+        lead: leadMs((meterConfig && meterConfig.current) || {}),
         themeRule: self.themeRuleFact(),
         assured: self.assureFact(),
         meter: self.meterSelection(),

@@ -1950,6 +1950,8 @@ pub struct TapSource {
     probed_seen: Option<(u32, String)>,
     /// The player's word on the panel since the last take.
     screen_asked: Option<ScreenRequest>,
+    /// Where the player wants a picture of the screen written, until taken.
+    grab_asked: Option<String>,
     weather_held: Option<lead::Weather>,
     /// The player's last word on a track among its favourites: the track's
     /// location and whether it is one. The snapshot says it of the playing
@@ -2167,6 +2169,11 @@ impl TapSource {
         self.screen_asked.take()
     }
 
+    /// The path the player wants a picture of the screen at, once.
+    pub fn take_grab(&mut self) -> Option<String> {
+        self.grab_asked.take()
+    }
+
     /// Tell the player the panel's state, as the display switches it.
     pub fn report_screen(
         &mut self,
@@ -2194,6 +2201,7 @@ impl TapSource {
             show_asked: None,
             probed_seen: None,
             screen_asked: None,
+            grab_asked: None,
             weather_held: None,
             favourite_held: None,
             standby_held: false,
@@ -2854,6 +2862,7 @@ impl Source for TapSource {
                 Event::Calibrate { points } => self.calibrate_asked = Some(points),
                 Event::Probed { sent, to } => self.probed_seen = Some((sent, to)),
                 Event::Screen(request) => self.screen_asked = Some(request),
+                Event::Grab { path } => self.grab_asked = Some(path),
                 Event::Favourite { uri, on } => {
                     self.favourite_held = Some((uri, on));
                     self.rederive = true;

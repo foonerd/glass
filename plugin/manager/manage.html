@@ -1398,6 +1398,11 @@
             <input type="number" id="disp-scale" min="10" max="100" placeholder="100">
           </div>
           <div>
+            <label id="disp-lead-label"></label>
+            <input type="number" id="disp-lead" min="0" max="200" placeholder="0">
+            <div class="help" id="disp-lead-help"></div>
+          </div>
+          <div>
             <label id="disp-margin-label"></label>
             <input type="number" id="disp-margin" min="0" max="25" placeholder="0">
           </div>
@@ -1527,6 +1532,11 @@
             <div class="help" id="screen-power-help"></div>
           </div>
           <div class="full"><button class="small" id="btn-screen-details"></button></div>
+          <div class="full">
+            <button class="small" id="btn-screen-picture"></button>
+            <div class="help" id="screen-picture-help"></div>
+            <img id="screen-picture" alt="" style="max-width:100%;margin-top:8px;border-radius:6px" hidden>
+          </div>
           <div class="full" id="screen-owner" style="margin-top:10px"></div>
           <div class="full row" id="screen-owner-actions"></div>
           <div class="full row" id="screen-face-row" hidden><label id="screen-face-label"
@@ -2129,8 +2139,12 @@
         $('disp-title').textContent = t('MANAGER_DISPLAY_TITLE');
         $('disp-help').textContent = t('MANAGER_DISPLAY_DOC');
         $('disp-fit-label').textContent = t('MANAGER_DISPLAY_FIT');
+        $('disp-lead-label').textContent = t('MANAGER_DISPLAY_LEAD');
+        $('disp-lead-help').textContent = t('MANAGER_DISPLAY_LEAD_HELP');
         $('disp-backdrop-label').textContent = t('MANAGER_DISPLAY_BACKDROP');
         $('screen-power-off').textContent = t('MANAGER_SCREEN_POWER_SWITCH_OFF');
+        $('btn-screen-picture').textContent = t('MANAGER_SCREEN_PICTURE');
+        $('screen-picture-help').textContent = t('MANAGER_SCREEN_PICTURE_HELP');
         $('screen-power-on').textContent = t('MANAGER_SCREEN_POWER_SWITCH_ON');
         $('screen-brightness-label').textContent = t('MANAGER_SCREEN_BRIGHTNESS');
         $('screen-dim-word').textContent = t('MANAGER_SCREEN_DIM');
@@ -2944,6 +2958,7 @@
           $('disp-x').value = d.x;
           $('disp-y').value = d.y;
           $('disp-scale').value = d.scale || '';
+          $('disp-lead').value = d.lead || '';
           var m = d.margin || { top: 0, right: 0, bottom: 0, left: 0 };
           var equal = m.top === m.right && m.right === m.bottom && m.bottom === m.left;
           $('disp-margin-each').checked = !equal;
@@ -2957,7 +2972,7 @@
         var pct = function (id) { var v = parseInt($(id).value, 10); return v > 0 ? Math.min(v, 25) : 0; };
         var margin = $('disp-margin-each').checked ? { top: pct('disp-margin-top'), right: pct('disp-margin-right'), bottom: pct('disp-margin-bottom'), left: pct('disp-margin-left') } : (function () { var a = pct('disp-margin'); return { top: a, right: a, bottom: a, left: a }; })();
         var scale = parseInt($('disp-scale').value, 10);
-        var body = { fit: $('disp-fit').checked, backdrop: $('disp-backdrop').checked, position: pos === 'manual' ? 'manual' : 'center', place: pos === 'manual' ? undefined : pos, scale: scale > 0 && scale < 100 ? scale : null, margin: margin, x: parseInt($('disp-x').value, 10) || 0, y: parseInt($('disp-y').value, 10) || 0 };
+        var body = { fit: $('disp-fit').checked, backdrop: $('disp-backdrop').checked, lead: $('disp-lead').value === '' ? 0 : parseInt($('disp-lead').value, 10), position: pos === 'manual' ? 'manual' : 'center', place: pos === 'manual' ? undefined : pos, scale: scale > 0 && scale < 100 ? scale : null, margin: margin, x: parseInt($('disp-x').value, 10) || 0, y: parseInt($('disp-y').value, 10) || 0 };
         api('POST', '/api/display', body).then(function () { toast(t('MANAGER_SAVED')); loadDisplay(); }).catch(function (e) { toast(errorText(e), 'error'); });
       };
       function loadArtwork() {
@@ -3100,7 +3115,7 @@
             ]],
             ['MANAGER_ST_SECTION_SCREEN', [
               ['MANAGER_ST_DISPLAY', s.headless ? t('DISPLAY_OUTPUT_NONE') : (s.running ? t('MANAGER_ST_RUNNING') : t('MANAGER_ST_IDLE') + noThemeText(s.themeMissing)) + ' · DISPLAY=:' + s.display + ' · ' + t('MANAGER_ST_TIMEOUT') + ' ' + s.timeout + ' s' + (s.running && s.showing && s.showing.rate && s.performance && s.showing.rate < s.performance.values.frameRate ? ' · ' + t('MANAGER_ST_GOVERNED') + ' ' + s.showing.rate + ' fps' : '')],
-              ['MANAGER_ST_SCREEN', !screen ? '-' : (screen.size ? t('MANAGER_ST_SCREEN_SIZE') + ' ' + screen.size : t('MANAGER_ST_NO_SCREEN')) + (s.themeSize ? ' · ' + t('MANAGER_ST_THEME_SIZE') + ' ' + s.themeSize : '') + ' · ' + (screen.mouse ? t('MANAGER_ST_MOUSE_ON') : t('MANAGER_ST_MOUSE_OFF')) + (s.running && screen.since ? ' · ' + t('MANAGER_ST_SINCE') + ' ' + fmtDate(screen.since) : '')],
+              ['MANAGER_ST_SCREEN', !screen ? '-' : (screen.size ? t('MANAGER_ST_SCREEN_SIZE') + ' ' + screen.size : t('MANAGER_ST_NO_SCREEN')) + (s.lead > 0 ? ' · ' + t('MANAGER_ST_LEAD').replace('{ms}', s.lead) : '') + (s.themeSize ? ' · ' + t('MANAGER_ST_THEME_SIZE') + ' ' + s.themeSize : '') + ' · ' + (screen.mouse ? t('MANAGER_ST_MOUSE_ON') : t('MANAGER_ST_MOUSE_OFF')) + (s.running && screen.since ? ' · ' + t('MANAGER_ST_SINCE') + ' ' + fmtDate(screen.since) : '')],
             ].concat(sc ? screenRows(sc) : [], [
               ['MANAGER_TOUCH_TITLE', !s.interactive ? '-' : t('INTERACTIVE_' + String(s.interactive).toUpperCase())],
               ['MANAGER_PERF_TITLE', !s.performance ? '-' : t('MANAGER_PERF_' + String(s.performance.profile || 'custom').toUpperCase()) + (s.performance.profile === 'auto' && s.performance.auto ? ' (' + t('MANAGER_PERF_' + String(s.performance.auto).toUpperCase()) + ')' : '') + ' · ' + s.performance.values.frameRate + ' fps · ' + t('MANAGER_ST_GOVERNOR') + ' ' + (s.performance.governor ? t('MANAGER_ST_ON') : t('MANAGER_ST_OFF')) + (s.performance.board && s.performance.board.model ? ' · ' + s.performance.board.model : '')]
@@ -4296,6 +4311,18 @@
       function setScreenPower(body) {
         api('POST', '/api/screen/power', body).then(function () { setTimeout(loadScreenPower, 800); }).catch(function (e) { toast(errorText(e), 'error'); });
       }
+      // The picture of the screen: fetched, shown under the button; the Manager's word when there is none.
+      $('btn-screen-picture').onclick = function () {
+        var img = $('screen-picture');
+        $('btn-screen-picture').disabled = true;
+        fetch('/api/screen/picture?t=' + Date.now(), { cache: 'no-store' }).then(function (r) {
+          if (!r.ok) { return r.json().then(function (e) { throw new Error(t(String(e.error || '').replace(/^GLASS\./, ''))); }); }
+          return r.blob();
+        }).then(function (blob) {
+          if (img.src && img.src.indexOf('blob:') === 0) { URL.revokeObjectURL(img.src); }
+          img.src = URL.createObjectURL(blob); img.hidden = false;
+        }).catch(function (e) { toast(e && e.message ? e.message : String(e), 'error'); }).then(function () { $('btn-screen-picture').disabled = false; });
+      };
       $('screen-power-off').onclick = function () { setScreenPower({ power: 'off' }); };
       $('screen-power-on').onclick = function () { setScreenPower({ power: 'on' }); };
       $('screen-brightness').onchange = function () { setScreenPower({ brightness: parseInt($('screen-brightness').value, 10) || 0 }); };

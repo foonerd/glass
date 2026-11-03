@@ -903,6 +903,9 @@ fn session(
     let mut leave: Option<&'static str> = None;
     // The theme went while the display ran: it leaves, and says so by its exit.
     let mut no_theme = false;
+    // A picture of the screen was asked: the next frame goes up whole, so
+    // the grab comes at once on a screen that stands still.
+    let mut grab_whole = false;
     // What lay over the theme on the frame before this one.
     let mut was_over = Over::default();
     // The album art blurred behind a theme that leaves part of the screen
@@ -1074,6 +1077,14 @@ fn session(
         // The panel's power: the player's word first, the face's after. A
         // player's line is answered with the state whatever it changed, so
         // a bare ask tells, and a player that connects anew hears.
+        // The player asks for a picture of the screen: the window's pixels
+        // as shown, written at the next show.
+        if let Some(path) = source.take_grab() {
+            if let Some(window) = surface.as_mut() {
+                window.grab_after(1, std::path::PathBuf::from(path));
+                grab_whole = true;
+            }
+        }
         if let Some(request) = source.take_screen() {
             if let (Some(level), Some(window)) = (request.brightness, surface.as_mut()) {
                 // With a fade, from where the backlight stands over the time
@@ -1397,6 +1408,10 @@ fn session(
                 damage = &whole;
             }
             exit_was_drawing = exit.drawing(exit_now);
+            if grab_whole {
+                damage = &whole;
+                grab_whole = false;
+            }
             was_over = over;
             rastered_at = Instant::now();
             if let Some(window) = surface.as_mut() {

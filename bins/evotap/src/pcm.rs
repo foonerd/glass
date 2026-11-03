@@ -519,6 +519,9 @@ fn run(shared: Arc<Shared>, settings: Settings) {
                         1
                     };
                 let hop_ns = measure.hop() as u64 * 1_000_000_000 / rate;
+                // The demand may ask for the hops ahead of the sound, for a
+                // screen whose own path to the eye runs behind it.
+                let ahead_ns = u64::from(measure.demand().ahead_ms) * 1_000_000;
                 // The PCM says how many frames stand between the last one
                 // written and the sound; from that the moment the last of
                 // these chunks ends is known, and every chunk before it.
@@ -547,6 +550,7 @@ fn run(shared: Arc<Shared>, settings: Settings) {
                     written += frames;
                     measure.take(samples, &mut |frame, frames_in| {
                         let due = (heard_from + frames_in as u64 * 1_000_000_000 / rate)
+                            .saturating_sub(ahead_ns)
                             .max(last_due + hop_ns);
                         last_due = due;
                         if pending.len() >= PENDING_MAX {

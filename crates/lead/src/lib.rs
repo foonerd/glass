@@ -2281,6 +2281,7 @@ fn section_demand(
             channels: channels.unwrap_or(2),
             scale: scale.unwrap_or_default(),
             window: window.unwrap_or(0),
+            ahead_ms: 0,
         }
         .clean(),
     )

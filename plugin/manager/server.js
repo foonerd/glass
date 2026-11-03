@@ -569,6 +569,14 @@ class Manager {
       res.json(self.plugin.screenPower());
     });
 
+    // A picture of the screen as the player's own display shows it now.
+    app.get('/api/screen/picture', wrap(async function (req, res) {
+      const result = await self.plugin.screenPicture();
+      if (result.error) return res.status(409).json(result);
+      res.set('Cache-Control', 'no-store');
+      res.sendFile(result.path);
+    }));
+
     app.post('/api/screen/power', wrap(async function (req, res) {
       const result = await self.exclusive(function () { return self.plugin.setScreenPower(req.body || {}); });
       if (result.error) return res.status(400).json(result);

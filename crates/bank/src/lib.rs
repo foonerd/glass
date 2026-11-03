@@ -114,7 +114,21 @@ pub struct Demand {
     /// count wants.
     #[serde(default)]
     pub window: usize,
+    /// Milliseconds each hop is published ahead of the moment its audio
+    /// is heard, 0 to [`MAX_AHEAD_MS`]: for a screen whose own path to the
+    /// eye runs behind the sound, a TV over HDMI among them.
+    #[serde(default, skip_serializing_if = "no_lead")]
+    pub ahead_ms: u32,
 }
+
+/// A lead of nothing is left off the wire, so a demand without one reads
+/// as it always did.
+fn no_lead(ms: &u32) -> bool {
+    *ms == 0
+}
+
+/// The furthest the meters are let run ahead of the sound.
+pub const MAX_AHEAD_MS: u32 = 200;
 
 impl Default for Demand {
     fn default() -> Self {
@@ -130,6 +144,7 @@ impl Demand {
             channels,
             scale,
             window: 0,
+            ahead_ms: 0,
         }
         .clean()
     }
@@ -162,6 +177,7 @@ impl Demand {
             channels: self.channels.clamp(1, 2),
             scale: self.scale,
             window,
+            ahead_ms: self.ahead_ms.min(MAX_AHEAD_MS),
         }
     }
 }
@@ -727,6 +743,24 @@ mod tests {
     }
 
     #[test]
+    fn the_lead_is_kept_within_its_bound() {
+        let mut demand = Demand::new(64, 2, Scale::Log);
+        demand.ahead_ms = 500;
+        assert_eq!(demand.clean().ahead_ms, MAX_AHEAD_MS);
+        demand.ahead_ms = 80;
+        assert_eq!(demand.clean().ahead_ms, 80);
+        // A lead is on the wire only when there is one.
+        assert_eq!(
+            serde_json::to_string(&demand.clean()).unwrap(),
+            r#"{"bins":64,"channels":2,"scale":"log","window":4096,"ahead_ms":80}"#
+        );
+        // A demand written before the lead reads as none.
+        let old: Demand =
+            serde_json::from_str(r#"{"bins":96,"channels":2,"scale":"log","window":0}"#).unwrap();
+        assert_eq!(old.ahead_ms, 0);
+    }
+
+    #[test]
     fn a_demand_is_cleaned_and_its_window_follows_the_band_count() {
         assert_eq!(Demand::new(64, 2, Scale::Log).window, 4096);
         assert_eq!(Demand::new(128, 1, Scale::Mel).window, 8192);
@@ -736,6 +770,7 @@ mod tests {
             channels: 7,
             scale: Scale::Linear,
             window: 3000,
+            ahead_ms: 0,
         }
         .clean();
         assert_eq!((odd.bins, odd.channels, odd.window), (256, 2, 4096));

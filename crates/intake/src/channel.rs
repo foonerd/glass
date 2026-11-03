@@ -73,6 +73,9 @@ pub enum Event {
     /// The player's word on power: whether it can go to standby, a board
     /// whose plugin put a standby handler in Volumio's hands.
     Power { standby: bool },
+    /// The player asks for a picture of the screen, the window's pixels as
+    /// shown, written to this path.
+    Grab { path: String },
     /// The player's answer to this display's `themes` ask: the installed
     /// themes, or one theme's variants.
     Themes(Box<lead::Themes>),
@@ -579,6 +582,8 @@ pub fn decode(line: &[u8]) -> Option<Event> {
             uri: text("uri"),
             on: value.get("on").and_then(Value::as_bool).unwrap_or(false),
         }),
+        // A picture of the screen, written where the player says.
+        "grab" => Some(Event::Grab { path: text("path") }),
         "power" => Some(Event::Power {
             standby: value
                 .get("standby")
@@ -643,6 +648,12 @@ mod decode_tests {
         assert_eq!(
             decode(br#"{"kind":"power","standby":true}"#),
             Some(Event::Power { standby: true })
+        );
+        assert_eq!(
+            decode(br#"{"kind":"grab","path":"/data/INTERNAL/glass/screen.png"}"#),
+            Some(Event::Grab {
+                path: "/data/INTERNAL/glass/screen.png".into()
+            })
         );
         match decode(br#"{"kind":"themes","title":"Themes","folder":"","serial":3,"items":[{"title":"Akai 77","subtitle":"1 variant","art":"http://127.0.0.1:5582/api/themes/a/preview/b?thumb=1","folder":"1280x720_Akai_77","on_show":true}]}"#) {
             Some(Event::Themes(themes)) => {
