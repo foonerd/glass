@@ -2,47 +2,6 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.11.16] - 2026-11-03
-
-- **The changer's sled on the other side of the row.** A theme may put the sled (the pickup under the arm's housing) on either side of the discs' centre line with `changer.sled.side`: `left` or `right` of a vertical row, `above` or `below` a horizontal one; left and above, as before, when the theme leaves it out. The Tailor keeps the word with the theme. Asked on the forum for a skin built from the record changer, where the arm belongs on the right.
-- **Playback paused before every restart of the backend.** 0.11.15 paused a playing player before an upgrade or a rollback from a release; the pause now sits where the restart itself is asked, so an upgrade from a file, a return to stable and the System tab's own restart pause it too.
-- Diagnostics: no Find a problem check, sheet row or Troubleshooting line is needed; a theme key and the manner of the restart.
-
-## [0.11.15] - 2026-11-03
-
-- **Save as a look.** The look panel keeps the look as adjusted under a name of your own, written as a face theme among the player's own looks (a folder with a face.txt under the player's faces), listed with the looks and chosen at once; **Remove this look**, pressed twice, takes a saved look away. A name a shipped look carries is refused, so the shipped look stays what it is. The API: `POST /api/face/looks`, `DELETE /api/face/looks/:name`. In step: the Manager page; two checks in the look panel's harness; no Find a problem check, no sheet row.
-- **Playback paused before an upgrade restarts the backend.** An upgrade or a rollback of Glass pauses a playing player and gives it three seconds to say so before the install restarts the backend, so the music does not cut off mid-note and comes back where it stood. There is no automatic take of a release that would need to wait; a release is taken by a press.
-- The font rasteriser fault Glass works around since 0.7.96 is reported upstream, with its reproduction; the idle face's redraw rule (Same while nothing changes) is stated on the record.
-
-## [0.11.14] - 2026-11-03
-
-- **The likeness keeps the bar's band without drawing the bar when the look lets it leave the idle screen.** Since the bar could leave the idle screen (`buttons.idle = leave`), the look panel's likeness for "When nothing plays" still drew the bar while the screen showed none, the pieces standing where they stood: the likeness and the screen no longer agreed. Now the idle likeness draws no bar in that case and keeps its band, as the face keeps the room above the bar whether or not the bar is there; the help under the likeness says so. The look panel's regression checks in a real browser now run before every tag, with two checks for this. Asked on a player with that look.
-- **A remote's Status says the controls' composition on the path a remote draws through.** 0.11.13 said it only on the player's own path; a remote's page showed the Controls row empty.
-
-## [0.11.13] - 2026-11-03
-
-- **The names of the days and the months on the face in the player's language.** The plugin tells the display the player's language on its channel, and the glass-evo face names the days and the months in it, on the player's screen and on remotes alike: every language Volumio offers (28, from Catalan to Vietnamese), English where the player names none or one not here.
-- **Rotation with the display plugins, said whole.** Glass turns a screen only where it draws the panel itself (KMS, or an X server of its own); under a kiosk's X server the Touch Display or Display Configuration plugin's turn stands and Glass's own is not applied. The probe now suggests the kernel command line's turn where the Pi Screen Setup plugin wrote one (`video=…,rotate=`), after the Touch Display plugin's angle. Find a problem notes the Display Configuration plugin's files left under `/etc/X11/xorg.conf.d` with the plugin off while Glass draws on an X server of its own. The Screen page carries every case.
-- **A remote's controls said.** The remote's Status panel has a Controls row: shown or hidden, by the look's word or by this remote's own; the journal says the same once per change.
-- **A glass-evo update in the header.** The Manager's header badge for a newer glass-evo, as for Glass; the glass-evo release's manifest is published as an asset of its own and read before any download, so the System tab says the least Glass a release needs.
-- **A meter switch keeps the pictures still in use.** The pictures a theme's meters share stand through a switch (a slot cleared at the switch decoded again off the frame loop and left a frame without it); a picture asked for in another box shows nothing until the one for that box is ready. The timing tests assert their bound on a machine of ours, not on a shared runner.
-- The browsed play and the plus were proven on a player's own queue. In step: the Screen page's table, the Remotes page, the Manager page; a Find a problem note; no sheet row.
-
-## [0.11.12] - 2026-11-03
-
-- **The picture of the screen comes upright.** On a screen set turned, the display draws the picture turned on the panel, and 0.11.10's picture came as the panel holds it, turned the other way. The display now turns the grab back by the screen's rotation before writing it, so the picture is the screen as the eye sees it. Asked on a turned screen. In step: the Screen page's line; no Find a problem check, no sheet row.
-
-## [0.11.11] - 2026-11-03
-
-- **Meters ahead of the sound reaches the tap.** 0.11.10 wrote the lead into the display's configuration and showed it on the Status tab, but the demand file the tap reads carried 0 whatever was set: the plugin took the number from the spectrum configuration's section instead of the meter configuration's. The demand now carries the lead set, and the tap publishes the hops ahead by it. In step: nothing new; the Status row and the Troubleshooting paragraph stand.
-
-## [0.11.10] - 2026-11-03
-
-- **Meters ahead of the sound.** A new Display setting in the Manager's Appearance tab, 0 to 200 milliseconds, 0 unless set: for a screen whose own path to the eye runs behind the sound, a TV over HDMI among them. The tap publishes each measurement that much before its audio is heard, so the needles and the sound meet at the eye; remote displays follow it, since the hops reach them the same way. The key is `screen.lead` in the display's configuration; the plugin carries it to the tap in the demand file as `ahead_ms`, which evotap 0.1.1 reads (a demand without it reads as before, and a lead of nothing is left off the file). The Status tab's Screen row says the lead in force. In step: the Status row and a Troubleshooting paragraph; no Find a problem check.
-- **Picture of the screen.** A button on the Screen tab asks the player's own display for the window's pixels as it shows them, at its next frame, and shows the picture under the button: for a report, or a look at a screen out of sight. It works on any screen the display draws on, the kiosk's X server or KMS alike, and for the glass-evo face as for a theme; with no display of the player's own on the screen the tab says so. The API is `GET /api/screen/picture`; the display takes the line `grab` on its channel. In step: the Screen page and a Troubleshooting line; no Find a problem check, no sheet row.
-- **evotap 0.1.1.** The tap reads the lead from the demand; nothing else of the rings or the snippet changed. Released at foonerd/evotap in step.
-- **The repository's build folder.** Files a container had left owned by root under `target` kept a release build in the repository from writing; they are set aside, and a release build in the repository's own folder works again. The cut tool's release wait asks for a release again for up to a minute after its run succeeds, where it once called a release missing sixteen seconds after it was published.
-
 ## [0.11.8] - 2026-11-02
 
 - **The display is not started without a theme to show, so the kiosk keeps the screen.** When the kiosk owned the screen and the theme the configuration named was not installed, its folder gone or without meters, the display was started as music played and painted a dark screen over the kiosk until the music stopped. Now the plugin does not start the display while the theme on show cannot be drawn (no theme set, its folder not under the templates, no meters.txt in it, no meter in that, or a meter chosen that is not in it) and says why, once, in the journal; the Status tab's Display row reads "not showing · no theme to show" with the reason; Find a problem names it under the meters, the screen and other symptoms. The display checks the same for itself and leaves with exit 3 and the line "no theme to show" before it opens a window, at the start and when the theme goes at a meter change; the plugin takes that exit as no fault and starts it again when a theme is there. A remote shows its status screen without a theme as before, and the glass-evo face runs its own pages. Found on a test player. In step: the Find a problem check, the Status row and the Troubleshooting row.
