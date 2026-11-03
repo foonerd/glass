@@ -198,6 +198,8 @@
       kept.forEach(function (line) {
         try { guarded(function () { withString(line, function (ptr, len) { face.ex.event(ptr, len); }); }); } catch (err) { /* told at start */ }
       });
+      // What this page does with the sound, for the sheet's tile, from the start.
+      phTell();
     });
   }
 
@@ -270,6 +272,16 @@
   // and that is taken after every frame and done the same way.
   function carry(acts) {
     acts.forEach(function (act) {
+      // Play here is this page's own doing, never the player's: the More
+      // sheet's tile and its slider ask here, and the face is told back.
+      if (act.command && act.command.name === 'play-here') {
+        var ask = act.command.value || {};
+        if (typeof ask.gain === 'number') phGain(ask.gain);
+        if (ask.on === true && !ph.wanted) phStart();
+        else if (ask.on === false && ph.wanted) phStop();
+        else phTell();
+        return;
+      }
       if (act.command) {
         // A command with an answer (a browse) brings a line of the
         // plugin's back, handed to the module as the feed's lines are.
@@ -632,6 +644,26 @@
     if (fill) Object.keys(fill).forEach(function (k) { text = text.replace('{' + k + '}', fill[k]); });
     ph.state = key || '';
     say(text, key === 'MANAGER_PLAY_HERE_OFF' || key === 'MANAGER_PLAY_HERE_UNAVAILABLE' || key === 'MANAGER_PLAY_HERE_FULL' || key === 'MANAGER_PLAY_HERE_RATE');
+    phTell();
+  }
+
+  // The face is told what this page does with the sound, so the More
+  // sheet's tile wears it and its slider stands where the gain is: a line
+  // made here for the module alone, in the feed's own shape.
+  function phTell() {
+    if (!face.ex || typeof face.ex.event !== 'function') return;
+    var line = JSON.stringify({ kind: 'play-here', served: ph.available, on: ph.wanted, gain: Math.round(ph.gainValue * 100) });
+    try { guarded(function () { withString(line, function (ptr, len) { face.ex.event(ptr, len); }); }); } catch (err) { /* the module is not up yet */ }
+  }
+
+  // The device's own volume, 0 to 100, from the slider here or the face's.
+  function phGain(value) {
+    ph.gainValue = Math.max(0, Math.min(1, Number(value) / 100));
+    if (ph.gain) ph.gain.gain.value = ph.gainValue;
+    var g = $('play-here-gain');
+    if (g) g.value = String(Math.round(ph.gainValue * 100));
+    try { localStorage.setItem('glass-play-here-gain', String(Math.round(ph.gainValue * 100))); } catch (e) { /* no storage */ }
+    phTell();
   }
 
   function phButton() {
@@ -648,7 +680,8 @@
     return fetch('/api/play-here').then(function (r) { return r.ok ? r.json() : null; }).then(function (p) {
       ph.available = !!(p && p.on && p.available);
       phButton();
-    }).catch(function () { ph.available = false; phButton(); });
+      phTell();
+    }).catch(function () { ph.available = false; phButton(); phTell(); });
   }
 
   function phStart() {
@@ -784,11 +817,7 @@
         var kept = localStorage.getItem('glass-play-here-gain');
         if (kept !== null && !isNaN(parseInt(kept, 10))) { ph.gainValue = Math.max(0, Math.min(1, parseInt(kept, 10) / 100)); g.value = String(Math.round(ph.gainValue * 100)); }
       } catch (e) { /* no storage: the default */ }
-      g.addEventListener('input', function () {
-        ph.gainValue = Math.max(0, Math.min(1, parseInt(g.value, 10) / 100));
-        if (ph.gain) ph.gain.gain.value = ph.gainValue;
-        try { localStorage.setItem('glass-play-here-gain', g.value); } catch (e) { /* no storage */ }
-      });
+      g.addEventListener('input', function () { phGain(parseInt(g.value, 10)); });
     }
     phAsk();
   }

@@ -3842,6 +3842,20 @@ pub struct Themes {
     pub serial: u32,
 }
 
+/// Play here, the player's sound on the device that draws the face: whether
+/// the player serves it (`served`, the plugin's switch, said on its config
+/// line) and what the host does with it (`on`, `gain` 0 to 100, the host's
+/// own word, a line a page makes for its module and never sends anywhere).
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PlayHere {
+    #[serde(default)]
+    pub served: bool,
+    #[serde(default)]
+    pub on: bool,
+    #[serde(default)]
+    pub gain: u8,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Input {
     pub levels: Levels,
@@ -3870,6 +3884,9 @@ pub struct Input {
     /// the words a face draws: the names of the days and the months.
     #[serde(default)]
     pub language: String,
+    /// Play here: served by the player, and what this host does with it.
+    #[serde(default)]
+    pub play_here: PlayHere,
     /// The plugin's last answer to this display's `themes` ask, with the
     /// previews that have landed; none until one was asked.
     #[serde(default)]

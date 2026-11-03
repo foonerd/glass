@@ -35,6 +35,17 @@ pub enum Event {
         meter: String,
         /// The player's language code, for the words a face draws.
         language: String,
+        /// Whether the player serves its sound to a page (Play here).
+        play_here: bool,
+    },
+    /// Play here as the host that draws the face does it: whether it plays
+    /// the sound now and at what gain (0 to 100), and, where the host says
+    /// so, whether the player serves it. A line a page makes for its own
+    /// module; it never travels.
+    PlayHere {
+        served: Option<bool>,
+        on: bool,
+        gain: u8,
     },
     /// The meter the player's own display shows, for remotes that follow it.
     Showing { theme: String, meter: String },
@@ -520,6 +531,19 @@ pub fn decode(line: &[u8]) -> Option<Event> {
             theme: text("theme"),
             meter: text("meter"),
             language: text("language"),
+            play_here: value
+                .get("playHere")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+        }),
+        "play-here" => Some(Event::PlayHere {
+            served: value.get("served").and_then(Value::as_bool),
+            on: value.get("on").and_then(Value::as_bool).unwrap_or(false),
+            gain: value
+                .get("gain")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                .min(100) as u8,
         }),
         "showing" => Some(Event::Showing {
             theme: text("theme"),
@@ -612,6 +636,49 @@ mod decode_tests {
     /// The player's answer to a browse: the location, the items with what
     /// the face needs of each, the serial of the ask; a field the plugin
     /// leaves out is its default, and a line that is no answer is nothing.
+    #[test]
+    fn the_config_line_says_whether_play_here_is_served_and_the_hosts_line_what_it_does() {
+        let served = decode(br#"{"kind":"config","version":"v","theme":"t","meter":"m","language":"de","playHere":true}"#);
+        assert_eq!(
+            served,
+            Some(Event::Config {
+                version: "v".into(),
+                theme: "t".into(),
+                meter: "m".into(),
+                language: "de".into(),
+                play_here: true
+            })
+        );
+        let unsaid = decode(br#"{"kind":"config","version":"v","theme":"t","meter":"m"}"#);
+        assert!(
+            matches!(
+                unsaid,
+                Some(Event::Config {
+                    play_here: false,
+                    ..
+                })
+            ),
+            "an older plugin says nothing: not served"
+        );
+        assert_eq!(
+            decode(br#"{"kind":"play-here","served":true,"on":true,"gain":80}"#),
+            Some(Event::PlayHere {
+                served: Some(true),
+                on: true,
+                gain: 80
+            })
+        );
+        assert_eq!(
+            decode(br#"{"kind":"play-here","on":false,"gain":250}"#),
+            Some(Event::PlayHere {
+                served: None,
+                on: false,
+                gain: 100
+            }),
+            "the gain is held to a hundred; the served word is the host's to give or not"
+        );
+    }
+
     #[test]
     fn the_browse_line_is_decoded() {
         let line = br#"{"kind":"browse","uri":"music-library","title":"Music Library","prev":"","serial":3,"items":[{"title":"NAS","icon":"server","uri":"music-library/NAS","service":"mpd","type":"folder","leaf":false},{"title":"One","subtitle":"A - X","art":"/albumart?path=x","uri":"mnt/x/1.flac","service":"mpd","type":"song","leaf":true,"duration":100}]}"#;
@@ -891,6 +958,7 @@ mod tests {
             events[1],
             Event::Config {
                 language: String::new(),
+                play_here: false,
                 version: "abcd1234".into(),
                 theme: "1280x720_x".into(),
                 meter: "gold".into()

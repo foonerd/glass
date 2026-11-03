@@ -2178,6 +2178,9 @@ Glass.prototype.setPlayHereOn = function (on) {
     if (this.playHereOn() === wanted) { return { changed: false, on: wanted }; }
     this.config.set('playHere', wanted);
     this.logger.info(id + 'play here ' + (wanted ? 'is on' : 'is off'));
+    // The faces hear of it on the config line: the More sheet's tile shows
+    // where the player serves the sound and goes where it does not.
+    try { this.pushRemoteConfig(); } catch (e) { /* no channel yet */ }
     return { changed: true, on: wanted };
 };
 
@@ -4707,7 +4710,7 @@ Glass.prototype.pushRemoteConfig = function () {
   var self = this;
   if (!self.channel || !remoteConfigVersion) { return; }
   var language = ''; try { language = String(self.commandRouter.sharedVars.get('language_code') || ''); } catch (e) { /* no word on it */ }
-  self.channel.push({ kind: 'config', language: language, version: remoteConfigVersion, theme: self.activeTheme(), meter: String((meterConfig && meterConfig.current && meterConfig.current.meter) || '') });
+  self.channel.push({ kind: 'config', language: language, playHere: self.playHereOn(), version: remoteConfigVersion, theme: self.activeTheme(), meter: String((meterConfig && meterConfig.current && meterConfig.current.meter) || '') });
 };
 
 Glass.prototype.updateConfigVersion = function () {

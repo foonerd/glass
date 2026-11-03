@@ -1946,6 +1946,9 @@ pub struct TapSource {
     config_seen: Option<(String, String, String)>,
     /// The player's language as its last config line said.
     language: String,
+    /// Play here: served, as the config line says; on and at what gain,
+    /// as the host's own line says.
+    play_here: lead::PlayHere,
     showing_seen: Option<(String, String)>,
     show_asked: Option<String>,
     /// The plugin's answer to a probe request, until taken.
@@ -2200,6 +2203,7 @@ impl TapSource {
             hops: Box::new(IdleHops),
             config_seen: None,
             language: String::new(),
+            play_here: Default::default(),
             showing_seen: None,
             show_asked: None,
             probed_seen: None,
@@ -2835,11 +2839,20 @@ impl Source for TapSource {
                     theme,
                     meter,
                     language,
+                    play_here,
                 } => {
                     if !language.is_empty() {
                         self.language = language;
                     }
+                    self.play_here.served = play_here;
                     self.config_seen = Some((version, theme, meter));
+                }
+                Event::PlayHere { served, on, gain } => {
+                    if let Some(served) = served {
+                        self.play_here.served = served;
+                    }
+                    self.play_here.on = on;
+                    self.play_here.gain = gain;
                 }
                 Event::Showing { theme, meter } => self.showing_seen = Some((theme, meter)),
                 Event::Show { meter } => self.show_asked = Some(meter),
@@ -3047,6 +3060,7 @@ impl Source for TapSource {
         Input {
             levels: self.levels_held,
             language: self.language.clone(),
+            play_here: self.play_here.clone(),
             bins: Bins {
                 values: self.spectrum_held.clone(),
                 bank: self.bank_held.clone(),
@@ -3390,6 +3404,7 @@ pub fn input_from_records(
     let bins = decode_spectrum(spectrum, spectrum_bins).unwrap_or_default();
     Input {
         language: String::new(),
+        play_here: Default::default(),
         levels,
         bins: Bins {
             values: bins,
