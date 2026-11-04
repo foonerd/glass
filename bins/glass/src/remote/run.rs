@@ -162,6 +162,7 @@ impl RemoteSession {
         // here when the player serves it.
         Ok(TapSource::installed()
             .with_sound_here(true)
+            .with_language(&config.language)
             .with_hops(Box::new(hops))
             .with_channel(channel)
             .with_skin(skin))
@@ -216,7 +217,9 @@ impl RemoteSession {
         let theme = self.theme.clone();
         let meter = skin.name.clone();
         let screen = [skin.width, skin.height];
+        let language = source.language().to_string();
         self.app.set_status(|s| {
+            s.language = language;
             s.phase = if per_s > 0.0 {
                 "showing".into()
             } else if connected {

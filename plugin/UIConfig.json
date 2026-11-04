@@ -68,6 +68,66 @@
           "value": ""
         },
         {
+          "id": "language",
+          "element": "select",
+          "doc": "TRANSLATE.GLASS.LANGUAGE_DOC",
+          "label": "TRANSLATE.GLASS.LANGUAGE",
+          "value": {
+            "value": "",
+            "label": "TRANSLATE.GLASS.LANGUAGE_FOLLOW"
+          },
+          "options": [
+            {
+              "value": "",
+              "label": "TRANSLATE.GLASS.LANGUAGE_FOLLOW"
+            },
+            {
+              "value": "de",
+              "label": "Deutsch"
+            },
+            {
+              "value": "en",
+              "label": "English"
+            },
+            {
+              "value": "es",
+              "label": "Español"
+            },
+            {
+              "value": "fr",
+              "label": "Français"
+            },
+            {
+              "value": "it",
+              "label": "Italiano"
+            },
+            {
+              "value": "ja",
+              "label": "日本語"
+            },
+            {
+              "value": "nl",
+              "label": "Nederlands"
+            },
+            {
+              "value": "pl",
+              "label": "Polski"
+            },
+            {
+              "value": "pt",
+              "label": "Português"
+            },
+            {
+              "value": "ru",
+              "label": "Русский"
+            },
+            {
+              "value": "zh",
+              "label": "中文"
+            }
+          ]
+        },
+        {
           "id": "managerOpen",
           "element": "button",
           "label": "TRANSLATE.GLASS.MANAGER_OPEN",

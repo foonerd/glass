@@ -414,6 +414,11 @@ pub struct RemoteConfig {
     /// stream being at full level.
     #[serde(default = "default_play_here_gain")]
     pub play_here_gain: u8,
+    /// The language of the face's dates on this remote, by its code (`de`,
+    /// `fr`, any Volumio names); empty follows the player's, as the Glass
+    /// Manager's own Language setting has it.
+    #[serde(default)]
+    pub language: String,
 }
 
 fn default_frames_port() -> u16 {
@@ -498,6 +503,7 @@ impl Default for RemoteConfig {
             frames_port: intake::remote::DEFAULT_REMOTE_FRAMES_PORT,
             play_here: false,
             play_here_gain: DEFAULT_PLAY_HERE_GAIN,
+            language: String::new(),
         }
     }
 }
@@ -547,6 +553,16 @@ impl RemoteConfig {
             self.page_port = DEFAULT_PAGE_PORT;
         }
         self.play_here_gain = self.play_here_gain.min(100);
+        // A language code as written anywhere: letters, an underscore or a
+        // dash, lower case, eight at most.
+        self.language = self
+            .language
+            .trim()
+            .to_ascii_lowercase()
+            .chars()
+            .filter(|c| c.is_ascii_lowercase() || *c == '_' || *c == '-')
+            .take(8)
+            .collect();
         self.themes_dir = self
             .themes_dir
             .take()
@@ -791,6 +807,22 @@ mod tests {
         assert!(serde_json::to_string(&set)
             .unwrap()
             .contains(r#""face":"always""#));
+    }
+
+    #[test]
+    fn the_language_is_a_code_as_written_anywhere() {
+        let mut c = RemoteConfig {
+            language: " PT_br! ".into(),
+            ..Default::default()
+        };
+        c.tidy();
+        assert_eq!(c.language, "pt_br");
+        c.language = "A language name far too long".into();
+        c.tidy();
+        assert_eq!(c.language, "alanguag", "letters alone, eight at most");
+        c.language = String::new();
+        c.tidy();
+        assert_eq!(c.language, "", "empty follows the player's");
     }
 
     #[test]

@@ -71,6 +71,9 @@ pub struct Status {
     /// Play here on this remote: the switch, the volume, what the sound is
     /// doing in words, and the stream's shape while one is on.
     pub play_here: playhere::PlayHereStatus,
+    /// The language of the face's dates in force: this remote's own where
+    /// set, else the player's; empty before the session began.
+    pub language: String,
 }
 
 /// What this machine has for the display to run, for the page's

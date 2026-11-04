@@ -25,6 +25,7 @@ const { FaceFeed } = require('./manager/facefeed');
 const { advanced } = require('./manager/statenow');
 const screenpower = require('./manager/screenpower');
 const browse = require('./manager/browse');
+const language = require('./manager/language');
 const plaintext = require('./manager/plaintext');
 const assure = require('./manager/assure');
 const screenprobe = require('./manager/screenprobe');
@@ -912,6 +913,7 @@ Glass.prototype.onVolumioStart = function () {
         headless: ['boolean', false],
         managerPort: ['number', MANAGER_DEFAULT_PORT],
         managerHost: ['string', ''],
+        language: ['string', ''],
         remotesEnabled: ['boolean', false],
         remoteFramesPort: ['number', 5580],
         remoteChannelPort: ['number', 5581],
@@ -3829,6 +3831,7 @@ Glass.prototype.getUIConfig = function () {
             C('managerPort').value = parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT;
             C('managerHost').value = String(self.config.get('managerHost') || '');
             C('managerHost').attributes[0].placeholder = self.managerDefaultHost();
+            pick('language', self.languageSet());
             // The UI opens an openUrl button in a new tab, always; the one
             // button type it navigates in place is the oauth one, which sets
             // the window's location to its performer URL (with two query
@@ -4709,8 +4712,11 @@ Glass.prototype.saveRotationConf = function (confData) {
 Glass.prototype.pushRemoteConfig = function () {
   var self = this;
   if (!self.channel || !remoteConfigVersion) { return; }
-  var language = ''; try { language = String(self.commandRouter.sharedVars.get('language_code') || ''); } catch (e) { /* no word on it */ }
-  self.channel.push({ kind: 'config', language: language, playHere: self.playHereOn(), version: remoteConfigVersion, theme: self.activeTheme(), meter: String((meterConfig && meterConfig.current && meterConfig.current.meter) || '') });
+  // The face's dates: the language set in Glass, else the player's own
+  // code as Volumio has it (the face names the days in every language
+  // Volumio offers).
+  var spoken = self.languageSet() || self.playerLanguage();
+  self.channel.push({ kind: 'config', language: spoken, playHere: self.playHereOn(), version: remoteConfigVersion, theme: self.activeTheme(), meter: String((meterConfig && meterConfig.current && meterConfig.current.meter) || '') });
 };
 
 Glass.prototype.updateConfigVersion = function () {
@@ -6481,6 +6487,12 @@ Glass.prototype.saveManagerConf = function (data) {
         self.config.set('managerHost', host);
         changed = true;
     }
+    // The language, a select: its value, or the choice object the UI sends.
+    if (data && data.language !== undefined) {
+        var chosen = data.language && typeof data.language === 'object' ? data.language.value : data.language;
+        var said = self.setManagerSettings({ language: chosen === undefined || chosen === null ? '' : chosen });
+        if (said.changed) { changed = true; }
+    }
     var oldPort = parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT;
     if (port === oldPort) {
         self.commandRouter.pushToastMessage(changed ? 'success' : 'info', pluginName, self.commandRouter.getI18nString(changed ? 'COMMON.SETTINGS_SAVED_SUCCESSFULLY' : 'GLASS.NO_CHANGES'));
@@ -6528,8 +6540,27 @@ Glass.prototype.managerUrl = function () {
     return 'http://' + self.managerHost() + ':' + port + '/';
 };
 
+// The languages Glass ships its words in, read once from the strings folder.
+var shippedLanguages = null;
+Glass.prototype.languages = function () {
+    if (!shippedLanguages) { shippedLanguages = language.shipped(__dirname + '/i18n'); }
+    return shippedLanguages;
+};
+
+// The player's language, Volumio's setting, as its code; empty when it has none.
+Glass.prototype.playerLanguage = function () {
+    try { return String(this.commandRouter.sharedVars.get('language_code') || ''); } catch (e) { return ''; }
+};
+
+// The language set in Glass, where it names one Glass ships; empty follows the player's.
+Glass.prototype.languageSet = function () {
+    return language.resolve(this.config.get('language'), this.languages());
+};
+
+// The language of Glass's own words, the Manager's, Anymote's and the
+// face's dates: the one set in Glass, else the player's, else English.
 Glass.prototype.managerLanguage = function () {
-    try { return String(this.commandRouter.sharedVars.get('language_code') || 'en'); } catch (e) { return 'en'; }
+    return language.pick(this.config.get('language'), this.playerLanguage(), this.languages());
 };
 
 // The plugin's strings in a language, with English behind them.
@@ -6925,7 +6956,10 @@ Glass.prototype.managerSettings = function () {
         themeTagRules: String(self.config.get('themeTagRules') || ''),
         doNotDeleteThemes: self.config.get('doNotDeleteThemes') === true,
         managerPort: parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT,
-        managerHost: String(self.config.get('managerHost') || '')
+        managerHost: String(self.config.get('managerHost') || ''),
+        language: self.languageSet(),
+        languages: self.languages(),
+        playerLanguage: language.resolve(self.playerLanguage(), self.languages()) || 'en'
     };
 };
 
@@ -6947,6 +6981,20 @@ Glass.prototype.setManagerSettings = function (data) {
             changed = true;
         }
         self.syncPreserveFlag(preserve);
+    }
+    if (data.language !== undefined) {
+        var wanted = language.clean(data.language);
+        if (wanted && self.languages().indexOf(wanted) === -1) {
+            return { error: 'language', message: 'not a language Glass ships: ' + wanted };
+        }
+        if ((self.config.get('language') || '') !== wanted) {
+            self.config.set('language', wanted);
+            changed = true;
+            // The face's dates follow at once, on every display and page.
+            try { self.pushRemoteConfig(); } catch (e) { /* no channel yet */ }
+            uiNeedsUpdate = true;
+            self.updateUIConfig();
+        }
     }
     return { ok: true, changed: changed };
 };
@@ -7202,7 +7250,8 @@ Glass.prototype.statusInfo = function () {
         logging: Object.assign({ levels: logging.LEVELS, targetsAvailable: logging.TARGETS }, self.logSettings()),
         performance: self.performanceInfo(),
         legacy: self.legacyEnabled(),
-        language: self.managerLanguage()
+        language: self.managerLanguage(),
+        languageSet: self.languageSet() !== ''
     };
 };
 

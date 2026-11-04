@@ -225,6 +225,7 @@
       <div><label>Name, as the player's manager lists it</label><input type="text" id="r-name" placeholder="Kitchen"></div>
       <div><label>Port of this page</label><input type="number" id="r-port" min="1024" max="65535"></div>
       <div><label>Log level of this remote</label><select id="r-log"><option value="">As started</option><option value="error">Error</option><option value="warn">Warn</option><option value="info">Info</option><option value="verbose">Verbose</option><option value="trace">Trace</option></select></div>
+      <div><label>Language of the face's dates</label><select id="r-lang"><option value="">As the player's</option><option value="de">Deutsch</option><option value="en">English</option><option value="es">Español</option><option value="fr">Français</option><option value="it">Italiano</option><option value="ja">日本語</option><option value="nl">Nederlands</option><option value="pl">Polski</option><option value="pt">Português</option><option value="ru">Русский</option><option value="zh">中文</option></select></div>
       <div class="full"><a href="/api/config/export" download style="text-decoration:none"><button class="small">Download the configuration</button></a> <input type="file" id="cfg-file" accept=".json,application/json" class="hidden"><button class="small" id="btn-cfg-import">Upload a configuration</button><div class="help">A configuration downloaded from this or another remote is applied at once and kept; folder paths in it are taken as they are, so one from another machine may need its themes folder changed here.</div></div>
       <div class="full help" id="paths"></div>
     </div>
@@ -605,6 +606,7 @@
       ['On the screen', onScreenWords(st)],
       ['Synced', st.synced || '']].concat(state.face ? [['Glass interface', st.face_shown ? 'shown' : 'not shown'], ['Controls', st.controls || (st.face_shown ? 'not drawn yet' : '')]] : []).concat([
       ['Play here', st.play_here ? st.play_here.state + (st.play_here.shape ? ' · ' + st.play_here.shape : '') + (st.play_here.on ? ' · volume ' + st.play_here.gain : '') : ''],
+      ['Language of the dates', st.language ? st.language + (state.config && state.config.language ? ' · this remote\'s own' : ' · the player\'s') : ''],
       ['This page', st.page || '']
     ]);
   }
@@ -760,7 +762,7 @@
     $('d-margin').value = equal && m.top ? m.top : '';
     ['top', 'right', 'bottom', 'left'].forEach(function (e) { $('d-margin-' + e).value = m[e] || ''; });
     marginEachFollows();
-    $('gain').value = c.gain_db; $('decay').value = c.spectrum_decay ? c.spectrum_decay : ''; $('r-name').value = c.name; $('r-port').value = c.page_port; $('r-log').value = c.log_level || '';
+    $('gain').value = c.gain_db; $('decay').value = c.spectrum_decay ? c.spectrum_decay : ''; $('r-name').value = c.name; $('r-port').value = c.page_port; $('r-log').value = c.log_level || ''; $('r-lang').value = c.language || '';
     $('face-shown').value = c.face || 'follow';
     $('face-buttons').value = c.buttons || 'look';
     $('test-releases').checked = !!c.test_releases;
@@ -788,7 +790,7 @@
     var pct = function (id) { var v = parseInt($(id).value, 10); return v > 0 ? Math.min(v, 25) : 0; };
     var margin = $('d-margin-each').checked ? { top: pct('d-margin-top'), right: pct('d-margin-right'), bottom: pct('d-margin-bottom'), left: pct('d-margin-left') } : (function () { var a = pct('d-margin'); return { top: a, right: a, bottom: a, left: a }; })();
     c.display = { mode: $('d-mode').value, margin: margin, position: (x !== '' && y !== '') ? [parseInt(x, 10) || 0, parseInt(y, 10) || 0] : null, fit: $('d-fit').checked, scale: scale > 0 && scale < 100 ? scale : null, place: $('d-place').value || 'center', backdrop: $('d-backdrop').value || 'player', fps: $('d-fps').value ? parseInt($('d-fps').value, 10) : null, monitor: parseInt($('d-monitor').value, 10) || 0 };
-    c.gain_db = parseFloat($('gain').value) || 0; c.spectrum_decay = parseFloat($('decay').value) || 0; c.name = $('r-name').value.trim(); c.page_port = parseInt($('r-port').value, 10) || 5583; c.log_level = $('r-log').value || null;
+    c.gain_db = parseFloat($('gain').value) || 0; c.spectrum_decay = parseFloat($('decay').value) || 0; c.name = $('r-name').value.trim(); c.page_port = parseInt($('r-port').value, 10) || 5583; c.log_level = $('r-log').value || null; c.language = $('r-lang').value || '';
     c.face = $('face-shown').value || 'follow';
     c.buttons = $('face-buttons').value || 'look';
     c.test_releases = $('test-releases').checked;
@@ -802,7 +804,7 @@
     $('d-margin').disabled = each;
   }
   $('d-margin-each').onchange = function () { marginEachFollows(); setDirty(true); };
-  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'd-scale', 'd-place', 'd-backdrop', 'd-margin', 'd-margin-top', 'd-margin-right', 'd-margin-bottom', 'd-margin-left', 'gain', 'decay', 'r-name', 'r-port', 'r-log', 'face-shown', 'face-buttons', 'test-releases', 'upload-install'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
+  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'd-scale', 'd-place', 'd-backdrop', 'd-margin', 'd-margin-top', 'd-margin-right', 'd-margin-bottom', 'd-margin-left', 'gain', 'decay', 'r-name', 'r-port', 'r-log', 'r-lang', 'face-shown', 'face-buttons', 'test-releases', 'upload-install'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
   // A share of the theme's size below 100 shows it smaller, never fitted: Fit goes off and stays off while the share stands.
   function fitFollowsScale() {
     var s = parseInt($('d-scale').value, 10);

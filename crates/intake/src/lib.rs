@@ -1944,8 +1944,12 @@ pub struct TapSource {
     hops: Box<dyn Hops>,
     /// The configuration change the channel last announced, until taken.
     config_seen: Option<(String, String, String)>,
-    /// The player's language as its last config line said.
+    /// The language of the face's dates: the player's as its last config
+    /// line said, unless this host set one of its own.
     language: String,
+    /// A language this host chose for itself (a remote's setting), which
+    /// the player's config line then does not move.
+    language_set: Option<String>,
     /// Play here: served, as the config line says; on and at what gain,
     /// as the host's own line says.
     play_here: lead::PlayHere,
@@ -2107,6 +2111,26 @@ impl TapSource {
         self
     }
 
+    /// A language of this host's own for the face's dates (a remote's
+    /// setting, by its code); empty leaves the player's, as its config
+    /// line says it.
+    pub fn with_language(mut self, code: &str) -> Self {
+        let code = code.trim();
+        if code.is_empty() {
+            self.language_set = None;
+        } else {
+            self.language = code.to_string();
+            self.language_set = Some(code.to_string());
+        }
+        self
+    }
+
+    /// The language of the face's dates in force: this host's own where
+    /// it set one, else the player's.
+    pub fn language(&self) -> &str {
+        &self.language
+    }
+
     pub fn with_hops(mut self, hops: Box<dyn Hops>) -> Self {
         self.hops = hops;
         self
@@ -2211,6 +2235,7 @@ impl TapSource {
             hops: Box::new(IdleHops),
             config_seen: None,
             language: String::new(),
+            language_set: None,
             // A page in a browser plays the sound itself; a remote says so
             // with `with_sound_here`; the player's own screen never does.
             play_here: lead::PlayHere {
@@ -2854,7 +2879,7 @@ impl Source for TapSource {
                     language,
                     play_here,
                 } => {
-                    if !language.is_empty() {
+                    if !language.is_empty() && self.language_set.is_none() {
                         self.language = language;
                     }
                     self.play_here.served = play_here;
@@ -4296,6 +4321,29 @@ mod browse_tests {
         let next = source.poll();
         assert_eq!(next.browse.as_ref().unwrap().serial, 2);
         assert_eq!(next.browse.as_ref().unwrap().items[0].title, "Top 500");
+    }
+
+    /// The face's dates follow the player's language from its config
+    /// line, unless the host set a language of its own (a remote's
+    /// setting), which the line then does not move.
+    #[test]
+    fn a_hosts_own_language_holds_against_the_players_config_line() {
+        let line = br#"{"kind":"config","version":"7","theme":"t","meter":"m","language":"fr","playHere":false}"#;
+        let mut source = TapSource::new(8, 1.0).without_player();
+        assert_eq!(source.language(), "");
+        source.push_event(decode_event(line).unwrap());
+        assert_eq!(
+            source.poll().language,
+            "fr",
+            "the player's, with nothing set"
+        );
+        let mut own = TapSource::new(8, 1.0).without_player().with_language("de");
+        assert_eq!(own.language(), "de");
+        own.push_event(decode_event(line).unwrap());
+        assert_eq!(own.poll().language, "de", "the host's own stands");
+        let mut cleared = TapSource::new(8, 1.0).without_player().with_language("  ");
+        cleared.push_event(decode_event(line).unwrap());
+        assert_eq!(cleared.poll().language, "fr", "nothing set is the player's");
     }
 }
 

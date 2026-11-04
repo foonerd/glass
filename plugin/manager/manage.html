@@ -1656,6 +1656,11 @@
           <div class="help hidden" id="play-here-cap-help"></div>
         </div>
         <div style="margin-top:12px">
+          <div><b id="lang-title"></b></div>
+          <div class="row" style="margin-top:6px"><label for="lang-select" id="lang-label"></label><select id="lang-select"></select></div>
+          <div class="help" id="lang-help"></div>
+        </div>
+        <div style="margin-top:12px">
           <label class="switch"><input type="checkbox" id="upd-upload"><span id="upd-upload-label"></span></label>
           <div class="help" id="upd-upload-help"></div>
           <div id="upd-upload-box" class="hidden" style="margin-top:8px">
@@ -2653,6 +2658,7 @@
         return api('GET', '/api/settings').then(function (s) {
           $('rules-input').value = s.themeTagRules || '';
           $('preserve-input').checked = !!s.doNotDeleteThemes;
+          renderLanguage(s);
         }).catch(function () { });
       }
       $('btn-rules-save').onclick = function () {
@@ -3131,7 +3137,8 @@
               ['MANAGER_ST_ADDRESSES', !reveal ? t('MANAGER_ST_HIDDEN') : (s.hostname || '') + (addresses.length ? ' · ' + addresses.map(function (a) { return a.name + ' ' + a.address; }).join(' · ') : '')],
               ['MANAGER_ST_MANAGER', urlsOf('/') + ' · ' + t('MANAGER_ST_UPTIME') + ' ' + Math.round(s.manager.uptimeS / 60) + ' min'],
               ['MANAGER_ST_ANYMOTE', urlsOf('/anymote')],
-              ['MANAGER_ST_LEGACY', s.legacy ? t('MANAGER_ST_YES') : t('MANAGER_ST_NO')]
+              ['MANAGER_ST_LEGACY', s.legacy ? t('MANAGER_ST_YES') : t('MANAGER_ST_NO')],
+              ['MANAGER_ST_LANGUAGE', !s.language ? '-' : languageName(s.language) + ' · ' + t(s.languageSet ? 'MANAGER_ST_LANGUAGE_SET' : 'MANAGER_ST_LANGUAGE_PLAYER')]
             ]],
             ['MANAGER_ST_SECTION_SCREEN', [
               ['MANAGER_ST_DISPLAY', s.headless ? t('DISPLAY_OUTPUT_NONE') : (s.running ? t('MANAGER_ST_RUNNING') : t('MANAGER_ST_IDLE') + noThemeText(s.themeMissing)) + ' · DISPLAY=:' + s.display + ' · ' + t('MANAGER_ST_TIMEOUT') + ' ' + s.timeout + ' s' + (s.running && s.showing && s.showing.rate && s.performance && s.showing.rate < s.performance.values.frameRate ? ' · ' + t('MANAGER_ST_GOVERNED') + ' ' + s.showing.rate + ' fps' : '')],
@@ -4738,6 +4745,37 @@
       $('play-here-cap').onchange = function () {
         api('POST', '/api/play-here', { cap: parseInt($('play-here-cap').value, 10) }).then(function (p) { renderPlayHere(p); toast(t('MANAGER_SAVED')); })
           .catch(function (e) { toast(errorText(e), 'error'); loadPlayHere(); });
+      };
+
+      // ---- the language of Glass's words ----------------------------------------
+      // The Manager's, Anymote's and the face's dates: the player's language
+      // unless one is chosen here; the choice is applied at once and the page
+      // loads again in the new words.
+      var NATIVE_LANGUAGES = { de: 'Deutsch', en: 'English', es: 'Español', fr: 'Français', it: 'Italiano', ja: '日本語', nl: 'Nederlands', pl: 'Polski', pt: 'Português', ru: 'Русский', zh: '中文' };
+      function languageName(code) { return NATIVE_LANGUAGES[code] || code || ''; }
+      function renderLanguage(s) {
+        $('lang-title').textContent = t('MANAGER_LANGUAGE_TITLE');
+        $('lang-label').textContent = t('MANAGER_LANGUAGE_LABEL');
+        $('lang-help').textContent = t('MANAGER_LANGUAGE_HELP');
+        var select = $('lang-select');
+        select.innerHTML = '';
+        var follow = document.createElement('option');
+        follow.value = '';
+        follow.textContent = t('MANAGER_LANGUAGE_FOLLOW') + (s.playerLanguage ? ' (' + languageName(s.playerLanguage) + ')' : '');
+        select.appendChild(follow);
+        (s.languages || []).forEach(function (code) {
+          var option = document.createElement('option');
+          option.value = code;
+          option.textContent = languageName(code);
+          select.appendChild(option);
+        });
+        select.value = s.language || '';
+      }
+      $('lang-select').onchange = function () {
+        var select = $('lang-select');
+        select.disabled = true;
+        api('POST', '/api/settings', { language: select.value }).then(function () { location.reload(); })
+          .catch(function (e) { toast(errorText(e), 'error'); select.disabled = false; loadSettings(); });
       };
 
       // ---- upgrading Glass ---------------------------------------------------
