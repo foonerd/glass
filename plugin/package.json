@@ -1,6 +1,6 @@
 {
   "name": "glass",
-  "version": "0.11.18",
+  "version": "0.11.19",
   "description": "Glass: VU meters, spectrum, turntables and reels on the player's display",
   "main": "index.js",
   "author": "foonerd; audio path from PeppyMeter Screensaver by 2aCD (original) and Just a Nerd",
@@ -34,6 +34,6 @@
       "amd64"
     ],
     "details": "Glass draws VU meters, spectrum analysers, turntables and tape decks on the player's display from PeppyMeter themes. It is a native display, one small binary, with no Python and no browser in the path. Glass replaces PeppyMeter Screensaver: only one of the two may be enabled.",
-    "changelog": "0.11.18 Play here bit-perfect on a Linux remote: an ALSA device named on the remote's page is opened at each stream's own rate and width; the system's output otherwise, and the reason said."
+    "changelog": "0.11.19 A remote started without a window ends on a termination signal while it plays the sound; SDL's own signal handlers are left out when the sound opens it first."
   }
 }
