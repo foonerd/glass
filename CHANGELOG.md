@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.20] - 2026-11-04
+
+- **Fanart, back covers and logos in their places after a meter switch.** Since 0.11.14 a meter switch kept the pictures still in use, and a folder layer's or the fanart's slot was kept by its file alone: the next meter asking the same picture into another box got the picture fitted and placed for the box before, so the fanart, the back cover and the logos of a theme with several meters landed at the previous meter's places and sizes until the page was refreshed or the file changed. A slot is now kept by its file and its box; the same file asked into another box is decoded for it, nothing of the old box drawn meanwhile, and a picture two meters share in the same box stands through the switch as 0.11.14 meant. The fanart's handover across a change of picture takes only a picture made for the box. Reported on the forum; seen on the player's screen and in the Face tab alike, right on 0.10.38. In step: the Face tab and Anymote carry the same engine; no Find a problem check, no sheet row, no Troubleshooting line, no new words of the plugin's; glass-evo re-pinned, the face unchanged.
+
 ## [0.11.19] - 2026-11-04
 
 - **A remote with no window ends on a termination signal while it plays the sound.** SDL's first initialisation takes SIGINT and SIGTERM for itself and turns them into a quit event; a remote started without a window (`--headless`) pumps no events, so once Play here had opened the system's output through SDL the remote did not end on a termination signal and had to be killed. SDL is now told to leave the signals alone when the sound opens it first; a remote with a window answers the quit event through its pump as before. Found by the bit-perfect proof's timed exits; the three remotes of the proof now end within sixty milliseconds. In step: no Find a problem check, no sheet row, no Troubleshooting line, no new words of the plugin's; glass-evo re-pinned, the face unchanged.
