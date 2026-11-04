@@ -1760,6 +1760,12 @@ pub mod audio {
         /// Opened at `rate` and `channels`, SDL's own conversion between
         /// them and the device's, and started.
         pub fn open(rate: u32, channels: u8, pull: P) -> Result<Self, String> {
+            // SDL's first initialisation takes SIGINT and SIGTERM for
+            // itself and turns them into a quit event; a display with no
+            // window pumps no events and would then not end on a
+            // termination signal. With a window open already the hint is
+            // moot and the window's pump answers the quit event as before.
+            sdl2::hint::set("SDL_NO_SIGNAL_HANDLERS", "1");
             let audio = sdl2::init()?.audio()?;
             let driver = audio.current_audio_driver().to_string();
             let wanted = AudioSpecDesired {
