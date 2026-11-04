@@ -2422,30 +2422,60 @@ impl TypeIcon {
     }
 }
 
-/// A picture decoded and fitted for a box, kept until the file changes: on
-/// a machine decoded off the frame loop, the slot showing what it has
-/// until the next file is ready; on a target without threads decoded in
-/// the frame that first asks for it.
+/// Whether two layer specs name the same box: the place, the size, the
+/// scaling and the border, whatever files they name. A picture is fitted
+/// and placed for a box, so it serves that box alone.
+fn same_box(a: &FolderLayerSpec, b: &FolderLayerSpec) -> bool {
+    a.x == b.x
+        && a.y == b.y
+        && a.w == b.w
+        && a.h == b.h
+        && a.scale == b.scale
+        && a.zorder == b.zorder
+        && a.border == b.border
+        && a.border_color == b.border_color
+}
+
+/// A picture decoded, fitted and placed for a box, kept until the file or
+/// the box changes: on a machine decoded off the frame loop, the slot
+/// showing what it has until the next file is ready, and nothing while a
+/// picture for another box is on its way (the one held was placed for the
+/// box before, as a meter switch asks the same file into another box); on
+/// a target without threads decoded in the frame that first asks for it.
 #[derive(Default)]
 struct PictureSlot {
     file: String,
+    /// The box the picture held was made for; none without a picture.
+    spec: Option<FolderLayerSpec>,
     picture: Option<FolderPicture>,
     #[cfg(not(target_arch = "wasm32"))]
-    pending: Option<(String, std::sync::mpsc::Receiver<Option<FolderPicture>>)>,
+    pending: Option<(
+        (String, FolderLayerSpec),
+        std::sync::mpsc::Receiver<Option<FolderPicture>>,
+    )>,
 }
 
 impl PictureSlot {
+    /// Whether the picture held, if any, was made for `spec`'s box.
+    fn fits(&self, spec: &FolderLayerSpec) -> bool {
+        self.spec.as_ref().is_some_and(|held| same_box(held, spec))
+    }
+
     /// Ask for `file` in this box; `ready` is a picture of that file already
-    /// decoded elsewhere, taken over without decoding again.
-    fn want(&mut self, file: &str, spec: &FolderLayerSpec, ready: Option<&FolderPicture>) {
+    /// decoded for this box elsewhere, taken over without decoding again.
+    /// `true` when what the slot shows changed.
+    fn want(&mut self, file: &str, spec: &FolderLayerSpec, ready: Option<&FolderPicture>) -> bool {
+        let mut changed = false;
         #[cfg(not(target_arch = "wasm32"))]
         {
             if let Some((wanted, rx)) = &self.pending {
                 match rx.try_recv() {
                     Ok(picture) => {
-                        self.file = wanted.clone();
+                        self.file = wanted.0.clone();
+                        self.spec = Some(wanted.1.clone());
                         self.picture = picture;
                         self.pending = None;
+                        changed = true;
                     }
                     Err(std::sync::mpsc::TryRecvError::Empty) => {}
                     Err(std::sync::mpsc::TryRecvError::Disconnected) => self.pending = None,
@@ -2454,46 +2484,60 @@ impl PictureSlot {
             if self
                 .pending
                 .as_ref()
-                .is_some_and(|(wanted, _)| wanted == file)
+                .is_some_and(|(wanted, _)| wanted.0 == file && same_box(&wanted.1, spec))
             {
-                return;
+                return changed;
             }
         }
-        if file == self.file {
-            return;
+        if file == self.file && self.fits(spec) {
+            return changed;
+        }
+        // Another box: the picture held was fitted and placed for the one
+        // before, so nothing shows until the one for this box is ready.
+        if self.picture.is_some() && !self.fits(spec) {
+            self.picture = None;
+            changed = true;
         }
         if file.is_empty() {
+            if !self.file.is_empty() || self.picture.is_some() {
+                changed = true;
+            }
             self.file.clear();
+            self.spec = None;
             self.picture = None;
             #[cfg(not(target_arch = "wasm32"))]
             {
                 self.pending = None;
             }
-            return;
+            return changed;
         }
         if let Some(picture) = ready {
             self.file = file.to_string();
+            self.spec = Some(spec.clone());
             self.picture = Some(picture.clone());
             #[cfg(not(target_arch = "wasm32"))]
             {
                 self.pending = None;
             }
-            return;
+            return true;
         }
         #[cfg(not(target_arch = "wasm32"))]
         {
             let (tx, rx) = std::sync::mpsc::channel();
-            let (path, spec) = (file.to_string(), spec.clone());
+            let (path, for_box) = (file.to_string(), spec.clone());
             std::thread::spawn(move || {
-                let _ = tx.send(FolderPicture::load(Path::new(&path), &spec));
+                let _ = tx.send(FolderPicture::load(Path::new(&path), &for_box));
             });
-            self.pending = Some((file.to_string(), rx));
+            self.pending = Some(((file.to_string(), spec.clone()), rx));
         }
         #[cfg(target_arch = "wasm32")]
         {
             self.file = file.to_string();
+            self.spec = Some(spec.clone());
             self.picture = FolderPicture::load(Path::new(file), spec);
+            changed = true;
         }
+        changed
     }
 }
 
@@ -2586,9 +2630,8 @@ pub struct Pictures {
     icon: TypeIcon,
     folder: Vec<PictureSlot>,
     /// The folder slots' pictures as `Stack` takes them, rebuilt when a
-    /// slot's file changes.
+    /// slot's picture changes.
     folder_pictures: Vec<Option<FolderPicture>>,
-    folder_files: Vec<String>,
     fanart: (PictureSlot, PictureSlot),
     vinyl: PlainSlot,
     reels: (PlainSlot, PlainSlot),
@@ -2742,7 +2785,8 @@ impl Pictures {
             None => self.art = None,
         }
         self.icon.follow(scene.type_area.as_ref());
-        if self.folder.len() != scene.folder_layers.len() {
+        let mut changed = self.folder.len() != scene.folder_layers.len();
+        if changed {
             self.folder = scene
                 .folder_layers
                 .iter()
@@ -2750,15 +2794,9 @@ impl Pictures {
                 .collect();
         }
         for (slot, layer) in self.folder.iter_mut().zip(scene.folder_layers.iter()) {
-            slot.want(&layer.file, &layer.spec, None);
+            changed |= slot.want(&layer.file, &layer.spec, None);
         }
-        if self
-            .folder
-            .iter()
-            .map(|slot| slot.file.as_str())
-            .ne(self.folder_files.iter().map(String::as_str))
-        {
-            self.folder_files = self.folder.iter().map(|slot| slot.file.clone()).collect();
+        if changed {
             self.folder_pictures = self
                 .folder
                 .iter()
@@ -2777,8 +2815,10 @@ impl Pictures {
                 border: 0,
                 border_color: [0, 0, 0],
             };
-            // The picture being replaced is the one the current slot held.
-            let handed_over = if self.fanart.0.file == fanart.prev_file {
+            // The picture being replaced is the one the current slot held,
+            // where it was made for this box.
+            let handed_over = if self.fanart.0.file == fanart.prev_file && self.fanart.0.fits(&spec)
+            {
                 self.fanart.0.picture.clone()
             } else {
                 None
@@ -13546,6 +13586,115 @@ mod backdrop_tests {
             "a change, to nothing"
         );
         assert!(backdrop.frame().is_none(), "a file that is no picture");
+        let _ = std::fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod picture_slot_tests {
+    use super::*;
+    use lead::{FolderLayerSpec, Scale, ZOrder};
+    use plot::FolderLayer;
+
+    fn layer(file: &str, x: u32, y: u32, w: u32, h: u32) -> FolderLayer {
+        FolderLayer {
+            spec: FolderLayerSpec {
+                files: Vec::new(),
+                x,
+                y,
+                w,
+                h,
+                scale: Scale::Stretch,
+                zorder: ZOrder::Overlay,
+                border: 0,
+                border_color: [0, 0, 0],
+            },
+            file: file.to_string(),
+        }
+    }
+
+    /// `follow` until the first folder slot holds a picture (decoded off the
+    /// frame loop), or two seconds pass.
+    fn settle(
+        pictures: &mut Pictures,
+        scene: &Scene,
+        assets: &MeterAssets,
+    ) -> Option<FolderPicture> {
+        let started = std::time::Instant::now();
+        loop {
+            pictures.follow(scene, assets, 0);
+            if let Some(Some(picture)) = pictures.folder_pictures().first() {
+                return Some(picture.clone());
+            }
+            if started.elapsed() > std::time::Duration::from_secs(2) {
+                return None;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(5));
+        }
+    }
+
+    /// A meter switch asks the same picture into another box: the slot does
+    /// not keep the picture placed and fitted for the box before (as it did
+    /// from 0.11.14 to 0.11.19, the fanart and the folder layers landing at
+    /// the previous meter's places until the page was refreshed), and the
+    /// one for the new box takes its place; the same file in the same box
+    /// stands through the switch untouched.
+    #[test]
+    fn a_picture_follows_the_box_it_is_asked_into_across_a_meter_switch() {
+        let dir = std::env::temp_dir().join(format!("glass-picture-box-{}", std::process::id()));
+        let _ = std::fs::create_dir_all(&dir);
+        let frame = Frame {
+            blend: Default::default(),
+            width: 20,
+            height: 10,
+            rgba: vec![200; 20 * 10 * 4],
+        };
+        let file = dir.join("logo.png");
+        write_png(&file, &frame).unwrap();
+        let file = file.to_string_lossy().to_string();
+        // Nothing of the meter's assets is read for a folder layer but the
+        // art mask, which this meter has none of.
+        let assets = MeterAssets {
+            front: None,
+            indicator: None,
+            indicator_right: None,
+            fonts: Fonts::default(),
+            art_mask: None,
+            spectra: Vec::new(),
+            tonearm: None,
+            reels: (None, None),
+            lenses: Lenses::default(),
+            indicators: None,
+            base: Frame::default(),
+            translucent: false,
+        };
+        let mut pictures = Pictures::default();
+        let mut scene = Scene {
+            folder_layers: vec![layer(&file, 10, 20, 40, 30)],
+            ..Default::default()
+        };
+        let first = settle(&mut pictures, &scene, &assets).expect("decoded for the first box");
+        assert_eq!(first.at, (10, 20));
+        assert_eq!((first.frame.width, first.frame.height), (40, 30));
+        // The meter switches: the same file into another box.
+        pictures.clear();
+        scene.folder_layers = vec![layer(&file, 100, 200, 80, 60)];
+        pictures.follow(&scene, &assets, 0);
+        assert!(
+            pictures.folder_pictures()[0].is_none(),
+            "nothing of the old box is drawn in the new"
+        );
+        let second = settle(&mut pictures, &scene, &assets).expect("decoded for the second box");
+        assert_eq!(second.at, (100, 200));
+        assert_eq!((second.frame.width, second.frame.height), (80, 60));
+        // The meter switches again, the same file in the same box: kept as it is.
+        pictures.clear();
+        pictures.follow(&scene, &assets, 0);
+        assert_eq!(
+            pictures.folder_pictures()[0].as_ref().map(|p| p.at),
+            Some((100, 200)),
+            "the picture the two meters share stands through the switch"
+        );
         let _ = std::fs::remove_dir_all(dir);
     }
 }
