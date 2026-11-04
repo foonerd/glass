@@ -1198,7 +1198,7 @@ pub fn remote_main(
             page,
             probe: None,
             unread_text,
-            play_here: playhere::Run::new(),
+            play_here: playhere::Run::new(app.config().play_here_device),
         };
         if let ThemeChoice::Own { meter, .. } | ThemeChoice::Local { meter, .. } = &player.theme {
             logline::say!(

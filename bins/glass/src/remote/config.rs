@@ -419,6 +419,13 @@ pub struct RemoteConfig {
     /// Manager's own Language setting has it.
     #[serde(default)]
     pub language: String,
+    /// Play here bit-perfect on a Linux remote: an ALSA device by its name
+    /// (`hw:0,0`, `hw:CARD=DAC`), opened directly at the stream's own rate
+    /// and width; empty plays through the system's output. A device that
+    /// cannot take a stream's shape is said, and that stream goes through
+    /// the system's output.
+    #[serde(default)]
+    pub play_here_device: String,
 }
 
 fn default_frames_port() -> u16 {
@@ -504,6 +511,7 @@ impl Default for RemoteConfig {
             play_here: false,
             play_here_gain: DEFAULT_PLAY_HERE_GAIN,
             language: String::new(),
+            play_here_device: String::new(),
         }
     }
 }
@@ -562,6 +570,15 @@ impl RemoteConfig {
             .chars()
             .filter(|c| c.is_ascii_lowercase() || *c == '_' || *c == '-')
             .take(8)
+            .collect();
+        // An ALSA device name as `aplay -L` lists it: printable, no
+        // spaces, sixty-four characters at most.
+        self.play_here_device = self
+            .play_here_device
+            .trim()
+            .chars()
+            .filter(|c| c.is_ascii_graphic())
+            .take(64)
             .collect();
         self.themes_dir = self
             .themes_dir

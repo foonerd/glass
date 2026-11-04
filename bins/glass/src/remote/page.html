@@ -216,6 +216,8 @@
       <div class="full"><label><input type="checkbox" id="ph-on"> Play the player's sound on this remote</label></div>
       <div><label>Volume on this remote, 0 to 100</label><input type="number" id="ph-gain" min="0" max="100" step="1" value="80"></div>
       <div class="full help">The player's own stream, taken over its Manager's port while the player's System tab has Play here on, played through this machine's audio output a quarter to half a second behind the room. Both take effect at once, without Apply; the Glass interface's Play here tile and its slider do the same. The Status panel says what the sound is doing.</div>
+      <div class="full" id="ph-device-row"><label>Bit-perfect through ALSA on Linux: the device, empty for the system's output</label><input type="text" id="ph-device" placeholder="hw:0,0" maxlength="64"></div>
+      <div class="full help" id="ph-device-help">An ALSA device as <code>aplay -L</code> names it (<code>hw:0,0</code>, <code>hw:CARD=DAC</code>), opened directly at the stream's own rate and width, so the bits reach the DAC untouched at a volume of 100; below 100 the samples are scaled here. A device the system's sound server holds, or one that cannot take a stream's shape, is said in the Status panel and that stream goes through the system's output. Applied with Apply.</div>
     </div>
   </div>
 
@@ -364,6 +366,9 @@
       // The choice is there only on a display built with the Glass interface (the bundle).
       $('face-panel').classList.toggle('hidden', !s.face);
       fillPlayHere(s.status && s.status.play_here);
+      // The ALSA device is a Linux remote's choice; the field stays away elsewhere.
+      var os = String(s.prerequisites && s.prerequisites.os || '').toLowerCase();
+      ['ph-device-row', 'ph-device-help'].forEach(function (id) { $(id).classList.toggle('hidden', os.indexOf('linux') === -1); });
       $('face-help').textContent = s.face ? 'This remote is the bundle: the display with ' + s.face + ' in it, a clock and the date when the player stands still and a bar of controls. The first choice shows them when the player\'s own screen does, which is when glass-evo holds it. The controls need a touch screen or a mouse here; the clock needs neither.' : '';
       $('paths').textContent = 'Configuration: ' + s.configPath + ' · cache: ' + s.cache;
       renderUpgrade(s);
@@ -605,7 +610,7 @@
       ['Screen', st.screen && st.screen[0] ? st.screen[0] + 'x' + st.screen[1] : ''],
       ['On the screen', onScreenWords(st)],
       ['Synced', st.synced || '']].concat(state.face ? [['Glass interface', st.face_shown ? 'shown' : 'not shown'], ['Controls', st.controls || (st.face_shown ? 'not drawn yet' : '')]] : []).concat([
-      ['Play here', st.play_here ? st.play_here.state + (st.play_here.shape ? ' · ' + st.play_here.shape : '') + (st.play_here.on ? ' · volume ' + st.play_here.gain : '') : ''],
+      ['Play here', st.play_here ? st.play_here.state + (st.play_here.shape ? ' · ' + st.play_here.shape : '') + (st.play_here.output ? ' · ' + st.play_here.output : '') + (st.play_here.on ? ' · volume ' + st.play_here.gain : '') : ''],
       ['Language of the dates', st.language ? st.language + (state.config && state.config.language ? ' · this remote\'s own' : ' · the player\'s') : ''],
       ['This page', st.page || '']
     ]);
@@ -762,7 +767,7 @@
     $('d-margin').value = equal && m.top ? m.top : '';
     ['top', 'right', 'bottom', 'left'].forEach(function (e) { $('d-margin-' + e).value = m[e] || ''; });
     marginEachFollows();
-    $('gain').value = c.gain_db; $('decay').value = c.spectrum_decay ? c.spectrum_decay : ''; $('r-name').value = c.name; $('r-port').value = c.page_port; $('r-log').value = c.log_level || ''; $('r-lang').value = c.language || '';
+    $('gain').value = c.gain_db; $('decay').value = c.spectrum_decay ? c.spectrum_decay : ''; $('r-name').value = c.name; $('r-port').value = c.page_port; $('r-log').value = c.log_level || ''; $('r-lang').value = c.language || ''; $('ph-device').value = c.play_here_device || '';
     $('face-shown').value = c.face || 'follow';
     $('face-buttons').value = c.buttons || 'look';
     $('test-releases').checked = !!c.test_releases;
@@ -790,7 +795,7 @@
     var pct = function (id) { var v = parseInt($(id).value, 10); return v > 0 ? Math.min(v, 25) : 0; };
     var margin = $('d-margin-each').checked ? { top: pct('d-margin-top'), right: pct('d-margin-right'), bottom: pct('d-margin-bottom'), left: pct('d-margin-left') } : (function () { var a = pct('d-margin'); return { top: a, right: a, bottom: a, left: a }; })();
     c.display = { mode: $('d-mode').value, margin: margin, position: (x !== '' && y !== '') ? [parseInt(x, 10) || 0, parseInt(y, 10) || 0] : null, fit: $('d-fit').checked, scale: scale > 0 && scale < 100 ? scale : null, place: $('d-place').value || 'center', backdrop: $('d-backdrop').value || 'player', fps: $('d-fps').value ? parseInt($('d-fps').value, 10) : null, monitor: parseInt($('d-monitor').value, 10) || 0 };
-    c.gain_db = parseFloat($('gain').value) || 0; c.spectrum_decay = parseFloat($('decay').value) || 0; c.name = $('r-name').value.trim(); c.page_port = parseInt($('r-port').value, 10) || 5583; c.log_level = $('r-log').value || null; c.language = $('r-lang').value || '';
+    c.gain_db = parseFloat($('gain').value) || 0; c.spectrum_decay = parseFloat($('decay').value) || 0; c.name = $('r-name').value.trim(); c.page_port = parseInt($('r-port').value, 10) || 5583; c.log_level = $('r-log').value || null; c.language = $('r-lang').value || ''; c.play_here_device = $('ph-device').value.trim();
     c.face = $('face-shown').value || 'follow';
     c.buttons = $('face-buttons').value || 'look';
     c.test_releases = $('test-releases').checked;
@@ -804,7 +809,7 @@
     $('d-margin').disabled = each;
   }
   $('d-margin-each').onchange = function () { marginEachFollows(); setDirty(true); };
-  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'd-scale', 'd-place', 'd-backdrop', 'd-margin', 'd-margin-top', 'd-margin-right', 'd-margin-bottom', 'd-margin-left', 'gain', 'decay', 'r-name', 'r-port', 'r-log', 'r-lang', 'face-shown', 'face-buttons', 'test-releases', 'upload-install'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
+  ['d-mode', 'd-monitor', 'd-x', 'd-y', 'd-fps', 'd-fit', 'd-scale', 'd-place', 'd-backdrop', 'd-margin', 'd-margin-top', 'd-margin-right', 'd-margin-bottom', 'd-margin-left', 'gain', 'decay', 'r-name', 'r-port', 'r-log', 'r-lang', 'ph-device', 'face-shown', 'face-buttons', 'test-releases', 'upload-install'].forEach(function (id) { $(id).onchange = function () { setDirty(true); }; });
   // A share of the theme's size below 100 shows it smaller, never fitted: Fit goes off and stays off while the share stands.
   function fitFollowsScale() {
     var s = parseInt($('d-scale').value, 10);

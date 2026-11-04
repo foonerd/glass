@@ -26,6 +26,8 @@ use lite_client::{parse_text, Event, Shape};
 use serde::Serialize;
 use tungstenite::{HandshakeError, Message};
 
+#[cfg(target_os = "linux")]
+use super::alsa;
 use super::RemoteApp;
 
 /// The sound starts once this much is queued: the jitter buffer, a
@@ -48,50 +50,84 @@ const READ: Duration = Duration::from_secs(5);
 /// The route the player's Manager proxies to its sound server.
 pub const ROUTE: &str = "/anymote/listen";
 
-/// The queue between the socket and the output: samples as floats,
-/// interleaved by channel, at one shape at a time.
+/// The queue between the socket and the output: the stream's own PCM
+/// frames as they came, at one shape at a time. The output takes them as
+/// floats (the system's output, SDL converting) or as they are (a device
+/// opened at the stream's shape, bit-perfect at a volume of 100).
 pub struct Ring {
-    samples: VecDeque<f32>,
-    rate: u32,
-    channels: u32,
+    bytes: VecDeque<u8>,
+    shape: Option<Shape>,
     gain: f32,
     started: bool,
     /// Frames the trim dropped since the ring was shaped.
     dropped: u64,
+    /// The frames last taken, contiguous, and their floats.
+    raw: Vec<u8>,
+    floats: Vec<f32>,
+}
+
+impl Default for Ring {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl Ring {
-    pub fn new(rate: u32, channels: u32) -> Self {
+    pub fn new() -> Self {
         Self {
-            samples: VecDeque::new(),
-            rate: rate.max(1),
-            channels: channels.max(1),
+            bytes: VecDeque::new(),
+            shape: None,
             gain: 1.0,
             started: false,
             dropped: 0,
+            raw: Vec::new(),
+            floats: Vec::new(),
         }
     }
 
-    /// Shaped for a segment: emptied and at its rate and channels.
-    pub fn reshape(&mut self, rate: u32, channels: u32) {
-        self.rate = rate.max(1);
-        self.channels = channels.max(1);
+    /// Shaped for a segment: emptied and at its rate, channels and format.
+    pub fn reshape(&mut self, shape: &Shape) {
+        self.shape = Some(shape.clone());
         self.clear();
         self.dropped = 0;
     }
 
+    /// The rate and channels in force; zeros before any segment.
     pub fn shape(&self) -> (u32, u32) {
-        (self.rate, self.channels)
+        self.shape
+            .as_ref()
+            .map(|s| (s.rate, s.channels))
+            .unwrap_or((0, 0))
     }
 
-    fn samples_in(&self, ms: u32) -> usize {
-        (self.rate as usize * self.channels as usize * ms as usize) / 1000
+    fn frame_bytes(&self) -> usize {
+        self.shape
+            .as_ref()
+            .map(|s| s.frame_bytes as usize)
+            .unwrap_or(1)
+            .max(1)
+    }
+
+    fn rate(&self) -> usize {
+        self.shape.as_ref().map(|s| s.rate as usize).unwrap_or(0)
+    }
+
+    fn channels(&self) -> usize {
+        self.shape
+            .as_ref()
+            .map(|s| s.channels as usize)
+            .unwrap_or(1)
+            .max(1)
+    }
+
+    fn bytes_in(&self, ms: u32) -> usize {
+        self.rate() * self.frame_bytes() * ms as usize / 1000
     }
 
     /// How much is queued, in milliseconds of sound.
     pub fn queued_ms(&self) -> u32 {
-        let per_second = (self.rate as usize * self.channels as usize).max(1);
-        (self.samples.len() * 1000 / per_second) as u32
+        let per_second = (self.rate() * self.frame_bytes()).max(1);
+        (self.bytes.len() * 1000 / per_second) as u32
     }
 
     /// The volume on this device, 0 to 100, as the page's slider: a share
@@ -105,45 +141,91 @@ impl Ring {
         self.gain
     }
 
-    /// Frames in, as decoded; past `MOST_MS` the oldest go, back to the lead.
-    pub fn push(&mut self, samples: &[f32]) {
-        self.samples.extend(samples.iter().copied());
-        let most = self.samples_in(MOST_MS);
-        if self.samples.len() > most {
-            let keep = self.samples_in(LEAD_MS);
-            let drop = self.samples.len() - keep;
-            self.samples.drain(..drop);
-            self.dropped += (drop / self.channels as usize) as u64;
+    /// Frames in, as they came; past `MOST_MS` the oldest go, back to the
+    /// lead, whole frames at a time. Nothing is taken before a segment
+    /// shaped the ring.
+    pub fn push(&mut self, pcm: &[u8]) {
+        if self.shape.is_none() {
+            return;
+        }
+        let frame = self.frame_bytes();
+        let whole = pcm.len() / frame * frame;
+        self.bytes.extend(pcm[..whole].iter().copied());
+        let most = self.bytes_in(MOST_MS);
+        if self.bytes.len() > most {
+            let keep = self.bytes_in(LEAD_MS);
+            let drop = (self.bytes.len() - keep) / frame * frame;
+            self.bytes.drain(..drop);
+            self.dropped += (drop / frame) as u64;
         }
     }
 
     /// Emptied, the lead to gather again: a gap, the stream's end, a new segment.
     pub fn clear(&mut self) {
-        self.samples.clear();
+        self.bytes.clear();
         self.started = false;
     }
 
-    /// The output's call: `out` filled with the next samples at the gain,
-    /// or with silence until the lead is queued; a ring that runs dry
-    /// mid-way fills the rest with silence and waits for the lead again.
-    /// `true` while sound flowed.
-    pub fn pull(&mut self, out: &mut [f32]) -> bool {
+    /// Up to `frames` frames taken into `raw`: none until the lead is
+    /// queued, and a ring that runs dry mid-way gives what it has and
+    /// waits for the lead again. How many were taken.
+    fn take(&mut self, frames: usize) -> usize {
+        self.raw.clear();
         if !self.started {
             if self.queued_ms() < LEAD_MS {
-                out.fill(0.0);
-                return false;
+                return 0;
             }
             self.started = true;
         }
-        let have = self.samples.len().min(out.len());
-        for (o, s) in out.iter_mut().zip(self.samples.drain(..have)) {
-            *o = s * self.gain;
-        }
-        if have < out.len() {
-            out[have..].fill(0.0);
+        let frame = self.frame_bytes();
+        let have = (self.bytes.len() / frame).min(frames);
+        self.raw.extend(self.bytes.drain(..have * frame));
+        if have < frames {
             self.started = false;
         }
-        have > 0
+        have
+    }
+
+    /// The system output's call: `out` filled with the next frames as
+    /// floats at the gain, silence where the ring gives nothing. `true`
+    /// while sound flowed.
+    pub fn pull(&mut self, out: &mut [f32]) -> bool {
+        let channels = self.channels();
+        let taken = self.take(out.len() / channels);
+        let Self {
+            raw,
+            floats,
+            shape,
+            gain,
+            ..
+        } = self;
+        floats.clear();
+        if let Some(shape) = shape {
+            shape.to_f32(raw, floats);
+        }
+        let n = floats.len().min(out.len());
+        for (o, s) in out[..n].iter_mut().zip(floats.iter()) {
+            *o = s * *gain;
+        }
+        out[n..].fill(0.0);
+        taken > 0
+    }
+
+    /// A device's call: `out` filled with the next frames as they came,
+    /// the bits untouched at a volume of 100 and scaled below it, silence
+    /// where the ring gives nothing. `true` while sound flowed.
+    pub fn pull_raw(&mut self, out: &mut [u8]) -> bool {
+        let frame = self.frame_bytes();
+        let taken = self.take(out.len() / frame);
+        let n = self.raw.len().min(out.len());
+        out[..n].copy_from_slice(&self.raw[..n]);
+        out[n..].fill(0);
+        if self.gain < 1.0 {
+            if let Some(shape) = &self.shape {
+                scale_in_place(&shape.format, &mut out[..n], self.gain);
+            }
+        }
+        taken > 0
     }
 
     /// Whether the output is being fed, the lead gathered.
@@ -154,6 +236,41 @@ impl Ring {
     #[cfg(test)]
     pub fn dropped(&self) -> u64 {
         self.dropped
+    }
+}
+
+/// Samples in the stream's own format scaled by `gain`, in place: the
+/// volume below 100 on a device opened at the stream's shape.
+pub fn scale_in_place(format: &str, bytes: &mut [u8], gain: f32) {
+    match format {
+        "s16le" => {
+            for s in bytes.as_chunks_mut::<2>().0 {
+                let v = (i16::from_le_bytes(*s) as f32 * gain).round() as i16;
+                *s = v.to_le_bytes();
+            }
+        }
+        "s24le" => {
+            for s in bytes.as_chunks_mut::<3>().0 {
+                let v = (i32::from_le_bytes([0, s[0], s[1], s[2]]) >> 8) as f32 * gain;
+                let v = (v.round() as i32)
+                    .clamp(-(1 << 23), (1 << 23) - 1)
+                    .to_le_bytes();
+                *s = [v[0], v[1], v[2]];
+            }
+        }
+        "s32le" => {
+            for s in bytes.as_chunks_mut::<4>().0 {
+                let v = (i32::from_le_bytes(*s) as f64 * gain as f64).round() as i32;
+                *s = v.to_le_bytes();
+            }
+        }
+        "f32le" => {
+            for s in bytes.as_chunks_mut::<4>().0 {
+                let v = f32::from_le_bytes(*s) * gain;
+                *s = v.to_le_bytes();
+            }
+        }
+        _ => {}
     }
 }
 
@@ -216,7 +333,7 @@ impl Listener {
     pub fn start(host: &str, port: u16, gain: u8) -> Self {
         let stop = Arc::new(AtomicBool::new(false));
         let socket = Arc::new(Mutex::new(None));
-        let mut ring = Ring::new(44_100, 2);
+        let mut ring = Ring::new();
         ring.set_gain(gain);
         let ring = Arc::new(Mutex::new(ring));
         let (sender, words) = mpsc::channel();
@@ -336,7 +453,6 @@ fn listen(
         };
         tries = 0;
         let mut shape: Option<Shape> = None;
-        let mut decoded = Vec::new();
         loop {
             let message = match ws.read() {
                 Ok(message) => message,
@@ -362,7 +478,7 @@ fn listen(
                         Event::Segment(segment) => {
                             ring.lock()
                                 .unwrap_or_else(|e| e.into_inner())
-                                .reshape(segment.rate, segment.channels);
+                                .reshape(&segment);
                             shape = Some(segment.clone());
                             say(Word::Segment(segment));
                         }
@@ -382,12 +498,8 @@ fn listen(
                     }
                 }
                 Message::Binary(pcm) => {
-                    if let Some(s) = shape.as_ref().filter(|s| s.known() && !s.one_bit) {
-                        decoded.clear();
-                        s.to_f32(&pcm, &mut decoded);
-                        ring.lock()
-                            .unwrap_or_else(|e| e.into_inner())
-                            .push(&decoded);
+                    if shape.as_ref().is_some_and(|s| s.known() && !s.one_bit) {
+                        ring.lock().unwrap_or_else(|e| e.into_inner()).push(&pcm);
                     }
                 }
                 Message::Close(_) => break,
@@ -468,6 +580,109 @@ pub struct PlayHereStatus {
     pub gain: u8,
     pub state: String,
     pub shape: String,
+    /// The output in force while a stream is on: the system's output
+    /// through its driver, or bit-perfect through a device, with the
+    /// reason where the device named could not be used.
+    pub output: String,
+}
+
+/// A device opened at the stream's shape (Linux, ALSA), fed by a thread
+/// of its own from the ring in whole periods, paced by the device's own
+/// clock; a write that fails is kept for the session, which falls back to
+/// the system's output.
+#[cfg(target_os = "linux")]
+struct Direct {
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+    failed: Arc<Mutex<Option<String>>>,
+}
+
+#[cfg(target_os = "linux")]
+impl Direct {
+    fn start(mut device: alsa::Device, ring: Arc<Mutex<Ring>>, shape: &Shape) -> Self {
+        let stop = Arc::new(AtomicBool::new(false));
+        let failed = Arc::new(Mutex::new(None));
+        // A period of 20 ms a write, as the stream's chunks are.
+        let frame = (shape.frame_bytes as usize).max(1);
+        let period = (shape.rate as usize * 20 / 1000).max(1) * frame;
+        let (rate, channels) = (shape.rate, shape.channels);
+        let thread = {
+            let (stop, failed) = (stop.clone(), failed.clone());
+            thread::Builder::new()
+                .name("play-here-alsa".into())
+                .spawn(move || {
+                    let mut buf = vec![0u8; period];
+                    while !stop.load(Ordering::Acquire) {
+                        let flowed = {
+                            let mut ring = ring.lock().unwrap_or_else(|e| e.into_inner());
+                            if ring.shape() == (rate, channels) {
+                                ring.pull_raw(&mut buf)
+                            } else {
+                                buf.fill(0);
+                                false
+                            }
+                        };
+                        if let Err(why) = device.write(&buf) {
+                            *failed.lock().unwrap_or_else(|e| e.into_inner()) = Some(why);
+                            break;
+                        }
+                        // The device paces the writes by its own clock; a
+                        // device that takes silence at once (ALSA's null,
+                        // a plugin without a clock) is not spun on.
+                        if !flowed {
+                            thread::sleep(Duration::from_millis(10));
+                        }
+                    }
+                })
+                .ok()
+        };
+        Self {
+            stop,
+            thread,
+            failed,
+        }
+    }
+
+    fn failed(&self) -> Option<String> {
+        self.failed
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl Drop for Direct {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// The device named opened at the stream's shape and its writer started;
+/// the error says what stood in the way (no library, a format ALSA does
+/// not take, a device held or short of the shape).
+#[cfg(target_os = "linux")]
+fn open_direct(
+    device: &str,
+    shape: &Shape,
+    ring: &Arc<Mutex<Ring>>,
+) -> Result<(Direct, &'static str), String> {
+    let lib = alsa::Lib::load()?;
+    let (format, name) = alsa::format_of(&shape.format)
+        .ok_or_else(|| format!("{} is not a format ALSA takes", shape.format))?;
+    let opened = alsa::Device::open(
+        lib,
+        device,
+        format,
+        shape.channels,
+        shape.rate,
+        shape.frame_bytes as usize,
+        LEAD_MS * 1000,
+    )?;
+    Ok((Direct::start(opened, ring.clone(), shape), name))
 }
 
 /// The session's side: the listener while the sound is wanted and served,
@@ -482,16 +697,17 @@ pub struct Run {
     told: Option<(bool, u8)>,
     /// The last words written to the journal, written once per change.
     said: String,
-}
-
-impl Default for Run {
-    fn default() -> Self {
-        Self::new()
-    }
+    /// The ALSA device named for a bit-perfect output on Linux; empty is
+    /// the system's output.
+    device: String,
+    #[cfg(target_os = "linux")]
+    direct: Option<Direct>,
+    /// The output in force, in words, for the Status panel.
+    through: String,
 }
 
 impl Run {
-    pub fn new() -> Self {
+    pub fn new(device: String) -> Self {
         Self {
             listener: None,
             output: None,
@@ -499,7 +715,97 @@ impl Run {
             state: State::Off,
             told: None,
             said: String::new(),
+            device,
+            #[cfg(target_os = "linux")]
+            direct: None,
+            through: String::new(),
         }
+    }
+
+    /// Both outputs shut; the next segment opens one again.
+    fn close_outputs(&mut self) {
+        self.output = None;
+        #[cfg(target_os = "linux")]
+        {
+            self.direct = None;
+        }
+        self.through.clear();
+    }
+
+    fn any_output(&self) -> bool {
+        #[cfg(target_os = "linux")]
+        {
+            self.output.is_some() || self.direct.is_some()
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            self.output.is_some()
+        }
+    }
+
+    /// The system's output opened at the shape, SDL converting; a note
+    /// (why the device named was not used) is kept in the words.
+    fn open_system(&mut self, shape: &Shape, ring: &Arc<Mutex<Ring>>, note: Option<String>) {
+        let tap = Tap {
+            ring: ring.clone(),
+            rate: shape.rate,
+            channels: shape.channels,
+        };
+        match pane::audio::Output::open(shape.rate, shape.channels.min(255) as u8, tap) {
+            Ok(output) => {
+                logline::say!(
+                    Info,
+                    "remotes",
+                    "play here: {} through {}",
+                    shape_words(shape),
+                    output.driver()
+                );
+                self.through = match note {
+                    Some(why) => format!("the system's output through {} ({why})", output.driver()),
+                    None => format!("the system's output through {}", output.driver()),
+                };
+                self.output = Some(output);
+                self.state = State::Playing;
+            }
+            Err(e) => {
+                logline::say!(Warn, "remotes", "play here: no audio output: {e}");
+                self.state = State::NoOutput(e);
+            }
+        }
+    }
+
+    /// An output opened at a new segment's shape: the device named first,
+    /// bit-perfect, else the system's output with the reason noted.
+    fn open_output(&mut self, shape: &Shape, ring: &Arc<Mutex<Ring>>) {
+        self.close_outputs();
+        #[cfg(target_os = "linux")]
+        if !self.device.is_empty() {
+            match open_direct(&self.device, shape, ring) {
+                Ok((direct, format)) => {
+                    logline::say!(
+                        Info,
+                        "remotes",
+                        "play here: {} bit-perfect through {} ({format})",
+                        shape_words(shape),
+                        self.device
+                    );
+                    self.through = format!("bit-perfect through {} ({format})", self.device);
+                    self.direct = Some(direct);
+                    self.state = State::Playing;
+                    return;
+                }
+                Err(why) => {
+                    logline::say!(
+                        Warn,
+                        "remotes",
+                        "play here: {why}; the system's output instead"
+                    );
+                    self.open_system(shape, ring, Some(why));
+                    return;
+                }
+            }
+        }
+        self.open_system(shape, ring, None);
     }
 
     /// A command of the face's: `play-here` with `on` and `gain` is this
@@ -559,40 +865,10 @@ impl Run {
                     }
                     Word::Segment(shape) => {
                         if shape.one_bit || !shape.known() {
-                            self.output = None;
+                            self.close_outputs();
                             self.state = State::PlayerOnly;
                         } else {
-                            let tap = Tap {
-                                ring: ring.clone(),
-                                rate: shape.rate,
-                                channels: shape.channels,
-                            };
-                            self.output = None;
-                            match pane::audio::Output::open(
-                                shape.rate,
-                                shape.channels.min(255) as u8,
-                                tap,
-                            ) {
-                                Ok(output) => {
-                                    logline::say!(
-                                        Info,
-                                        "remotes",
-                                        "play here: {} through {}",
-                                        shape_words(&shape),
-                                        output.driver()
-                                    );
-                                    self.output = Some(output);
-                                    self.state = State::Playing;
-                                }
-                                Err(e) => {
-                                    logline::say!(
-                                        Warn,
-                                        "remotes",
-                                        "play here: no audio output: {e}"
-                                    );
-                                    self.state = State::NoOutput(e);
-                                }
-                            }
+                            self.open_output(&shape, &ring);
                         }
                         self.shape = Some(shape);
                     }
@@ -610,14 +886,28 @@ impl Run {
                     Word::Refused(code) => self.state = State::Unreachable(format!("HTTP {code}")),
                     Word::Unreachable(why) => self.state = State::Unreachable(why),
                     Word::Closed => {
-                        self.output = None;
+                        self.close_outputs();
                         self.state = State::Reaching;
                     }
                 }
             }
+            // A device that failed mid-stream: said, and the stream goes on
+            // through the system's output.
+            #[cfg(target_os = "linux")]
+            if let Some(why) = self.direct.as_ref().and_then(|d| d.failed()) {
+                logline::say!(
+                    Warn,
+                    "remotes",
+                    "play here: {why}; the system's output instead"
+                );
+                self.direct = None;
+                if let Some(shape) = self.shape.clone() {
+                    self.open_system(&shape, &ring, Some(why));
+                }
+            }
             // A stream on and the output open: playing while the ring feeds
             // it, waiting while the lead gathers.
-            if self.output.is_some() && matches!(self.state, State::Playing | State::Waiting) {
+            if self.any_output() && matches!(self.state, State::Playing | State::Waiting) {
                 let playing = ring.lock().unwrap_or_else(|e| e.into_inner()).playing();
                 self.state = if playing {
                     State::Playing
@@ -627,7 +917,7 @@ impl Run {
             }
         } else {
             if let Some(mut listener) = self.listener.take() {
-                self.output = None;
+                self.close_outputs();
                 self.shape = None;
                 listener.stop();
                 logline::say!(
@@ -662,12 +952,18 @@ impl Run {
             logline::say!(Info, "remotes", "play here: {words}");
             self.said = words.clone();
         }
+        let output = if self.any_output() {
+            self.through.clone()
+        } else {
+            String::new()
+        };
         app.set_status(|s| {
             s.play_here = PlayHereStatus {
                 on,
                 gain,
                 state: words,
                 shape,
+                output,
             }
         });
     }
@@ -677,14 +973,39 @@ impl Run {
 mod tests {
     use super::*;
 
-    fn ms(ring: &Ring, ms: u32) -> Vec<f32> {
-        vec![0.5; ring.samples_in(ms)]
+    /// A 16-bit stereo shape at `rate`.
+    fn s16(rate: u32) -> Shape {
+        Shape {
+            rate,
+            channels: 2,
+            format: "s16le".into(),
+            bits: 16,
+            frame_bytes: 4,
+            one_bit: false,
+            capped: false,
+            chunk_ms: 20,
+        }
+    }
+
+    /// A ring shaped 16-bit stereo at `rate`.
+    fn ring16(rate: u32) -> Ring {
+        let mut ring = Ring::new();
+        ring.reshape(&s16(rate));
+        ring
+    }
+
+    /// `ms` of 16-bit stereo frames at half scale (0x4000), as bytes.
+    fn ms(ring: &Ring, ms: u32) -> Vec<u8> {
+        let frames = ring.bytes_in(ms) / 4;
+        (0..frames * 2)
+            .flat_map(|_| 0x4000i16.to_le_bytes())
+            .collect()
     }
 
     #[test]
     fn the_ring_gathers_the_lead_before_any_sound_and_pauses_when_dry() {
-        let mut ring = Ring::new(48_000, 2);
-        let mut out = vec![1.0; 96 * 10]; // 10 ms
+        let mut ring = ring16(48_000);
+        let mut out = vec![1.0; 96 * 10]; // 10 ms of floats
         assert!(!ring.pull(&mut out), "nothing queued: silence");
         assert!(out.iter().all(|s| *s == 0.0));
         let a_bit = ms(&ring, LEAD_MS - 10);
@@ -693,21 +1014,25 @@ mod tests {
         assert_eq!(ring.queued_ms(), LEAD_MS - 10, "silence takes nothing");
         ring.push(&ms(&ring, 20));
         assert!(ring.pull(&mut out), "the lead is there: sound");
-        assert!(out.iter().all(|s| *s == 0.5));
+        assert!(
+            out.iter().all(|s| (*s - 0.5).abs() < 1e-3),
+            "{:?}",
+            &out[..4]
+        );
         assert!(ring.playing());
         // Everything out, and more asked: the rest is silence and the lead
         // gathers again before the next sound.
-        let mut much = vec![1.0; ring.samples_in(MOST_MS)];
+        let mut much = vec![1.0; ring.bytes_in(MOST_MS) / 2];
         assert!(ring.pull(&mut much));
         assert!(!ring.playing(), "ran dry: paused");
-        assert_eq!(much[ring.samples_in(LEAD_MS + 10)], 0.0);
+        assert_eq!(much[ring.bytes_in(LEAD_MS + 10) / 2], 0.0);
         ring.push(&ms(&ring, 100));
         assert!(!ring.pull(&mut out), "the lead gathers again");
     }
 
     #[test]
     fn the_ring_trims_back_to_the_lead_when_the_clocks_drift_it_long() {
-        let mut ring = Ring::new(44_100, 2);
+        let mut ring = ring16(44_100);
         ring.push(&ms(&ring, MOST_MS));
         assert_eq!(ring.dropped(), 0);
         ring.push(&ms(&ring, 40));
@@ -720,30 +1045,82 @@ mod tests {
 
     #[test]
     fn the_gain_scales_the_sound_and_a_clear_or_reshape_empties_it() {
-        let mut ring = Ring::new(44_100, 2);
+        let mut ring = ring16(44_100);
         ring.set_gain(50);
         ring.push(&ms(&ring, LEAD_MS));
         let mut out = vec![0.0; 88];
         assert!(ring.pull(&mut out));
-        assert!(out.iter().all(|s| (*s - 0.25).abs() < 1e-6));
+        assert!(out.iter().all(|s| (*s - 0.25).abs() < 1e-3));
         ring.clear();
         assert_eq!(ring.queued_ms(), 0);
         assert!(!ring.playing());
         ring.push(&ms(&ring, LEAD_MS));
-        ring.reshape(96_000, 2);
+        ring.reshape(&s16(96_000));
         assert_eq!(ring.shape(), (96_000, 2));
         assert_eq!(ring.queued_ms(), 0);
         assert!(
             (ring.gain() - 0.5).abs() < 1e-6,
             "the gain outlives a reshape"
         );
+        let mut unshaped = Ring::new();
+        unshaped.push(&[1, 2, 3, 4]);
+        assert_eq!(unshaped.queued_ms(), 0, "nothing taken before a segment");
+        assert_eq!(unshaped.shape(), (0, 0));
+    }
+
+    #[test]
+    fn the_raw_pull_passes_the_bits_at_a_hundred_and_scales_below() {
+        let mut ring = ring16(44_100);
+        let frames: Vec<u8> = (0..ring.bytes_in(LEAD_MS) / 4)
+            .flat_map(|i| {
+                let v = (i as i16).wrapping_mul(37);
+                [v.to_le_bytes(), (-v).to_le_bytes()].concat()
+            })
+            .collect();
+        ring.push(&frames);
+        let mut out = vec![0xffu8; 4 * 100];
+        assert!(ring.pull_raw(&mut out));
+        assert_eq!(&out[..], &frames[..400], "the bytes as they came");
+        ring.clear();
+        ring.set_gain(50);
+        ring.push(&frames);
+        assert!(ring.pull_raw(&mut out));
+        let first = i16::from_le_bytes([out[8], out[9]]);
+        assert_eq!(first, 37, "the third frame's left sample, 74 at half");
+        // A part frame at the end is left out, silence filling the rest.
+        let mut odd = vec![0xffu8; 4 * 3 + 2];
+        assert!(ring.pull_raw(&mut odd));
+        assert_eq!(&odd[12..], &[0, 0]);
+    }
+
+    #[test]
+    fn samples_scale_in_every_format() {
+        let mut s16 = 1000i16.to_le_bytes().to_vec();
+        scale_in_place("s16le", &mut s16, 0.5);
+        assert_eq!(i16::from_le_bytes([s16[0], s16[1]]), 500);
+        let mut s24 = (-0x010000i32).to_le_bytes()[..3].to_vec();
+        scale_in_place("s24le", &mut s24, 0.5);
+        assert_eq!(
+            i32::from_le_bytes([0, s24[0], s24[1], s24[2]]) >> 8,
+            -0x008000
+        );
+        let mut s32 = 2_000_000_000i32.to_le_bytes().to_vec();
+        scale_in_place("s32le", &mut s32, 0.25);
+        assert_eq!(
+            i32::from_le_bytes([s32[0], s32[1], s32[2], s32[3]]),
+            500_000_000
+        );
+        let mut f32s = 0.8f32.to_le_bytes().to_vec();
+        scale_in_place("f32le", &mut f32s, 0.5);
+        assert!((f32::from_le_bytes([f32s[0], f32s[1], f32s[2], f32s[3]]) - 0.4).abs() < 1e-6);
     }
 
     #[test]
     fn the_tap_gives_silence_while_the_ring_is_at_another_shape() {
         use pane::audio::Pull;
-        let ring = Arc::new(Mutex::new(Ring::new(44_100, 2)));
-        ring.lock().unwrap().push(&vec![0.5; 44_100]);
+        let ring = Arc::new(Mutex::new(ring16(44_100)));
+        let half_second = ms(&ring.lock().unwrap(), 500);
+        ring.lock().unwrap().push(&half_second);
         let mut tap = Tap {
             ring: ring.clone(),
             rate: 48_000,
@@ -755,7 +1132,7 @@ mod tests {
         assert_eq!(ring.lock().unwrap().queued_ms(), 500, "and nothing taken");
         tap.rate = 44_100;
         tap.pull(&mut out);
-        assert!(out.iter().all(|s| *s == 0.5));
+        assert!(out.iter().all(|s| (*s - 0.5).abs() < 1e-3));
     }
 
     #[test]

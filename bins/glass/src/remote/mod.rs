@@ -4,6 +4,8 @@
 //! snapshot and a change lands as a new generation number the loop looks
 //! at once a frame.
 
+#[cfg(target_os = "linux")]
+pub mod alsa;
 pub mod config;
 pub mod exit;
 pub mod playhere;
