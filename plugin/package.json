@@ -1,6 +1,6 @@
 {
   "name": "glass",
-  "version": "0.11.20",
+  "version": "0.11.21",
   "description": "Glass: VU meters, spectrum, turntables and reels on the player's display",
   "main": "index.js",
   "author": "foonerd; audio path from PeppyMeter Screensaver by 2aCD (original) and Just a Nerd",
@@ -34,6 +34,6 @@
       "amd64"
     ],
     "details": "Glass draws VU meters, spectrum analysers, turntables and tape decks on the player's display from PeppyMeter themes. It is a native display, one small binary, with no Python and no browser in the path. Glass replaces PeppyMeter Screensaver: only one of the two may be enabled.",
-    "changelog": "0.11.20 Fanart, back covers and logos in their places after a meter switch: a picture slot is kept by its file and its box, so the next meter's box takes a picture of its own."
+    "changelog": "0.11.21 Do not switch themes by edition tag: a switch under Theme settings that keeps the rules and holds them while a theme is reviewed."
   }
 }
