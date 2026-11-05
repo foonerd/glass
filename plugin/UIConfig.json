@@ -521,6 +521,13 @@
           ]
         },
         {
+          "id": "themeTagHold",
+          "element": "switch",
+          "doc": "TRANSLATE.GLASS.THEME_TAG_HOLD_DOC",
+          "label": "TRANSLATE.GLASS.THEME_TAG_HOLD",
+          "value": false
+        },
+        {
           "id": "doNotDeleteThemes",
           "element": "switch",
           "doc": "TRANSLATE.GLASS.DO_NOT_DELETE_THEMES_DOC",

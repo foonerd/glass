@@ -50,7 +50,7 @@ const CONFIG = [
   ['viewsFace', 'look'],
   ['timeout', 'behaviour'], ['persist_duration', 'behaviour'], ['persist_display', 'behaviour'], ['carDash*', 'behaviour'],
   // Play here, the sound to a page: an extra the user turned on, and its cap.
-  ['playHere', 'behaviour'], ['playHereCap', 'behaviour'], ['language', 'behaviour'],
+  ['playHere', 'behaviour'], ['playHereCap', 'behaviour'], ['language', 'behaviour'], ['themeTagHold', 'behaviour'],
   ['animation', 'tuning'], ['frameRate', 'tuning'], ['rotationFPS', 'tuning'], ['rotationQuality', 'tuning'], ['transitionType', 'tuning'],
   ['perfProfile', 'tuning'], ['logLevel', 'tuning'], ['logTargets', 'tuning'],
   ['testReleases', 'tests'],

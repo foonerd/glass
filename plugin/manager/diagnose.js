@@ -664,6 +664,16 @@ const CHECKS = [
       const by = { album: 'the album name', folder: 'the folder name', source: 'the source' }[r.by] || r.by || '-';
       return note('theme-rule', 'DIAG_THEME_RULE', { folder: r.folder, tag: r.tag || '-', by: by, home: r.home || '-' }, 'themes');
     }
+  },
+  {
+    // The edition tag rules are held (Do not switch themes by edition tag,
+    // for a theme under review): the theme on show stays whatever plays,
+    // which a user who forgot the switch reads as the rules not working.
+    id: 'theme-rules-held', symptoms: ['look', 'other'],
+    run(f) {
+      if (!f.status || f.status.themeTagHold !== true) return null;
+      return note('theme-rules-held', 'DIAG_THEME_RULES_HELD', {}, 'themes');
+    }
   }
 ];
 

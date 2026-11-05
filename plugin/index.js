@@ -914,6 +914,7 @@ Glass.prototype.onVolumioStart = function () {
         managerPort: ['number', MANAGER_DEFAULT_PORT],
         managerHost: ['string', ''],
         language: ['string', ''],
+        themeTagHold: ['boolean', false],
         remotesEnabled: ['boolean', false],
         remoteFramesPort: ['number', 5580],
         remoteChannelPort: ['number', 5581],
@@ -1199,6 +1200,12 @@ Glass.prototype.themeRuleFact = function () {
     var pick = self.themeTagOverride && self.themeRulePick ? self.themeRulePick : null;
     if (!pick) return null;
     return { folder: pick.folder, tag: pick.tag, by: pick.by, home: String(self.config.get('activeFolder') || '') };
+};
+
+// Whether the edition tag rules are held: kept and not applied, for a
+// theme under review (Do not switch themes by edition tag).
+Glass.prototype.themeTagHold = function () {
+    try { return this.config.get('themeTagHold') === true; } catch (e) { return false; }
 };
 
 // A source sent names with web markup, cleared before they were shown:
@@ -3866,6 +3873,7 @@ Glass.prototype.getUIConfig = function () {
             }
             C('themeTagRules').value = self.config.get('themeTagRules') || '';
             C('doNotDeleteThemes').value = self.config.get('doNotDeleteThemes') === true;
+            C('themeTagHold').value = self.themeTagHold();
 
             // Meter.
             C('smoothBuffer').value = parseInt(meterConfig.data.source['smooth.buffer.size'], 10) || 0;
@@ -4408,6 +4416,7 @@ Glass.prototype.saveThemesArtwork = function (data) {
         }
         var settings = self.setManagerSettings({
             themeTagRules: (data && typeof data.themeTagRules === 'string') ? data.themeTagRules : '',
+            themeTagHold: !!(data && (data.themeTagHold === true || data.themeTagHold === 'true')),
             doNotDeleteThemes: !!(data && (data.doNotDeleteThemes === true || data.doNotDeleteThemes === 'true'))
         });
         if (settings.changed) { noChanges = false; }
@@ -5184,6 +5193,13 @@ Glass.prototype.applyThemeTag = function (state) {
   self._themeTagState = { album: state.album || '', uri: state.uri || '', service: state.service || '' };
   var rulesText = '';
   try { rulesText = self.config.get('themeTagRules') || ''; } catch (e) { return; }
+  // The rules held (a theme under review): kept, not applied; the theme
+  // on show stays whatever plays, and nothing says it was picked by a rule.
+  if (self.themeTagHold()) {
+    self.themeRulePick = null;
+    self.themeTagOverride = false;
+    return;
+  }
   var pick = themerule.pickTheme(self._themeTagState.album, self._themeTagState.uri, self._themeTagState.service, rulesText);
   var picked = pick === null ? null : pick.folder;
   self.themeRulePick = pick && pick.folder ? { folder: pick.folder, tag: pick.tag, by: pick.by } : null;
@@ -6954,6 +6970,7 @@ Glass.prototype.managerSettings = function () {
     var self = this;
     return {
         themeTagRules: String(self.config.get('themeTagRules') || ''),
+        themeTagHold: self.themeTagHold(),
         doNotDeleteThemes: self.config.get('doNotDeleteThemes') === true,
         managerPort: parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT,
         managerHost: String(self.config.get('managerHost') || ''),
@@ -6972,6 +6989,18 @@ Glass.prototype.setManagerSettings = function (data) {
             self.config.set('themeTagRules', rules);
             changed = true;
             try { self.applyThemeTag(self.lastState); } catch (e) {}
+        }
+    }
+    if (data.themeTagHold !== undefined) {
+        var hold = data.themeTagHold === true || data.themeTagHold === 'true';
+        if (self.themeTagHold() !== hold) {
+            self.config.set('themeTagHold', hold);
+            changed = true;
+            // Held: the theme on show stays. Released: what plays picks
+            // its theme again at once, as it would at the next start.
+            try { self.applyThemeTag(self.lastState); } catch (e) {}
+            uiNeedsUpdate = true;
+            self.updateUIConfig();
         }
     }
     if (data.doNotDeleteThemes !== undefined) {
@@ -7237,6 +7266,7 @@ Glass.prototype.statusInfo = function () {
         themeMissing: self.themeMissing(),
         lead: leadMs((meterConfig && meterConfig.current) || {}),
         themeRule: self.themeRuleFact(),
+        themeTagHold: self.themeTagHold(),
         assured: self.assureFact(),
         meter: self.meterSelection(),
         channel: {

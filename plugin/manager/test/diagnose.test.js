@@ -599,3 +599,15 @@ test('the Display Configuration plugin\'s X files left under Glass\'s own X serv
   f.screen.probe.holders.displayConfiguration = false; f.screen.fact.ownX = false;
   assert.strictEqual(one(diagnose('screen', f), 'x-confs-left'), undefined, 'under the kiosk\'s X the files are the kiosk\'s');
 });
+
+test('the edition tag rules held are a note under the look, nothing while they apply', function () {
+  let f = healthy();
+  assert.ok(!one(diagnose('look', f), 'theme-rules-held'), 'rules that apply say nothing');
+  f = healthy(); f.status.themeTagHold = true;
+  const held = one(diagnose('look', f), 'theme-rules-held');
+  assert.ok(held, 'held rules are noted');
+  assert.strictEqual(held.kind, 'note');
+  assert.strictEqual(held.key, 'DIAG_THEME_RULES_HELD');
+  assert.ok(one(diagnose('other', f), 'theme-rules-held'), 'under other too');
+  assert.ok(!one(diagnose('no-meters', f), 'theme-rules-held'), 'not under the meters');
+});

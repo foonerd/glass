@@ -1304,6 +1304,10 @@
             <div class="help" id="rules-help"></div>
           </div>
           <div class="full">
+            <label class="switch"><input type="checkbox" id="rules-hold-input"><span id="rules-hold-label"></span></label>
+            <div class="help" id="rules-hold-help"></div>
+          </div>
+          <div class="full">
             <label class="switch"><input type="checkbox" id="preserve-input"><span id="preserve-label"></span></label>
             <div class="help" id="preserve-help"></div>
           </div>
@@ -2130,6 +2134,8 @@
         $('rules-label').textContent = t('THEME_TAG_RULES');
         $('rules-input').placeholder = 'Vinyl=1920x1080_name_Vinyl, Tape=1920x1080_name_Tape';
         $('rules-help').textContent = t('THEME_TAG_RULES_DOC');
+        $('rules-hold-label').textContent = t('THEME_TAG_HOLD');
+        $('rules-hold-help').textContent = t('THEME_TAG_HOLD_DOC');
         $('preserve-label').textContent = t('DO_NOT_DELETE_THEMES');
         $('preserve-help').textContent = t('DO_NOT_DELETE_THEMES_DOC');
         $('btn-rules-save').textContent = t('MANAGER_SAVE');
@@ -2657,13 +2663,15 @@
       function loadSettings() {
         return api('GET', '/api/settings').then(function (s) {
           $('rules-input').value = s.themeTagRules || '';
+          $('rules-hold-input').checked = !!s.themeTagHold;
           $('preserve-input').checked = !!s.doNotDeleteThemes;
           renderLanguage(s);
         }).catch(function () { });
       }
       $('btn-rules-save').onclick = function () {
-        api('POST', '/api/settings', { themeTagRules: $('rules-input').value, doNotDeleteThemes: $('preserve-input').checked }).then(function () {
+        api('POST', '/api/settings', { themeTagRules: $('rules-input').value, themeTagHold: $('rules-hold-input').checked, doNotDeleteThemes: $('preserve-input').checked }).then(function () {
           toast(t('MANAGER_SAVED'));
+          loadStatus();
         }).catch(function (e) { toast(errorText(e), 'error'); });
       };
 
@@ -3165,7 +3173,7 @@
               })(s.playHere)]
             ]],
             ['MANAGER_ST_SECTION_THEMES', [
-              ['MANAGER_ST_THEME', s.activeTheme + (s.themeRule && s.themeRule.folder ? ' · ' + t('MANAGER_ST_THEME_RULE') + ' ' + s.themeRule.tag + ' (' + t({ album: 'MANAGER_ST_THEME_RULE_ALBUM', folder: 'MANAGER_ST_THEME_RULE_FOLDER', source: 'MANAGER_ST_THEME_RULE_SOURCE' }[s.themeRule.by] || 'MANAGER_ST_THEME_RULE_SOURCE') + ')' : '') + ' · ' + ({ random: t('MANAGER_MODE_RANDOM'), list: t('MANAGER_MODE_LIST'), single: t('MANAGER_MODE_SINGLE') }[s.meter.mode] || s.meter.mode) + (s.meter.mode !== 'random' ? ': ' + s.meter.names.join(', ') : '') + (s.showing && s.showing.meter ? ' · ' + t('MANAGER_ST_SHOWING') + ' ' + s.showing.meter : '')],
+              ['MANAGER_ST_THEME', s.activeTheme + (s.themeRule && s.themeRule.folder ? ' · ' + t('MANAGER_ST_THEME_RULE') + ' ' + s.themeRule.tag + ' (' + t({ album: 'MANAGER_ST_THEME_RULE_ALBUM', folder: 'MANAGER_ST_THEME_RULE_FOLDER', source: 'MANAGER_ST_THEME_RULE_SOURCE' }[s.themeRule.by] || 'MANAGER_ST_THEME_RULE_SOURCE') + ')' : '') + (s.themeTagHold ? ' · ' + t('MANAGER_ST_THEME_RULES_HELD') : '') + ' · ' + ({ random: t('MANAGER_MODE_RANDOM'), list: t('MANAGER_MODE_LIST'), single: t('MANAGER_MODE_SINGLE') }[s.meter.mode] || s.meter.mode) + (s.meter.mode !== 'random' ? ': ' + s.meter.names.join(', ') : '') + (s.showing && s.showing.meter ? ' · ' + t('MANAGER_ST_SHOWING') + ' ' + s.showing.meter : '')],
               ['MANAGER_ST_THEMES', !s.themes ? '-' : s.themes.meters + ' ' + t('MANAGER_ST_THEMES_IN') + ' ' + s.themes.meterBase + ' · ' + s.themes.spectrum + ' ' + t('MANAGER_ST_SPECTRUM_IN') + ' ' + s.themes.spectrumBase],
               ['MANAGER_ST_FONTS', !s.fonts ? '-' : ['light', 'regular', 'bold', 'italic', 'digi'].map(function (style) {
                 var c = s.fonts.styles[style] || { kind: 'builtin' };
