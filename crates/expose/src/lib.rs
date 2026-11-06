@@ -1676,7 +1676,12 @@ impl Op<'_> {
                 (at.1 + spans.height) as i32,
             ),
             Op::Fade { .. } => (0, 0, width as i32, height as i32),
-            Op::Hole { x, y, w, h } => (x as i32, y as i32, w as i32, h as i32),
+            Op::Hole { x, y, w, h } => (
+                x as i32,
+                y as i32,
+                x.saturating_add(w) as i32,
+                y.saturating_add(h) as i32,
+            ),
         };
         clip_box(b, width, height)
     }
@@ -11542,6 +11547,54 @@ mod tests {
             fixed.settle(3_000, i * 100);
         }
         assert_eq!(fixed.active, 4, "a fixed count stays");
+    }
+
+    /// The movie's hole is bounded by its corners as every step is, so the
+    /// rects the raster paints from the bounds reach the box's last row
+    /// and column, and the clear covers the whole box: a hole at 52,52 of
+    /// 704 by 396 clears row 447 and column 755, and leaves row 448 and
+    /// column 756 as the theme painted them.
+    #[test]
+    fn the_hole_is_bounded_by_its_corners_and_cleared_whole() {
+        let hole = || Op::Hole {
+            x: 52,
+            y: 52,
+            w: 704,
+            h: 396,
+        };
+        assert_eq!(hole().bounds(1280, 720), Some((52, 52, 756, 448)));
+        let base = Frame {
+            blend: Blend::Normal,
+            width: 1280,
+            height: 720,
+            rgba: vec![200; 1280 * 720 * 4],
+        };
+        let rects = [box_rect(hole().bounds(1280, 720).expect("in the frame"))];
+        for threads in [1usize, 3] {
+            // The canvas holds the frame before, as the raster keeps it:
+            // what the rects do not reach stays as the theme painted it.
+            let mut canvas = base.clone();
+            paint(&mut canvas, &base, &[hole()], &rects, threads);
+            let px = |x: usize, y: usize| canvas.rgba[(y * 1280 + x) * 4 + 3];
+            assert_eq!(px(52, 52), 0, "the first pixel cleared");
+            assert_eq!(px(755, 447), 0, "the last row and column cleared");
+            assert_eq!(px(400, 447), 0, "the last row cleared through");
+            assert_eq!(
+                px(400, 448),
+                200,
+                "the row under the box as the theme painted it"
+            );
+            assert_eq!(
+                px(756, 250),
+                200,
+                "the column beside the box as the theme painted it"
+            );
+            assert_eq!(
+                px(51, 250),
+                200,
+                "the column before the box as the theme painted it"
+            );
+        }
     }
 
     #[test]
