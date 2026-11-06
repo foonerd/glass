@@ -29,6 +29,7 @@ pub mod probe;
 mod remote;
 mod screen;
 mod tailor;
+mod video;
 
 use remote::run::RemoteSession;
 
@@ -939,6 +940,14 @@ fn session(
     // per track and screen size. A remote's page says which it got.
     let mut backdrop = expose::Backdrop::default();
     let mut backdrop_said: Option<bool> = None;
+    // The picture of a video file the player plays, under the theme: the
+    // harness flag for now; the plugin's switch when it ships.
+    #[cfg(all(unix, not(target_os = "android")))]
+    let movie_wanted = env::var_os("GLASS_VIDEO").is_some();
+    #[cfg(all(unix, not(target_os = "android")))]
+    let mut movie: Option<video::Video> = None;
+    #[cfg(all(unix, not(target_os = "android")))]
+    let mut movie_probed: Option<String> = None;
     // The panel's power: the player's word, the face's idle black, a touch.
     let mut screen = screen::ScreenPower::default();
     let mut wake_screen = false;
@@ -1088,6 +1097,48 @@ fn session(
             }
         }
         let input = source.poll();
+        #[cfg(all(unix, not(target_os = "android")))]
+        if movie_wanted {
+            // The file the player plays, where it is one on this machine.
+            let uri = input.metadata.uri.as_str();
+            let playing = input.metadata.status == "play" || input.metadata.status == "pause";
+            let path = if playing && uri.starts_with("mnt/") {
+                format!("/{uri}")
+            } else {
+                String::new()
+            };
+            if path.is_empty() {
+                movie = None;
+            } else if movie.as_ref().is_none_or(|m| m.file() != path)
+                && movie_probed.as_deref() != Some(path.as_str())
+            {
+                movie = None;
+                movie_probed = Some(path.clone());
+                let lead_ms = env::var("GLASS_VIDEO_LEAD_MS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                let delay_ms = env::var("GLASS_VIDEO_DELAY_MS")
+                    .ok()
+                    .and_then(|v| v.parse().ok())
+                    .unwrap_or(0);
+                match video::probe(&path) {
+                    Ok(Some(probe)) => {
+                        logline::say!(
+                            Info,
+                            "video",
+                            "{path}: {}x{} at {:.3} fps",
+                            probe.width,
+                            probe.height,
+                            probe.fps
+                        );
+                        movie = Some(video::Video::open(&path, probe, lead_ms, delay_ms));
+                    }
+                    Ok(None) => logline::say!(Verbose, "video", "{path}: no video stream"),
+                    Err(e) => logline::say!(Warn, "video", "{path}: {e}"),
+                }
+            }
+        }
         // A remote plays the player's sound here when asked: the listener
         // and the output follow the switch and the player's word.
         if let Some(remote) = remote.as_deref_mut() {
@@ -1461,6 +1512,12 @@ fn session(
             }
             was_over = over;
             rastered_at = Instant::now();
+            // The movie's frame due now, window or none: the harness reads
+            // the sync headless, the window shows the picture.
+            #[cfg(all(unix, not(target_os = "android")))]
+            let movie_due = movie
+                .as_mut()
+                .is_some_and(|m| m.tick(Instant::now(), input.levels.left));
             if let Some(window) = surface.as_mut() {
                 if let Some(mode) = remote.as_deref().and_then(|r| r.app.take_window_request()) {
                     if let Err(err) = window.set_mode(mode) {
@@ -1498,6 +1555,27 @@ fn session(
                 // A theme whose pictures leave the screen uncovered or clear
                 // somewhere is blended over the backdrop, or the dark colour.
                 window.set_translucent(assets.translucent);
+                #[cfg(all(unix, not(target_os = "android")))]
+                match movie.as_ref() {
+                    Some(m) => {
+                        if movie_due {
+                            let (w, h) = m.size();
+                            if let Some(planes) = m.shown() {
+                                if let Err(err) = window.set_backdrop_yuv(w, h, planes) {
+                                    eprintln!("glass: video: {err}");
+                                }
+                            }
+                        }
+                    }
+                    None => {
+                        if window.backdrop_is_yuv() {
+                            window.clear_backdrop_yuv();
+                            if let Err(err) = window.set_backdrop(backdrop.frame()) {
+                                eprintln!("glass: backdrop: {err}");
+                            }
+                        }
+                    }
+                }
                 // The panel off: no frame goes up, the window's events are
                 // pumped alone, and a finger or a button on it wakes.
                 let shown = match if screen.off() {

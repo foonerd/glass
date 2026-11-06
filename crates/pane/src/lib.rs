@@ -293,6 +293,12 @@ pub struct Surface {
     /// The picture under a frame that leaves part of the window bare, the
     /// window's size; none shows the black.
     backdrop: Option<Texture>,
+    /// The size of the moving picture the backdrop texture holds, when it
+    /// is one (`set_backdrop_yuv`); none while the backdrop is a still.
+    backdrop_yuv: Option<(u32, u32)>,
+    /// A new moving picture went up since the last show: the window is
+    /// presented again even when the frame over it is as it was.
+    backdrop_moved: bool,
     /// Whether the frames leave pixels less than opaque: such a frame is
     /// blended over the backdrop, or over the dark colour where there is
     /// none; an opaque frame is copied.
@@ -617,6 +623,8 @@ impl Surface {
             creator,
             texture: None,
             backdrop: None,
+            backdrop_yuv: None,
+            backdrop_moved: false,
             translucent: false,
             backlight: backlight::find(),
             power: Power { on: true, by: None },
@@ -716,6 +724,7 @@ impl Surface {
             // With `unsafe_textures` a texture is freed by hand.
             unsafe { old.destroy() };
         }
+        self.backdrop_yuv = None;
         let Some(picture) = picture else {
             return Ok(());
         };
@@ -736,6 +745,71 @@ impl Surface {
     /// there is none, so what the theme left uncovered or clear shows what
     /// is behind it; an opaque frame is copied, as before. It stands until
     /// the next call.
+    /// A moving picture as the backdrop: one planar YUV 4:2:0 frame of
+    /// `width` by `height` (the Y plane, then U, then V, each row packed),
+    /// uploaded to a texture the GPU converts and scales under the theme.
+    /// The texture is kept across frames of one size and made again for
+    /// another; the picture backdrop, if any, is let go. Nothing is
+    /// converted or copied on the CPU here beyond the upload itself.
+    pub fn set_backdrop_yuv(
+        &mut self,
+        width: u32,
+        height: u32,
+        planes: &[u8],
+    ) -> Result<(), String> {
+        let (width, height) = (width.max(2) & !1, height.max(2) & !1);
+        let (y_len, c_len) = (
+            (width * height) as usize,
+            ((width / 2) * (height / 2)) as usize,
+        );
+        if planes.len() < y_len + 2 * c_len {
+            return Err("a YUV frame short of its planes".to_string());
+        }
+        if self.backdrop_yuv != Some((width, height)) {
+            if let Some(old) = self.backdrop.take() {
+                unsafe { old.destroy() };
+            }
+            let texture = self
+                .creator
+                .create_texture_streaming(PixelFormatEnum::IYUV, width, height)
+                .map_err(|err| err.to_string())?;
+            self.backdrop = Some(texture);
+            self.backdrop_yuv = Some((width, height));
+        }
+        let Some(texture) = self.backdrop.as_mut() else {
+            return Ok(());
+        };
+        let (y, rest) = planes.split_at(y_len);
+        let (u, v) = rest.split_at(c_len);
+        self.backdrop_moved = true;
+        texture
+            .update_yuv(
+                None,
+                y,
+                width as usize,
+                u,
+                (width / 2) as usize,
+                &v[..c_len],
+                (width / 2) as usize,
+            )
+            .map_err(|err| err.to_string())
+    }
+
+    /// The moving picture gone: the backdrop is a still picture again, or
+    /// none, as `set_backdrop` next says.
+    pub fn clear_backdrop_yuv(&mut self) {
+        if self.backdrop_yuv.take().is_some() {
+            if let Some(old) = self.backdrop.take() {
+                unsafe { old.destroy() };
+            }
+        }
+    }
+
+    /// Whether a moving picture is the backdrop now.
+    pub fn backdrop_is_yuv(&self) -> bool {
+        self.backdrop_yuv.is_some()
+    }
+
     pub fn set_translucent(&mut self, on: bool) {
         if self.translucent == on {
             return;
@@ -994,8 +1068,9 @@ impl Surface {
                 .update(None, &frame.rgba, pitch)
                 .map_err(|err| err.to_string())?;
         } else {
-            if changed.is_empty() {
-                // The window shows this frame already.
+            // The window shows this frame already; with a moving picture
+            // under it the window is presented again all the same.
+            if changed.is_empty() && !std::mem::take(&mut self.backdrop_moved) {
                 return Ok(if touched { Shown::Touched } else { Shown::Kept });
             }
             for r in changed {
