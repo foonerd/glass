@@ -1135,10 +1135,13 @@ fn session(
                     .ok()
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(skin.run.lead_ms);
+                // The player's own delay setting fixes it; else the last
+                // measured, the default until then.
+                let fixed = skin.run.delay_ms > 0;
                 let delay_ms = env::var("GLASS_VIDEO_DELAY_MS")
                     .ok()
                     .and_then(|v| v.parse().ok())
-                    .unwrap_or(movie_delay_ms);
+                    .unwrap_or(if fixed { skin.run.delay_ms } else { movie_delay_ms });
                 match video::probe(&path) {
                     Ok(Some(probe)) => {
                         logline::say!(
@@ -1149,7 +1152,7 @@ fn session(
                             probe.height,
                             probe.fps
                         );
-                        movie = Some(video::Video::open(&path, probe, lead_ms, delay_ms));
+                        movie = Some(video::Video::open(&path, probe, lead_ms, delay_ms, fixed));
                     }
                     Ok(None) => logline::say!(Verbose, "video", "{path}: no video stream"),
                     Err(e) => logline::say!(Warn, "video", "{path}: {e}"),

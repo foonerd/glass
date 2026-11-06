@@ -621,10 +621,23 @@ test('the movie: the switch, the profile, the decoder, the box, the display\'s w
   assert.strictEqual(one(diagnose('movie', f), 'movie').key, 'DIAG_MOVIE_NO_DECODER');
   f.status.movie = { on: true, allowed: true, decoder: true, box: false, report: null };
   assert.strictEqual(one(diagnose('movie', f), 'movie').key, 'DIAG_MOVIE_NO_BOX');
-  f.status.movie = { on: true, allowed: true, decoder: true, box: { x: 0, y: 0, w: 1920, h: 1080 }, report: { state: 'showing', width: 1920, height: 1080, fps: 30, delay: 532, measured: 0.8, at: f.now } };
+  f.status.movie = { on: true, allowed: true, decoder: true, decoderSource: 'component', decoderWanted: '0.1.0', box: { x: 0, y: 0, w: 1920, h: 1080 }, report: { state: 'showing', width: 1920, height: 1080, fps: 30, delay: 532, measured: 0.8, at: f.now } };
   const r = one(diagnose('movie', f), 'movie');
   assert.strictEqual(r.kind, 'ok');
-  assert.deepStrictEqual(r.with, { w: 1920, h: 1080, fps: 30, delay: 532, how: 'measured' });
+  assert.strictEqual(r.key, 'DIAG_MOVIE_OK');
+  assert.deepStrictEqual(r.with, { w: 1920, h: 1080, fps: 30, delay: 532 });
+  // The delay assumed, or as the listener set it, each its own sentence.
+  f.status.movie.report.measured = null;
+  assert.strictEqual(one(diagnose('movie', f), 'movie').key, 'DIAG_MOVIE_OK_ASSUMED');
+  f.status.movie.report.fixed = true;
+  assert.strictEqual(one(diagnose('movie', f), 'movie').key, 'DIAG_MOVIE_OK_SET');
+  // The distribution's ffmpeg serving is a note beside the picture, pointing at the fetch.
+  f.status.movie.decoderSource = 'distribution';
+  const d = one(diagnose('movie', f), 'movie');
+  assert.strictEqual(d.key, 'DIAG_MOVIE_DISTRIBUTION_DECODER');
+  assert.strictEqual(d.kind, 'note');
+  assert.strictEqual(d.with.version, '0.1.0');
+  assert.strictEqual(d.go, 'appearance');
   f.status.channel.status = 'play';
   f.status.movie.report = null;
   assert.strictEqual(one(diagnose('movie', f), 'movie').key, 'DIAG_MOVIE_NO_VIDEO', 'playing with no word from the display: the file has no video, or the display has not opened it');

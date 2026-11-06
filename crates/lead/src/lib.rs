@@ -3269,6 +3269,11 @@ pub struct RunSettings {
     /// processing runs behind the sound; 0 unless said.
     #[serde(default)]
     pub lead_ms: u32,
+    /// `screen.delay`: milliseconds the sound output runs behind mpd's
+    /// position, set by the listener for the movie's picture, 0 to 2000;
+    /// 0 unless said, which lets the player measure it.
+    #[serde(default)]
+    pub delay_ms: u32,
     /// `screen.driver`: what draws the window, `auto` unless said.
     #[serde(default)]
     pub driver: ScreenDriver,
@@ -3492,6 +3497,7 @@ impl Default for RunSettings {
             backdrop: false,
             movie: false,
             lead_ms: 0,
+            delay_ms: 0,
             driver: ScreenDriver::Auto,
             rotation: Rotation::R0,
             pointer: false,
@@ -3607,6 +3613,10 @@ pub fn run_settings(text: &str) -> RunSettings {
             .and_then(|v| v.trim().parse::<u32>().ok())
             .unwrap_or(0)
             .min(200),
+        delay_ms: current_value(text, "screen.delay")
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .unwrap_or(0)
+            .min(2000),
         driver: ScreenDriver::parse(current_value(text, "screen.driver").as_deref()),
         rotation: Rotation::parse(current_value(text, "screen.rotation").as_deref()),
         pointer: truthy(current_value(text, "screen.pointer.shown").as_deref()),
@@ -6864,6 +6874,7 @@ mod tests {
                 backdrop: false,
                 movie: false,
                 lead_ms: 0,
+                delay_ms: 0,
                 driver: ScreenDriver::Auto,
                 rotation: Rotation::R0,
                 pointer: false,

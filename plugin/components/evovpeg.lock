@@ -1,0 +1,10 @@
+# evovpeg, the movie's decoder: FFmpeg built down to decoding a video file's picture
+# stream to raw frames on a pipe and probing a file, static, signed with the evo release
+# key (keys/release-signing.pub). The Manager fetches the release this names on demand,
+# one archive per architecture, verifies it and keeps bin/evovpeg and bin/evovprobe under
+# the player's own folder; until then the display runs the distribution's ffmpeg and
+# ffprobe by name. PROGRAMS names the decoder and the prober, in that order.
+NAME=evovpeg
+VERSION=0.1.0
+REPOSITORY=foonerd/evovpeg
+PROGRAMS=evovpeg evovprobe

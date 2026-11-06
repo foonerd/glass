@@ -546,6 +546,26 @@ class Manager {
       res.json(Object.assign({ ok: true }, self.plugin.displayPlacement()));
     }));
 
+    // The movie's decoder: evovpeg fetched on demand and verified, or removed.
+    app.get('/api/movie/decoder', function (req, res) {
+      res.json(self.plugin.movieDecoder());
+    });
+    app.post('/api/movie/decoder', wrap(async function (req, res) {
+      const now = self.plugin.movieDecoder();
+      if (now.job && now.job.state !== 'installed' && now.job.state !== 'failed') return res.status(202).json({ ok: true, job: now.job });
+      // Started, not awaited: the page follows the job through GET.
+      self.plugin.fetchMovieDecoder().catch(function () { /* the job carries the fault */ });
+      await new Promise(function (resolve) { setTimeout(resolve, 50); });
+      res.status(202).json({ ok: true, job: self.plugin.movieDecoder().job });
+    }));
+    app.delete('/api/movie/decoder', wrap(async function (req, res) {
+      try {
+        res.json(Object.assign({ ok: true }, await self.plugin.removeMovieDecoder()));
+      } catch (e) {
+        res.status(e && e.code === 'busy' ? 409 : 500).json({ error: e && e.code === 'busy' ? 'busy' : 'failed', message: e && e.message ? e.message : String(e) });
+      }
+    }));
+
     // Artwork.
     app.get('/api/artwork', function (req, res) {
       res.json(self.plugin.artworkSettings());

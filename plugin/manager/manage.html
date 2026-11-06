@@ -1414,6 +1414,13 @@
           <div class="full">
             <label class="switch"><input type="checkbox" id="disp-movie"><span id="disp-movie-label"></span></label>
             <div class="help" id="disp-movie-help"></div>
+            <div class="help" id="disp-movie-decoder"></div>
+            <div class="row" id="disp-movie-decoder-row"><button type="button" id="btn-movie-decoder"></button><span class="help" id="disp-movie-decoder-job"></span></div>
+          </div>
+          <div>
+            <label id="disp-movie-delay-label"></label>
+            <input type="number" id="disp-movie-delay" min="0" max="2000" placeholder="0">
+            <div class="help" id="disp-movie-delay-help"></div>
           </div>
           <div>
             <label id="disp-margin-label"></label>
@@ -2178,6 +2185,8 @@
         $('disp-lead-help').textContent = t('MANAGER_DISPLAY_LEAD_HELP');
         $('disp-movie-label').textContent = t('MANAGER_DISPLAY_MOVIE');
         $('disp-movie-help').textContent = t('MANAGER_DISPLAY_MOVIE_HELP');
+        $('disp-movie-delay-label').textContent = t('MANAGER_DISPLAY_MOVIE_DELAY');
+        $('disp-movie-delay-help').textContent = t('MANAGER_DISPLAY_MOVIE_DELAY_HELP');
         $('disp-backdrop-label').textContent = t('MANAGER_DISPLAY_BACKDROP');
         $('screen-power-off').textContent = t('MANAGER_SCREEN_POWER_SWITCH_OFF');
         $('btn-screen-picture').textContent = t('MANAGER_SCREEN_PICTURE');
@@ -3001,6 +3010,8 @@
           $('disp-lead').value = d.lead || '';
           $('disp-movie').checked = !!d.movie;
           $('disp-movie-help').textContent = t('MANAGER_DISPLAY_MOVIE_HELP') + (d.movie && d.movieAllowed === false ? ' ' + t('MANAGER_DISPLAY_MOVIE_HELD') : '');
+          $('disp-movie-delay').value = d.movieDelay || '';
+          showMovieDecoder(d.movieDecoder);
           var m = d.margin || { top: 0, right: 0, bottom: 0, left: 0 };
           var equal = m.top === m.right && m.right === m.bottom && m.bottom === m.left;
           $('disp-margin-each').checked = !equal;
@@ -3014,8 +3025,47 @@
         var pct = function (id) { var v = parseInt($(id).value, 10); return v > 0 ? Math.min(v, 25) : 0; };
         var margin = $('disp-margin-each').checked ? { top: pct('disp-margin-top'), right: pct('disp-margin-right'), bottom: pct('disp-margin-bottom'), left: pct('disp-margin-left') } : (function () { var a = pct('disp-margin'); return { top: a, right: a, bottom: a, left: a }; })();
         var scale = parseInt($('disp-scale').value, 10);
-        var body = { fit: $('disp-fit').checked, backdrop: $('disp-backdrop').checked, movie: $('disp-movie').checked, lead: $('disp-lead').value === '' ? 0 : parseInt($('disp-lead').value, 10), position: pos === 'manual' ? 'manual' : 'center', place: pos === 'manual' ? undefined : pos, scale: scale > 0 && scale < 100 ? scale : null, margin: margin, x: parseInt($('disp-x').value, 10) || 0, y: parseInt($('disp-y').value, 10) || 0 };
+        var body = { fit: $('disp-fit').checked, backdrop: $('disp-backdrop').checked, movie: $('disp-movie').checked, lead: $('disp-lead').value === '' ? 0 : parseInt($('disp-lead').value, 10), movieDelay: $('disp-movie-delay').value === '' ? 0 : parseInt($('disp-movie-delay').value, 10), position: pos === 'manual' ? 'manual' : 'center', place: pos === 'manual' ? undefined : pos, scale: scale > 0 && scale < 100 ? scale : null, margin: margin, x: parseInt($('disp-x').value, 10) || 0, y: parseInt($('disp-y').value, 10) || 0 };
         api('POST', '/api/display', body).then(function () { toast(t('MANAGER_SAVED')); loadDisplay(); }).catch(function (e) { toast(errorText(e), 'error'); });
+      };
+      // The movie's decoder: which serves, the component's state against
+      // the lock, the fetch or its removal, and the job followed to its end.
+      var movieDecoderTimer = null;
+      function decoderWords(c) {
+        if (!c) return '';
+        var running = c.job && ['installed', 'failed'].indexOf(c.job.state) === -1;
+        if (running) return '';
+        if (c.source === 'component') {
+          var line = t('MANAGER_DISPLAY_MOVIE_DECODER_OWN').replace('{name}', c.name).replace('{version}', c.version || '');
+          if (c.state === 'older' || c.state === 'newer') line += ' ' + t('MANAGER_DISPLAY_MOVIE_DECODER_OTHER').replace('{version}', c.wanted || '');
+          return line;
+        }
+        if (c.source === 'distribution') return t('MANAGER_DISPLAY_MOVIE_DECODER_DISTRIBUTION').replace('{version}', c.wanted || '');
+        return t('MANAGER_DISPLAY_MOVIE_DECODER_NONE').replace('{version}', c.wanted || '');
+      }
+      function showMovieDecoder(c) {
+        c = c || {};
+        var running = c.job && ['installed', 'failed'].indexOf(c.job.state) === -1;
+        $('disp-movie-decoder').textContent = decoderWords(c);
+        var btn = $('btn-movie-decoder');
+        btn.disabled = !!running;
+        btn.textContent = c.source === 'component' && c.state === 'installed' ? t('MANAGER_DISPLAY_MOVIE_DECODER_REMOVE') : t('MANAGER_DISPLAY_MOVIE_DECODER_GET');
+        btn.dataset.action = c.source === 'component' && c.state === 'installed' ? 'remove' : 'get';
+        var job = $('disp-movie-decoder-job');
+        if (running) {
+          var p = c.job.progress && c.job.progress.total ? ' ' + Math.round(100 * c.job.progress.done / c.job.progress.total) + '%' : '';
+          job.textContent = t('MANAGER_DISPLAY_MOVIE_DECODER_' + String(c.job.state).toUpperCase()) + p;
+          if (!movieDecoderTimer) movieDecoderTimer = setTimeout(function () { movieDecoderTimer = null; api('GET', '/api/movie/decoder').then(showMovieDecoder).catch(function () {}); }, 1000);
+        } else if (c.job && c.job.state === 'failed') {
+          job.textContent = t('MANAGER_DISPLAY_MOVIE_DECODER_FAILED') + (c.job.error ? ' ' + (c.job.error.message || c.job.error.code) : '');
+        } else {
+          job.textContent = '';
+        }
+      }
+      $('btn-movie-decoder').onclick = function () {
+        var action = $('btn-movie-decoder').dataset.action;
+        var call = action === 'remove' ? api('DELETE', '/api/movie/decoder') : api('POST', '/api/movie/decoder');
+        call.then(function () { return api('GET', '/api/movie/decoder'); }).then(showMovieDecoder).catch(function (e) { toast(errorText(e), 'error'); });
       };
       function loadArtwork() {
         api('GET', '/api/artwork').then(function (a) {
@@ -3128,12 +3178,14 @@
         if (m.allowed === false) return t('MANAGER_ST_MOVIE_HELD');
         if (m.decoder === false) return t('MANAGER_ST_MOVIE_NO_DECODER');
         var parts = [];
+        if (m.decoderSource === 'component') parts.push(t('MANAGER_ST_MOVIE_DECODER_OWN').replace('{name}', m.decoderName || '').replace('{version}', m.decoderVersion || ''));
+        else if (m.decoderSource === 'distribution') parts.push(t('MANAGER_ST_MOVIE_DECODER_DISTRIBUTION'));
         if (m.box === false) parts.push(t('MANAGER_ST_MOVIE_NO_BOX'));
         else if (m.box) parts.push(t('MANAGER_ST_MOVIE_BOX').replace('{w}', m.box.w).replace('{h}', m.box.h).replace('{x}', m.box.x).replace('{y}', m.box.y));
         var r = m.report;
         if (r && r.at && Date.now() - r.at < 120000) {
           parts.push((r.state === 'showing' ? t('MANAGER_ST_MOVIE_SHOWING') : t('MANAGER_ST_MOVIE_WAITING')).replace('{w}', r.width).replace('{h}', r.height).replace('{fps}', Math.round(r.fps)));
-          parts.push((r.measured !== null && r.measured !== undefined ? t('MANAGER_ST_MOVIE_DELAY_MEASURED') : t('MANAGER_ST_MOVIE_DELAY_ASSUMED')).replace('{ms}', r.delay));
+          parts.push((r.fixed ? t('MANAGER_ST_MOVIE_DELAY_SET') : (r.measured !== null && r.measured !== undefined ? t('MANAGER_ST_MOVIE_DELAY_MEASURED') : t('MANAGER_ST_MOVIE_DELAY_ASSUMED'))).replace('{ms}', r.delay));
         } else {
           parts.push(t('MANAGER_ST_MOVIE_ON'));
         }

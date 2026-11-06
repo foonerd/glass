@@ -34,8 +34,28 @@ use std::time::{Duration, Instant};
 /// The decoder and the prober: evovpeg, the static build of our own with
 /// the video decoders, once it ships as a component beside the display;
 /// until then the image's own ffmpeg, by name on the path.
+/// The decoder and the prober by name, found on the path, unless the
+/// player names the programs (`GLASS_MOVIE_DECODER`, `GLASS_MOVIE_PROBER`):
+/// the evovpeg component the Manager fetched, else the distribution's
+/// ffmpeg and ffprobe.
 const DECODER: &str = "ffmpeg";
 const PROBER: &str = "ffprobe";
+
+fn program(name: &'static str, env: &str) -> String {
+    std::env::var(env)
+        .ok()
+        .map(|v| v.trim().to_string())
+        .filter(|v| !v.is_empty())
+        .unwrap_or_else(|| name.to_string())
+}
+
+fn decoder() -> String {
+    program(DECODER, "GLASS_MOVIE_DECODER")
+}
+
+fn prober() -> String {
+    program(PROBER, "GLASS_MOVIE_PROBER")
+}
 /// mpd on the player.
 const MPD: &str = "127.0.0.1:6600";
 /// How often the clock reads mpd.
@@ -177,7 +197,7 @@ pub struct Probe {
 /// refusal is an error in words.
 pub fn probe(file: &str) -> Result<Option<Probe>, String> {
     let mut child = Child::spawn(
-        PROBER,
+        &prober(),
         &[
             "-v",
             "error",
@@ -243,7 +263,7 @@ impl Decoder {
         let from = from.max(0.0);
         let at = format!("{from:.3}");
         let child = Child::spawn(
-            DECODER,
+            &decoder(),
             &[
                 "-nostdin",
                 "-loglevel",
@@ -336,6 +356,9 @@ struct Envelope {
     child: Child,
     bins: Arc<Mutex<VecDeque<(f64, f32)>>>,
     stop: Arc<AtomicBool>,
+    /// The child's output at its end: the file's end, or a decoder with no
+    /// sound to give (one without the audio decoders).
+    ended: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
 
@@ -349,7 +372,7 @@ impl Envelope {
         let from = from.max(0.0);
         let at = format!("{from:.3}");
         let child = Child::spawn(
-            DECODER,
+            &decoder(),
             &[
                 "-nostdin",
                 "-loglevel",
@@ -371,9 +394,10 @@ impl Envelope {
         )?;
         let bins = Arc::new(Mutex::new(VecDeque::with_capacity(ENVELOPE_BINS)));
         let stop = Arc::new(AtomicBool::new(false));
+        let ended = Arc::new(AtomicBool::new(false));
         let mut out = child.out.try_clone().map_err(|e| e.to_string())?;
         let thread = {
-            let (bins, stop) = (bins.clone(), stop.clone());
+            let (bins, stop, ended) = (bins.clone(), stop.clone(), ended.clone());
             thread::Builder::new()
                 .name("video-envelope".into())
                 .spawn(move || {
@@ -386,6 +410,7 @@ impl Envelope {
                             continue;
                         }
                         if out.read_exact(&mut raw).is_err() {
+                            ended.store(true, Ordering::Release);
                             break;
                         }
                         let mut sum = 0f32;
@@ -407,8 +432,15 @@ impl Envelope {
             child,
             bins,
             stop,
+            ended,
             thread: Some(thread),
         })
+    }
+
+    /// Whether the child has given all it will and left: its bins stand,
+    /// and nothing more comes.
+    fn ended(&self) -> bool {
+        self.ended.load(Ordering::Acquire)
     }
 
     /// The envelope between two times in the file, as bins of ten
@@ -740,6 +772,8 @@ pub struct Video {
     delay: f64,
     /// Whether the delay was found by correlation, and how well it stood.
     measured: Option<f32>,
+    /// The delay as the player set it: kept, never measured over.
+    fixed: bool,
     /// One window's reading, waiting for the next window to agree.
     candidate: Option<f64>,
     /// The loudness the tap measured, placed by mpd's position at each
@@ -775,7 +809,9 @@ impl Video {
     /// For `file`, which the prober says carries video; `lead_ms` as the
     /// meters' lead, `delay_ms` the sound output's delay to start from
     /// (the measured default, or the last one found on this player).
-    pub fn open(file: &str, probe: Probe, lead_ms: u32, delay_ms: u32) -> Self {
+    /// `fixed` keeps `delay_ms` as the player's own setting, with no
+    /// calibration over it.
+    pub fn open(file: &str, probe: Probe, lead_ms: u32, delay_ms: u32, fixed: bool) -> Self {
         let log = std::env::var_os("GLASS_SYNC_LOG").and_then(|p| File::create(p).ok());
         Self {
             file: file.to_string(),
@@ -788,6 +824,7 @@ impl Video {
             lead: lead_ms as f64 / 1000.0,
             delay: delay_ms as f64 / 1000.0,
             measured: None,
+            fixed,
             candidate: None,
             heard: VecDeque::with_capacity(4000),
             last_position: None,
@@ -820,6 +857,7 @@ impl Video {
             "state": state,
             "delay": delay,
             "measured": measured.map(|c| (c * 100.0).round() / 100.0),
+            "fixed": self.fixed,
         });
         let text = value.to_string();
         if text == self.reported {
@@ -831,6 +869,9 @@ impl Video {
 
     /// The correlation run, when enough has been heard since the last.
     fn calibrate(&mut self, now: Instant, position: f64) {
+        if self.fixed {
+            return;
+        }
         if self
             .calibrated_at
             .is_some_and(|at| now.duration_since(at) < CALIBRATE_EVERY)
@@ -841,6 +882,17 @@ impl Video {
         let Some(envelope) = self.envelope.as_ref() else {
             return;
         };
+        if envelope.ended() && envelope.window(f64::MIN, f64::MAX).is_empty() {
+            // A decoder with no sound to give: let go, its child reaped,
+            // and the delay stays as set.
+            logline::say!(
+                Verbose,
+                "video",
+                "no sound from the decoder for the calibration: the delay stays as set"
+            );
+            self.envelope = None;
+            return;
+        }
         let from = position - CALIBRATE_WINDOW;
         let heard: Vec<(f64, f32)> = self
             .heard
@@ -909,7 +961,11 @@ impl Video {
             Err(e) => logline::say!(Warn, "video", "the decoder did not start: {e}"),
         }
         // The sound's envelope from a second and a half before, so the
-        // correlation has the file's side at every lag it tries.
+        // correlation has the file's side at every lag it tries; none when
+        // the delay is the player's own setting.
+        if self.fixed {
+            return;
+        }
         match Envelope::start(&self.file, at - self.delay - 1.6) {
             Ok(envelope) => self.envelope = Some(envelope),
             Err(e) => logline::say!(Verbose, "video", "no envelope, the delay stays as set: {e}"),

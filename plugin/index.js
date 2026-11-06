@@ -38,6 +38,7 @@ const graphics = require('./manager/graphics');
 const automaticBackup = require('./manager/update').automaticBackup;
 const facelook = require('./manager/facelook');
 const component = require('./manager/component');
+const moviedecoder = require('./manager/moviedecoder');
 const { compact: compactQueue } = require('./manager/queue');
 const themefolder = require('./manager/themefolder');
 const enginefiles = require('./manager/enginefiles');
@@ -200,6 +201,7 @@ Channel.prototype.attach = function (conn) {
                     state: String(message.state || '').slice(0, 32),
                     delay: parseInt(message.delay, 10) || 0,
                     measured: message.measured === null || message.measured === undefined ? null : parseFloat(message.measured),
+                    fixed: message.fixed === true,
                     at: Date.now()
                 };
                 if (self.onPush) { self.onPush({ kind: 'movie' }); }
@@ -1065,6 +1067,10 @@ Glass.prototype.launchEnv = function () {
         GLASS_LOG: log.level,
         GLASS_LOG_TARGETS: log.targets.join(',')
     });
+    // The movie's decoder and prober as they stand: the component's, else
+    // the distribution's; none named leaves the display to its own names.
+    var programs = (self.movieDecoder().programs) || {};
+    if (programs.decoder) { env.GLASS_MOVIE_DECODER = programs.decoder; env.GLASS_MOVIE_PROBER = programs.prober; }
     // The screen by fact: X while a kiosk runs one, the screen itself while
     // no kiosk uses it; otherwise no word, and the display opens no window.
     var draws = null;
@@ -1246,13 +1252,63 @@ Glass.prototype.movieAllowed = function () {
         return ['light', 'minimal'].indexOf(String(effective)) === -1;
     } catch (e) { return true; }
 };
-// The decoder the display calls by name: the image's own ffmpeg and
-// ffprobe until the evovpeg component ships.
-Glass.prototype.movieDecoder = function () {
-    var found = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'].some(function (p) { return fs.existsSync(p); })
-        && ['/usr/bin/ffprobe', '/usr/local/bin/ffprobe'].some(function (p) { return fs.existsSync(p); });
-    return { available: found, name: 'ffmpeg' };
+// The movie's decoder: evovpeg as the Manager fetched it (the release the
+// plugin's lock names, verified against the evo release key), else the
+// distribution's ffmpeg and ffprobe by name, else none. The component is
+// made once; its facts are read each time.
+Glass.prototype.movieDecoderComponent = function () {
+    var self = this;
+    if (self.movieDecoderKept) { return self.movieDecoderKept; }
+    var lock = fs.readFileSync(path.join(__dirname, 'components', 'evovpeg.lock'), 'utf8');
+    self.movieDecoderKept = new moviedecoder.Decoder({
+        dir: MOVIE_DECODER_DIR,
+        lock: lock,
+        arch: function () { return self.volumioArch(); },
+        log: function (line) { self.logger.info(id + line); }
+    });
+    return self.movieDecoderKept;
 };
+Glass.prototype.movieDecoder = function () {
+    var self = this;
+    var facts;
+    try { facts = self.movieDecoderComponent().facts(); } catch (e) {
+        self.logger.warn(id + 'movie decoder: ' + (e && e.message ? e.message : e));
+        return { available: false, name: 'none', source: 'none', state: 'missing', version: null, wanted: null, programs: null, job: null };
+    }
+    return {
+        available: !!facts.programs,
+        name: facts.source === 'component' ? facts.wanted.name : (facts.source === 'distribution' ? 'ffmpeg' : 'none'),
+        source: facts.source,
+        state: facts.state,
+        version: facts.installed ? facts.installed.version : null,
+        wanted: facts.wanted.version,
+        programs: facts.programs,
+        job: facts.job
+    };
+};
+// The component fetched and put in place, then the display started again
+// so it runs the programs; `remove` the other way. Both answer the job or
+// the facts; a fetch under way is answered as it stands.
+Glass.prototype.fetchMovieDecoder = function () {
+    var self = this;
+    var d = self.movieDecoderComponent();
+    if (d.job && !d.job.done) { return Promise.resolve(d.job); }
+    return d.install().then(function (job) {
+        if (job.state === 'installed') { self.relaunchDisplay(); }
+        return job;
+    });
+};
+Glass.prototype.removeMovieDecoder = function () {
+    var self = this;
+    return self.movieDecoderComponent().remove().then(function () { self.relaunchDisplay(); return self.movieDecoder(); });
+};
+// `screen.delay`: milliseconds the sound output runs behind mpd's position,
+// set by the listener for the movie's picture, 0 to 2000; 0 unless set,
+// which lets the player measure it.
+function movieDelayMs(current) {
+    var n = parseInt(String((current || {})['screen.delay'] || '0'), 10);
+    return isNaN(n) ? 0 : Math.min(2000, Math.max(0, n));
+}
 // Whether the meter on show gives the picture a box: `video.pos` and
 // `video.dimension` in its section of the theme's meters.txt.
 Glass.prototype.movieBoxOnShow = function () {
@@ -1295,10 +1351,18 @@ Glass.prototype.syncMovieKey = function () {
 Glass.prototype.movieFact = function () {
     var self = this;
     var decoder = self.movieDecoder();
+    var current = (meterConfig && meterConfig.current) || {};
     return {
         on: self.movieWanted(),
         allowed: self.movieAllowed(),
         decoder: decoder.available,
+        decoderName: decoder.name,
+        decoderSource: decoder.source,
+        decoderVersion: decoder.version,
+        decoderWanted: decoder.wanted,
+        decoderState: decoder.state,
+        decoderJob: decoder.job,
+        delay: movieDelayMs(current),
         box: self.movieBoxOnShow(),
         report: (self.channel && self.channel.movieReport) || null
     };
@@ -3057,6 +3121,8 @@ Glass.prototype.setScreenSettings = function (data) {
 // manifest and the binaries by architecture. Available means the manifest
 // and the binary for this player's architecture are there.
 const EVO_DIR = DATA_DIR + '/evo';
+// evovpeg, the movie's decoder the Manager fetches on demand, beside it.
+const MOVIE_DECODER_DIR = DATA_DIR + '/evovpeg';
 // Face themes: a folder each, with the theme's text in face.txt. The
 // user's own, and the looks the glass-evo component ships.
 const FACES_DIR = DATA_DIR + '/faces';
@@ -6932,6 +6998,8 @@ Glass.prototype.displayPlacement = function () {
         lead: leadMs(cur),
         movie: self.movieWanted(),
         movieAllowed: self.movieAllowed(),
+        movieDelay: movieDelayMs(cur),
+        movieDecoder: self.movieDecoder(),
         position: type === 'center' || type === 'fit' ? 'center' : 'manual',
         x: parseInt(cur['position.x'], 10) || 0,
         y: parseInt(cur['position.y'], 10) || 0,
@@ -6963,6 +7031,9 @@ Glass.prototype.setDisplayPlacement = function (data) {
     // Meters ahead of the sound: absent keeps the setting, empty or null is 0, else 0 to 200 milliseconds.
     var lead = data.lead === undefined ? now.lead : (data.lead === null || data.lead === '' ? 0 : parseInt(data.lead, 10));
     if (isNaN(lead) || lead < 0 || lead > 200) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
+    // The sound output's delay for the movie: absent keeps the setting, empty or null is 0 (measured), else 0 to 2000 milliseconds.
+    var movieDelay = data.movieDelay === undefined ? now.movieDelay : (data.movieDelay === null || data.movieDelay === '' ? 0 : parseInt(data.movieDelay, 10));
+    if (isNaN(movieDelay) || movieDelay < 0 || movieDelay > 2000) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
     var x = data.x === undefined ? now.x : parseInt(data.x, 10);
     var y = data.y === undefined ? now.y : parseInt(data.y, 10);
     // Either way from the screen's corner: a picture larger than the screen,
@@ -6983,7 +7054,7 @@ Glass.prototype.setDisplayPlacement = function (data) {
         margin = { top: edge(m.top, now.margin.top), right: edge(m.right, now.margin.right), bottom: edge(m.bottom, now.margin.bottom), left: edge(m.left, now.margin.left) };
         if (['top', 'right', 'bottom', 'left'].some(function (e) { return isNaN(margin[e]) || margin[e] < 0 || margin[e] > 25; })) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
     }
-    var wanted = { 'position.fit': fit ? 'True' : 'False', 'screen.backdrop': backdrop ? 'blur' : 'color', 'screen.lead': String(lead), 'position.type': position, 'position.x': String(x), 'position.y': String(y),
+    var wanted = { 'position.fit': fit ? 'True' : 'False', 'screen.backdrop': backdrop ? 'blur' : 'color', 'screen.lead': String(lead), 'screen.delay': String(movieDelay), 'position.type': position, 'position.x': String(x), 'position.y': String(y),
         'position.scale': String(scale), 'position.place': place,
         'position.margin.top': String(margin.top), 'position.margin.right': String(margin.right), 'position.margin.bottom': String(margin.bottom), 'position.margin.left': String(margin.left) };
     var changed = false;

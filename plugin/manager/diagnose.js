@@ -663,12 +663,18 @@ const CHECKS = [
       if (!m) return null;
       if (!m.on) return cause('movie', 'DIAG_MOVIE_OFF', {}, 'appearance');
       if (m.allowed === false) return cause('movie', 'DIAG_MOVIE_HELD', {}, 'system');
-      if (m.decoder === false) return cause('movie', 'DIAG_MOVIE_NO_DECODER', {}, null);
+      if (m.decoder === false) return cause('movie', 'DIAG_MOVIE_NO_DECODER', { version: m.decoderWanted || '' }, 'appearance');
       if (m.box === false) return cause('movie', 'DIAG_MOVIE_NO_BOX', {}, 'themes');
       const r = m.report;
       const playing = !!(f.status.channel && f.status.channel.status === 'play');
       if (playing && (!r || !r.at || f.now - r.at > 120000)) return note('movie', 'DIAG_MOVIE_NO_VIDEO', {}, null);
-      if (r && r.state === 'showing') return ok('movie', 'DIAG_MOVIE_OK', { w: r.width, h: r.height, fps: Math.round(r.fps), delay: r.delay, how: r.measured === null || r.measured === undefined ? 'assumed' : 'measured' });
+      // The distribution's ffmpeg serves until the player's own decoder is fetched: said beside a picture that shows.
+      if (r && r.state === 'showing' && m.decoderSource === 'distribution') return note('movie', 'DIAG_MOVIE_DISTRIBUTION_DECODER', { w: r.width, h: r.height, version: m.decoderWanted || '' }, 'appearance');
+      if (r && r.state === 'showing') {
+        // The delay as the listener set it, as measured, or as assumed: each its own sentence.
+        const key = r.fixed ? 'DIAG_MOVIE_OK_SET' : (r.measured === null || r.measured === undefined ? 'DIAG_MOVIE_OK_ASSUMED' : 'DIAG_MOVIE_OK');
+        return ok('movie', key, { w: r.width, h: r.height, fps: Math.round(r.fps), delay: r.delay });
+      }
       if (r && r.state === 'waiting') return note('movie', 'DIAG_MOVIE_WAITING', { w: r.width, h: r.height }, null);
       return null;
     }
