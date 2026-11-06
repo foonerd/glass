@@ -399,6 +399,7 @@
     "MANAGER_ST_MOVIE_DELAY_SET": "音声遅延 {ms} ms、設定どおり",
     "MANAGER_ST_MOVIE_DECODER_OWN": "デコーダー {name} {version}",
     "MANAGER_ST_MOVIE_DECODER_DISTRIBUTION": "デコーダー: イメージ付属の ffmpeg",
+    "MANAGER_ST_MOVIE_HARDWARE": "ボードのデコーダー ({name}) で復号",
     "MANAGER_SCREEN_PICTURE": "画面の画像",
     "MANAGER_SCREEN_PICTURE_HELP": "プレーヤーの画面が今表示しているものを、ディスプレイが描いたとおりに取得します。レポート用に、または見えない場所にある画面を確認するために。",
     "MANAGER_SCREEN_PICTURE_NONE": "画像を取得できるプレーヤー自身のディスプレイが画面上にありません。",

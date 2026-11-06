@@ -399,6 +399,7 @@
     "MANAGER_ST_MOVIE_DELAY_SET": "opóźnienie dźwięku {ms} ms, jak ustawiono",
     "MANAGER_ST_MOVIE_DECODER_OWN": "dekoder {name} {version}",
     "MANAGER_ST_MOVIE_DECODER_DISTRIBUTION": "dekoder: ffmpeg z obrazu systemu",
+    "MANAGER_ST_MOVIE_HARDWARE": "dekodowane przez układ płytki ({name})",
     "MANAGER_SCREEN_PICTURE": "Zdjęcie ekranu",
     "MANAGER_SCREEN_PICTURE_HELP": "Co ekran odtwarzacza pokazuje teraz, tak jak rysuje to wyświetlacz: do raportu albo do zajrzenia na ekran poza zasięgiem wzroku.",
     "MANAGER_SCREEN_PICTURE_NONE": "Na ekranie nie ma własnego wyświetlacza odtwarzacza, z którego można zrobić zdjęcie.",

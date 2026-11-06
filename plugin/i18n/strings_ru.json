@@ -399,6 +399,7 @@
     "MANAGER_ST_MOVIE_DELAY_SET": "задержка звука {ms} мс, как задано",
     "MANAGER_ST_MOVIE_DECODER_OWN": "декодер {name} {version}",
     "MANAGER_ST_MOVIE_DECODER_DISTRIBUTION": "декодер: ffmpeg из образа",
+    "MANAGER_ST_MOVIE_HARDWARE": "декодируется блоком платы ({name})",
     "MANAGER_SCREEN_PICTURE": "Снимок экрана",
     "MANAGER_SCREEN_PICTURE_HELP": "Что экран плеера показывает сейчас, как его рисует дисплей: для отчёта или чтобы взглянуть на экран вне поля зрения.",
     "MANAGER_SCREEN_PICTURE_NONE": "На экране нет собственного дисплея плеера, с которого можно сделать снимок.",

@@ -60,6 +60,49 @@ fn prober() -> String {
 const MPD: &str = "127.0.0.1:6600";
 /// How often the clock reads mpd.
 const CLOCK_EVERY: Duration = Duration::from_millis(250);
+/// The V4L2 mem2mem decoder of a codec, as FFmpeg names it: the board's
+/// own block, where the kernel exposes a stateful decoder device (a
+/// Raspberry Pi 4's `bcm2835-codec-decode`); none for a codec the path
+/// does not cover.
+pub fn hardware_decoder(codec: &str) -> Option<&'static str> {
+    Some(match codec {
+        "h264" => "h264_v4l2m2m",
+        "hevc" => "hevc_v4l2m2m",
+        "mpeg2video" => "mpeg2_v4l2m2m",
+        "mpeg4" => "mpeg4_v4l2m2m",
+        "vp8" => "vp8_v4l2m2m",
+        "vp9" => "vp9_v4l2m2m",
+        _ => return None,
+    })
+}
+
+/// Where the kernel names its video devices.
+const V4L2_DIR: &str = "/sys/class/video4linux";
+
+/// Whether a stateful decoder device is there to try: a video4linux
+/// device whose name says it decodes (`bcm2835-codec-decode`, `vdec`). A
+/// stateless one (`rpi-hevc-dec`, a Raspberry Pi 5's) is not, since the
+/// mem2mem decoders cannot drive it.
+pub fn hardware_decoder_device_in(dir: &std::path::Path) -> Option<String> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .ok()?
+        .flatten()
+        .filter_map(|e| std::fs::read_to_string(e.path().join("name")).ok())
+        .map(|n| n.trim().to_string())
+        .filter(|n| n.contains("decode") || n.contains("vdec"))
+        .collect();
+    names.sort();
+    names.into_iter().next()
+}
+
+fn hardware_decoder_device() -> Option<String> {
+    hardware_decoder_device_in(std::path::Path::new(V4L2_DIR))
+}
+
+/// A hardware decoder that gave no frame this long after its start is
+/// given up for the software one.
+const HARDWARE_PATIENCE: Duration = Duration::from_secs(4);
+
 /// Frames decoded ahead of the clock and held, at the least; the pipe's
 /// backpressure paces the decoder past the line. The line is a second of
 /// frames where the memory allows, so a decoder that runs near real time
@@ -224,6 +267,8 @@ impl Child {
 /// carries no video.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Probe {
+    /// The stream's codec as the prober names it (`h264`, `hevc`, ...).
+    pub codec: String,
     pub width: u32,
     pub height: u32,
     pub fps: f64,
@@ -240,7 +285,7 @@ pub fn probe(file: &str) -> Result<Option<Probe>, String> {
             "-select_streams",
             "v:0",
             "-show_entries",
-            "stream=width,height,r_frame_rate",
+            "stream=codec_name,width,height,r_frame_rate",
             "-of",
             "csv=p=0",
             file,
@@ -252,10 +297,18 @@ pub fn probe(file: &str) -> Result<Option<Probe>, String> {
     Ok(parse_probe(&text))
 }
 
-/// `1920,1080,30000/1001` as the prober prints it.
+/// `h264,1920,1080,30000/1001` as the prober prints it.
 pub fn parse_probe(text: &str) -> Option<Probe> {
     let line = text.lines().find(|l| !l.trim().is_empty())?;
     let mut parts = line.trim().split(',');
+    let codec = parts.next()?.trim().to_string();
+    if codec.is_empty()
+        || codec
+            .chars()
+            .any(|c| !(c.is_ascii_alphanumeric() || c == '_'))
+    {
+        return None;
+    }
     let width: u32 = parts.next()?.trim().parse().ok()?;
     let height: u32 = parts.next()?.trim().parse().ok()?;
     let rate = parts.next()?.trim();
@@ -272,7 +325,12 @@ pub fn parse_probe(text: &str) -> Option<Probe> {
     if width < 2 || height < 2 || !(1.0..=240.0).contains(&fps) {
         return None;
     }
-    Some(Probe { width, height, fps })
+    Some(Probe {
+        codec,
+        width,
+        height,
+        fps,
+    })
 }
 
 /// One decoded frame: its time in the file and its planes.
@@ -299,21 +357,21 @@ struct Decoder {
 impl Decoder {
     /// Started at `from`, giving frames of `shape` (the file's own size, or
     /// smaller, scaled on the way) at the file's rate.
-    fn start(file: &str, probe: &Probe, shape: (u32, u32), from: f64) -> Result<Self, String> {
+    fn start(
+        file: &str,
+        probe: &Probe,
+        shape: (u32, u32),
+        from: f64,
+        hardware: Option<&str>,
+    ) -> Result<Self, String> {
         let from = from.max(0.0);
         let at = format!("{from:.3}");
         let scale = format!("scale={}:{}:flags=fast_bilinear", shape.0, shape.1);
-        let mut args = vec![
-            "-nostdin",
-            "-loglevel",
-            "error",
-            "-ss",
-            &at,
-            "-i",
-            file,
-            "-an",
-            "-sn",
-        ];
+        let mut args = vec!["-nostdin", "-loglevel", "error", "-ss", &at];
+        if let Some(name) = hardware {
+            args.extend(["-c:v", name]);
+        }
+        args.extend(["-i", file, "-an", "-sn"]);
         if (shape.0, shape.1) != (probe.width, probe.height) {
             args.extend(["-vf", scale.as_str()]);
         }
@@ -801,6 +859,10 @@ pub struct Video {
     probe: Probe,
     /// The size the decoder gives the frames: the file's, or the box's.
     shape: (u32, u32),
+    /// The board's own decoder in use, by FFmpeg's name; none for software.
+    hardware: Option<&'static str>,
+    /// Frames the decoder gave since its last start.
+    delivered: u32,
     decoder: Option<Decoder>,
     envelope: Option<Envelope>,
     clock: Clock,
@@ -872,6 +934,26 @@ impl Video {
     ) -> Self {
         let log = std::env::var_os("GLASS_SYNC_LOG").and_then(|p| File::create(p).ok());
         let shape = decoded_shape(&probe, target);
+        let hardware = match (hardware_decoder(&probe.codec), hardware_decoder_device()) {
+            (Some(name), Some(device)) => {
+                logline::say!(
+                    Info,
+                    "video",
+                    "the board's decoder {device} tried for {}: {name}",
+                    probe.codec
+                );
+                Some(name)
+            }
+            (Some(_), None) => {
+                logline::say!(
+                    Verbose,
+                    "video",
+                    "no stateful decoder device on this board: software decode"
+                );
+                None
+            }
+            (None, _) => None,
+        };
         if shape != (probe.width, probe.height) {
             logline::say!(
                 Info,
@@ -885,6 +967,8 @@ impl Video {
             file: file.to_string(),
             probe,
             shape,
+            hardware,
+            delivered: 0,
             decoder: None,
             envelope: None,
             clock: Clock::start(),
@@ -928,6 +1012,7 @@ impl Video {
             "delay": delay,
             "measured": measured.map(|c| (c * 100.0).round() / 100.0),
             "fixed": self.fixed,
+            "hardware": self.hardware,
         });
         let text = value.to_string();
         if text == self.reported {
@@ -1042,7 +1127,8 @@ impl Video {
         self.decoder = None;
         self.envelope = None;
         self.starting = Some((now, at));
-        match Decoder::start(&self.file, &self.probe, self.shape, at) {
+        self.delivered = 0;
+        match Decoder::start(&self.file, &self.probe, self.shape, at, self.hardware) {
             Ok(decoder) => self.decoder = Some(decoder),
             Err(e) => logline::say!(Warn, "video", "the decoder did not start: {e}"),
         }
@@ -1138,6 +1224,7 @@ impl Video {
         // start teaches the start-up, and one far behind the clock all the
         // same has the decoder started once more with it.
         let mut first = None;
+        let mut hardware_gave_up = false;
         if let Some(decoder) = &self.decoder {
             while self.waiting.len() < decoder.ahead {
                 match decoder.next() {
@@ -1145,16 +1232,39 @@ impl Video {
                         if self.starting.is_some() && self.waiting.is_empty() {
                             first = Some(frame.pts);
                         }
+                        self.delivered += 1;
                         self.waiting.push_back(frame);
                     }
                     None => break,
                 }
             }
-            if decoder.ended.load(Ordering::Acquire) && self.waiting.is_empty() {
+            let ended = decoder.ended.load(Ordering::Acquire);
+            // The board's decoder that gave nothing (the device refused the
+            // stream, or the decoder hangs): the software one from here on.
+            if self.hardware.is_some()
+                && self.delivered == 0
+                && (ended
+                    || self
+                        .starting
+                        .is_some_and(|(since, _)| now.duration_since(since) > HARDWARE_PATIENCE))
+            {
+                hardware_gave_up = true;
+            } else if ended && self.waiting.is_empty() {
                 // The file's end, or the child gone: nothing more to show.
                 self.decoder = None;
                 self.starting = None;
             }
+        }
+        if hardware_gave_up {
+            logline::say!(
+                Warn,
+                "video",
+                "the board's decoder {} gave no frame: software decode from here",
+                self.hardware.unwrap_or("")
+            );
+            self.hardware = None;
+            self.restart(now, target);
+            return false;
         }
         if let Some(pts) = first {
             let (since, asked) = self.starting.take().unwrap_or((now, pts));
@@ -1234,16 +1344,55 @@ mod tests {
     #[test]
     fn the_probers_line_is_read() {
         assert_eq!(
-            parse_probe("1920,1080,30000/1001\n"),
+            parse_probe("h264,1920,1080,30000/1001\n"),
             Some(Probe {
+                codec: "h264".into(),
                 width: 1920,
                 height: 1080,
                 fps: 30000.0 / 1001.0
             })
         );
-        assert_eq!(parse_probe("1280,720,25\n").map(|p| p.fps), Some(25.0));
+        assert_eq!(parse_probe("hevc,1280,720,25\n").map(|p| p.fps), Some(25.0));
         assert_eq!(parse_probe(""), None, "no video stream");
-        assert_eq!(parse_probe("1920,1080,0/0\n"), None, "a rate of nothing");
+        assert_eq!(
+            parse_probe("h264,1920,1080,0/0\n"),
+            None,
+            "a rate of nothing"
+        );
+        assert_eq!(
+            parse_probe("1920,1080,30\n"),
+            None,
+            "a line without the codec"
+        );
+    }
+
+    /// The board's decoder by the codec's name, and the device that makes
+    /// it worth trying: a stateful one by its name, a stateless one not.
+    #[test]
+    fn the_boards_decoder_is_named_and_its_device_told() {
+        assert_eq!(hardware_decoder("h264"), Some("h264_v4l2m2m"));
+        assert_eq!(hardware_decoder("hevc"), Some("hevc_v4l2m2m"));
+        assert_eq!(hardware_decoder("av1"), None);
+        let dir = std::env::temp_dir().join(format!("glass-v4l2-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let make = |n: &str, name: &str| {
+            let d = dir.join(n);
+            std::fs::create_dir_all(&d).unwrap();
+            std::fs::write(d.join("name"), format!("{name}\n")).unwrap();
+        };
+        make("video19", "rpi-hevc-dec");
+        make("video20", "pispbe-input");
+        assert_eq!(
+            hardware_decoder_device_in(&dir),
+            None,
+            "a stateless decoder is not tried"
+        );
+        make("video10", "bcm2835-codec-decode");
+        assert_eq!(
+            hardware_decoder_device_in(&dir).as_deref(),
+            Some("bcm2835-codec-decode")
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]
@@ -1294,6 +1443,7 @@ mod tests {
     #[test]
     fn the_picture_is_decoded_no_larger_than_its_box() {
         let hd = Probe {
+            codec: "h264".into(),
             width: 1920,
             height: 1080,
             fps: 30.0,

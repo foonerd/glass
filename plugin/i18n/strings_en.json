@@ -399,6 +399,7 @@
     "MANAGER_ST_MOVIE_DELAY_SET": "sound delay {ms} ms, as set",
     "MANAGER_ST_MOVIE_DECODER_OWN": "decoder {name} {version}",
     "MANAGER_ST_MOVIE_DECODER_DISTRIBUTION": "decoder: the image's ffmpeg",
+    "MANAGER_ST_MOVIE_HARDWARE": "decoded by the board's own {name}",
     "MANAGER_SCREEN_PICTURE": "Picture of the screen",
     "MANAGER_SCREEN_PICTURE_HELP": "What the player's screen shows now, as the display draws it: for a report, or a look at a screen out of sight.",
     "MANAGER_SCREEN_PICTURE_NONE": "No display of the player's own is on the screen to take a picture from.",

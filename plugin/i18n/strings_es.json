@@ -399,6 +399,7 @@
     "MANAGER_ST_MOVIE_DELAY_SET": "retardo del sonido {ms} ms, tal como se fijó",
     "MANAGER_ST_MOVIE_DECODER_OWN": "decodificador {name} {version}",
     "MANAGER_ST_MOVIE_DECODER_DISTRIBUTION": "decodificador: el ffmpeg de la imagen",
+    "MANAGER_ST_MOVIE_HARDWARE": "decodificado por el bloque de la placa ({name})",
     "MANAGER_SCREEN_PICTURE": "Imagen de la pantalla",
     "MANAGER_SCREEN_PICTURE_HELP": "Lo que la pantalla del reproductor muestra ahora, tal como el visor lo dibuja: para un informe, o para echar un vistazo a una pantalla fuera de la vista.",
     "MANAGER_SCREEN_PICTURE_NONE": "No hay ningún visor propio del reproductor en la pantalla del que tomar una imagen.",

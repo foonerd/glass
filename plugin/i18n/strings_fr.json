@@ -399,6 +399,7 @@
     "MANAGER_ST_MOVIE_DELAY_SET": "retard du son {ms} ms, tel que réglé",
     "MANAGER_ST_MOVIE_DECODER_OWN": "décodeur {name} {version}",
     "MANAGER_ST_MOVIE_DECODER_DISTRIBUTION": "décodeur : le ffmpeg de l'image",
+    "MANAGER_ST_MOVIE_HARDWARE": "décodé par le bloc de la carte ({name})",
     "MANAGER_SCREEN_PICTURE": "Image de l'écran",
     "MANAGER_SCREEN_PICTURE_HELP": "Ce que l'écran du lecteur montre maintenant, tel que l'affichage le dessine : pour un rapport, ou un coup d'œil à un écran hors de vue.",
     "MANAGER_SCREEN_PICTURE_NONE": "Aucun affichage propre au lecteur n'est à l'écran pour en prendre une image.",

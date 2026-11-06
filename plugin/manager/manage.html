@@ -3186,6 +3186,7 @@
         if (r && r.at && Date.now() - r.at < 120000) {
           parts.push((r.state === 'showing' ? t('MANAGER_ST_MOVIE_SHOWING') : t('MANAGER_ST_MOVIE_WAITING')).replace('{w}', r.width).replace('{h}', r.height).replace('{fps}', Math.round(r.fps)));
           parts.push((r.fixed ? t('MANAGER_ST_MOVIE_DELAY_SET') : (r.measured !== null && r.measured !== undefined ? t('MANAGER_ST_MOVIE_DELAY_MEASURED') : t('MANAGER_ST_MOVIE_DELAY_ASSUMED'))).replace('{ms}', r.delay));
+          if (r.hardware) parts.push(t('MANAGER_ST_MOVIE_HARDWARE').replace('{name}', r.hardware));
         } else {
           parts.push(t('MANAGER_ST_MOVIE_ON'));
         }

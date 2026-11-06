@@ -399,6 +399,7 @@
     "MANAGER_ST_MOVIE_DELAY_SET": "声音延迟 {ms} 毫秒，按所设",
     "MANAGER_ST_MOVIE_DECODER_OWN": "解码器 {name} {version}",
     "MANAGER_ST_MOVIE_DECODER_DISTRIBUTION": "解码器：镜像自带的 ffmpeg",
+    "MANAGER_ST_MOVIE_HARDWARE": "由板载解码器 ({name}) 解码",
     "MANAGER_SCREEN_PICTURE": "屏幕截图",
     "MANAGER_SCREEN_PICTURE_HELP": "播放器屏幕此刻显示的画面，按显示程序绘制的样子：用于报告，或查看看不到的屏幕。",
     "MANAGER_SCREEN_PICTURE_NONE": "屏幕上没有播放器自己的显示程序，无法截图。",
