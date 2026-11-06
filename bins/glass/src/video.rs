@@ -43,9 +43,14 @@ const CLOCK_EVERY: Duration = Duration::from_millis(250);
 /// Frames decoded ahead of the clock and held: the pipe's backpressure
 /// paces the decoder past this.
 const AHEAD_FRAMES: usize = 4;
-/// Past this far behind or ahead the decoder is started again at the
-/// clock's place rather than dropped or held into step.
-const RESTART_S: f64 = 0.75;
+/// A frame this far ahead of the clock is a jump back (a seek): the
+/// decoder is started again at the clock's place rather than held.
+const RESTART_AHEAD_S: f64 = 0.75;
+/// The clock this far ahead of the frames is a jump forward: started
+/// again rather than caught up by dropping, which the decoder's own pace
+/// (several times real time) does for anything less, the first seconds
+/// after a start included.
+const RESTART_BEHIND_S: f64 = 3.0;
 
 /// A child started with its standard output on a pipe we read; the other
 /// two standard streams go nowhere.
@@ -213,7 +218,9 @@ struct Decoded {
 /// the queue's bound is the backpressure that paces the child.
 struct Decoder {
     child: Child,
-    frames: Receiver<Decoded>,
+    /// Taken before the thread is joined: a thread blocked handing a frame
+    /// into the full queue leaves the moment its receiver is gone.
+    frames: Option<Receiver<Decoded>>,
     spare: SyncSender<Vec<u8>>,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
@@ -276,7 +283,7 @@ impl Decoder {
         };
         Ok(Self {
             child,
-            frames,
+            frames: Some(frames),
             spare,
             stop,
             thread: Some(thread),
@@ -289,8 +296,14 @@ impl Decoder {
         let _ = self.spare.try_send(planes);
     }
 
+    /// The next frame decoded, if one waits.
+    fn next(&self) -> Option<Decoded> {
+        self.frames.as_ref()?.try_recv().ok()
+    }
+
     fn stop(&mut self) {
         self.stop.store(true, Ordering::Release);
+        self.frames = None;
         self.child.end();
         if let Some(thread) = self.thread.take() {
             let _ = thread.join();
@@ -772,6 +785,13 @@ impl Video {
             .copied()
             .collect();
         let file = envelope.window(from - 1.6, position);
+        logline::say!(
+            Verbose,
+            "video",
+            "calibration: {} measures heard, {} file bins",
+            heard.len(),
+            file.len()
+        );
         if let Some((ms, corr)) = correlate_delay(&heard, &file) {
             let found = ms as f64 / 1000.0;
             // Eased in, so one window's reading does not jolt the picture.
@@ -852,9 +872,9 @@ impl Video {
         // Frames from the decoder into the waiting line.
         if let Some(decoder) = &self.decoder {
             while self.waiting.len() < AHEAD_FRAMES {
-                match decoder.frames.try_recv() {
-                    Ok(frame) => self.waiting.push_back(frame),
-                    Err(_) => break,
+                match decoder.next() {
+                    Some(frame) => self.waiting.push_back(frame),
+                    None => break,
                 }
             }
             if decoder.ended.load(Ordering::Acquire) && self.waiting.is_empty() {
@@ -869,7 +889,7 @@ impl Video {
             .map(|f| f.pts)
             .or(self.shown.as_ref().map(|f| f.pts));
         if let Some(edge) = edge {
-            if target - edge > RESTART_S || edge - target > RESTART_S {
+            if target - edge > RESTART_BEHIND_S || edge - target > RESTART_AHEAD_S {
                 self.restart(target);
                 return false;
             }
