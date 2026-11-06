@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.24] - 2026-11-06
+
+- **The Android app builds again.** The movie's tick had lost its guard in 0.11.23, whose release workflow stopped at the Android build and published nothing on either repository; this release carries 0.11.23's change, the movie on the Linux and Windows remotes, whole.
+
 ## [0.11.23] - 2026-11-06
 
 - **The movie on the Linux and Windows remotes.** A remote display shows the film in the theme's box as the player's screen does: the player serves the playing file to its remotes while the picture is on, and the remote decodes it with the machine's own `ffmpeg` and `ffprobe` found by name (any distribution's, or the Windows builds from ffmpeg.org; they read the file over HTTP with range seeks), scaled on the way to the box's size and held to the room's sound by the sound output delay the player measured or has set, with the player's own state as the clock, so the remote measures nothing of its own. A seek shows the new place within a second and a half, a pause holds the frame, a stop leaves the box clean. The player tells every remote of the movie at its connect and at each change (the file, the delay, the lead). The remote's page says what the movie does on its Status panel, **The movie**: off on the player, no box in the meter shown, the decoder this machine lacks, or the file showing with the delay applied; a machine without ffmpeg shows the theme without the picture. An Android remote does not show the movie.
