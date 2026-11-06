@@ -42,7 +42,7 @@
   // The movie: what the player says of it (the file to play, the boxes of
   // the theme's meters, the sound's delay), the video element laid over
   // the theme's box, and the player's position it is held to.
-  var movie = { line: null, video: null, src: '', stateAt: 0, timer: null, failed: '' };
+  var movie = { line: null, video: null, src: '', stateAt: 0, timer: null, failed: '', hole: '' };
 
   var $ = function (id) { return document.getElementById(id); };
   var encoder = new TextEncoder();
@@ -306,18 +306,22 @@
       say(face.t('MANAGER_FACE_MOVIE_UNPLAYABLE'), true);
     });
     v.addEventListener('loadedmetadata', function () { movieFollow(true); });
+    ['loadeddata', 'playing', 'emptied', 'ended', 'stalled'].forEach(function (ev) { v.addEventListener(ev, function () { moviePlace(); }); });
     if (window.getComputedStyle(stage).position === 'static') stage.style.position = 'relative';
     stage.appendChild(v);
     movie.video = v;
     return v;
   }
   // The element placed in the box of the meter on show, as the canvas is
-  // drawn on the page; under the canvas for a background box, over it else.
+  // drawn on the page, always under the canvas: for an overlay box the
+  // module leaves the theme clear there while a picture shows, so the
+  // picture shows through the theme and the face stays over it; for a
+  // background box the theme's own clear parts let it through.
   function moviePlace() {
     var v = movie.video;
     if (!v || !movie.line || !face.ready) return;
     var box = movie.line.boxes ? movie.line.boxes[face.meter] : null;
-    if (!box || !movie.src || movie.failed) { v.style.display = 'none'; return; }
+    if (!box || !movie.src || movie.failed) { v.style.display = 'none'; movieHole(null); return; }
     var canvas = $('face-canvas');
     var rect = canvas.getBoundingClientRect();
     var stageRect = $('face-stage').getBoundingClientRect();
@@ -327,10 +331,21 @@
     v.style.width = (box.w * k) + 'px';
     v.style.height = (box.h * k) + 'px';
     v.style.objectFit = box.scale === 'cover' ? 'cover' : (box.scale === 'stretch' ? 'fill' : 'contain');
-    v.style.zIndex = box.zorder === 'background' ? '0' : '1';
+    v.style.zIndex = '0';
     canvas.style.position = 'relative';
-    canvas.style.zIndex = box.zorder === 'background' ? '1' : '0';
+    canvas.style.zIndex = '1';
     v.style.display = '';
+    movieHole(box.zorder === 'background' || v.readyState < 2 ? null : box);
+  }
+  // The theme's box cut clear in the module, or painted whole again.
+  function movieHole(box) {
+    if (!face.ex || typeof face.ex.set_hole !== 'function') return;
+    var key = box ? [box.x, box.y, box.w, box.h].join(',') : '';
+    if (movie.hole === key) return;
+    movie.hole = key;
+    try {
+      guarded(function () { if (box) face.ex.set_hole(box.x, box.y, box.w, box.h); else face.ex.clear_hole(); });
+    } catch (e) { /* an older module: the picture sits under an opaque theme */ }
   }
   // The player's word applied: the file to play, or none.
   function movieApply() {
@@ -735,6 +750,7 @@
     // The movie rests with the tab: no bytes for a page nobody sees.
     if (movie.timer) { clearInterval(movie.timer); movie.timer = null; }
     if (movie.video && !movie.video.paused) movie.video.pause();
+    movieHole(null);
   }
 
   function fullScreen() {

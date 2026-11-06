@@ -410,7 +410,7 @@
     }
 
     #face-stage {
-      background: #000;
+      background: #0c0c10;
       border-radius: 8px;
       overflow: hidden;
     }
@@ -420,8 +420,9 @@
       width: 100%;
       height: auto;
       image-rendering: auto;
-      /* What the theme leaves transparent shows the display's dark colour, as the screen does without a backdrop. */
-      background: #0c0c10;
+      /* What the theme leaves transparent shows the display's dark colour, as the screen does without a backdrop:
+         the stage's, under the canvas, so the movie's element between them shows through the theme's box. */
+      background: transparent;
       /* A finger's drag on the face is the face's: a list scrolls, the page does not. */
       touch-action: none;
     }

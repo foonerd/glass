@@ -1422,12 +1422,26 @@ fn session(
             if profiling {
                 motion.profile = Some(Vec::new());
             }
+            // The movie's box left clear in the theme while a picture is on
+            // and the theme's box is over it: the picture is drawn under
+            // the frame and shows through, and the face over the frame
+            // covers it where the face draws.
+            #[cfg(all(unix, not(target_os = "android")))]
+            let movie_hole: Option<(u32, u32, u32, u32)> = movie
+                .as_ref()
+                .filter(|m| m.shown().is_some())
+                .and(skin.video.as_ref())
+                .filter(|v| v.zorder == lead::ZOrder::Overlay)
+                .map(|v| (v.x, v.y, v.w, v.h));
+            #[cfg(not(all(unix, not(target_os = "android"))))]
+            let movie_hole: Option<(u32, u32, u32, u32)> = None;
             let (mut frame, mut damage): (&Frame, &[Rect]) = {
                 let painted = raster_over(
                     &scene,
                     Stack {
                         screen: None,
                         face: None,
+                        hole: movie_hole,
                         front: assets.front.as_ref(),
                         needle: assets.indicator.as_ref(),
                         needle_right: assets.indicator_right.as_ref(),
@@ -1612,7 +1626,7 @@ fn session(
                 }
                 // A theme whose pictures leave the screen uncovered or clear
                 // somewhere is blended over the backdrop, or the dark colour.
-                window.set_translucent(assets.translucent);
+                window.set_translucent(assets.translucent || movie_hole.is_some());
                 #[cfg(all(unix, not(target_os = "android")))]
                 {
                     window.set_video_box(skin.video.as_ref().map(|v| pane::VideoBox {
@@ -1625,7 +1639,9 @@ fn session(
                             lead::Scale::Cover => pane::VideoFit::Cover,
                             lead::Scale::Fit => pane::VideoFit::Fit,
                         },
-                        over: v.zorder == lead::ZOrder::Overlay,
+                        // Under the frame always: an overlay box is a hole
+                        // in the theme, so the face stays over the picture.
+                        over: false,
                     }));
                     match movie.as_ref() {
                         Some(m) => {
@@ -1958,6 +1974,7 @@ fn session(
                         Stack {
                             screen: None,
                             face: None,
+                            hole: None,
                             front: assets.front.as_ref(),
                             needle: assets.indicator.as_ref(),
                             needle_right: assets.indicator_right.as_ref(),

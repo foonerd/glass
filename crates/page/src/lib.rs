@@ -122,6 +122,9 @@ pub struct Page {
     laid: Laid,
     /// What the face asked of the player, until the page takes it.
     asked: Vec<Happened>,
+    /// The movie's box left clear in the theme while the page's own video
+    /// element shows a picture under the canvas (x, y, w, h).
+    hole: Option<(u32, u32, u32, u32)>,
     /// The page's clock at the last frame, its zone, and the time of day
     /// they make.
     now_ms: u64,
@@ -408,6 +411,13 @@ impl Page {
         self.showing.as_ref().map_or(30, |s| s.rate)
     }
 
+    /// The movie's box left clear in the theme, under the face, while the
+    /// page's video element shows a picture beneath the canvas; none
+    /// paints the theme whole again.
+    pub fn set_hole(&mut self, hole: Option<(u32, u32, u32, u32)>) {
+        self.hole = hole.filter(|h| h.2 > 0 && h.3 > 0);
+    }
+
     pub fn width(&self) -> u32 {
         self.showing.as_ref().map_or(0, |s| s.skin.width)
     }
@@ -432,6 +442,7 @@ impl Page {
             laid,
             asked,
             wall,
+            hole,
             ..
         } = self;
         let showing = showing.as_mut()?;
@@ -449,6 +460,7 @@ impl Page {
             let stack = Stack {
                 screen: None,
                 face: None,
+                hole: *hole,
                 front: assets.front.as_ref(),
                 needle: assets.indicator.as_ref(),
                 needle_right: assets.indicator_right.as_ref(),
@@ -732,6 +744,14 @@ pub mod host {
         with(|page| page.width())
     }
 
+    pub fn set_hole(x: u32, y: u32, w: u32, h: u32) {
+        with(|page| page.set_hole(Some((x, y, w, h))))
+    }
+
+    pub fn clear_hole() {
+        with(|page| page.set_hole(None))
+    }
+
     pub fn frame_height() -> u32 {
         with(|page| page.height())
     }
@@ -887,6 +907,16 @@ macro_rules! exports {
             pub extern "C" fn frame_width() -> u32 {
                 armed();
                 host::frame_width()
+            }
+            #[no_mangle]
+            pub extern "C" fn set_hole(x: u32, y: u32, w: u32, h: u32) {
+                armed();
+                host::set_hole(x, y, w, h)
+            }
+            #[no_mangle]
+            pub extern "C" fn clear_hole() {
+                armed();
+                host::clear_hole()
             }
             #[no_mangle]
             pub extern "C" fn frame_height() -> u32 {

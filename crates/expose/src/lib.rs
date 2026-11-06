@@ -312,6 +312,7 @@ pub fn raster(scene: &Scene) -> Frame {
         Stack {
             screen: None,
             face: None,
+            hole: None,
             front: None,
             needle: None,
             needle_right: None,
@@ -637,6 +638,9 @@ pub fn resample_picture_onto(
 pub struct Stack<'a> {
     pub screen: Option<&'a Frame>,
     pub face: Option<&'a Frame>,
+    /// A box of the frame left clear, for the movie's picture under it
+    /// (x, y, w, h); none without a picture on.
+    pub hole: Option<(u32, u32, u32, u32)>,
     /// The meter foreground with its opaque spans.
     pub front: Option<&'a Spans>,
     /// The indicator picture for the left or mono channel: a needle sprite,
@@ -1231,6 +1235,11 @@ pub fn raster_over<'m>(
     if let Some((color, alpha)) = overlay {
         ops.push(Op::Fade { color, alpha });
     }
+    if let Some((x, y, w, h)) = stack.hole {
+        if w > 0 && h > 0 {
+            ops.push(Op::Hole { x, y, w, h });
+        }
+    }
     // Only the boxes of steps that differ from the last frame's are
     // painted; the canvas keeps the rest. A new base or size repaints all.
     let steps: Vec<(u64, Option<Box4>)> = ops
@@ -1600,6 +1609,10 @@ enum Op<'a> {
     Front { spans: &'a Spans, at: (u32, u32) },
     /// A colour over the whole frame at `alpha`.
     Fade { color: [u8; 3], alpha: u8 },
+    /// A box of the frame made clear (every pixel's alpha and colour
+    /// zero), so what lies under the frame shows there: the movie's box
+    /// while a picture is on, under the face.
+    Hole { x: u32, y: u32, w: u32, h: u32 },
 }
 
 impl Op<'_> {
@@ -1663,6 +1676,7 @@ impl Op<'_> {
                 (at.1 + spans.height) as i32,
             ),
             Op::Fade { .. } => (0, 0, width as i32, height as i32),
+            Op::Hole { x, y, w, h } => (x as i32, y as i32, w as i32, h as i32),
         };
         clip_box(b, width, height)
     }
@@ -1772,6 +1786,10 @@ impl Op<'_> {
                 h.bytes(&color);
                 h.tag(alpha);
             }
+            Op::Hole { x, y, w, h: hh } => {
+                h.tag(10);
+                h.u32s(&[x, y, w, hh]);
+            }
         }
         h.0
     }
@@ -1826,6 +1844,7 @@ impl Op<'_> {
             Op::Column { rect, level, color } => fill_column(band, &rect, level, color),
             Op::Front { spans, at } => spans.blit(band, at),
             Op::Fade { color, alpha } => fade_band(band, color, alpha),
+            Op::Hole { x, y, w, h } => clear_band(band, x, y, w, h),
         }
     }
 }
@@ -2028,6 +2047,20 @@ fn fade_band(band: &mut Band, color: [u8; 3], alpha: u8) {
         for px in band.row(y)[x0..x1].as_chunks_mut::<4>().0 {
             blend(px, 0, [color[0], color[1], color[2], alpha]);
         }
+    }
+}
+
+/// The box made clear within the band: alpha and colour zero.
+fn clear_band(band: &mut Band, x: u32, y: u32, w: u32, h: u32) {
+    let x0 = band.x0.max(x) as usize * 4;
+    let x1 = band.x1.min(x.saturating_add(w)) as usize * 4;
+    if x1 <= x0 {
+        return;
+    }
+    let y0 = band.y0.max(y);
+    let y1 = band.y1.min(y.saturating_add(h));
+    for row in y0..y1 {
+        band.row(row)[x0..x1].fill(0);
     }
 }
 
@@ -5369,6 +5402,7 @@ mod changer_tests {
                 let stack = Stack {
                     screen: None,
                     face: None,
+                    hole: None,
                     front: None,
                     needle: None,
                     needle_right: None,
@@ -11740,6 +11774,7 @@ mod tests {
                 Stack {
                     screen: None,
                     face: None,
+                    hole: None,
                     front: None,
                     needle: None,
                     needle_right: None,
@@ -11768,6 +11803,7 @@ mod tests {
                 Stack {
                     screen: None,
                     face: None,
+                    hole: None,
                     front: None,
                     needle: None,
                     needle_right: None,
@@ -11848,6 +11884,7 @@ mod tests {
                 Stack {
                     screen: None,
                     face: None,
+                    hole: None,
                     front: None,
                     needle: None,
                     needle_right: None,
@@ -11980,6 +12017,7 @@ mod tests {
             let stack = || Stack {
                 screen: None,
                 face: None,
+                hole: None,
                 front: None,
                 needle: Some(&needle),
                 needle_right: None,
