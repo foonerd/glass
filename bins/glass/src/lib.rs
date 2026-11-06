@@ -1588,6 +1588,7 @@ fn session(
             if let (Some(m), true) = (movie.as_ref(), remote.is_some()) {
                 m.feed(&input.metadata.status, input.metadata.seek as f64);
             }
+            #[cfg(not(target_os = "android"))]
             let movie_due = movie
                 .as_mut()
                 .is_some_and(|m| m.tick(Instant::now(), &input.heard, input.levels.left));
