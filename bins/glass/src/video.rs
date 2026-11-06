@@ -17,13 +17,15 @@
 //! decode is the child's on its own cores; the display's added work per
 //! frame is one texture upload and no conversion or copy of its own.
 
-#![cfg(all(unix, not(target_os = "android")))]
+#![cfg(not(target_os = "android"))]
 
 use std::collections::VecDeque;
+#[cfg(unix)]
 use std::ffi::CString;
 use std::fs::File;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::TcpStream;
+#[cfg(unix)]
 use std::os::fd::FromRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, SyncSender};
@@ -164,11 +166,64 @@ const STARTUP_MARGIN_S: f64 = 0.25;
 
 /// A child started with its standard output on a pipe we read; the other
 /// two standard streams go nowhere.
+#[cfg(unix)]
 struct Child {
     pid: libc::pid_t,
     out: File,
 }
 
+/// The same on Windows, through the standard library's process (the
+/// glibc symbols that keep `std::process` out of the Linux builds are no
+/// matter there), the child's console window never shown.
+#[cfg(windows)]
+struct Child {
+    child: Mutex<std::process::Child>,
+    out: File,
+}
+
+#[cfg(windows)]
+impl Child {
+    fn spawn(program: &str, args: &[&str]) -> Result<Self, String> {
+        use std::os::windows::io::OwnedHandle;
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        let mut child = std::process::Command::new(program)
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .creation_flags(CREATE_NO_WINDOW)
+            .spawn()
+            .map_err(|e| format!("{program} did not start: {e}"))?;
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| format!("{program}: no output pipe"))?;
+        let out = File::from(OwnedHandle::from(stdout));
+        Ok(Self {
+            child: Mutex::new(child),
+            out,
+        })
+    }
+
+    /// Reaped if it has ended; `true` then.
+    fn reap(&self) -> bool {
+        let mut child = self.child.lock().unwrap_or_else(|e| e.into_inner());
+        matches!(child.try_wait(), Ok(Some(_)))
+    }
+
+    /// Ended: killed and reaped; Windows has no gentler word for a child.
+    fn end(&self) {
+        if self.reap() {
+            return;
+        }
+        let mut child = self.child.lock().unwrap_or_else(|e| e.into_inner());
+        let _ = child.kill();
+        let _ = child.wait();
+    }
+}
+
+#[cfg(unix)]
 impl Child {
     fn spawn(program: &str, args: &[&str]) -> Result<Self, String> {
         extern "C" {

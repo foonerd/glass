@@ -942,18 +942,18 @@ fn session(
     let mut backdrop_said: Option<bool> = None;
     // The picture of a video file the player plays, under the theme: the
     // harness flag for now; the plugin's switch when it ships.
-    #[cfg(all(unix, not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     let movie_forced = env::var_os("GLASS_VIDEO").is_some();
-    #[cfg(all(unix, not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     let mut movie: Option<video::Video> = None;
-    #[cfg(all(unix, not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     let mut movie_probed: Option<String> = None;
-    #[cfg(all(unix, not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     let mut movie_delay_ms: u32 = video::DEFAULT_DELAY_MS;
     // Whether the player was told of a movie, so it is told when none is.
-    #[cfg(all(unix, not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     let mut movie_told = false;
-    #[cfg(all(unix, not(target_os = "android")))]
+    #[cfg(not(target_os = "android"))]
     let mut movie_word: Option<String> = None;
     // The panel's power: the player's word, the face's idle black, a touch.
     let mut screen = screen::ScreenPower::default();
@@ -1106,14 +1106,14 @@ fn session(
         let input = source.poll();
         // The picture of a video file the player plays, where the switch is
         // on and the meter on show gives it a box.
-        #[cfg(all(unix, not(target_os = "android")))]
+        #[cfg(not(target_os = "android"))]
         let movie_wanted = (skin.run.movie || movie_forced) && skin.video.is_some();
-        #[cfg(all(unix, not(target_os = "android")))]
+        #[cfg(not(target_os = "android"))]
         if !movie_wanted {
             movie = None;
             movie_probed = None;
         }
-        #[cfg(all(unix, not(target_os = "android")))]
+        #[cfg(not(target_os = "android"))]
         if movie_wanted {
             // The file the player plays, where it is one on this machine; on
             // a remote display the player serves it, and its movie line
@@ -1448,14 +1448,14 @@ fn session(
             // and the theme's box is over it: the picture is drawn under
             // the frame and shows through, and the face over the frame
             // covers it where the face draws.
-            #[cfg(all(unix, not(target_os = "android")))]
+            #[cfg(not(target_os = "android"))]
             let movie_hole: Option<(u32, u32, u32, u32)> = movie
                 .as_ref()
                 .filter(|m| m.shown().is_some())
                 .and(skin.video.as_ref())
                 .filter(|v| v.zorder == lead::ZOrder::Overlay)
                 .map(|v| (v.x, v.y, v.w, v.h));
-            #[cfg(not(all(unix, not(target_os = "android"))))]
+            #[cfg(target_os = "android")]
             let movie_hole: Option<(u32, u32, u32, u32)> = None;
             let (mut frame, mut damage): (&Frame, &[Rect]) = {
                 let painted = raster_over(
@@ -1584,14 +1584,14 @@ fn session(
             rastered_at = Instant::now();
             // The movie's frame due now, window or none: the harness reads
             // the sync headless, the window shows the picture.
-            #[cfg(all(unix, not(target_os = "android")))]
+            #[cfg(not(target_os = "android"))]
             if let (Some(m), true) = (movie.as_ref(), remote.is_some()) {
                 m.feed(&input.metadata.status, input.metadata.seek as f64);
             }
             let movie_due = movie
                 .as_mut()
                 .is_some_and(|m| m.tick(Instant::now(), &input.heard, input.levels.left));
-            #[cfg(all(unix, not(target_os = "android")))]
+            #[cfg(not(target_os = "android"))]
             match movie.as_mut() {
                 Some(m) => {
                     let (delay, measured) = m.delay();
@@ -1616,7 +1616,7 @@ fn session(
                 }
             }
             // A remote's Status panel says what the movie does here, once per change.
-            #[cfg(all(unix, not(target_os = "android")))]
+            #[cfg(not(target_os = "android"))]
             if let Some(remote) = remote.as_deref() {
                 let word = match (input.movie.as_ref(), skin.video.as_ref(), movie.as_ref()) {
                     (Some(l), _, _) if !l.on => "off on the player".to_string(),
@@ -1676,7 +1676,7 @@ fn session(
                 // A theme whose pictures leave the screen uncovered or clear
                 // somewhere is blended over the backdrop, or the dark colour.
                 window.set_translucent(assets.translucent || movie_hole.is_some());
-                #[cfg(all(unix, not(target_os = "android")))]
+                #[cfg(not(target_os = "android"))]
                 {
                     window.set_video_box(skin.video.as_ref().map(|v| pane::VideoBox {
                         x: v.x,
