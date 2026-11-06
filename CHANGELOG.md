@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.25] - 2026-11-06
+
+- **The movie's box cleared whole.** Since 0.11.22 the step that leaves the theme's box clear for the picture named its far corner by its size rather than its corner, so the painting stopped short of the box's last rows (and, after a partial repaint, its last columns) and the theme stayed painted there: a 16:9 picture in a box of 396 rows showed its top 348 and looked glued to the top, on the player's screen, the remotes, the Face tab and Anymote alike. The bounds are corners now, as every step's are; a test paints the box and reads its last row and column.
+
 ## [0.11.24] - 2026-11-06
 
 - **The Android app builds again.** The movie's tick had lost its guard in 0.11.23, whose release workflow stopped at the Android build and published nothing on either repository; this release carries 0.11.23's change, the movie on the Linux and Windows remotes, whole.
