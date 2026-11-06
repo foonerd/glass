@@ -703,6 +703,7 @@
     "MANAGER_FACE_NO_MODULE": "esta versión no tiene módulo para navegador; actualice Glass",
     "MANAGER_FACE_NO_FRAMES": "sin fotogramas: el demonio de fotogramas no está en marcha",
     "MANAGER_FACE_WAITING": "Esperando al reproductor…",
+    "MANAGER_FACE_MOVIE_UNPLAYABLE": "Este navegador no reproduce el formato de este archivo (MP4 o WebM con H.264, VP8, VP9 o AV1 se reproducen en todas partes; MKV y AVI en ningún navegador). La pantalla propia del reproductor lo muestra.",
     "MANAGER_FACE_FAILED": "La Face no pudo arrancar:",
     "MANAGER_FACE_STOPPED": "El reproductor está detenido. El visor ha dejado la pantalla; los vúmetros vuelven cuando reproduce.",
     "MANAGER_FACE_PAUSED": "El reproductor está en pausa. El visor ha dejado la pantalla; los vúmetros vuelven cuando reproduce.",

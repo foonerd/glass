@@ -703,6 +703,7 @@
     "MANAGER_FACE_NO_MODULE": "deze release heeft geen browsermodule; werk Glass bij",
     "MANAGER_FACE_NO_FRAMES": "geen frames: de frame-dienst draait niet",
     "MANAGER_FACE_WAITING": "Wachten op de speler…",
+    "MANAGER_FACE_MOVIE_UNPLAYABLE": "Deze browser speelt het formaat van dit bestand niet (MP4 of WebM met H.264, VP8, VP9 of AV1 spelen overal; MKV en AVI in geen enkele browser). Het eigen scherm van de speler toont het.",
     "MANAGER_FACE_FAILED": "De Face kon niet starten:",
     "MANAGER_FACE_STOPPED": "De speler is gestopt. De weergave heeft het scherm verlaten; de meters keren terug wanneer hij speelt.",
     "MANAGER_FACE_PAUSED": "De speler is gepauzeerd. De weergave heeft het scherm verlaten; de meters keren terug wanneer hij speelt.",

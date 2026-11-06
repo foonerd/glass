@@ -703,6 +703,7 @@
     "MANAGER_FACE_NO_MODULE": "此版本没有浏览器模块；请升级 Glass",
     "MANAGER_FACE_NO_FRAMES": "没有帧：帧守护进程未运行",
     "MANAGER_FACE_WAITING": "正在等待播放器…",
+    "MANAGER_FACE_MOVIE_UNPLAYABLE": "此浏览器无法播放该文件的格式（H.264、VP8、VP9 或 AV1 的 MP4 或 WebM 在任何浏览器都能播放；MKV 和 AVI 在任何浏览器都不能）。播放器自己的屏幕会显示它。",
     "MANAGER_FACE_FAILED": "Face 无法启动：",
     "MANAGER_FACE_STOPPED": "播放器已停止。显示程序已离开屏幕；播放时仪表会回来。",
     "MANAGER_FACE_PAUSED": "播放器已暂停。显示程序已离开屏幕；播放时仪表会回来。",

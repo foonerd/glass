@@ -703,6 +703,7 @@
     "MANAGER_FACE_NO_MODULE": "このリリースにはブラウザー用モジュールがありません。Glassをアップグレードしてください",
     "MANAGER_FACE_NO_FRAMES": "フレームなし：フレームデーモンが動いていません",
     "MANAGER_FACE_WAITING": "プレーヤーを待っています…",
+    "MANAGER_FACE_MOVIE_UNPLAYABLE": "このブラウザーはこのファイルの形式を再生できません（H.264、VP8、VP9、AV1 の MP4 または WebM はどこでも再生できます。MKV と AVI はどのブラウザーでも再生できません）。プレーヤー自身の画面には表示されます。",
     "MANAGER_FACE_FAILED": "Faceを開始できませんでした：",
     "MANAGER_FACE_STOPPED": "プレーヤーは停止中です。ディスプレイは画面から離れました。再生するとメーターが戻ります。",
     "MANAGER_FACE_PAUSED": "プレーヤーは一時停止中です。ディスプレイは画面から離れました。再生するとメーターが戻ります。",

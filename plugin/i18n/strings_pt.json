@@ -703,6 +703,7 @@
     "MANAGER_FACE_NO_MODULE": "esta versão não tem módulo para navegador; atualize o Glass",
     "MANAGER_FACE_NO_FRAMES": "sem tramas: o serviço de tramas não está a correr",
     "MANAGER_FACE_WAITING": "À espera do leitor…",
+    "MANAGER_FACE_MOVIE_UNPLAYABLE": "Este navegador não reproduz o formato deste ficheiro (MP4 ou WebM com H.264, VP8, VP9 ou AV1 reproduzem-se em todo o lado; MKV e AVI em nenhum navegador). O ecrã do próprio leitor mostra-o.",
     "MANAGER_FACE_FAILED": "A face não conseguiu arrancar:",
     "MANAGER_FACE_STOPPED": "O leitor está parado. O visualizador saiu do ecrã; os medidores voltam quando tocar.",
     "MANAGER_FACE_PAUSED": "O leitor está em pausa. O visualizador saiu do ecrã; os medidores voltam quando tocar.",

@@ -546,6 +546,20 @@ class Manager {
       res.json(Object.assign({ ok: true }, self.plugin.displayPlacement()));
     }));
 
+    // The movie's file for a browser page, the one the player plays and no
+    // other, while the switch is on: the browser plays it itself, muted, in
+    // the theme's box, and the player serves bytes with ranges.
+    app.get('/api/movie/file', function (req, res) {
+      const line = self.plugin.movieFaceLine();
+      const at = String(req.query.at || '');
+      if (!line.on || !line.url || !at) return res.status(404).json({ error: 'GLASS.MANAGER_NOT_FOUND' });
+      const playing = self.plugin.moviePlayingPath();
+      if (!playing || at !== playing) return res.status(404).json({ error: 'GLASS.MANAGER_NOT_FOUND' });
+      res.sendFile(playing, { acceptRanges: true, cacheControl: false, headers: { 'Content-Type': line.type } }, function (err) {
+        if (err && !res.headersSent) res.status(err.status || 500).end();
+      });
+    });
+
     // The movie's decoder: evovpeg fetched on demand and verified, or removed.
     app.get('/api/movie/decoder', function (req, res) {
       res.json(self.plugin.movieDecoder());

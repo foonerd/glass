@@ -189,7 +189,7 @@ Channel.prototype.attach = function (conn) {
             } else if (message && message.kind === 'movie' && !conn.remote && message.state === 'none') {
                 // The player's own display let the picture go: no file on.
                 self.movieReport = null;
-                if (self.onPush) { self.onPush({ kind: 'movie' }); }
+                if (self.onMovie) { self.onMovie(); }
             } else if (message && message.kind === 'movie' && !conn.remote) {
                 // The player's own display says what it does with the picture
                 // of the video file the player plays.
@@ -205,7 +205,7 @@ Channel.prototype.attach = function (conn) {
                     hardware: message.hardware ? String(message.hardware).slice(0, 32) : null,
                     at: Date.now()
                 };
-                if (self.onPush) { self.onPush({ kind: 'movie' }); }
+                if (self.onMovie) { self.onMovie(); }
             } else if (message && (message.kind === 'screen' || message.kind === 'showing') && conn.remote) {
                 // A remote's display says the same of its own screen and
                 // its own meter: not the player's to keep, and no problem.
@@ -1330,6 +1330,78 @@ Glass.prototype.movieBoxOnShow = function () {
         return { x: parseInt(pos[1], 10), y: parseInt(pos[2], 10), w: parseInt(dim[1], 10), h: parseInt(dim[2], 10) };
     } catch (e) { return null; }
 };
+// The movie's box in every meter of the active theme, by meter name, with
+// its scale and zorder: what a browser page needs to lay the picture over
+// the theme it draws, whichever meter it shows.
+Glass.prototype.movieBoxes = function () {
+    var self = this;
+    var boxes = {};
+    try {
+        var folder = self.activeTheme();
+        if (!folder) { return boxes; }
+        var text = fs.readFileSync(base_folder_P + folder + '/meters.txt', 'utf-8');
+        var re = /^\s*\[([^\]\n]+)\]\s*$/gm;
+        var heads = [];
+        var m;
+        while ((m = re.exec(text)) !== null) { heads.push({ name: m[1].trim(), at: m.index + m[0].length }); }
+        heads.forEach(function (h, i) {
+            var section = text.slice(h.at, i + 1 < heads.length ? heads[i + 1].at : text.length);
+            var pos = /^\s*video\.pos\s*=\s*(\d+)\s*,\s*(\d+)/m.exec(section);
+            var dim = /^\s*video\.dimension\s*=\s*(\d+)\s*,\s*(\d+)/m.exec(section);
+            if (!pos || !dim) { return; }
+            var scale = (/^\s*video\.scale\s*=\s*(\w+)/m.exec(section) || [])[1] || 'fit';
+            var zorder = (/^\s*video\.zorder\s*=\s*(\w+)/m.exec(section) || [])[1] || 'overlay';
+            boxes[h.name] = { x: parseInt(pos[1], 10), y: parseInt(pos[2], 10), w: parseInt(dim[1], 10), h: parseInt(dim[2], 10), scale: String(scale).toLowerCase(), zorder: String(zorder).toLowerCase() };
+        });
+    } catch (e) { /* no theme, no boxes */ }
+    return boxes;
+};
+// The file the player plays as a path on this player, when it is a video
+// file on a mount; null for a stream or a music file.
+Glass.prototype.moviePlayingPath = function () {
+    var self = this;
+    var state = self.channel && self.channel.state;
+    var uri = state && (state.status === 'play' || state.status === 'pause') ? String(state.uri || '') : '';
+    if (!/^mnt\//.test(uri)) { return null; }
+    if (!/\.(mp4|m4v|mov|mkv|webm|avi|ts|m2ts|mpg|mpeg|wmv|ogv)$/i.test(uri)) { return null; }
+    return '/' + uri;
+};
+// The movie for the browser pages (the Face tab, Anymote): what the page
+// lays over the theme and holds to the player's position. The browser
+// plays the file itself, muted; the sound stays the player's.
+Glass.prototype.movieFaceLine = function () {
+    var self = this;
+    var on = self.movieWanted() && self.movieAllowed();
+    var file = on ? self.moviePlayingPath() : null;
+    var report = (self.channel && self.channel.movieReport) || null;
+    var ext = file ? String(path.extname(file)).toLowerCase().replace('.', '') : '';
+    // What a browser plays by itself: MP4 and WebM containers; MKV, AVI and
+    // the MPEG transports play in no browser.
+    var container = { mp4: 'video/mp4', m4v: 'video/mp4', mov: 'video/mp4', webm: 'video/webm', ogv: 'video/ogg' }[ext] || null;
+    var current = (meterConfig && meterConfig.current) || {};
+    return {
+        kind: 'movie',
+        on: on,
+        file: file ? path.basename(file) : null,
+        url: file && container ? '/api/movie/file?at=' + encodeURIComponent(file) : null,
+        type: container,
+        playable: file ? !!container : null,
+        boxes: on ? self.movieBoxes() : {},
+        delay: report && report.delay ? report.delay : (movieDelayMs(current) || 1500),
+        lead: leadMs(current)
+    };
+};
+// The line pushed to the pages when it changed: at a switch, a theme, a
+// track or a report of the display.
+Glass.prototype.pushMovieFace = function () {
+    var self = this;
+    if (!self.face) { return; }
+    var line = self.movieFaceLine();
+    var text = JSON.stringify(line);
+    if (text === self.movieFaceLast) { return; }
+    self.movieFaceLast = text;
+    self.face.push(line);
+};
 // `screen.movie` in the meter configuration as the switch and the profile
 // say; the display starts again with it when it changed.
 Glass.prototype.syncMovieKey = function () {
@@ -1344,6 +1416,7 @@ Glass.prototype.syncMovieKey = function () {
     if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
     uiNeedsUpdate = true;
     self.updateUIConfig();
+    try { self.pushMovieFace(); } catch (e) { /* the pages hear it at the next change */ }
     return true;
 };
 // What the display does with the picture, as the Status tab and Find a
@@ -1661,9 +1734,10 @@ Glass.prototype.onStart = function () {
     // The feed behind the manager's Face tab: the frames from the daemon's
     // pages socket, and every line the displays hear, for browser pages.
     self.face = new FaceFeed({ socketPath: faceSocketPath, logger: self.logger, current: function () {
-        return self.channel ? { state: advanced(self.channel.state, self.channel.stateAt, Date.now()), infinity: self.channel.infinity, showing: self.channel.showing, queue: self.channel.queue, persist: self.channel.persist, weather: self.channel.weather, favourite: self.channel.favourite, power: self.channel.power } : {};
+        return self.channel ? { state: advanced(self.channel.state, self.channel.stateAt, Date.now()), infinity: self.channel.infinity, showing: self.channel.showing, queue: self.channel.queue, persist: self.channel.persist, weather: self.channel.weather, favourite: self.channel.favourite, power: self.channel.power, movie: self.movieFaceLine() } : {};
     } });
     self.channel.onPush = function (message) { self.face.push(message); };
+    self.channel.onMovie = function () { try { self.pushMovieFace(); } catch (e) { /* at the next change */ } };
     // The display's report sets what is held for the next display.
     self.channel.onScreen = function (report) { self.screenWish = { power: report.power }; };
     // The forecast for the face, once the user has chosen a place: every
@@ -1812,6 +1886,7 @@ Glass.prototype.onStart = function () {
             // The cover's addresses of late, for the route that fetches only what the player reported.
             self.channel.arts = picture.reported(self.channel.arts, state && state.albumart);
             self.channel.push({ kind: 'state', state: state });
+            try { self.pushMovieFace(); } catch (e) { /* the pages hear it at the next change */ }
         }
         self.logger.info(id + 'pushState: status=' + status + ' service=' + state.service + ' volatile=' + state.volatile);
 

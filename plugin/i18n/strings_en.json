@@ -703,6 +703,7 @@
     "MANAGER_FACE_NO_MODULE": "this release has no browser module; upgrade Glass",
     "MANAGER_FACE_NO_FRAMES": "no frames: the frames daemon is not running",
     "MANAGER_FACE_WAITING": "Waiting for the player…",
+    "MANAGER_FACE_MOVIE_UNPLAYABLE": "This browser does not play this file's format (MP4 or WebM with H.264, VP8, VP9 or AV1 play everywhere; MKV and AVI in no browser). The player's own screen shows it.",
     "MANAGER_FACE_FAILED": "The face could not start:",
     "MANAGER_FACE_STOPPED": "The player is stopped. The display has left the screen; the meters return when it plays.",
     "MANAGER_FACE_PAUSED": "The player is paused. The display has left the screen; the meters return when it plays.",

@@ -703,6 +703,7 @@
     "MANAGER_FACE_NO_MODULE": "to wydanie nie ma modułu przeglądarkowego; należy zaktualizować Glass",
     "MANAGER_FACE_NO_FRAMES": "brak ramek: demon ramek nie działa",
     "MANAGER_FACE_WAITING": "Oczekiwanie na odtwarzacz…",
+    "MANAGER_FACE_MOVIE_UNPLAYABLE": "Ta przeglądarka nie odtwarza formatu tego pliku (MP4 lub WebM z H.264, VP8, VP9 lub AV1 odtwarzają się wszędzie; MKV i AVI w żadnej przeglądarce). Własny ekran odtwarzacza go pokazuje.",
     "MANAGER_FACE_FAILED": "Face nie mógł wystartować:",
     "MANAGER_FACE_STOPPED": "Odtwarzacz jest zatrzymany. Wyświetlacz opuścił ekran; mierniki wrócą, gdy zacznie grać.",
     "MANAGER_FACE_PAUSED": "Odtwarzacz jest wstrzymany. Wyświetlacz opuścił ekran; mierniki wrócą, gdy zacznie grać.",

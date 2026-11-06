@@ -703,6 +703,7 @@
     "MANAGER_FACE_NO_MODULE": "questa versione non ha alcun modulo per il browser; aggiornare Glass",
     "MANAGER_FACE_NO_FRAMES": "nessun frame: il demone dei frame non è in esecuzione",
     "MANAGER_FACE_WAITING": "In attesa del lettore…",
+    "MANAGER_FACE_MOVIE_UNPLAYABLE": "Questo browser non riproduce il formato di questo file (MP4 o WebM con H.264, VP8, VP9 o AV1 si riproducono ovunque; MKV e AVI in nessun browser). Lo schermo del lettore lo mostra.",
     "MANAGER_FACE_FAILED": "La Face non è riuscita ad avviarsi:",
     "MANAGER_FACE_STOPPED": "Il lettore è fermo. Il display ha lasciato lo schermo; i meter tornano quando riproduce.",
     "MANAGER_FACE_PAUSED": "Il lettore è in pausa. Il display ha lasciato lo schermo; i meter tornano quando riproduce.",

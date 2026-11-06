@@ -39,6 +39,11 @@
     leftFullscreen: false
   };
 
+  // The movie: what the player says of it (the file to play, the boxes of
+  // the theme's meters, the sound's delay), the video element laid over
+  // the theme's box, and the player's position it is held to.
+  var movie = { line: null, video: null, src: '', stateAt: 0, timer: null, failed: '' };
+
   var $ = function (id) { return document.getElementById(id); };
   var encoder = new TextEncoder();
   var decoder = new TextDecoder();
@@ -250,6 +255,7 @@
     listen(canvas);
     fitted();
     showing();
+    movieApply();
     // The banner was settled when the player's lines came, before the
     // module was here to say whether it draws a face: settled again now.
     truth();
@@ -262,6 +268,113 @@
     var scale = Math.min(window.innerWidth / face.width, window.innerHeight / face.height);
     canvas.style.width = Math.max(1, Math.floor(face.width * scale)) + 'px';
     canvas.style.height = Math.max(1, Math.floor(face.height * scale)) + 'px';
+    moviePlace();
+  }
+
+  // ---- the movie in the browser ------------------------------------------
+  // The browser plays the file itself, muted, in the theme's box over the
+  // canvas, and holds it to the player's position less the sound's delay
+  // on the player (the display measured it) plus the lead: the picture
+  // meets the sound in the room. A file the browser cannot play (MKV, AVI)
+  // gets a word, not a hole.
+  function moviePosition() {
+    var s = face.playerState;
+    if (!s || !movie.stateAt) return null;
+    var seek = Number(s.seek || 0) / 1000;
+    if (s.status === 'play') return seek + (Date.now() - movie.stateAt) / 1000;
+    if (s.status === 'pause') return seek;
+    return null;
+  }
+  function movieElement() {
+    if (movie.video) return movie.video;
+    var stage = $('face-stage');
+    var canvas = $('face-canvas');
+    if (!stage || !canvas) return null;
+    var v = document.createElement('video');
+    v.id = 'face-movie';
+    v.muted = true;
+    v.defaultMuted = true;
+    v.playsInline = true;
+    v.setAttribute('playsinline', '');
+    v.preload = 'auto';
+    v.style.position = 'absolute';
+    v.style.pointerEvents = 'none';
+    v.style.display = 'none';
+    v.addEventListener('error', function () {
+      movie.failed = movie.src;
+      v.style.display = 'none';
+      say(face.t('MANAGER_FACE_MOVIE_UNPLAYABLE'), true);
+    });
+    v.addEventListener('loadedmetadata', function () { movieFollow(true); });
+    if (window.getComputedStyle(stage).position === 'static') stage.style.position = 'relative';
+    stage.appendChild(v);
+    movie.video = v;
+    return v;
+  }
+  // The element placed in the box of the meter on show, as the canvas is
+  // drawn on the page; under the canvas for a background box, over it else.
+  function moviePlace() {
+    var v = movie.video;
+    if (!v || !movie.line || !face.ready) return;
+    var box = movie.line.boxes ? movie.line.boxes[face.meter] : null;
+    if (!box || !movie.src || movie.failed) { v.style.display = 'none'; return; }
+    var canvas = $('face-canvas');
+    var rect = canvas.getBoundingClientRect();
+    var stageRect = $('face-stage').getBoundingClientRect();
+    var k = face.width ? rect.width / face.width : 1;
+    v.style.left = (rect.left - stageRect.left + box.x * k) + 'px';
+    v.style.top = (rect.top - stageRect.top + box.y * k) + 'px';
+    v.style.width = (box.w * k) + 'px';
+    v.style.height = (box.h * k) + 'px';
+    v.style.objectFit = box.scale === 'cover' ? 'cover' : (box.scale === 'stretch' ? 'fill' : 'contain');
+    v.style.zIndex = box.zorder === 'background' ? '0' : '1';
+    canvas.style.position = 'relative';
+    canvas.style.zIndex = box.zorder === 'background' ? '1' : '0';
+    v.style.display = '';
+  }
+  // The player's word applied: the file to play, or none.
+  function movieApply() {
+    var line = movie.line;
+    var v = movieElement();
+    if (!v) return;
+    var wanted = line && line.on && line.url ? line.url : '';
+    if (line && line.on && line.file && line.playable === false) {
+      say(face.t('MANAGER_FACE_MOVIE_UNPLAYABLE'), true);
+    } else if (movie.src && !wanted && !movie.failed) {
+      say('');
+    }
+    if (wanted !== movie.src) {
+      movie.src = wanted;
+      movie.failed = '';
+      if (wanted) { v.setAttribute('src', wanted); v.load(); } else { v.removeAttribute('src'); try { v.load(); } catch (e) { /* nothing loaded */ } }
+    }
+    moviePlace();
+    movieFollow(true);
+    if (wanted && !movie.timer) movie.timer = setInterval(function () { movieFollow(false); }, 500);
+    if (!wanted && movie.timer) { clearInterval(movie.timer); movie.timer = null; }
+  }
+  // The element held to the player's position: a jump seeks it, a drift
+  // nudges its rate, play and pause follow the player.
+  function movieFollow(jump) {
+    var v = movie.video;
+    if (!v || !movie.src || !movie.line || movie.failed) return;
+    var position = moviePosition();
+    if (position === null) { if (!v.paused) v.pause(); return; }
+    var target = position - Number(movie.line.delay || 0) / 1000 + Number(movie.line.lead || 0) / 1000;
+    if (target < 0) target = 0;
+    var playing = face.playerState && face.playerState.status === 'play';
+    if (!isFinite(v.duration)) return;
+    var diff = v.currentTime - target;
+    if (jump || Math.abs(diff) > 0.25) {
+      try { v.currentTime = target; } catch (e) { /* not seekable yet */ }
+      v.playbackRate = 1;
+    } else if (Math.abs(diff) > 0.04) {
+      v.playbackRate = diff > 0 ? 0.97 : 1.03;
+    } else {
+      v.playbackRate = 1;
+    }
+    if (playing && v.paused) { var p = v.play(); if (p && p.catch) p.catch(function () { /* the browser wants a gesture: the next tap */ }); }
+    if (!playing && !v.paused) v.pause();
   }
 
   // ---- the finger on the controls ---------------------------------------
@@ -295,7 +408,7 @@
           .catch(function () {});
       }
       if (act.meter) {
-        face.meter = act.meter; sized();
+        face.meter = act.meter; sized(); moviePlace();
         // Until the screen has answered with this meter (or three seconds
         // passed) its older answers are not followed: a second press must
         // not be taken back by the answer to the first.
@@ -407,7 +520,8 @@
       var message = null;
       try { message = JSON.parse(line); } catch (err) { return; }
       if (message && message.kind === 'showing' && message.meter) face.playerMeter = message.meter;
-      if (message && message.kind === 'state' && message.state) { face.status = String(message.state.status || ''); face.playerState = message.state; truth(); phSession(); }
+      if (message && message.kind === 'state' && message.state) { face.status = String(message.state.status || ''); face.playerState = message.state; movie.stateAt = Date.now(); truth(); phSession(); movieFollow(false); }
+      if (message && message.kind === 'movie') { movie.line = message; movieApply(); return; }
       if (message && message.kind === 'persist') { face.persist = { mode: message.mode || '', seconds: message.seconds || 0, startedAt: message.startedAt || 0, stays: !!message.stays }; truth(); }
       // What the views carry changed: the other module, if this is not it.
       if (message && message.kind === 'views') {
@@ -602,7 +716,7 @@
     face.shown = true;
     connect();
     face.loop = requestAnimationFrame(tick);
-    if (face.ready) { showing(); return; }
+    if (face.ready) { showing(); movieApply(); return; }
     face.starting = loadModule().then(bringTheme).catch(function (err) {
       say(face.t('MANAGER_FACE_FAILED') + ' ' + String(err.message || err), true);
       tryAgainLater();
@@ -618,6 +732,9 @@
     if (face.loop) { cancelAnimationFrame(face.loop); face.loop = null; }
     if (face.retry) { clearTimeout(face.retry); face.retry = null; }
     disconnect();
+    // The movie rests with the tab: no bytes for a page nobody sees.
+    if (movie.timer) { clearInterval(movie.timer); movie.timer = null; }
+    if (movie.video && !movie.video.paused) movie.video.pause();
   }
 
   function fullScreen() {
@@ -830,6 +947,8 @@
       var button = $('btn-face-full');
       if (button) button.addEventListener('click', fullScreen);
       phInit();
+      // The movie's box follows the canvas as the window changes.
+      window.addEventListener('resize', moviePlace);
       if (face.fit) {
         window.addEventListener('resize', fitted);
         document.addEventListener('fullscreenchange', function () {
