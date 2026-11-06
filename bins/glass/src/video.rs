@@ -43,14 +43,25 @@ const CLOCK_EVERY: Duration = Duration::from_millis(250);
 /// Frames decoded ahead of the clock and held: the pipe's backpressure
 /// paces the decoder past this.
 const AHEAD_FRAMES: usize = 4;
-/// A frame this far ahead of the clock is a jump back (a seek): the
-/// decoder is started again at the clock's place rather than held.
-const RESTART_AHEAD_S: f64 = 0.75;
-/// The clock this far ahead of the frames is a jump forward: started
-/// again rather than caught up by dropping, which the decoder's own pace
-/// (several times real time) does for anything less, the first seconds
-/// after a start included.
+/// The clock moving by more than its own time plus this, or back at all,
+/// between two frames is a jump (a seek): the decoder is started again
+/// where the clock will be rather than caught up by dropping, which the
+/// decoder's own pace (several times real time) does for anything less. A
+/// resume after a pause moves mpd's position by about a second, which is
+/// caught up, not started again.
+const JUMP_S: f64 = 2.0;
+/// The decoder's first frame after a start this far behind the clock, when
+/// the start was placed by an estimate of the decoder's own start-up that
+/// proved far too short (a long group of pictures to decode through), has
+/// the decoder started once more with the start-up now learnt.
 const RESTART_BEHIND_S: f64 = 3.0;
+/// The decoder's start-up as first assumed, in seconds: from its spawn to
+/// its first frame, the seek to the key frame before the place asked and
+/// the decode from there to it. Learnt from each start afterwards.
+const STARTUP_S: f64 = 1.0;
+/// Over the start-up learnt, so the first frame lands a little early and
+/// is held rather than late and dropped.
+const STARTUP_MARGIN_S: f64 = 0.25;
 
 /// A child started with its standard output on a pipe we read; the other
 /// two standard streams go nowhere.
@@ -427,12 +438,19 @@ impl Drop for Envelope {
 
 /// The sound output's delay found by correlation: the loudness the tap
 /// measured, placed by mpd's position at each measure, against the file's
-/// own loudness at every lag from fifty milliseconds to a second and a
-/// half; the lag whose correlation stands highest, when it stands clear of
-/// the rest and high enough to mean anything. What is correlated is each
+/// own loudness at every lag from two hundred milliseconds to a second,
+/// the band mpd's own buffering spans (what is measured is the way from
+/// mpd's position to the tap, before the output; a film's own rhythm
+/// offers peaks further out that mean nothing); the lag whose correlation
+/// stands highest, when it stands clear of the rest and high enough to
+/// mean anything. What is correlated is each
 /// side's onsets, the rises of loudness, since a rise is where a sound
 /// begins on both sides alike, while the tap's meter falls slowly and
 /// would drag the lag late if its whole shape were matched.
+/// The lags tried, in bins of ten milliseconds.
+const LAG_LEAST: i64 = 20;
+const LAG_MOST: i64 = 100;
+
 pub fn correlate_delay(heard: &[(f64, f32)], file: &[(f64, f32)]) -> Option<(u32, f32)> {
     if heard.len() < 300 || file.len() < 300 {
         return None;
@@ -519,7 +537,7 @@ pub fn correlate_delay(heard: &[(f64, f32)], file: &[(f64, f32)]) -> Option<(u32
         }
         Some(sxy / (sxx * syy).sqrt())
     };
-    let mut scores: Vec<(i64, f32)> = (5..=150)
+    let mut scores: Vec<(i64, f32)> = (LAG_LEAST..=LAG_MOST)
         .filter_map(|lag| pearson(lag).map(|c| (lag, c)))
         .collect();
     if scores.is_empty() {
@@ -577,6 +595,20 @@ impl Clock {
                         match status {
                             Some(status) => {
                                 let mut reads = reads.lock().unwrap_or_else(|e| e.into_inner());
+                                // A read behind the last one's projection, or
+                                // of another file or state, starts the fit afresh:
+                                // the earlier reads would hold the position up.
+                                let afresh = reads.back().is_some_and(|last: &Status| {
+                                    last.file != status.file
+                                        || last.state != status.state
+                                        || matches!(
+                                            (last.elapsed, status.elapsed),
+                                            (Some(a), Some(b)) if b + 0.1 < a
+                                        )
+                                });
+                                if afresh {
+                                    reads.clear();
+                                }
                                 if reads.len() == 8 {
                                     reads.pop_front();
                                 }
@@ -611,6 +643,24 @@ impl Clock {
             .fold(None, |best: Option<f64>, p| {
                 Some(best.map_or(p, |b| b.max(p)))
             })
+    }
+}
+
+impl Clock {
+    /// The last read, in a few words, for the log.
+    pub fn last_read(&self) -> String {
+        let reads = self.reads.lock().unwrap_or_else(|e| e.into_inner());
+        match reads.back() {
+            Some(r) => format!(
+                "{} reads, the last state {:?} elapsed {:?} file {:?} {} ms ago",
+                reads.len(),
+                r.state,
+                r.elapsed,
+                r.file.chars().rev().take(24).collect::<String>().chars().rev().collect::<String>(),
+                r.at.map(|at| at.elapsed().as_millis()).unwrap_or(0)
+            ),
+            None => "no read yet".to_string(),
+        }
     }
 }
 
@@ -690,11 +740,19 @@ pub struct Video {
     delay: f64,
     /// Whether the delay was found by correlation, and how well it stood.
     measured: Option<f32>,
+    /// One window's reading, waiting for the next window to agree.
+    candidate: Option<f64>,
     /// The loudness the tap measured, placed by mpd's position at each
     /// measure, for the correlation.
     heard: VecDeque<(f64, f32)>,
     last_position: Option<f64>,
     calibrated_at: Option<Instant>,
+    /// The last tick's moment, for telling a jump of the clock from its run.
+    last_tick: Option<Instant>,
+    /// The decoder's start-up as learnt, in seconds, and the last start:
+    /// its moment and the place asked, until its first frame arrives.
+    startup: f64,
+    starting: Option<(Instant, f64)>,
     /// What was last reported to the player, so the line goes once per change.
     reported: String,
     /// The sync harness: a line per frame when `GLASS_SYNC_LOG` names a file.
@@ -710,6 +768,8 @@ pub const DEFAULT_DELAY_MS: u32 = 530;
 const CALIBRATE_EVERY: Duration = Duration::from_secs(4);
 /// The window the correlation looks over, in seconds of the file.
 const CALIBRATE_WINDOW: f64 = 12.0;
+/// Two windows' readings this close agree, and the delay is taken.
+const CANDIDATE_AGREE_S: f64 = 0.06;
 
 impl Video {
     /// For `file`, which the prober says carries video; `lead_ms` as the
@@ -728,9 +788,13 @@ impl Video {
             lead: lead_ms as f64 / 1000.0,
             delay: delay_ms as f64 / 1000.0,
             measured: None,
+            candidate: None,
             heard: VecDeque::with_capacity(4000),
             last_position: None,
             calibrated_at: None,
+            last_tick: None,
+            startup: STARTUP_S,
+            starting: None,
             reported: String::new(),
             log,
             started: Instant::now(),
@@ -794,10 +858,21 @@ impl Video {
         );
         if let Some((ms, corr)) = correlate_delay(&heard, &file) {
             let found = ms as f64 / 1000.0;
-            // Eased in, so one window's reading does not jolt the picture.
-            let next = match self.measured {
-                Some(_) => self.delay * 0.5 + found * 0.5,
-                None => found,
+            // A film's sound has onsets of its own at every spacing, so one
+            // window's reading is held until the next agrees with it; then
+            // eased in, so no window's reading jolts the picture.
+            let next = match (self.measured, self.candidate) {
+                (Some(_), _) => self.delay * 0.5 + found * 0.5,
+                (None, Some(held)) if (held - found).abs() <= CANDIDATE_AGREE_S => found,
+                (None, _) => {
+                    logline::say!(
+                        Verbose,
+                        "video",
+                        "the delay read at {ms} ms (correlation {corr:.2}), held for the next window"
+                    );
+                    self.candidate = Some(found);
+                    return;
+                }
             };
             if (next - self.delay).abs() >= 0.015 {
                 logline::say!(
@@ -820,11 +895,15 @@ impl Video {
         (self.probe.width, self.probe.height)
     }
 
-    fn restart(&mut self, at: f64) {
+    /// The decoder started where the clock will be when its first frame
+    /// comes: `target` plus the start-up learnt.
+    fn restart(&mut self, now: Instant, target: f64) {
+        let at = target + self.startup + STARTUP_MARGIN_S;
         self.waiting.clear();
         self.heard.clear();
         self.decoder = None;
         self.envelope = None;
+        self.starting = Some((now, at));
         match Decoder::start(&self.file, &self.probe, at) {
             Ok(decoder) => self.decoder = Some(decoder),
             Err(e) => logline::say!(Warn, "video", "the decoder did not start: {e}"),
@@ -849,15 +928,35 @@ impl Video {
     pub fn tick(&mut self, now: Instant, level: f32) -> bool {
         let Some(position) = self.clock.position(now) else {
             // Stopped, or the clock silent: the picture is let go.
+            if self.decoder.is_some() || self.shown.is_some() {
+                logline::say!(
+                    Verbose,
+                    "video",
+                    "the clock gives no position ({}): the picture let go",
+                    self.clock.last_read()
+                );
+            }
             self.decoder = None;
             self.envelope = None;
+            self.starting = None;
             self.waiting.clear();
             self.heard.clear();
             self.shown = None;
+            self.last_position = None;
+            self.last_tick = None;
             return false;
         };
+        // A jump of the clock: further than its own time since the last
+        // tick allows, or back.
+        let jumped = match (self.last_position, self.last_tick) {
+            (Some(p), Some(t)) => {
+                let wall = now.duration_since(t).as_secs_f64();
+                position < p - 0.1 || position > p + wall + JUMP_S
+            }
+            _ => false,
+        };
         // The sound heard now, placed by the position, while it moves.
-        if self.last_position.is_none_or(|p| position > p) {
+        if !jumped && self.last_position.is_none_or(|p| position > p) {
             self.heard.push_back((position, level));
             if self.heard.len() > 4000 {
                 self.heard.pop_front();
@@ -865,32 +964,53 @@ impl Video {
             self.calibrate(now, position);
         }
         self.last_position = Some(position);
+        self.last_tick = Some(now);
         let target = position + self.lead - self.delay;
-        if self.decoder.is_none() {
-            self.restart(target);
+        if self.decoder.is_none() || jumped {
+            logline::say!(
+                Verbose,
+                "video",
+                "the decoder started at {target:.2} ({})",
+                if jumped { "the clock jumped" } else { "none ran" }
+            );
+            self.restart(now, target);
         }
-        // Frames from the decoder into the waiting line.
+        // Frames from the decoder into the waiting line; the first after a
+        // start teaches the start-up, and one far behind the clock all the
+        // same has the decoder started once more with it.
+        let mut first = None;
         if let Some(decoder) = &self.decoder {
             while self.waiting.len() < AHEAD_FRAMES {
                 match decoder.next() {
-                    Some(frame) => self.waiting.push_back(frame),
+                    Some(frame) => {
+                        if self.starting.is_some() && self.waiting.is_empty() {
+                            first = Some(frame.pts);
+                        }
+                        self.waiting.push_back(frame);
+                    }
                     None => break,
                 }
             }
             if decoder.ended.load(Ordering::Acquire) && self.waiting.is_empty() {
                 // The file's end, or the child gone: nothing more to show.
                 self.decoder = None;
+                self.starting = None;
             }
         }
-        // A jump: the clock far from what the decoder gives.
-        let edge = self
-            .waiting
-            .front()
-            .map(|f| f.pts)
-            .or(self.shown.as_ref().map(|f| f.pts));
-        if let Some(edge) = edge {
-            if target - edge > RESTART_BEHIND_S || edge - target > RESTART_AHEAD_S {
-                self.restart(target);
+        if let Some(pts) = first {
+            let (since, asked) = self.starting.take().unwrap_or((now, pts));
+            let took = now.duration_since(since).as_secs_f64();
+            self.startup = (self.startup + took) / 2.0;
+            logline::say!(
+                Verbose,
+                "video",
+                "the decoder's first frame {:.2} s after its start at {asked:.2}, {:.2} s from the clock; start-up now {:.2} s",
+                took,
+                pts - target,
+                self.startup
+            );
+            if target - pts > RESTART_BEHIND_S {
+                self.restart(now, target);
                 return false;
             }
         }

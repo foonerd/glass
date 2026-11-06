@@ -185,6 +185,10 @@ Channel.prototype.attach = function (conn) {
                 // The player's own display says what the panel's power is.
                 self.screenReport = screenpower.report(message);
                 if (self.onScreen) { self.onScreen(self.screenReport); }
+            } else if (message && message.kind === 'movie' && !conn.remote && message.state === 'none') {
+                // The player's own display let the picture go: no file on.
+                self.movieReport = null;
+                if (self.onPush) { self.onPush({ kind: 'movie' }); }
             } else if (message && message.kind === 'movie' && !conn.remote) {
                 // The player's own display says what it does with the picture
                 // of the video file the player plays.
@@ -221,6 +225,8 @@ Channel.prototype.attach = function (conn) {
         if (at !== -1) {
             self.clients.splice(at, 1);
             self.logger.info(id + 'channel: the display left');
+            // The player's own display gone, its word on the movie with it.
+            if (!conn.remote && self.movieReport) { self.movieReport = null; }
         }
     };
     conn.on('error', detach);

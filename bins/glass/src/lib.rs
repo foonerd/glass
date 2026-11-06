@@ -950,6 +950,9 @@ fn session(
     let mut movie_probed: Option<String> = None;
     #[cfg(all(unix, not(target_os = "android")))]
     let mut movie_delay_ms: u32 = video::DEFAULT_DELAY_MS;
+    // Whether the player was told of a movie, so it is told when none is.
+    #[cfg(all(unix, not(target_os = "android")))]
+    let mut movie_told = false;
     // The panel's power: the player's word, the face's idle black, a touch.
     let mut screen = screen::ScreenPower::default();
     let mut wake_screen = false;
@@ -1533,18 +1536,27 @@ fn session(
                 .as_mut()
                 .is_some_and(|m| m.tick(Instant::now(), input.levels.left));
             #[cfg(all(unix, not(target_os = "android")))]
-            if let Some(m) = movie.as_mut() {
-                let (delay, measured) = m.delay();
-                if measured.is_some() {
-                    movie_delay_ms = delay;
+            match movie.as_mut() {
+                Some(m) => {
+                    let (delay, measured) = m.delay();
+                    if measured.is_some() {
+                        movie_delay_ms = delay;
+                    }
+                    let state = if m.shown().is_some() {
+                        "showing"
+                    } else {
+                        "waiting"
+                    };
+                    if let Some(line) = m.report(state) {
+                        source.report_movie(&line);
+                        movie_told = true;
+                    }
                 }
-                let state = if m.shown().is_some() {
-                    "showing"
-                } else {
-                    "waiting"
-                };
-                if let Some(line) = m.report(state) {
-                    source.report_movie(&line);
+                None => {
+                    if movie_told {
+                        source.report_movie(&serde_json::json!({ "state": "none" }));
+                        movie_told = false;
+                    }
                 }
             }
             if let Some(window) = surface.as_mut() {
