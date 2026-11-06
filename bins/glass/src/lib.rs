@@ -953,6 +953,8 @@ fn session(
     // Whether the player was told of a movie, so it is told when none is.
     #[cfg(all(unix, not(target_os = "android")))]
     let mut movie_told = false;
+    #[cfg(all(unix, not(target_os = "android")))]
+    let mut movie_word: Option<String> = None;
     // The panel's power: the player's word, the face's idle black, a touch.
     let mut screen = screen::ScreenPower::default();
     let mut wake_screen = false;
@@ -1113,10 +1115,20 @@ fn session(
         }
         #[cfg(all(unix, not(target_os = "android")))]
         if movie_wanted {
-            // The file the player plays, where it is one on this machine.
+            // The file the player plays, where it is one on this machine; on
+            // a remote display the player serves it, and its movie line
+            // names the path under its manager.
             let uri = input.metadata.uri.as_str();
             let playing = input.metadata.status == "play" || input.metadata.status == "pause";
-            let path = if playing && uri.starts_with("mnt/") {
+            let served = remote.is_some();
+            let path = if served {
+                match (intake::manager_base(), input.movie.as_ref()) {
+                    (Some(base), Some(line)) if playing && line.on && !line.url.is_empty() => {
+                        format!("{base}{}", line.url)
+                    }
+                    _ => String::new(),
+                }
+            } else if playing && uri.starts_with("mnt/") {
                 format!("/{uri}")
             } else {
                 String::new()
@@ -1136,12 +1148,17 @@ fn session(
                     .and_then(|v| v.parse().ok())
                     .unwrap_or(skin.run.lead_ms);
                 // The player's own delay setting fixes it; else the last
-                // measured, the default until then.
-                let fixed = skin.run.delay_ms > 0;
+                // measured, the default until then. A remote takes the
+                // player's word as it stands: the room's sound is the
+                // player's, and the remote measures nothing of its own.
+                let served_delay = input.movie.as_ref().map(|l| l.delay_ms).filter(|d| *d > 0);
+                let fixed = skin.run.delay_ms > 0 || served;
                 let delay_ms = env::var("GLASS_VIDEO_DELAY_MS")
                     .ok()
                     .and_then(|v| v.parse().ok())
-                    .unwrap_or(if fixed {
+                    .unwrap_or(if served {
+                        served_delay.unwrap_or(video::DEFAULT_DELAY_MS)
+                    } else if fixed {
                         skin.run.delay_ms
                     } else {
                         movie_delay_ms
@@ -1164,8 +1181,13 @@ fn session(
                             .and_then(|w| w.video_box_pixels())
                             .zip(skin.video.as_ref())
                             .map(|((w, h), v)| (w, h, v.scale == lead::Scale::Cover));
-                        movie = Some(video::Video::open(
-                            &path, probe, lead_ms, delay_ms, fixed, target,
+                        let clock = if served {
+                            video::Clock::fed()
+                        } else {
+                            video::Clock::start()
+                        };
+                        movie = Some(video::Video::open_with(
+                            &path, probe, lead_ms, delay_ms, fixed, target, clock,
                         ));
                     }
                     Ok(None) => logline::say!(Verbose, "video", "{path}: no video stream"),
@@ -1563,6 +1585,9 @@ fn session(
             // The movie's frame due now, window or none: the harness reads
             // the sync headless, the window shows the picture.
             #[cfg(all(unix, not(target_os = "android")))]
+            if let (Some(m), true) = (movie.as_ref(), remote.is_some()) {
+                m.feed(&input.metadata.status, input.metadata.seek as f64);
+            }
             let movie_due = movie
                 .as_mut()
                 .is_some_and(|m| m.tick(Instant::now(), &input.heard, input.levels.left));
@@ -1588,6 +1613,30 @@ fn session(
                         source.report_movie(&serde_json::json!({ "state": "none" }));
                         movie_told = false;
                     }
+                }
+            }
+            // A remote's Status panel says what the movie does here, once per change.
+            #[cfg(all(unix, not(target_os = "android")))]
+            if let Some(remote) = remote.as_deref() {
+                let word = match (input.movie.as_ref(), skin.video.as_ref(), movie.as_ref()) {
+                    (Some(l), _, _) if !l.on => "off on the player".to_string(),
+                    (Some(_), None, _) => "the meter shown gives the picture no box".to_string(),
+                    (Some(l), Some(_), None) if !l.url.is_empty() && movie_probed.is_some() => {
+                        "the file could not be opened here: a decoder (ffmpeg and ffprobe) on this machine shows it".to_string()
+                    }
+                    (Some(l), Some(_), Some(m)) => {
+                        let (delay, _) = m.delay();
+                        format!(
+                            "{} showing, the player's sound {delay} ms behind its position{}",
+                            l.file,
+                            m.report_hardware().map(|h| format!(", decoded by the board's {h}")).unwrap_or_default()
+                        )
+                    }
+                    _ => String::new(),
+                };
+                if movie_word.as_deref() != Some(word.as_str()) {
+                    movie_word = Some(word.clone());
+                    remote.app.set_status(|s| s.movie = word.clone());
                 }
             }
             if let Some(window) = surface.as_mut() {

@@ -55,6 +55,8 @@ pub enum Event {
     /// The forecast for the place the user chose, or that there is none to
     /// show: for a face to draw.
     Weather(Option<lead::Weather>),
+    /// The player's word on the movie, for a remote display.
+    Movie(lead::MovieLine),
     /// The player's queue as the plugin pushes it, on connect and on every
     /// change: the tracks in order, for the next line and the queue's length.
     Queue(Vec<QueueItem>),
@@ -576,6 +578,21 @@ pub fn decode(line: &[u8]) -> Option<Event> {
                 serde_json::from_value(value.clone()).ok()
             },
         )),
+        "movie" => Some(Event::Movie(lead::MovieLine {
+            on: value.get("on").and_then(Value::as_bool).unwrap_or(false),
+            url: text("url"),
+            file: text("file"),
+            delay_ms: value
+                .get("delay")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                .min(5000) as u32,
+            lead_ms: value
+                .get("lead")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                .min(200) as u32,
+        })),
         "queue" => Some(Event::Queue(
             value
                 .get("items")

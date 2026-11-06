@@ -3946,6 +3946,23 @@ pub struct PlayHere {
     pub gain: u8,
 }
 
+/// The player's word on the movie, for a remote display: whether the
+/// picture is on, the file the player serves (a path under its manager),
+/// the sound output's delay the player measured or set, and the lead.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct MovieLine {
+    #[serde(default)]
+    pub on: bool,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub file: String,
+    #[serde(default)]
+    pub delay_ms: u32,
+    #[serde(default)]
+    pub lead_ms: u32,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Input {
     pub levels: Levels,
@@ -3960,6 +3977,9 @@ pub struct Input {
     /// The forecast, where the user has chosen a place and one is held.
     #[serde(default)]
     pub weather: Option<Weather>,
+    /// The player's word on the movie, as its last line said; none before.
+    #[serde(default)]
+    pub movie: Option<MovieLine>,
     /// The player's queue, every track, for a face that lists it: shared
     /// between frames, made again when the queue changes.
     #[serde(default)]

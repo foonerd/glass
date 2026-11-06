@@ -705,6 +705,30 @@ pub struct Clock {
 }
 
 impl Clock {
+    /// A clock fed by the display from the player's state lines, for a
+    /// remote display with no mpd beside it: `feed` once a frame.
+    pub fn fed() -> Self {
+        Self {
+            reads: Arc::new(Mutex::new(VecDeque::with_capacity(8))),
+            stop: Arc::new(AtomicBool::new(false)),
+            thread: None,
+        }
+    }
+
+    /// The player's state as the display has it now: the status word and
+    /// the position in seconds, already moved on from the player's last
+    /// line by the time since. One read stands at a time.
+    pub fn feed(&self, state: &str, seek: f64, file: &str) {
+        let mut reads = self.reads.lock().unwrap_or_else(|e| e.into_inner());
+        reads.clear();
+        reads.push_back(Status {
+            state: state.to_string(),
+            elapsed: Some(seek),
+            file: file.to_string(),
+            at: Some(Instant::now()),
+        });
+    }
+
     pub fn start() -> Self {
         let reads = Arc::new(Mutex::new(VecDeque::with_capacity(8)));
         let stop = Arc::new(AtomicBool::new(false));
@@ -924,13 +948,16 @@ impl Video {
     /// `target` is the box the picture lands in, in screen pixels, and
     /// whether it is to be covered rather than fitted: the decoder gives
     /// the picture no larger than that.
-    pub fn open(
+    /// The clock is given: the player's own reads mpd (`Clock::start`), a
+    /// remote display feeds one from the player's state (`Clock::fed`).
+    pub fn open_with(
         file: &str,
         probe: Probe,
         lead_ms: u32,
         delay_ms: u32,
         fixed: bool,
         target: Option<(u32, u32, bool)>,
+        clock: Clock,
     ) -> Self {
         let log = std::env::var_os("GLASS_SYNC_LOG").and_then(|p| File::create(p).ok());
         let shape = decoded_shape(&probe, target);
@@ -971,7 +998,7 @@ impl Video {
             delivered: 0,
             decoder: None,
             envelope: None,
-            clock: Clock::start(),
+            clock,
             shown: None,
             waiting: VecDeque::new(),
             lead: lead_ms as f64 / 1000.0,
@@ -1111,6 +1138,16 @@ impl Video {
 
     pub fn file(&self) -> &str {
         &self.file
+    }
+
+    /// The board's decoder in use, by FFmpeg's name; none for software.
+    pub fn report_hardware(&self) -> Option<&'static str> {
+        self.hardware
+    }
+
+    /// The player's state for a fed clock, once a frame on a remote.
+    pub fn feed(&self, state: &str, seek: f64) {
+        self.clock.feed(state, seek, &self.file);
     }
 
     /// The frames' size, as the decoder gives them.

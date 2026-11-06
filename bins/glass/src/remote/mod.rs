@@ -63,6 +63,10 @@ pub struct Status {
     /// resolved it: "the album art blurred" or "a dark colour"; empty before
     /// the first frame.
     pub backdrop: String,
+    /// The movie's picture on this remote, in words: off on the player, no
+    /// box in the meter, the decoder this machine lacks, or the file
+    /// showing through the decoder that serves and the delay applied.
+    pub movie: String,
     /// What draws the frames, once the window opened: the video driver, the
     /// renderer, and whether it draws in software.
     pub driver: String,

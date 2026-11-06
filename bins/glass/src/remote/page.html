@@ -612,6 +612,7 @@
       ['Synced', st.synced || '']].concat(state.face ? [['Glass interface', st.face_shown ? 'shown' : 'not shown'], ['Controls', st.controls || (st.face_shown ? 'not drawn yet' : '')]] : []).concat([
       ['Play here', st.play_here ? st.play_here.state + (st.play_here.shape ? ' · ' + st.play_here.shape : '') + (st.play_here.output ? ' · ' + st.play_here.output : '') + (st.play_here.on ? ' · volume ' + st.play_here.gain : '') : ''],
       ['Language of the dates', st.language ? st.language + (state.config && state.config.language ? ' · this remote\'s own' : ' · the player\'s') : ''],
+      ['The movie', st.movie || ''],
       ['This page', st.page || '']
     ]);
   }

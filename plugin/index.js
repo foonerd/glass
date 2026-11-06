@@ -141,6 +141,8 @@ Channel.prototype.attach = function (conn) {
     if (self.showing) { self.tell(conn, { kind: 'showing', theme: self.showing.theme, meter: self.showing.meter }); }
     if (self.infinity !== null) { self.tell(conn, { kind: 'infinity', on: self.infinity }); }
     if (self.weather) { self.tell(conn, self.weather); }
+    // A remote display needs the player's word on the movie from its first frame.
+    if (conn.remote && self.onMovieLine) { try { self.tell(conn, self.onMovieLine()); } catch (e) { /* at the next change */ } }
     if (self.favourite) { self.tell(conn, self.favourite); }
     if (self.power) { self.tell(conn, self.power); }
     conn.on('data', function (chunk) {
@@ -1401,6 +1403,8 @@ Glass.prototype.pushMovieFace = function () {
     if (text === self.movieFaceLast) { return; }
     self.movieFaceLast = text;
     self.face.push(line);
+    // The remote displays hear it over the channel; the player's own ignores the kind.
+    if (self.channel) { self.channel.clients.slice().forEach(function (c) { if (c.remote) { self.channel.tell(c, line); } }); }
 };
 // `screen.movie` in the meter configuration as the switch and the profile
 // say; the display starts again with it when it changed.
@@ -1738,6 +1742,7 @@ Glass.prototype.onStart = function () {
     } });
     self.channel.onPush = function (message) { self.face.push(message); };
     self.channel.onMovie = function () { try { self.pushMovieFace(); } catch (e) { /* at the next change */ } };
+    self.channel.onMovieLine = function () { return self.movieFaceLine(); };
     // The display's report sets what is held for the next display.
     self.channel.onScreen = function (report) { self.screenWish = { power: report.power }; };
     // The forecast for the face, once the user has chosen a place: every

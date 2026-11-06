@@ -61,6 +61,12 @@ fn manager_url() -> Option<String> {
     MANAGER.read().ok().and_then(|m| m.clone())
 }
 
+/// The player's manager a remote display talks to, `http://host:port`,
+/// once said; none on the player itself.
+pub fn manager_base() -> Option<String> {
+    manager_url()
+}
+
 /// Name the player a remote display talks to. Without this, the player is
 /// this machine.
 pub fn set_player(host: &str, port: u16) {
@@ -1979,6 +1985,8 @@ pub struct TapSource {
     /// Where the player wants a picture of the screen written, until taken.
     grab_asked: Option<String>,
     weather_held: Option<lead::Weather>,
+    /// The player's word on the movie, as its last line said.
+    movie_held: Option<lead::MovieLine>,
     /// The player's last word on a track among its favourites: the track's
     /// location and whether it is one. The snapshot says it of the playing
     /// track alone.
@@ -2271,6 +2279,7 @@ impl TapSource {
             screen_asked: None,
             grab_asked: None,
             weather_held: None,
+            movie_held: None,
             favourite_held: None,
             standby_held: false,
             browse_held: None,
@@ -2919,6 +2928,7 @@ impl Source for TapSource {
                 Event::Showing { theme, meter } => self.showing_seen = Some((theme, meter)),
                 Event::Show { meter } => self.show_asked = Some(meter),
                 Event::Weather(weather) => self.weather_held = weather,
+                Event::Movie(movie) => self.movie_held = Some(movie),
                 Event::Queue(items) => {
                     self.queue_entries = std::sync::Arc::new(
                         items
@@ -3133,6 +3143,7 @@ impl Source for TapSource {
             },
             metadata,
             weather: self.weather_held.clone(),
+            movie: self.movie_held.clone(),
             queue: self.queue_entries.clone(),
             browse: self.browse_dressed(),
             queue_art: self.queue_art_dressed(),
@@ -3468,6 +3479,7 @@ pub fn input_from_records(
     let bins = decode_spectrum(spectrum, spectrum_bins).unwrap_or_default();
     Input {
         heard: Vec::new(),
+        movie: None,
         language: String::new(),
         play_here: Default::default(),
         levels,
