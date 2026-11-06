@@ -371,7 +371,7 @@
     "MANAGER_DISPLAY_MOVIE_HELP": "Der Ton des Players bleibt, wie er ist; das Bild wird daneben dekodiert und dort gezeigt, wo das gezeigte Theme ihm einen Rahmen gibt, über die eigene Uhr des Players am Ton gehalten. Aus, solange nicht eingeschaltet.",
     "MANAGER_DISPLAY_MOVIE_HELD": "Vom Leistungsprofil ausgesetzt (Leicht oder Minimal).",
     "MANAGER_DISPLAY_MOVIE_DELAY": "Verzögerung der Tonausgabe (ms)",
-    "MANAGER_DISPLAY_MOVIE_DELAY_HELP": "Wie weit der Ton am Ausgang hinter der Position des Players liegt, für das Bild des Films. Leer gelassen misst der Player es selbst (etwa 530 ms auf einem Raspberry Pi mit den Puffern des Images); eine Zahl von 0 bis 2000, wenn Bild und Ton nicht zusammenfinden, bleibt wie gesetzt.",
+    "MANAGER_DISPLAY_MOVIE_DELAY_HELP": "Wie weit der Ton am Ausgang hinter der Position des Players liegt, für das Bild des Films. Leer gelassen misst der Player es selbst (etwa anderthalb Sekunden auf einem Raspberry Pi mit den Puffern des Images); eine Zahl von 0 bis 2000, wenn Bild und Ton nicht zusammenfinden, bleibt wie gesetzt.",
     "MANAGER_DISPLAY_MOVIE_DECODER_OWN": "Decoder: {name} {version}, der eigene des Players.",
     "MANAGER_DISPLAY_MOVIE_DECODER_OTHER": "Diese Glass-Version erwartet die Ausgabe {version}; holen Sie sie.",
     "MANAGER_DISPLAY_MOVIE_DECODER_DISTRIBUTION": "Decoder: das ffmpeg des Images, bis der eigene Decoder des Players (evovpeg {version}) geholt ist: für den Player gebaut, signiert und gegen den Schlüssel des Projekts geprüft.",

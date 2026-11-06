@@ -371,7 +371,7 @@
     "MANAGER_DISPLAY_MOVIE_HELP": "Het geluid van de speler blijft zoals het is; het beeld wordt ernaast gedecodeerd en getoond waar het getoonde thema het een kader geeft, op het geluid gehouden door de klok van de speler zelf. Uit tenzij ingeschakeld.",
     "MANAGER_DISPLAY_MOVIE_HELD": "Tegengehouden door het prestatieprofiel (Licht of Minimaal).",
     "MANAGER_DISPLAY_MOVIE_DELAY": "Vertraging van de geluidsuitgang (ms)",
-    "MANAGER_DISPLAY_MOVIE_DELAY_HELP": "Hoe ver het geluid aan de uitgang achterloopt op de positie van de speler, voor het beeld van de film. Laat leeg en de speler meet het (ongeveer 530 ms op een Raspberry Pi met de buffers van het image); zet een getal van 0 tot 2000 als beeld en geluid elkaar niet vinden, en het blijft zoals gezet.",
+    "MANAGER_DISPLAY_MOVIE_DELAY_HELP": "Hoe ver het geluid aan de uitgang achterloopt op de positie van de speler, voor het beeld van de film. Laat leeg en de speler meet het (ongeveer anderhalve seconde op een Raspberry Pi met de buffers van het image); zet een getal van 0 tot 2000 als beeld en geluid elkaar niet vinden, en het blijft zoals gezet.",
     "MANAGER_DISPLAY_MOVIE_DECODER_OWN": "Decoder: {name} {version}, die van de speler zelf.",
     "MANAGER_DISPLAY_MOVIE_DECODER_OTHER": "Deze versie van Glass verwacht uitgave {version}; haal die op.",
     "MANAGER_DISPLAY_MOVIE_DECODER_DISTRIBUTION": "Decoder: de ffmpeg van het image, tot de eigen decoder van de speler (evovpeg {version}) is opgehaald: gebouwd voor de speler, ondertekend en geverifieerd met de sleutel van het project.",

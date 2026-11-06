@@ -371,7 +371,7 @@
     "MANAGER_DISPLAY_MOVIE_HELP": "The player's sound stays as it is; the picture is decoded beside it and shown where the theme on show gives it a box, held to the sound by the player's own clock. Off unless set.",
     "MANAGER_DISPLAY_MOVIE_HELD": "Held off by the performance profile (Light or Minimal).",
     "MANAGER_DISPLAY_MOVIE_DELAY": "Sound output delay (ms)",
-    "MANAGER_DISPLAY_MOVIE_DELAY_HELP": "How far the sound at the output runs behind the player's position, for the movie's picture. Leave empty and the player measures it (about 530 ms on a Raspberry Pi with the image's buffers); set a number from 0 to 2000 when the picture and the sound do not meet, and it is kept as set.",
+    "MANAGER_DISPLAY_MOVIE_DELAY_HELP": "How far the sound at the output runs behind the player's position, for the movie's picture. Leave empty and the player measures it (about a second and a half on a Raspberry Pi with the image's buffers); set a number from 0 to 2000 when the picture and the sound do not meet, and it is kept as set.",
     "MANAGER_DISPLAY_MOVIE_DECODER_OWN": "Decoder: {name} {version}, the player's own.",
     "MANAGER_DISPLAY_MOVIE_DECODER_OTHER": "The release {version} is the one this version of Glass expects; fetch it.",
     "MANAGER_DISPLAY_MOVIE_DECODER_DISTRIBUTION": "Decoder: the image's own ffmpeg, until the player's own decoder (evovpeg {version}) is fetched: built for the player, signed and verified against the project's key.",

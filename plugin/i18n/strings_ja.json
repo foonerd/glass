@@ -371,7 +371,7 @@
     "MANAGER_DISPLAY_MOVIE_HELP": "プレーヤーの音はそのまま。映像は別にデコードされ、表示中のテーマが枠を与えた場所に、プレーヤー自身の時計で音に合わせて表示されます。設定しない限りオフ。",
     "MANAGER_DISPLAY_MOVIE_HELD": "パフォーマンスプロファイル（軽量または最小）により保留中。",
     "MANAGER_DISPLAY_MOVIE_DELAY": "音声出力の遅延 (ms)",
-    "MANAGER_DISPLAY_MOVIE_DELAY_HELP": "映画の映像のために、出力の音がプレーヤーの再生位置からどれだけ遅れているか。空欄のままにするとプレーヤーが測定します（イメージのバッファ設定の Raspberry Pi で約 530 ms）。映像と音が合わないときは 0 から 2000 の数値を入れると、その値のまま保たれます。",
+    "MANAGER_DISPLAY_MOVIE_DELAY_HELP": "映画の映像のために、出力の音がプレーヤーの再生位置からどれだけ遅れているか。空欄のままにするとプレーヤーが測定します（イメージのバッファ設定の Raspberry Pi で約 1.5 秒）。映像と音が合わないときは 0 から 2000 の数値を入れると、その値のまま保たれます。",
     "MANAGER_DISPLAY_MOVIE_DECODER_OWN": "デコーダー: {name} {version}、プレーヤー自身のもの。",
     "MANAGER_DISPLAY_MOVIE_DECODER_OTHER": "この Glass のバージョンはリリース {version} を前提にしています。取得してください。",
     "MANAGER_DISPLAY_MOVIE_DECODER_DISTRIBUTION": "デコーダー: イメージ付属の ffmpeg。プレーヤー自身のデコーダー (evovpeg {version}) を取得するまでの間です。プレーヤー向けにビルドされ、署名され、プロジェクトの鍵で検証されます。",

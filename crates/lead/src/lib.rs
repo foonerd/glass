@@ -3949,6 +3949,12 @@ pub struct PlayHere {
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Input {
     pub levels: Levels,
+    /// The tap's hops since the last frame as the tap timed them, each its
+    /// moment on the monotonic clock (nanoseconds) and its loudness (the
+    /// channels' RMS as one, full scale 1.0): the sound as heard, for the
+    /// movie's calibration. Empty off the player's own ring.
+    #[serde(default, skip)]
+    pub heard: Vec<(u64, f32)>,
     pub bins: Bins,
     pub metadata: Metadata,
     /// The forecast, where the user has chosen a place and one is held.

@@ -780,6 +780,18 @@ impl Surface {
         }
     }
 
+    /// The video box's size on the screen, in pixels, as the last show
+    /// placed the theme; none without a box or before a show.
+    pub fn video_box_pixels(&self) -> Option<(u32, u32)> {
+        let b = self.video_box?;
+        if self.last_scale <= 0.0 {
+            return None;
+        }
+        let w = (b.w as f32 * self.last_scale).round() as u32;
+        let h = (b.h as f32 * self.last_scale).round() as u32;
+        (w >= 2 && h >= 2).then_some((w, h))
+    }
+
     /// One planar YUV 4:2:0 frame of the moving picture, `width` by
     /// `height` (the Y plane, then U, then V, each row packed), uploaded
     /// to a texture the GPU converts and scales into the theme's box. The

@@ -149,7 +149,11 @@ impl Hops for WireHops {
         let elapsed = std::mem::take(&mut self.elapsed);
         let hop = merge_hops(self.frames.drain(..))
             .map(|frame| (frame, self.rate.max(1), elapsed.max(1)));
-        Taken { hop, quiet }
+        Taken {
+            hop,
+            quiet,
+            heard: Vec::new(),
+        }
     }
 
     fn stats(&self) -> (u64, u64) {

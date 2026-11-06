@@ -60,9 +60,45 @@ fn prober() -> String {
 const MPD: &str = "127.0.0.1:6600";
 /// How often the clock reads mpd.
 const CLOCK_EVERY: Duration = Duration::from_millis(250);
-/// Frames decoded ahead of the clock and held: the pipe's backpressure
-/// paces the decoder past this.
+/// Frames decoded ahead of the clock and held, at the least; the pipe's
+/// backpressure paces the decoder past the line. The line is a second of
+/// frames where the memory allows, so a decoder that runs near real time
+/// banks frames in the easy scenes and spends them in the hard ones.
 const AHEAD_FRAMES: usize = 4;
+const AHEAD_MOST: usize = 30;
+const AHEAD_BYTES: usize = 48 * 1024 * 1024;
+
+/// Frames held ahead for a picture of this size at this rate.
+fn ahead_frames(width: u32, height: u32, fps: f64) -> usize {
+    let frame = (width as usize * height as usize * 3 / 2).max(1);
+    let by_memory = AHEAD_BYTES / frame;
+    (fps.round() as usize)
+        .clamp(AHEAD_FRAMES, AHEAD_MOST)
+        .min(by_memory)
+        .max(AHEAD_FRAMES)
+}
+
+/// The size the decoder gives the picture: the file's own, or the box's
+/// where the box is smaller, scaled by the decoder on the way (cheap at
+/// that size, and the pipe, the memory and the upload carry a fraction).
+/// `cover` asks for the box filled rather than fitted. Even numbers, as
+/// the planes need.
+fn decoded_shape(probe: &Probe, target: Option<(u32, u32, bool)>) -> (u32, u32) {
+    let (vw, vh) = (probe.width.max(2), probe.height.max(2));
+    let Some((bw, bh, cover)) = target else {
+        return (vw, vh);
+    };
+    if bw < 2 || bh < 2 {
+        return (vw, vh);
+    }
+    let (rw, rh) = (bw as f64 / vw as f64, bh as f64 / vh as f64);
+    let ratio = if cover { rw.max(rh) } else { rw.min(rh) };
+    if ratio >= 1.0 {
+        return (vw, vh);
+    }
+    let even = |v: f64| ((v / 2.0).round() as u32 * 2).max(2);
+    (even(vw as f64 * ratio), even(vh as f64 * ratio))
+}
 /// The clock moving by more than its own time plus this, or back at all,
 /// between two frames is a jump (a seek): the decoder is started again
 /// where the clock will be rather than caught up by dropping, which the
@@ -253,37 +289,40 @@ struct Decoder {
     /// into the full queue leaves the moment its receiver is gone.
     frames: Option<Receiver<Decoded>>,
     spare: SyncSender<Vec<u8>>,
+    /// Frames held ahead of the clock, the line's length.
+    ahead: usize,
     stop: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
     ended: Arc<AtomicBool>,
 }
 
 impl Decoder {
-    fn start(file: &str, probe: &Probe, from: f64) -> Result<Self, String> {
+    /// Started at `from`, giving frames of `shape` (the file's own size, or
+    /// smaller, scaled on the way) at the file's rate.
+    fn start(file: &str, probe: &Probe, shape: (u32, u32), from: f64) -> Result<Self, String> {
         let from = from.max(0.0);
         let at = format!("{from:.3}");
-        let child = Child::spawn(
-            &decoder(),
-            &[
-                "-nostdin",
-                "-loglevel",
-                "error",
-                "-ss",
-                &at,
-                "-i",
-                file,
-                "-an",
-                "-sn",
-                "-f",
-                "rawvideo",
-                "-pix_fmt",
-                "yuv420p",
-                "-",
-            ],
-        )?;
-        let frame_len = (probe.width * probe.height) as usize * 3 / 2;
-        let (tx, frames) = mpsc::sync_channel::<Decoded>(AHEAD_FRAMES);
-        let (spare, spares) = mpsc::sync_channel::<Vec<u8>>(AHEAD_FRAMES + 2);
+        let scale = format!("scale={}:{}:flags=fast_bilinear", shape.0, shape.1);
+        let mut args = vec![
+            "-nostdin",
+            "-loglevel",
+            "error",
+            "-ss",
+            &at,
+            "-i",
+            file,
+            "-an",
+            "-sn",
+        ];
+        if (shape.0, shape.1) != (probe.width, probe.height) {
+            args.extend(["-vf", scale.as_str()]);
+        }
+        args.extend(["-f", "rawvideo", "-pix_fmt", "yuv420p", "-"]);
+        let child = Child::spawn(&decoder(), &args)?;
+        let frame_len = (shape.0 * shape.1) as usize * 3 / 2;
+        let ahead = ahead_frames(shape.0, shape.1, probe.fps);
+        let (tx, frames) = mpsc::sync_channel::<Decoded>(ahead);
+        let (spare, spares) = mpsc::sync_channel::<Vec<u8>>(ahead + 2);
         let stop = Arc::new(AtomicBool::new(false));
         let ended = Arc::new(AtomicBool::new(false));
         let mut out = child.out.try_clone().map_err(|e| e.to_string())?;
@@ -316,6 +355,7 @@ impl Decoder {
             child,
             frames: Some(frames),
             spare,
+            ahead,
             stop,
             thread: Some(thread),
             ended,
@@ -470,18 +510,21 @@ impl Drop for Envelope {
 
 /// The sound output's delay found by correlation: the loudness the tap
 /// measured, placed by mpd's position at each measure, against the file's
-/// own loudness at every lag from two hundred milliseconds to a second,
-/// the band mpd's own buffering spans (what is measured is the way from
-/// mpd's position to the tap, before the output; a film's own rhythm
-/// offers peaks further out that mean nothing); the lag whose correlation
-/// stands highest, when it stands clear of the rest and high enough to
-/// mean anything. What is correlated is each
-/// side's onsets, the rises of loudness, since a rise is where a sound
-/// begins on both sides alike, while the tap's meter falls slowly and
-/// would drag the lag late if its whole shape were matched.
-/// The lags tried, in bins of ten milliseconds.
+/// own loudness at every lag from two hundred milliseconds to two and a
+/// half seconds, the band a player's buffering spans (what is measured is
+/// the way from mpd's position to the tap, which the tap times to the
+/// hearing); the lag whose correlation stands highest, when it stands
+/// clear of the rest and high enough to mean anything. Both sides are the
+/// sound's loudness in bins of ten milliseconds (the tap's hops, the
+/// file's RMS), correlated on a logarithmic scale, where quiet dialogue
+/// and loud passages weigh alike; a clip whose sounds repeat at one
+/// spacing offers peaks a spacing apart and is refused by the rival rule.
+/// The lags tried, in bins of ten milliseconds: from two hundred
+/// milliseconds to two and a half seconds, what a player's buffering spans
+/// (a second and a half on a Raspberry Pi 5 with the image's mpd and ALSA
+/// buffers and the taps in the chain).
 const LAG_LEAST: i64 = 20;
-const LAG_MOST: i64 = 100;
+const LAG_MOST: i64 = 250;
 
 pub fn correlate_delay(heard: &[(f64, f32)], file: &[(f64, f32)]) -> Option<(u32, f32)> {
     if heard.len() < 300 || file.len() < 300 {
@@ -532,15 +575,9 @@ pub fn correlate_delay(heard: &[(f64, f32)], file: &[(f64, f32)]) -> Option<(u32
             })
             .collect()
     };
-    let onsets = |x: &[f32]| -> Vec<f32> {
-        let mut out = vec![0f32; x.len()];
-        for i in 1..x.len() {
-            out[i] = (x[i] - x[i - 1]).max(0.0);
-        }
-        out
-    };
-    let h = onsets(&smooth(&h));
-    let f = onsets(&smooth(&f));
+    let log = |x: &[f32]| -> Vec<f32> { x.iter().map(|v| (v + 1e-4).log10()).collect() };
+    let h = smooth(&log(&h));
+    let f = smooth(&log(&f));
     let pearson = |lag: i64| -> Option<f32> {
         let mut xs = Vec::with_capacity(span);
         let mut ys = Vec::with_capacity(span);
@@ -584,7 +621,7 @@ pub fn correlate_delay(heard: &[(f64, f32)], file: &[(f64, f32)]) -> Option<(u32
         .filter(|(lag, _)| (lag - best_lag).abs() > 10)
         .map(|(_, c)| *c)
         .fold(f32::MIN, f32::max);
-    if best < 0.45 || best - rival < 0.08 {
+    if best < 0.5 || best - rival < 0.1 {
         return None;
     }
     Some((best_lag as u32 * 10, best))
@@ -688,7 +725,14 @@ impl Clock {
                 reads.len(),
                 r.state,
                 r.elapsed,
-                r.file.chars().rev().take(24).collect::<String>().chars().rev().collect::<String>(),
+                r.file
+                    .chars()
+                    .rev()
+                    .take(24)
+                    .collect::<String>()
+                    .chars()
+                    .rev()
+                    .collect::<String>(),
                 r.at.map(|at| at.elapsed().as_millis()).unwrap_or(0)
             ),
             None => "no read yet".to_string(),
@@ -755,6 +799,8 @@ fn read_status(reader: &mut BufReader<TcpStream>, writer: &mut TcpStream) -> Opt
 pub struct Video {
     file: String,
     probe: Probe,
+    /// The size the decoder gives the frames: the file's, or the box's.
+    shape: (u32, u32),
     decoder: Option<Decoder>,
     envelope: Option<Envelope>,
     clock: Clock,
@@ -791,13 +837,15 @@ pub struct Video {
     reported: String,
     /// The sync harness: a line per frame when `GLASS_SYNC_LOG` names a file.
     log: Option<File>,
+    /// Calibration windows written beside it, counted.
+    calibrations: u32,
     started: Instant,
 }
 
 /// The sound output's delay on a player as measured on a Raspberry Pi 5
 /// with mpd's buffers as the image sets them: the start until the
 /// correlation finds the player's own.
-pub const DEFAULT_DELAY_MS: u32 = 530;
+pub const DEFAULT_DELAY_MS: u32 = 1500;
 /// How often the delay is looked for again.
 const CALIBRATE_EVERY: Duration = Duration::from_secs(4);
 /// The window the correlation looks over, in seconds of the file.
@@ -811,11 +859,32 @@ impl Video {
     /// (the measured default, or the last one found on this player).
     /// `fixed` keeps `delay_ms` as the player's own setting, with no
     /// calibration over it.
-    pub fn open(file: &str, probe: Probe, lead_ms: u32, delay_ms: u32, fixed: bool) -> Self {
+    /// `target` is the box the picture lands in, in screen pixels, and
+    /// whether it is to be covered rather than fitted: the decoder gives
+    /// the picture no larger than that.
+    pub fn open(
+        file: &str,
+        probe: Probe,
+        lead_ms: u32,
+        delay_ms: u32,
+        fixed: bool,
+        target: Option<(u32, u32, bool)>,
+    ) -> Self {
         let log = std::env::var_os("GLASS_SYNC_LOG").and_then(|p| File::create(p).ok());
+        let shape = decoded_shape(&probe, target);
+        if shape != (probe.width, probe.height) {
+            logline::say!(
+                Info,
+                "video",
+                "the picture decoded at {}x{} for its box",
+                shape.0,
+                shape.1
+            );
+        }
         Self {
             file: file.to_string(),
             probe,
+            shape,
             decoder: None,
             envelope: None,
             clock: Clock::start(),
@@ -834,6 +903,7 @@ impl Video {
             starting: None,
             reported: String::new(),
             log,
+            calibrations: 0,
             started: Instant::now(),
         }
     }
@@ -908,6 +978,21 @@ impl Video {
             heard.len(),
             file.len()
         );
+        // The harness keeps each window's two sides beside its log, for the
+        // method to be worked on away from the player.
+        if let Some(log) = std::env::var_os("GLASS_SYNC_LOG") {
+            let n = self.calibrations;
+            self.calibrations += 1;
+            let path = format!("{}.calib-{n}", log.to_string_lossy());
+            if let Ok(mut f) = File::create(&path) {
+                for (p, l) in &heard {
+                    let _ = writeln!(f, "heard {p:.4} {l:.4}");
+                }
+                for (t, r) in &file {
+                    let _ = writeln!(f, "file {t:.4} {r:.6}");
+                }
+            }
+        }
         if let Some((ms, corr)) = correlate_delay(&heard, &file) {
             let found = ms as f64 / 1000.0;
             // A film's sound has onsets of its own at every spacing, so one
@@ -943,8 +1028,9 @@ impl Video {
         &self.file
     }
 
+    /// The frames' size, as the decoder gives them.
     pub fn size(&self) -> (u32, u32) {
-        (self.probe.width, self.probe.height)
+        self.shape
     }
 
     /// The decoder started where the clock will be when its first frame
@@ -956,7 +1042,7 @@ impl Video {
         self.decoder = None;
         self.envelope = None;
         self.starting = Some((now, at));
-        match Decoder::start(&self.file, &self.probe, at) {
+        match Decoder::start(&self.file, &self.probe, self.shape, at) {
             Ok(decoder) => self.decoder = Some(decoder),
             Err(e) => logline::say!(Warn, "video", "the decoder did not start: {e}"),
         }
@@ -979,9 +1065,10 @@ impl Video {
 
     /// Once a frame: whether a new frame is due now and is the one shown
     /// (`shown` has its planes); `false` while the one shown stands.
-    /// `level` is the sound's measured level this frame, for the harness
-    /// alone.
-    pub fn tick(&mut self, now: Instant, level: f32) -> bool {
+    /// `heard` is the tap's hops since the last frame, each its moment on
+    /// the monotonic clock and its loudness, for the calibration; `level`
+    /// the meter's level now, for the harness's log alone.
+    pub fn tick(&mut self, now: Instant, heard: &[(u64, f32)], level: f32) -> bool {
         let Some(position) = self.clock.position(now) else {
             // Stopped, or the clock silent: the picture is let go.
             if self.decoder.is_some() || self.shown.is_some() {
@@ -1011,10 +1098,22 @@ impl Video {
             }
             _ => false,
         };
-        // The sound heard now, placed by the position, while it moves.
+        // The sound heard, placed by the position, while it moves: the
+        // tap's hops as the tap timed them to their hearing, each at the
+        // position the clock gives for that moment.
         if !jumped && self.last_position.is_none_or(|p| position > p) {
-            self.heard.push_back((position, level));
-            if self.heard.len() > 4000 {
+            let now_ns = tap::ring::now_ns();
+            for &(at_ns, rms) in heard {
+                let at = if at_ns <= now_ns {
+                    now.checked_sub(Duration::from_nanos(now_ns - at_ns))
+                } else {
+                    now.checked_add(Duration::from_nanos(at_ns - now_ns))
+                };
+                if let Some(p) = at.and_then(|at| self.clock.position(at)) {
+                    self.heard.push_back((p, rms));
+                }
+            }
+            while self.heard.len() > 4000 {
                 self.heard.pop_front();
             }
             self.calibrate(now, position);
@@ -1027,7 +1126,11 @@ impl Video {
                 Verbose,
                 "video",
                 "the decoder started at {target:.2} ({})",
-                if jumped { "the clock jumped" } else { "none ran" }
+                if jumped {
+                    "the clock jumped"
+                } else {
+                    "none ran"
+                }
             );
             self.restart(now, target);
         }
@@ -1036,7 +1139,7 @@ impl Video {
         // same has the decoder started once more with it.
         let mut first = None;
         if let Some(decoder) = &self.decoder {
-            while self.waiting.len() < AHEAD_FRAMES {
+            while self.waiting.len() < decoder.ahead {
                 match decoder.next() {
                     Some(frame) => {
                         if self.starting.is_some() && self.waiting.is_empty() {
@@ -1090,7 +1193,7 @@ impl Video {
             self.shown = Some(frame);
         }
         if let (Some(log), Some(shown)) = (self.log.as_mut(), self.shown.as_ref()) {
-            let luma = luma_of(&shown.planes, self.probe.width, self.probe.height);
+            let luma = luma_of(&shown.planes, self.shape.0, self.shape.1);
             let _ = writeln!(
                 log,
                 "{} {:.3} {:.3} {} {:.3}",
@@ -1185,31 +1288,97 @@ mod tests {
         assert_eq!(clock.position(t0), None);
     }
 
-    /// The file's loudness: bursts at every whole second; the tap heard
-    /// the same bursts 530 ms later by mpd's position, through a meter's
-    /// slow fall: the correlation names the lag within a bin or two.
+    /// The decoder's picture: the file's size for a box as large or larger,
+    /// the box's for a smaller one (fitted, or covered), even numbers; the
+    /// line a second of frames within the memory.
+    #[test]
+    fn the_picture_is_decoded_no_larger_than_its_box() {
+        let hd = Probe {
+            width: 1920,
+            height: 1080,
+            fps: 30.0,
+        };
+        assert_eq!(decoded_shape(&hd, None), (1920, 1080));
+        assert_eq!(decoded_shape(&hd, Some((1920, 1080, false))), (1920, 1080));
+        assert_eq!(decoded_shape(&hd, Some((3840, 2160, false))), (1920, 1080));
+        assert_eq!(decoded_shape(&hd, Some((747, 420, false))), (746, 420));
+        // Covered: the box's height sets the size, the width overflows it.
+        assert_eq!(decoded_shape(&hd, Some((747, 560, true))), (996, 560));
+        assert_eq!(ahead_frames(746, 420, 30.0), 30);
+        assert_eq!(ahead_frames(746, 420, 24.0), 24);
+        assert_eq!(
+            ahead_frames(1920, 1080, 30.0),
+            16,
+            "a second of 1080p frames is more than the memory allows"
+        );
+        assert_eq!(ahead_frames(3840, 2160, 60.0), 4);
+    }
+
+    /// A file whose sounds come at gaps that never repeat as one spacing
+    /// (as a film's do, and as the harness's irregular clip does), heard
+    /// 1.53 s later by mpd's position as the tap's hops: the correlation
+    /// names the lag within a bin or two. A clip whose sounds repeat every
+    /// second offers aliases a second apart and is refused.
     #[test]
     fn the_correlation_finds_the_output_delay() {
-        let file: Vec<(f64, f32)> = (0..2500)
+        let gaps = [
+            1.3, 0.7, 1.9, 1.1, 0.9, 1.7, 0.6, 1.5, 2.1, 0.8, 1.2, 1.4, 1.0, 1.8,
+        ];
+        let mut events = Vec::new();
+        let mut t = 10.0;
+        let mut n = 0;
+        while t < 60.0 {
+            events.push(t);
+            t += gaps[n % gaps.len()];
+            n += 1;
+        }
+        let loud = |t: f64| -> f32 {
+            if events.iter().any(|e| t >= *e && t < e + 0.1) {
+                0.8
+            } else {
+                0.002
+            }
+        };
+        let file: Vec<(f64, f32)> = (0..3000)
             .map(|i| {
                 let t = 10.0 + i as f64 * 0.01;
-                let in_burst = (t.fract() * 100.0) < 5.0;
-                (t, if in_burst { 0.8 } else { 0.02 })
+                (t, loud(t))
             })
             .collect();
-        let mut level = 0.0f32;
-        let heard: Vec<(f64, f32)> = (0..900)
+        let heard: Vec<(f64, f32)> = (0..600)
             .map(|i| {
-                let position = 14.0 + i as f64 * 0.0333;
-                let t = position - 0.53;
-                let in_burst = (t.fract() * 100.0) < 5.0;
-                level = if in_burst { 80.0 } else { level * 0.9 };
-                (position, level)
+                let position = 25.0 + i as f64 * 0.0213;
+                (position, loud(position - 1.53))
             })
             .collect();
         let (ms, corr) = correlate_delay(&heard, &file).expect("a delay found");
-        assert!((500..=560).contains(&ms), "{ms} ms at {corr}");
-        assert!(corr > 0.45);
+        assert!((1510..=1550).contains(&ms), "{ms} ms at {corr}");
+        assert!(corr > 0.5);
+        // Sounds every second: every lag a second apart scores alike, so none is taken.
+        let periodic = |t: f64| -> f32 {
+            if (t.fract() * 100.0) < 10.0 {
+                0.8
+            } else {
+                0.002
+            }
+        };
+        let file_p: Vec<(f64, f32)> = (0..3000)
+            .map(|i| {
+                let t = 10.0 + i as f64 * 0.01;
+                (t, periodic(t))
+            })
+            .collect();
+        let heard_p: Vec<(f64, f32)> = (0..600)
+            .map(|i| {
+                let position = 25.0 + i as f64 * 0.0213;
+                (position, periodic(position - 1.53))
+            })
+            .collect();
+        assert_eq!(
+            correlate_delay(&heard_p, &file_p),
+            None,
+            "a periodic clip is refused"
+        );
         // A flat sound says nothing.
         let flat: Vec<(f64, f32)> = heard.iter().map(|(p, _)| (*p, 10.0)).collect();
         assert_eq!(correlate_delay(&flat, &file), None);

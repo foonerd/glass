@@ -371,7 +371,7 @@
     "MANAGER_DISPLAY_MOVIE_HELP": "Il suono del lettore resta com'è; l'immagine viene decodificata a parte e mostrata dove il tema in uso le dà un riquadro, tenuta sul suono dall'orologio del lettore. Spento se non attivato.",
     "MANAGER_DISPLAY_MOVIE_HELD": "Trattenuto dal profilo di prestazioni (Leggero o Minimo).",
     "MANAGER_DISPLAY_MOVIE_DELAY": "Ritardo dell'uscita audio (ms)",
-    "MANAGER_DISPLAY_MOVIE_DELAY_HELP": "Di quanto il suono all'uscita è in ritardo rispetto alla posizione del lettore, per l'immagine del film. Lasciato vuoto, il lettore lo misura (circa 530 ms su un Raspberry Pi con i buffer dell'immagine); un numero da 0 a 2000 quando immagine e suono non coincidono, ed è mantenuto così com'è.",
+    "MANAGER_DISPLAY_MOVIE_DELAY_HELP": "Di quanto il suono all'uscita è in ritardo rispetto alla posizione del lettore, per l'immagine del film. Lasciato vuoto, il lettore lo misura (circa un secondo e mezzo su un Raspberry Pi con i buffer dell'immagine); un numero da 0 a 2000 quando immagine e suono non coincidono, ed è mantenuto così com'è.",
     "MANAGER_DISPLAY_MOVIE_DECODER_OWN": "Decodificatore: {name} {version}, quello proprio del lettore.",
     "MANAGER_DISPLAY_MOVIE_DECODER_OTHER": "Questa versione di Glass si aspetta la pubblicazione {version}; scaricala.",
     "MANAGER_DISPLAY_MOVIE_DECODER_DISTRIBUTION": "Decodificatore: l'ffmpeg dell'immagine, finché non viene scaricato il decodificatore proprio del lettore (evovpeg {version}): costruito per il lettore, firmato e verificato con la chiave del progetto.",

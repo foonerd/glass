@@ -371,7 +371,7 @@
     "MANAGER_DISPLAY_MOVIE_HELP": "Le son du lecteur reste tel quel ; l'image est décodée à côté et affichée là où le thème affiché lui donne un cadre, calée sur le son par l'horloge du lecteur. Désactivé sauf réglage.",
     "MANAGER_DISPLAY_MOVIE_HELD": "Retenu par le profil de performance (Léger ou Minimal).",
     "MANAGER_DISPLAY_MOVIE_DELAY": "Retard de la sortie son (ms)",
-    "MANAGER_DISPLAY_MOVIE_DELAY_HELP": "De combien le son à la sortie est en retard sur la position du lecteur, pour l'image du film. Laissez vide et le lecteur le mesure (environ 530 ms sur un Raspberry Pi avec les tampons de l'image) ; mettez un nombre de 0 à 2000 quand l'image et le son ne se rejoignent pas, et il est gardé tel quel.",
+    "MANAGER_DISPLAY_MOVIE_DELAY_HELP": "De combien le son à la sortie est en retard sur la position du lecteur, pour l'image du film. Laissez vide et le lecteur le mesure (environ une seconde et demie sur un Raspberry Pi avec les tampons de l'image) ; mettez un nombre de 0 à 2000 quand l'image et le son ne se rejoignent pas, et il est gardé tel quel.",
     "MANAGER_DISPLAY_MOVIE_DECODER_OWN": "Décodeur : {name} {version}, celui du lecteur.",
     "MANAGER_DISPLAY_MOVIE_DECODER_OTHER": "Cette version de Glass attend la publication {version} ; récupérez-la.",
     "MANAGER_DISPLAY_MOVIE_DECODER_DISTRIBUTION": "Décodeur : le ffmpeg de l'image, jusqu'à ce que le décodeur du lecteur (evovpeg {version}) soit récupéré : construit pour le lecteur, signé et vérifié avec la clé du projet.",

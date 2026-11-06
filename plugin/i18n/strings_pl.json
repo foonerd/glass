@@ -371,7 +371,7 @@
     "MANAGER_DISPLAY_MOVIE_HELP": "Dźwięk odtwarzacza pozostaje bez zmian; obraz jest dekodowany obok i pokazywany tam, gdzie pokazywany motyw daje mu ramkę, trzymany przy dźwięku zegarem samego odtwarzacza. Wyłączone, dopóki nie włączysz.",
     "MANAGER_DISPLAY_MOVIE_HELD": "Wstrzymane przez profil wydajności (Lekki lub Minimalny).",
     "MANAGER_DISPLAY_MOVIE_DELAY": "Opóźnienie wyjścia dźwięku (ms)",
-    "MANAGER_DISPLAY_MOVIE_DELAY_HELP": "O ile dźwięk na wyjściu jest opóźniony względem pozycji odtwarzacza, dla obrazu filmu. Zostaw puste, a odtwarzacz zmierzy to sam (około 530 ms na Raspberry Pi z buforami obrazu systemu); wpisz liczbę od 0 do 2000, gdy obraz i dźwięk się nie schodzą, a zostanie zachowana tak, jak ustawiono.",
+    "MANAGER_DISPLAY_MOVIE_DELAY_HELP": "O ile dźwięk na wyjściu jest opóźniony względem pozycji odtwarzacza, dla obrazu filmu. Zostaw puste, a odtwarzacz zmierzy to sam (około półtorej sekundy na Raspberry Pi z buforami obrazu systemu); wpisz liczbę od 0 do 2000, gdy obraz i dźwięk się nie schodzą, a zostanie zachowana tak, jak ustawiono.",
     "MANAGER_DISPLAY_MOVIE_DECODER_OWN": "Dekoder: {name} {version}, własny odtwarzacza.",
     "MANAGER_DISPLAY_MOVIE_DECODER_OTHER": "Ta wersja Glass oczekuje wydania {version}; pobierz je.",
     "MANAGER_DISPLAY_MOVIE_DECODER_DISTRIBUTION": "Dekoder: ffmpeg z obrazu systemu, dopóki nie zostanie pobrany własny dekoder odtwarzacza (evovpeg {version}): zbudowany dla odtwarzacza, podpisany i zweryfikowany kluczem projektu.",

@@ -1854,6 +1854,10 @@ impl Source for IdleSource {
 pub struct Taken {
     pub hop: Option<(tap::Frame, u32, u64)>,
     pub quiet: bool,
+    /// Every hop since the last take as the tap timed it, its moment on
+    /// the monotonic clock and its loudness (the channels' RMS as one),
+    /// for the movie's calibration; empty off the player's own ring.
+    pub heard: Vec<(u64, f32)>,
 }
 
 /// Where the hops come from: the tap's ring on the player, the wire on a
@@ -1907,6 +1911,7 @@ impl Hops for RingHops {
         let mut quiet = true;
         let last_seq = self.last_seq;
         let last_frames = self.last_frames;
+        let mut heard = Vec::new();
         if let Some(reader) = self.ring() {
             let info = reader.info();
             let stale = tap::ring::now_ns().saturating_sub(info.written_ns) > RING_QUIET_NS;
@@ -1922,10 +1927,22 @@ impl Hops for RingHops {
                     } else {
                         last_seq + 1
                     };
-                    let merged = merge_hops((first..=info.seq).filter_map(|seq| reader.slot(seq)));
+                    let mut heard_now = Vec::new();
+                    let merged = merge_hops(
+                        (first..=info.seq)
+                            .filter_map(|seq| reader.slot(seq))
+                            .inspect(|f| {
+                                let n = info.channels.clamp(1, tap::MAX_CHANNELS as u32) as usize;
+                                let rms = (f.rms[..n].iter().map(|v| v * v).sum::<f32>()
+                                    / n as f32)
+                                    .sqrt();
+                                heard_now.push((f.time_ns, rms));
+                            }),
+                    );
                     if let Some(frame) = merged {
                         let elapsed = frame.frames.saturating_sub(last_frames).max(1);
                         hop = Some((frame, info.rate.max(1), elapsed));
+                        heard = heard_now;
                     }
                 }
             }
@@ -1934,7 +1951,7 @@ impl Hops for RingHops {
             self.last_seq = frame.seq;
             self.last_frames = frame.frames;
         }
-        Taken { hop, quiet }
+        Taken { hop, quiet, heard }
     }
 }
 
@@ -2802,6 +2819,7 @@ impl Hops for IdleHops {
         Taken {
             hop: None,
             quiet: true,
+            heard: Vec::new(),
         }
     }
 }
@@ -2809,7 +2827,7 @@ impl Hops for IdleHops {
 impl Source for TapSource {
     fn poll(&mut self) -> Input {
         // The latest hop, or silence when the stream is gone or has gone quiet.
-        let Taken { hop, quiet } = self.hops.take();
+        let Taken { hop, quiet, heard } = self.hops.take();
         if let Some((mut frame, rate, elapsed)) = hop {
             if frame.raw {
                 let key = (rate, frame.window);
@@ -3103,6 +3121,7 @@ impl Source for TapSource {
 
         Input {
             levels: self.levels_held,
+            heard,
             language: self.language.clone(),
             play_here: self.play_here.clone(),
             bins: Bins {
@@ -3448,6 +3467,7 @@ pub fn input_from_records(
         .unwrap_or_default();
     let bins = decode_spectrum(spectrum, spectrum_bins).unwrap_or_default();
     Input {
+        heard: Vec::new(),
         language: String::new(),
         play_here: Default::default(),
         levels,

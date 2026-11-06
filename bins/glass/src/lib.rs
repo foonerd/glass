@@ -1141,7 +1141,11 @@ fn session(
                 let delay_ms = env::var("GLASS_VIDEO_DELAY_MS")
                     .ok()
                     .and_then(|v| v.parse().ok())
-                    .unwrap_or(if fixed { skin.run.delay_ms } else { movie_delay_ms });
+                    .unwrap_or(if fixed {
+                        skin.run.delay_ms
+                    } else {
+                        movie_delay_ms
+                    });
                 match video::probe(&path) {
                     Ok(Some(probe)) => {
                         logline::say!(
@@ -1152,7 +1156,17 @@ fn session(
                             probe.height,
                             probe.fps
                         );
-                        movie = Some(video::Video::open(&path, probe, lead_ms, delay_ms, fixed));
+                        // The box's size on the screen, for the decoder to
+                        // give the picture no larger than it; none before
+                        // the window is up, which is the file's own size.
+                        let target = surface
+                            .as_ref()
+                            .and_then(|w| w.video_box_pixels())
+                            .zip(skin.video.as_ref())
+                            .map(|((w, h), v)| (w, h, v.scale == lead::Scale::Cover));
+                        movie = Some(video::Video::open(
+                            &path, probe, lead_ms, delay_ms, fixed, target,
+                        ));
                     }
                     Ok(None) => logline::say!(Verbose, "video", "{path}: no video stream"),
                     Err(e) => logline::say!(Warn, "video", "{path}: {e}"),
@@ -1537,7 +1551,7 @@ fn session(
             #[cfg(all(unix, not(target_os = "android")))]
             let movie_due = movie
                 .as_mut()
-                .is_some_and(|m| m.tick(Instant::now(), input.levels.left));
+                .is_some_and(|m| m.tick(Instant::now(), &input.heard, input.levels.left));
             #[cfg(all(unix, not(target_os = "android")))]
             match movie.as_mut() {
                 Some(m) => {

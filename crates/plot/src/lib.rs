@@ -905,6 +905,7 @@ mod tests {
     fn half_scale_levels_and_a_full_bar() {
         let skin = SkinDesc::basic();
         let input = Input {
+            heard: Vec::new(),
             language: String::new(),
             play_here: Default::default(),
             queue: Default::default(),
@@ -1241,6 +1242,7 @@ mod analyser_tests {
         // Minus 30 dB: half way up the default decibel range.
         right[16] = 10f32.powf(-30.0 / 20.0);
         let input = Input {
+            heard: Vec::new(),
             language: String::new(),
             play_here: Default::default(),
             queue: Default::default(),
@@ -1313,6 +1315,7 @@ mod analyser_tests {
         let mut right = vec![0.0f32; bands];
         right[5] = 1.0;
         let input = Input {
+            heard: Vec::new(),
             language: String::new(),
             play_here: Default::default(),
             queue: Default::default(),
@@ -1372,6 +1375,7 @@ mod analyser_tests {
         let bands = 8;
         let with = |skin: &SkinDesc, left: Vec<f32>, right: Vec<f32>| {
             let input = Input {
+                heard: Vec::new(),
                 language: String::new(),
                 play_here: Default::default(),
                 queue: Default::default(),
@@ -1453,6 +1457,7 @@ mod analyser_tests {
         left[3] = 1.0;
         let right = vec![0.0f32; bands];
         let input = Input {
+            heard: Vec::new(),
             language: String::new(),
             play_here: Default::default(),
             queue: Default::default(),
