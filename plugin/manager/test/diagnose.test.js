@@ -611,3 +611,21 @@ test('the edition tag rules held are a note under the look, nothing while they a
   assert.ok(one(diagnose('other', f), 'theme-rules-held'), 'under other too');
   assert.ok(!one(diagnose('no-meters', f), 'theme-rules-held'), 'not under the meters');
 });
+
+test('the movie: the switch, the profile, the decoder, the box, the display\'s word', function () {
+  let f = healthy(); f.status.movie = { on: false, allowed: true, decoder: true, box: null, report: null };
+  assert.strictEqual(one(diagnose('movie', f), 'movie').key, 'DIAG_MOVIE_OFF');
+  f.status.movie = { on: true, allowed: false, decoder: true, box: null, report: null };
+  assert.strictEqual(one(diagnose('movie', f), 'movie').key, 'DIAG_MOVIE_HELD');
+  f.status.movie = { on: true, allowed: true, decoder: false, box: null, report: null };
+  assert.strictEqual(one(diagnose('movie', f), 'movie').key, 'DIAG_MOVIE_NO_DECODER');
+  f.status.movie = { on: true, allowed: true, decoder: true, box: false, report: null };
+  assert.strictEqual(one(diagnose('movie', f), 'movie').key, 'DIAG_MOVIE_NO_BOX');
+  f.status.movie = { on: true, allowed: true, decoder: true, box: { x: 0, y: 0, w: 1920, h: 1080 }, report: { state: 'showing', width: 1920, height: 1080, fps: 30, delay: 532, measured: 0.8, at: f.now } };
+  const r = one(diagnose('movie', f), 'movie');
+  assert.strictEqual(r.kind, 'ok');
+  assert.deepStrictEqual(r.with, { w: 1920, h: 1080, fps: 30, delay: 532, how: 'measured' });
+  f.status.channel.status = 'play';
+  f.status.movie.report = null;
+  assert.strictEqual(one(diagnose('movie', f), 'movie').key, 'DIAG_MOVIE_NO_VIDEO', 'playing with no word from the display: the file has no video, or the display has not opened it');
+});

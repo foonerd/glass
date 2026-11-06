@@ -2507,6 +2507,64 @@ pub fn meter_fanart(meters_txt: &str, meter: &str) -> Option<FanartSpec> {
     })
 }
 
+/// The box a meter gives the picture of a video file the player plays,
+/// `video.pos` and `video.dimension`, with `video.scale` (fit, stretch or
+/// cover, fit unless said) and `video.zorder` (background, under the
+/// theme where it leaves the box clear, or overlay over it; overlay
+/// unless said). A meter without the keys shows no picture, and the
+/// player's own switch decides whether any meter does.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VideoSpec {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+    pub scale: Scale,
+    pub zorder: ZOrder,
+}
+
+pub fn meter_video(meters_txt: &str, meter: &str) -> Option<VideoSpec> {
+    let values = section_values(meters_txt, meter);
+    let get = |key: &str| {
+        values
+            .iter()
+            .find(|(k, _)| k == key)
+            .map(|(_, v)| v.as_str())
+    };
+    let pair = |key: &str| -> Option<(u32, u32)> {
+        let mut parts = get(key)?.split(',');
+        let a = parts.next()?.trim().parse().ok()?;
+        let b = parts.next()?.trim().parse().ok()?;
+        Some((a, b))
+    };
+    let (x, y) = pair("video.pos")?;
+    let (w, h) = pair("video.dimension")?;
+    if w == 0 || h == 0 {
+        return None;
+    }
+    Some(VideoSpec {
+        x,
+        y,
+        w,
+        h,
+        scale: match get("video.scale")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("stretch") => Scale::Stretch,
+            Some("cover") => Scale::Cover,
+            _ => Scale::Fit,
+        },
+        zorder: match get("video.zorder")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("background") => ZOrder::Background,
+            _ => ZOrder::Overlay,
+        },
+    })
+}
+
 /// A state indicator's look: a coloured LED shape, or one picture per state,
 /// either with an optional glow behind it.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -3201,6 +3259,16 @@ pub struct RunSettings {
     /// page shows it behind its controls. The colour unless said.
     #[serde(default)]
     pub backdrop: bool,
+    /// `screen.movie = True`: the picture of a video file the player plays
+    /// shown under the theme, where the theme leaves the screen clear;
+    /// off unless said.
+    #[serde(default)]
+    pub movie: bool,
+    /// `screen.lead`: milliseconds the meters, and the picture of a movie,
+    /// run ahead of the sound, 0 to 200, for a screen whose own
+    /// processing runs behind the sound; 0 unless said.
+    #[serde(default)]
+    pub lead_ms: u32,
     /// `screen.driver`: what draws the window, `auto` unless said.
     #[serde(default)]
     pub driver: ScreenDriver,
@@ -3422,6 +3490,8 @@ impl Default for RunSettings {
             place: Place::Center,
             margins: [0; 4],
             backdrop: false,
+            movie: false,
+            lead_ms: 0,
             driver: ScreenDriver::Auto,
             rotation: Rotation::R0,
             pointer: false,
@@ -3532,6 +3602,11 @@ pub fn run_settings(text: &str) -> RunSettings {
         fit,
         backdrop: current_value(text, "screen.backdrop")
             .is_some_and(|v| v.trim().eq_ignore_ascii_case("blur")),
+        movie: truthy(current_value(text, "screen.movie").as_deref()),
+        lead_ms: current_value(text, "screen.lead")
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .unwrap_or(0)
+            .min(200),
         driver: ScreenDriver::parse(current_value(text, "screen.driver").as_deref()),
         rotation: Rotation::parse(current_value(text, "screen.rotation").as_deref()),
         pointer: truthy(current_value(text, "screen.pointer.shown").as_deref()),
@@ -3984,6 +4059,10 @@ pub struct SkinDesc {
     pub folder_layers: Vec<FolderLayerSpec>,
     #[serde(default)]
     pub fanart: Option<FanartSpec>,
+    /// The box for the picture of a video file the player plays, where the
+    /// meter gives one (`video.*`).
+    #[serde(default)]
+    pub video: Option<VideoSpec>,
     #[serde(default)]
     pub vinyl: Option<VinylSpec>,
     #[serde(default)]
@@ -4052,6 +4131,7 @@ impl SkinDesc {
             spectra: Vec::new(),
             folder_layers: Vec::new(),
             fanart: None,
+            video: None,
             vinyl: None,
             tonearm: None,
             rotation: RotationSettings::default(),
@@ -6330,6 +6410,25 @@ mod tests {
             (0, 0, 1280, 720, Scale::Stretch, ZOrder::Background)
         );
         assert_eq!(meter_fanart(m, "n"), None);
+        let v = "[m]\nvideo.pos = 400,120\nvideo.dimension = 1120,630\nvideo.scale = cover\nvideo.zorder = background\n[n]\nvideo.pos = 0,0\nvideo.dimension = 0,0\n";
+        assert_eq!(
+            meter_video(v, "m"),
+            Some(VideoSpec {
+                x: 400,
+                y: 120,
+                w: 1120,
+                h: 630,
+                scale: Scale::Cover,
+                zorder: ZOrder::Background
+            })
+        );
+        assert_eq!(meter_video(v, "n"), None, "a box of nothing is none");
+        assert_eq!(
+            meter_video("[m]\nvideo.pos = 1,2\nvideo.dimension = 3,4\n", "m")
+                .map(|s| (s.scale, s.zorder)),
+            Some((Scale::Fit, ZOrder::Overlay)),
+            "fit and over the theme unless said"
+        );
     }
 
     #[test]
@@ -6763,6 +6862,8 @@ mod tests {
                 place: Place::Center,
                 margins: [0; 4],
                 backdrop: false,
+                movie: false,
+                lead_ms: 0,
                 driver: ScreenDriver::Auto,
                 rotation: Rotation::R0,
                 pointer: false,
@@ -6802,6 +6903,11 @@ mod tests {
         assert_eq!(Place::parse(Some("TOP")).name(), "top");
         // The backdrop: the blurred art on the word `blur` alone.
         assert!(run_settings("[current]\nscreen.backdrop = Blur\n").backdrop);
+        assert!(run_settings("[current]\nscreen.movie = True\n").movie);
+        assert!(!run_settings("[current]\nscreen.backdrop = blur\n").movie);
+        assert_eq!(run_settings("[current]\nscreen.lead = 120\n").lead_ms, 120);
+        assert_eq!(run_settings("[current]\nscreen.lead = 900\n").lead_ms, 200);
+        assert_eq!(run_settings("[current]\n").lead_ms, 0);
         assert!(!run_settings("[current]\nscreen.backdrop = color\n").backdrop);
         assert!(!run_settings("[current]\nscreen.backdrop = True\n").backdrop);
         assert_eq!(

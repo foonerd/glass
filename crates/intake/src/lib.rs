@@ -21,7 +21,7 @@ use lead::{
     fonts_from_config, frame_rate_from_config, meter_art, meter_at, meter_background, meter_fanart,
     meter_folder_layers, meter_indicator, meter_indicators, meter_layers, meter_needle,
     meter_reels, meter_sections, meter_spec, meter_spectra, meter_text_at, meter_texts,
-    meter_tonearm, meter_type, meter_vinyl, random_change_title_from_config,
+    meter_tonearm, meter_type, meter_video, meter_vinyl, random_change_title_from_config,
     random_interval_from_config, rotation_settings, run_settings, screen_from_config,
     scroll_speeds_from_config, selection_from_config, spectrum_from_theme, spectrum_settings,
     transition_settings, Bins, DataSourceSpec, Input, Levels, Selection, SkinDesc, TextSpec,
@@ -2175,6 +2175,12 @@ impl TapSource {
             .is_some_and(|c| c.report_showing(theme, meter, rate))
     }
 
+    /// The player's own display says what it does with the picture of the
+    /// video file the player plays.
+    pub fn report_movie(&mut self, value: &Value) -> bool {
+        self.channel.as_mut().is_some_and(|c| c.report_movie(value))
+    }
+
     /// Whether the channel to the player is up.
     pub fn channel_connected(&self) -> bool {
         self.channel.as_ref().is_some_and(Channel::connected)
@@ -3193,6 +3199,7 @@ pub fn installed_skin_named(meter: Option<&str>) -> SkinDesc {
         skin.meter = meter_spec(&meters, &skin.name);
         skin.folder_layers = meter_folder_layers(&meters, &skin.name);
         skin.fanart = meter_fanart(&meters, &skin.name);
+        skin.video = meter_video(&meters, &skin.name);
         skin.rotation = rotation_settings(&text);
         skin.vinyl = meter_vinyl(&meters, &skin.name, &skin.theme_dir, &skin.rotation);
         skin.tonearm = meter_tonearm(&meters, &skin.name, &skin.theme_dir);

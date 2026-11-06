@@ -304,6 +304,229 @@ impl Drop for Decoder {
     }
 }
 
+/// The movie's own loudness, decoded ahead of the picture by a second
+/// child (the sound track alone, mono at 8 kHz) into bins of ten
+/// milliseconds on the file's clock: what the auto-calibration correlates
+/// with the loudness the tap measures, to find the sound output's delay.
+struct Envelope {
+    child: Child,
+    bins: Arc<Mutex<VecDeque<(f64, f32)>>>,
+    stop: Arc<AtomicBool>,
+    thread: Option<JoinHandle<()>>,
+}
+
+/// Bins kept: thirty seconds.
+const ENVELOPE_BINS: usize = 3000;
+/// One bin: ten milliseconds of sound at 8 kHz.
+const ENVELOPE_BIN: usize = 80;
+
+impl Envelope {
+    fn start(file: &str, from: f64) -> Result<Self, String> {
+        let from = from.max(0.0);
+        let at = format!("{from:.3}");
+        let child = Child::spawn(
+            DECODER,
+            &[
+                "-nostdin",
+                "-loglevel",
+                "error",
+                "-ss",
+                &at,
+                "-i",
+                file,
+                "-vn",
+                "-sn",
+                "-ac",
+                "1",
+                "-ar",
+                "8000",
+                "-f",
+                "f32le",
+                "-",
+            ],
+        )?;
+        let bins = Arc::new(Mutex::new(VecDeque::with_capacity(ENVELOPE_BINS)));
+        let stop = Arc::new(AtomicBool::new(false));
+        let mut out = child.out.try_clone().map_err(|e| e.to_string())?;
+        let thread = {
+            let (bins, stop) = (bins.clone(), stop.clone());
+            thread::Builder::new()
+                .name("video-envelope".into())
+                .spawn(move || {
+                    let mut raw = [0u8; ENVELOPE_BIN * 4];
+                    let mut index = 0u64;
+                    while !stop.load(Ordering::Acquire) {
+                        // The ring full: the child waits on the pipe meanwhile.
+                        if bins.lock().unwrap_or_else(|e| e.into_inner()).len() >= ENVELOPE_BINS {
+                            thread::sleep(Duration::from_millis(50));
+                            continue;
+                        }
+                        if out.read_exact(&mut raw).is_err() {
+                            break;
+                        }
+                        let mut sum = 0f32;
+                        for chunk in raw.as_chunks::<4>().0 {
+                            let v = f32::from_le_bytes(*chunk);
+                            sum += v * v;
+                        }
+                        let rms = (sum / ENVELOPE_BIN as f32).sqrt();
+                        let t = from + index as f64 * ENVELOPE_BIN as f64 / 8000.0;
+                        index += 1;
+                        bins.lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .push_back((t, rms));
+                    }
+                })
+                .map_err(|e| e.to_string())?
+        };
+        Ok(Self {
+            child,
+            bins,
+            stop,
+            thread: Some(thread),
+        })
+    }
+
+    /// The envelope between two times in the file, as bins of ten
+    /// milliseconds, where the ring holds it; the oldest bins are let go
+    /// once a window has passed.
+    fn window(&self, from: f64, to: f64) -> Vec<(f64, f32)> {
+        let mut bins = self.bins.lock().unwrap_or_else(|e| e.into_inner());
+        while bins.len() > ENVELOPE_BINS / 2 && bins.front().is_some_and(|b| b.0 < from - 2.0) {
+            bins.pop_front();
+        }
+        bins.iter()
+            .filter(|b| b.0 >= from && b.0 <= to)
+            .copied()
+            .collect()
+    }
+}
+
+impl Drop for Envelope {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        self.child.end();
+        if let Some(thread) = self.thread.take() {
+            let _ = thread.join();
+        }
+    }
+}
+
+/// The sound output's delay found by correlation: the loudness the tap
+/// measured, placed by mpd's position at each measure, against the file's
+/// own loudness at every lag from fifty milliseconds to a second and a
+/// half; the lag whose correlation stands highest, when it stands clear of
+/// the rest and high enough to mean anything. What is correlated is each
+/// side's onsets, the rises of loudness, since a rise is where a sound
+/// begins on both sides alike, while the tap's meter falls slowly and
+/// would drag the lag late if its whole shape were matched.
+pub fn correlate_delay(heard: &[(f64, f32)], file: &[(f64, f32)]) -> Option<(u32, f32)> {
+    if heard.len() < 300 || file.len() < 300 {
+        return None;
+    }
+    // Both as ten-millisecond bins on the file's clock, smoothed over fifty.
+    let bin = |t: f64| (t * 100.0).round() as i64;
+    let mut heard_bins: std::collections::BTreeMap<i64, (f32, u32)> = Default::default();
+    for &(t, v) in heard {
+        let e = heard_bins.entry(bin(t)).or_insert((0.0, 0));
+        e.0 += v;
+        e.1 += 1;
+    }
+    let first = *heard_bins.keys().next()?;
+    let last = *heard_bins.keys().next_back()?;
+    let span = (last - first + 1) as usize;
+    if span < 300 {
+        return None;
+    }
+    let mut h = vec![f32::NAN; span];
+    for (k, (sum, n)) in &heard_bins {
+        h[(k - first) as usize] = sum / *n as f32;
+    }
+    // Gaps between frames filled from the neighbour before.
+    for i in 1..span {
+        if h[i].is_nan() {
+            h[i] = h[i - 1];
+        }
+    }
+    if h[0].is_nan() {
+        return None;
+    }
+    let file_first = bin(file[0].0);
+    let mut f = vec![0f32; (bin(file[file.len() - 1].0) - file_first + 1) as usize];
+    for &(t, v) in file {
+        let i = (bin(t) - file_first) as usize;
+        if i < f.len() {
+            f[i] = v;
+        }
+    }
+    let smooth = |x: &[f32]| -> Vec<f32> {
+        let w = 5usize;
+        (0..x.len())
+            .map(|i| {
+                let lo = i.saturating_sub(w / 2);
+                let hi = (i + w / 2 + 1).min(x.len());
+                x[lo..hi].iter().sum::<f32>() / (hi - lo) as f32
+            })
+            .collect()
+    };
+    let onsets = |x: &[f32]| -> Vec<f32> {
+        let mut out = vec![0f32; x.len()];
+        for i in 1..x.len() {
+            out[i] = (x[i] - x[i - 1]).max(0.0);
+        }
+        out
+    };
+    let h = onsets(&smooth(&h));
+    let f = onsets(&smooth(&f));
+    let pearson = |lag: i64| -> Option<f32> {
+        let mut xs = Vec::with_capacity(span);
+        let mut ys = Vec::with_capacity(span);
+        for (i, hv) in h.iter().enumerate() {
+            let fi = first + i as i64 - lag - file_first;
+            if fi < 0 || fi as usize >= f.len() {
+                continue;
+            }
+            xs.push(*hv);
+            ys.push(f[fi as usize]);
+        }
+        if xs.len() < 200 {
+            return None;
+        }
+        let n = xs.len() as f32;
+        let (mx, my) = (xs.iter().sum::<f32>() / n, ys.iter().sum::<f32>() / n);
+        let (mut sxy, mut sxx, mut syy) = (0f32, 0f32, 0f32);
+        for (x, y) in xs.iter().zip(ys.iter()) {
+            let (dx, dy) = (x - mx, y - my);
+            sxy += dx * dy;
+            sxx += dx * dx;
+            syy += dy * dy;
+        }
+        if sxx <= 0.0 || syy <= 0.0 {
+            return None;
+        }
+        Some(sxy / (sxx * syy).sqrt())
+    };
+    let mut scores: Vec<(i64, f32)> = (5..=150)
+        .filter_map(|lag| pearson(lag).map(|c| (lag, c)))
+        .collect();
+    if scores.is_empty() {
+        return None;
+    }
+    scores.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+    let (best_lag, best) = scores[0];
+    // Clear of the rest: the best outside a hundred milliseconds of the
+    // peak stands well below it.
+    let rival = scores
+        .iter()
+        .filter(|(lag, _)| (lag - best_lag).abs() > 10)
+        .map(|(_, c)| *c)
+        .fold(f32::MIN, f32::max);
+    if best < 0.45 || best - rival < 0.08 {
+        return None;
+    }
+    Some((best_lag as u32 * 10, best))
+}
+
 /// What mpd said of itself at one read.
 #[derive(Clone, Debug, Default)]
 struct Status {
@@ -438,36 +661,134 @@ pub struct Video {
     file: String,
     probe: Probe,
     decoder: Option<Decoder>,
+    envelope: Option<Envelope>,
     clock: Clock,
     /// The frame shown, kept until the next.
     shown: Option<Decoded>,
     /// Frames taken from the decoder and not yet due.
     waiting: VecDeque<Decoded>,
-    /// Where the picture stands against mpd's position, in seconds: the
-    /// screen's lead ahead, less the sound output's delay behind (mpd's
-    /// position runs ahead of the sound at the DAC by its buffers, about
-    /// half a second on a player; the sync harness measures it).
-    ahead: f64,
+    /// The screen's lead, in seconds: the picture that far ahead of the
+    /// sound, as the meters are, for a screen whose own processing runs
+    /// behind the sound.
+    lead: f64,
+    /// The sound output's delay, in seconds: mpd's position runs ahead of
+    /// the sound at the DAC by its buffers, about half a second on a
+    /// player. The measured default until the correlation finds it.
+    delay: f64,
+    /// Whether the delay was found by correlation, and how well it stood.
+    measured: Option<f32>,
+    /// The loudness the tap measured, placed by mpd's position at each
+    /// measure, for the correlation.
+    heard: VecDeque<(f64, f32)>,
+    last_position: Option<f64>,
+    calibrated_at: Option<Instant>,
+    /// What was last reported to the player, so the line goes once per change.
+    reported: String,
     /// The sync harness: a line per frame when `GLASS_SYNC_LOG` names a file.
     log: Option<File>,
     started: Instant,
 }
 
+/// The sound output's delay on a player as measured on a Raspberry Pi 5
+/// with mpd's buffers as the image sets them: the start until the
+/// correlation finds the player's own.
+pub const DEFAULT_DELAY_MS: u32 = 530;
+/// How often the delay is looked for again.
+const CALIBRATE_EVERY: Duration = Duration::from_secs(4);
+/// The window the correlation looks over, in seconds of the file.
+const CALIBRATE_WINDOW: f64 = 12.0;
+
 impl Video {
     /// For `file`, which the prober says carries video; `lead_ms` as the
-    /// meters' lead, `delay_ms` the sound output's delay the harness found.
+    /// meters' lead, `delay_ms` the sound output's delay to start from
+    /// (the measured default, or the last one found on this player).
     pub fn open(file: &str, probe: Probe, lead_ms: u32, delay_ms: u32) -> Self {
         let log = std::env::var_os("GLASS_SYNC_LOG").and_then(|p| File::create(p).ok());
         Self {
             file: file.to_string(),
             probe,
             decoder: None,
+            envelope: None,
             clock: Clock::start(),
             shown: None,
             waiting: VecDeque::new(),
-            ahead: (lead_ms as f64 - delay_ms as f64) / 1000.0,
+            lead: lead_ms as f64 / 1000.0,
+            delay: delay_ms as f64 / 1000.0,
+            measured: None,
+            heard: VecDeque::with_capacity(4000),
+            last_position: None,
+            calibrated_at: None,
+            reported: String::new(),
             log,
             started: Instant::now(),
+        }
+    }
+
+    /// The sound output's delay in force, in milliseconds, and whether it
+    /// was measured on this file (with the correlation it stood at).
+    pub fn delay(&self) -> (u32, Option<f32>) {
+        ((self.delay * 1000.0).round() as u32, self.measured)
+    }
+
+    /// What the display does with the picture, for the player: the file,
+    /// its shape, the delay and whether it was measured; sent once per
+    /// change through `report`.
+    pub fn report(&mut self, state: &str) -> Option<serde_json::Value> {
+        let (delay, measured) = self.delay();
+        let value = serde_json::json!({
+            "file": self.file,
+            "width": self.probe.width,
+            "height": self.probe.height,
+            "fps": (self.probe.fps * 1000.0).round() / 1000.0,
+            "state": state,
+            "delay": delay,
+            "measured": measured.map(|c| (c * 100.0).round() / 100.0),
+        });
+        let text = value.to_string();
+        if text == self.reported {
+            return None;
+        }
+        self.reported = text;
+        Some(value)
+    }
+
+    /// The correlation run, when enough has been heard since the last.
+    fn calibrate(&mut self, now: Instant, position: f64) {
+        if self
+            .calibrated_at
+            .is_some_and(|at| now.duration_since(at) < CALIBRATE_EVERY)
+        {
+            return;
+        }
+        self.calibrated_at = Some(now);
+        let Some(envelope) = self.envelope.as_ref() else {
+            return;
+        };
+        let from = position - CALIBRATE_WINDOW;
+        let heard: Vec<(f64, f32)> = self
+            .heard
+            .iter()
+            .filter(|(p, _)| *p >= from)
+            .copied()
+            .collect();
+        let file = envelope.window(from - 1.6, position);
+        if let Some((ms, corr)) = correlate_delay(&heard, &file) {
+            let found = ms as f64 / 1000.0;
+            // Eased in, so one window's reading does not jolt the picture.
+            let next = match self.measured {
+                Some(_) => self.delay * 0.5 + found * 0.5,
+                None => found,
+            };
+            if (next - self.delay).abs() >= 0.015 {
+                logline::say!(
+                    Info,
+                    "video",
+                    "the sound output's delay measured at {} ms (correlation {corr:.2})",
+                    (next * 1000.0).round() as u32
+                );
+            }
+            self.delay = next;
+            self.measured = Some(corr);
         }
     }
 
@@ -481,10 +802,18 @@ impl Video {
 
     fn restart(&mut self, at: f64) {
         self.waiting.clear();
+        self.heard.clear();
         self.decoder = None;
+        self.envelope = None;
         match Decoder::start(&self.file, &self.probe, at) {
             Ok(decoder) => self.decoder = Some(decoder),
             Err(e) => logline::say!(Warn, "video", "the decoder did not start: {e}"),
+        }
+        // The sound's envelope from a second and a half before, so the
+        // correlation has the file's side at every lag it tries.
+        match Envelope::start(&self.file, at - self.delay - 1.6) {
+            Ok(envelope) => self.envelope = Some(envelope),
+            Err(e) => logline::say!(Verbose, "video", "no envelope, the delay stays as set: {e}"),
         }
     }
 
@@ -501,11 +830,22 @@ impl Video {
         let Some(position) = self.clock.position(now) else {
             // Stopped, or the clock silent: the picture is let go.
             self.decoder = None;
+            self.envelope = None;
             self.waiting.clear();
+            self.heard.clear();
             self.shown = None;
             return false;
         };
-        let target = position + self.ahead;
+        // The sound heard now, placed by the position, while it moves.
+        if self.last_position.is_none_or(|p| position > p) {
+            self.heard.push_back((position, level));
+            if self.heard.len() > 4000 {
+                self.heard.pop_front();
+            }
+            self.calibrate(now, position);
+        }
+        self.last_position = Some(position);
+        let target = position + self.lead - self.delay;
         if self.decoder.is_none() {
             self.restart(target);
         }
@@ -647,6 +987,36 @@ mod tests {
             ..Default::default()
         });
         assert_eq!(clock.position(t0), None);
+    }
+
+    /// The file's loudness: bursts at every whole second; the tap heard
+    /// the same bursts 530 ms later by mpd's position, through a meter's
+    /// slow fall: the correlation names the lag within a bin or two.
+    #[test]
+    fn the_correlation_finds_the_output_delay() {
+        let file: Vec<(f64, f32)> = (0..2500)
+            .map(|i| {
+                let t = 10.0 + i as f64 * 0.01;
+                let in_burst = (t.fract() * 100.0) < 5.0;
+                (t, if in_burst { 0.8 } else { 0.02 })
+            })
+            .collect();
+        let mut level = 0.0f32;
+        let heard: Vec<(f64, f32)> = (0..900)
+            .map(|i| {
+                let position = 14.0 + i as f64 * 0.0333;
+                let t = position - 0.53;
+                let in_burst = (t.fract() * 100.0) < 5.0;
+                level = if in_burst { 80.0 } else { level * 0.9 };
+                (position, level)
+            })
+            .collect();
+        let (ms, corr) = correlate_delay(&heard, &file).expect("a delay found");
+        assert!((500..=560).contains(&ms), "{ms} ms at {corr}");
+        assert!(corr > 0.45);
+        // A flat sound says nothing.
+        let flat: Vec<(f64, f32)> = heard.iter().map(|(p, _)| (*p, 10.0)).collect();
+        assert_eq!(correlate_delay(&flat, &file), None);
     }
 
     #[test]

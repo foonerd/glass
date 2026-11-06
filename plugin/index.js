@@ -94,6 +94,7 @@ function Channel(logger, onAttach, onCommand) {
     // The panel's power as the player's own display last reported it, and
     // who hears of a report.
     this.screenReport = null;
+    this.movieReport = null;
     this.onScreen = null;
     this.logger = logger;
     this.onAttach = onAttach;
@@ -184,6 +185,20 @@ Channel.prototype.attach = function (conn) {
                 // The player's own display says what the panel's power is.
                 self.screenReport = screenpower.report(message);
                 if (self.onScreen) { self.onScreen(self.screenReport); }
+            } else if (message && message.kind === 'movie' && !conn.remote) {
+                // The player's own display says what it does with the picture
+                // of the video file the player plays.
+                self.movieReport = {
+                    file: String(message.file || '').slice(0, 512),
+                    width: parseInt(message.width, 10) || 0,
+                    height: parseInt(message.height, 10) || 0,
+                    fps: parseFloat(message.fps) || 0,
+                    state: String(message.state || '').slice(0, 32),
+                    delay: parseInt(message.delay, 10) || 0,
+                    measured: message.measured === null || message.measured === undefined ? null : parseFloat(message.measured),
+                    at: Date.now()
+                };
+                if (self.onPush) { self.onPush({ kind: 'movie' }); }
             } else if (message && (message.kind === 'screen' || message.kind === 'showing') && conn.remote) {
                 // A remote's display says the same of its own screen and
                 // its own meter: not the player's to keep, and no problem.
@@ -864,6 +879,7 @@ Glass.prototype.applyPerformanceProfile = function (name) {
     self.loadConfigs();
     if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return { error: 'GLASS.NO_PEPPYCONFIG' }; }
     self.config.set('perfProfile', chosen);
+    self.syncMovieKey();
     if (chosen === 'custom') { return Object.assign({ changed: false }, self.performanceInfo()); }
     var info = self.performanceInfo();
     var target = chosen === 'auto' ? info.auto : chosen;
@@ -915,6 +931,7 @@ Glass.prototype.onVolumioStart = function () {
         managerHost: ['string', ''],
         language: ['string', ''],
         themeTagHold: ['boolean', false],
+        moviePicture: ['boolean', false],
         remotesEnabled: ['boolean', false],
         remoteFramesPort: ['number', 5580],
         remoteChannelPort: ['number', 5581],
@@ -1206,6 +1223,79 @@ Glass.prototype.themeRuleFact = function () {
 // theme under review (Do not switch themes by edition tag).
 Glass.prototype.themeTagHold = function () {
     try { return this.config.get('themeTagHold') === true; } catch (e) { return false; }
+};
+
+// The picture of a video file the player plays, shown by the display
+// where the theme gives it a box (video.*): the user's switch, off
+// unless set; held off by the Light and Minimal performance profiles,
+// whose boards cannot decode a movie beside the meters.
+Glass.prototype.movieWanted = function () {
+    try { return this.config.get('moviePicture') === true; } catch (e) { return false; }
+};
+Glass.prototype.movieAllowed = function () {
+    var self = this;
+    try {
+        var info = self.performanceInfo();
+        var effective = info.profile === 'auto' ? info.auto : info.profile;
+        return ['light', 'minimal'].indexOf(String(effective)) === -1;
+    } catch (e) { return true; }
+};
+// The decoder the display calls by name: the image's own ffmpeg and
+// ffprobe until the evovpeg component ships.
+Glass.prototype.movieDecoder = function () {
+    var found = ['/usr/bin/ffmpeg', '/usr/local/bin/ffmpeg'].some(function (p) { return fs.existsSync(p); })
+        && ['/usr/bin/ffprobe', '/usr/local/bin/ffprobe'].some(function (p) { return fs.existsSync(p); });
+    return { available: found, name: 'ffmpeg' };
+};
+// Whether the meter on show gives the picture a box: `video.pos` and
+// `video.dimension` in its section of the theme's meters.txt.
+Glass.prototype.movieBoxOnShow = function () {
+    var self = this;
+    try {
+        var folder = self.activeTheme();
+        var meter = self.channel && self.channel.showing ? self.channel.showing.meter : '';
+        if (!folder || !meter) { return null; }
+        var text = fs.readFileSync(base_folder_P + folder + '/meters.txt', 'utf-8');
+        var start = text.indexOf('[' + meter + ']');
+        if (start === -1) { return null; }
+        var rest = text.slice(start + meter.length + 2);
+        var end = rest.search(/\n\s*\[/);
+        var section = end === -1 ? rest : rest.slice(0, end);
+        var pos = /^\s*video\.pos\s*=\s*(\d+)\s*,\s*(\d+)/m.exec(section);
+        var dim = /^\s*video\.dimension\s*=\s*(\d+)\s*,\s*(\d+)/m.exec(section);
+        if (!pos || !dim) { return false; }
+        return { x: parseInt(pos[1], 10), y: parseInt(pos[2], 10), w: parseInt(dim[1], 10), h: parseInt(dim[2], 10) };
+    } catch (e) { return null; }
+};
+// `screen.movie` in the meter configuration as the switch and the profile
+// say; the display starts again with it when it changed.
+Glass.prototype.syncMovieKey = function () {
+    var self = this;
+    self.loadConfigs();
+    if (!meterConfig || !fs.existsSync(MeterConfigFile)) { return false; }
+    var wanted = (self.movieWanted() && self.movieAllowed()) ? 'True' : 'False';
+    if (String(meterConfig.current['screen.movie'] || 'False') === wanted) { return false; }
+    meterConfig.current['screen.movie'] = wanted;
+    fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+    try { self.updateConfigVersion(); } catch (e) {}
+    if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+    uiNeedsUpdate = true;
+    self.updateUIConfig();
+    return true;
+};
+// What the display does with the picture, as the Status tab and Find a
+// problem say it: the switch, the profile's word, the decoder, the box the
+// meter on show gives, and the display's own report.
+Glass.prototype.movieFact = function () {
+    var self = this;
+    var decoder = self.movieDecoder();
+    return {
+        on: self.movieWanted(),
+        allowed: self.movieAllowed(),
+        decoder: decoder.available,
+        box: self.movieBoxOnShow(),
+        report: (self.channel && self.channel.movieReport) || null
+    };
 };
 
 // A source sent names with web markup, cleared before they were shown:
@@ -3800,6 +3890,7 @@ Glass.prototype.getUIConfig = function () {
             minmax[0] = [C('timeout').attributes[2].min, C('timeout').attributes[3].max, C('timeout').attributes[0].placeholder];
             C('positionFit').value = String(meterConfig.current['position.fit']).toLowerCase() === 'true' || meterConfig.current['position.type'] == 'fit';
             C('screenBackdrop').value = String(meterConfig.current['screen.backdrop']).toLowerCase() === 'blur';
+            C('screenMovie').value = self.movieWanted();
             if (meterConfig.current['position.type'] == 'center' || meterConfig.current['position.type'] == 'fit') {
                 C('positionType').value.value = 0;
                 C('positionType').value.label = 'centered';
@@ -4032,6 +4123,10 @@ Glass.prototype.saveDisplayConf = function (confData) {
         noChanges = false;
     }
     var pos_fit = use_SDL2 && (confData.positionFit === true || confData.positionFit === 'true') ? 'True' : 'False';
+    if (confData.screenMovie !== undefined) {
+        var movieWish = confData.screenMovie === true || confData.screenMovie === 'true';
+        if (self.movieWanted() !== movieWish) { self.config.set('moviePicture', movieWish); }
+    }
     // The share of the theme's size and where it sits: a page that does not
     // send them leaves them as they stand; a share below 100 turns fit off.
     if (confData.positionScale !== undefined) {
@@ -4144,6 +4239,8 @@ Glass.prototype.saveDisplayConf = function (confData) {
         // Restart meter to apply new settings
         if (fs.existsSync(runFlag)){fs.removeSync(runFlag);}
     }
+    // The movie switch: the key written as the switch and the profile say.
+    if (self.syncMovieKey()) { noChanges = false; }
   } else {
       self.commandRouter.pushToastMessage('error', self.commandRouter.getI18nString('GLASS.PLUGIN_NAME'), self.commandRouter.getI18nString('GLASS.NO_PEPPYCONFIG'));
   }
@@ -6827,6 +6924,8 @@ Glass.prototype.displayPlacement = function () {
         fit: (String(cur['position.fit']).toLowerCase() === 'true' || type === 'fit') && scale >= 100,
         backdrop: String(cur['screen.backdrop']).toLowerCase() === 'blur',
         lead: leadMs(cur),
+        movie: self.movieWanted(),
+        movieAllowed: self.movieAllowed(),
         position: type === 'center' || type === 'fit' ? 'center' : 'manual',
         x: parseInt(cur['position.x'], 10) || 0,
         y: parseInt(cur['position.y'], 10) || 0,
@@ -6849,6 +6948,10 @@ Glass.prototype.setDisplayPlacement = function (data) {
     var now = self.displayPlacement();
     var fit = data.fit === undefined ? now.fit : (data.fit === true || data.fit === 'true');
     var backdrop = data.backdrop === undefined ? now.backdrop : (data.backdrop === true || data.backdrop === 'true');
+    if (data.movie !== undefined) {
+        var movie = data.movie === true || data.movie === 'true';
+        if (self.movieWanted() !== movie) { self.config.set('moviePicture', movie); }
+    }
     var position = data.position === undefined ? now.position : String(data.position);
     if (['center', 'manual'].indexOf(position) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }
     // Meters ahead of the sound: absent keeps the setting, empty or null is 0, else 0 to 200 milliseconds.
@@ -6890,6 +6993,7 @@ Glass.prototype.setDisplayPlacement = function (data) {
         // The lead reaches the tap through the demand, without a restart of anything.
         self.writeSpectrumDemand();
     }
+    if (self.syncMovieKey()) { changed = true; }
     return { ok: true, changed: changed };
 };
 
@@ -7281,7 +7385,8 @@ Glass.prototype.statusInfo = function () {
         performance: self.performanceInfo(),
         legacy: self.legacyEnabled(),
         language: self.managerLanguage(),
-        languageSet: self.languageSet() !== ''
+        languageSet: self.languageSet() !== '',
+        movie: self.movieFact()
     };
 };
 

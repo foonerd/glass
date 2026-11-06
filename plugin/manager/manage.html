@@ -1411,6 +1411,10 @@
             <input type="number" id="disp-lead" min="0" max="200" placeholder="0">
             <div class="help" id="disp-lead-help"></div>
           </div>
+          <div class="full">
+            <label class="switch"><input type="checkbox" id="disp-movie"><span id="disp-movie-label"></span></label>
+            <div class="help" id="disp-movie-help"></div>
+          </div>
           <div>
             <label id="disp-margin-label"></label>
             <input type="number" id="disp-margin" min="0" max="25" placeholder="0">
@@ -2172,6 +2176,8 @@
         $('disp-fit-label').textContent = t('MANAGER_DISPLAY_FIT');
         $('disp-lead-label').textContent = t('MANAGER_DISPLAY_LEAD');
         $('disp-lead-help').textContent = t('MANAGER_DISPLAY_LEAD_HELP');
+        $('disp-movie-label').textContent = t('MANAGER_DISPLAY_MOVIE');
+        $('disp-movie-help').textContent = t('MANAGER_DISPLAY_MOVIE_HELP');
         $('disp-backdrop-label').textContent = t('MANAGER_DISPLAY_BACKDROP');
         $('screen-power-off').textContent = t('MANAGER_SCREEN_POWER_SWITCH_OFF');
         $('btn-screen-picture').textContent = t('MANAGER_SCREEN_PICTURE');
@@ -2993,6 +2999,8 @@
           $('disp-y').value = d.y;
           $('disp-scale').value = d.scale || '';
           $('disp-lead').value = d.lead || '';
+          $('disp-movie').checked = !!d.movie;
+          $('disp-movie-help').textContent = t('MANAGER_DISPLAY_MOVIE_HELP') + (d.movie && d.movieAllowed === false ? ' ' + t('MANAGER_DISPLAY_MOVIE_HELD') : '');
           var m = d.margin || { top: 0, right: 0, bottom: 0, left: 0 };
           var equal = m.top === m.right && m.right === m.bottom && m.bottom === m.left;
           $('disp-margin-each').checked = !equal;
@@ -3006,7 +3014,7 @@
         var pct = function (id) { var v = parseInt($(id).value, 10); return v > 0 ? Math.min(v, 25) : 0; };
         var margin = $('disp-margin-each').checked ? { top: pct('disp-margin-top'), right: pct('disp-margin-right'), bottom: pct('disp-margin-bottom'), left: pct('disp-margin-left') } : (function () { var a = pct('disp-margin'); return { top: a, right: a, bottom: a, left: a }; })();
         var scale = parseInt($('disp-scale').value, 10);
-        var body = { fit: $('disp-fit').checked, backdrop: $('disp-backdrop').checked, lead: $('disp-lead').value === '' ? 0 : parseInt($('disp-lead').value, 10), position: pos === 'manual' ? 'manual' : 'center', place: pos === 'manual' ? undefined : pos, scale: scale > 0 && scale < 100 ? scale : null, margin: margin, x: parseInt($('disp-x').value, 10) || 0, y: parseInt($('disp-y').value, 10) || 0 };
+        var body = { fit: $('disp-fit').checked, backdrop: $('disp-backdrop').checked, movie: $('disp-movie').checked, lead: $('disp-lead').value === '' ? 0 : parseInt($('disp-lead').value, 10), position: pos === 'manual' ? 'manual' : 'center', place: pos === 'manual' ? undefined : pos, scale: scale > 0 && scale < 100 ? scale : null, margin: margin, x: parseInt($('disp-x').value, 10) || 0, y: parseInt($('disp-y').value, 10) || 0 };
         api('POST', '/api/display', body).then(function () { toast(t('MANAGER_SAVED')); loadDisplay(); }).catch(function (e) { toast(errorText(e), 'error'); });
       };
       function loadArtwork() {
@@ -3112,6 +3120,25 @@
           api('POST', '/api/legacy/wipe').then(function () { toast(t('MANAGER_LEGACY_DONE')); loadLegacy(); }).catch(function (e) { toast(errorText(e), 'error'); });
         });
       };
+      // The movie's picture, in words: the switch, the profile's hold, the
+      // decoder, the meter's box, and what the display reports.
+      function movieWords(m) {
+        if (!m) return '-';
+        if (!m.on) return t('MANAGER_ST_MOVIE_OFF');
+        if (m.allowed === false) return t('MANAGER_ST_MOVIE_HELD');
+        if (m.decoder === false) return t('MANAGER_ST_MOVIE_NO_DECODER');
+        var parts = [];
+        if (m.box === false) parts.push(t('MANAGER_ST_MOVIE_NO_BOX'));
+        else if (m.box) parts.push(t('MANAGER_ST_MOVIE_BOX').replace('{w}', m.box.w).replace('{h}', m.box.h).replace('{x}', m.box.x).replace('{y}', m.box.y));
+        var r = m.report;
+        if (r && r.at && Date.now() - r.at < 120000) {
+          parts.push((r.state === 'showing' ? t('MANAGER_ST_MOVIE_SHOWING') : t('MANAGER_ST_MOVIE_WAITING')).replace('{w}', r.width).replace('{h}', r.height).replace('{fps}', Math.round(r.fps)));
+          parts.push((r.measured !== null && r.measured !== undefined ? t('MANAGER_ST_MOVIE_DELAY_MEASURED') : t('MANAGER_ST_MOVIE_DELAY_ASSUMED')).replace('{ms}', r.delay));
+        } else {
+          parts.push(t('MANAGER_ST_MOVIE_ON'));
+        }
+        return parts.join(' · ');
+      }
       function loadStatus() {
         // The screen's facts cost a probe of the player, so they are read only
         // for the sheet on show; the sheet stands without them if they fail.
@@ -3150,6 +3177,7 @@
             ]],
             ['MANAGER_ST_SECTION_SCREEN', [
               ['MANAGER_ST_DISPLAY', s.headless ? t('DISPLAY_OUTPUT_NONE') : (s.running ? t('MANAGER_ST_RUNNING') : t('MANAGER_ST_IDLE') + noThemeText(s.themeMissing)) + ' · DISPLAY=:' + s.display + ' · ' + t('MANAGER_ST_TIMEOUT') + ' ' + s.timeout + ' s' + (s.running && s.showing && s.showing.rate && s.performance && s.showing.rate < s.performance.values.frameRate ? ' · ' + t('MANAGER_ST_GOVERNED') + ' ' + s.showing.rate + ' fps' : '')],
+              ['MANAGER_ST_MOVIE', movieWords(s.movie)],
               ['MANAGER_ST_SCREEN', !screen ? '-' : (screen.size ? t('MANAGER_ST_SCREEN_SIZE') + ' ' + screen.size : t('MANAGER_ST_NO_SCREEN')) + (s.lead > 0 ? ' · ' + t('MANAGER_ST_LEAD').replace('{ms}', s.lead) : '') + (s.themeSize ? ' · ' + t('MANAGER_ST_THEME_SIZE') + ' ' + s.themeSize : '') + ' · ' + (screen.mouse ? t('MANAGER_ST_MOUSE_ON') : t('MANAGER_ST_MOUSE_OFF')) + (s.running && screen.since ? ' · ' + t('MANAGER_ST_SINCE') + ' ' + fmtDate(screen.since) : '')],
             ].concat(sc ? screenRows(sc) : [], [
               ['MANAGER_TOUCH_TITLE', !s.interactive ? '-' : t('INTERACTIVE_' + String(s.interactive).toUpperCase())],

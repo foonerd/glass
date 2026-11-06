@@ -485,6 +485,22 @@ impl Channel {
         self.send_line(&line)
     }
 
+    /// The player's own display says what it does with the picture of the
+    /// video file the player plays: `value` as the display composed it
+    /// (the file, its size and rate, the state in words, the output's
+    /// delay as measured), for the Manager's Status row and Find a problem.
+    pub fn report_movie(&mut self, value: &Value) -> bool {
+        let mut line = serde_json::json!({ "kind": "movie" });
+        if let (Some(line), Some(value)) = (line.as_object_mut(), value.as_object()) {
+            for (k, v) in value {
+                line.insert(k.clone(), v.clone());
+            }
+        }
+        let mut line = line.to_string();
+        line.push('\n');
+        self.send_line(&line)
+    }
+
     fn send_line(&mut self, line: &str) -> bool {
         let Some(stream) = self.stream.as_mut() else {
             return false;

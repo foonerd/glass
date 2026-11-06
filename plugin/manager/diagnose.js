@@ -9,7 +9,7 @@
 // and found right), the string that says it with the values to fill in,
 // and the Manager's tab where it is set, when there is one.
 
-const SYMPTOMS = ['no-meters', 'not-moving', 'restarts', 'touch', 'screen', 'artwork', 'remotes', 'face', 'look', 'forecast', 'browse', 'play-here', 'slow', 'other'];
+const SYMPTOMS = ['no-meters', 'not-moving', 'restarts', 'touch', 'screen', 'artwork', 'remotes', 'face', 'look', 'forecast', 'browse', 'play-here', 'movie', 'slow', 'other'];
 const graphicsFault = require('./graphics').fault;
 
 // A size as the sheet writes it, `1280x720`, as numbers; null for anything else.
@@ -651,6 +651,26 @@ const CHECKS = [
       const a = f.assured;
       if (!a || !a.count) return null;
       return note('assured', 'DIAG_ASSURED', { count: a.count, fields: (a.fields || []).join(', ') || '-', from: (a.from || []).join(', ') || '-' });
+    }
+  },
+  {
+    // The picture of a video file the player plays: the switch, the
+    // performance profile's hold, the decoder on the image, the box the
+    // meter on show gives, and the display's own word.
+    id: 'movie', symptoms: ['movie'],
+    run(f) {
+      const m = f.status.movie;
+      if (!m) return null;
+      if (!m.on) return cause('movie', 'DIAG_MOVIE_OFF', {}, 'appearance');
+      if (m.allowed === false) return cause('movie', 'DIAG_MOVIE_HELD', {}, 'system');
+      if (m.decoder === false) return cause('movie', 'DIAG_MOVIE_NO_DECODER', {}, null);
+      if (m.box === false) return cause('movie', 'DIAG_MOVIE_NO_BOX', {}, 'themes');
+      const r = m.report;
+      const playing = !!(f.status.channel && f.status.channel.status === 'play');
+      if (playing && (!r || !r.at || f.now - r.at > 120000)) return note('movie', 'DIAG_MOVIE_NO_VIDEO', {}, null);
+      if (r && r.state === 'showing') return ok('movie', 'DIAG_MOVIE_OK', { w: r.width, h: r.height, fps: Math.round(r.fps), delay: r.delay, how: r.measured === null || r.measured === undefined ? 'assumed' : 'measured' });
+      if (r && r.state === 'waiting') return note('movie', 'DIAG_MOVIE_WAITING', { w: r.width, h: r.height }, null);
+      return null;
     }
   },
   {

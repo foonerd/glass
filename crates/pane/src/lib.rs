@@ -286,6 +286,27 @@ pub fn placed_rect_within(
 
 /// One window. The binary keeps it for the life of the player, with one
 /// streaming texture the frames are uploaded into.
+/// How the moving picture sits in its box: kept in proportion within it,
+/// stretched to it, or covering it with its middle.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum VideoFit {
+    Fit,
+    Stretch,
+    Cover,
+}
+
+/// The theme's box for the moving picture, in the frame's own pixels, and
+/// whether it is drawn over the frame or under it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct VideoBox {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+    pub fit: VideoFit,
+    pub over: bool,
+}
+
 pub struct Surface {
     canvas: Canvas<Window>,
     creator: TextureCreator<WindowContext>,
@@ -293,12 +314,16 @@ pub struct Surface {
     /// The picture under a frame that leaves part of the window bare, the
     /// window's size; none shows the black.
     backdrop: Option<Texture>,
-    /// The size of the moving picture the backdrop texture holds, when it
-    /// is one (`set_backdrop_yuv`); none while the backdrop is a still.
-    backdrop_yuv: Option<(u32, u32)>,
+    /// The moving picture of a video file the player plays, as a YUV
+    /// texture of the picture's own size, drawn into the theme's box.
+    video: Option<Texture>,
+    video_size: Option<(u32, u32)>,
+    /// Where the theme puts the moving picture, in the frame's own pixels,
+    /// and how; none where the theme gives it no box.
+    video_box: Option<VideoBox>,
     /// A new moving picture went up since the last show: the window is
     /// presented again even when the frame over it is as it was.
-    backdrop_moved: bool,
+    video_moved: bool,
     /// Whether the frames leave pixels less than opaque: such a frame is
     /// blended over the backdrop, or over the dark colour where there is
     /// none; an opaque frame is copied.
@@ -623,8 +648,10 @@ impl Surface {
             creator,
             texture: None,
             backdrop: None,
-            backdrop_yuv: None,
-            backdrop_moved: false,
+            video: None,
+            video_size: None,
+            video_box: None,
+            video_moved: false,
             translucent: false,
             backlight: backlight::find(),
             power: Power { on: true, by: None },
@@ -724,7 +751,6 @@ impl Surface {
             // With `unsafe_textures` a texture is freed by hand.
             unsafe { old.destroy() };
         }
-        self.backdrop_yuv = None;
         let Some(picture) = picture else {
             return Ok(());
         };
@@ -745,13 +771,22 @@ impl Surface {
     /// there is none, so what the theme left uncovered or clear shows what
     /// is behind it; an opaque frame is copied, as before. It stands until
     /// the next call.
-    /// A moving picture as the backdrop: one planar YUV 4:2:0 frame of
-    /// `width` by `height` (the Y plane, then U, then V, each row packed),
-    /// uploaded to a texture the GPU converts and scales under the theme.
-    /// The texture is kept across frames of one size and made again for
-    /// another; the picture backdrop, if any, is let go. Nothing is
-    /// converted or copied on the CPU here beyond the upload itself.
-    pub fn set_backdrop_yuv(
+    /// The theme's box for the moving picture, in the frame's own pixels,
+    /// or none: the picture is then not drawn, whatever frames come.
+    pub fn set_video_box(&mut self, video_box: Option<VideoBox>) {
+        if self.video_box != video_box {
+            self.video_box = video_box;
+            self.video_moved = true;
+        }
+    }
+
+    /// One planar YUV 4:2:0 frame of the moving picture, `width` by
+    /// `height` (the Y plane, then U, then V, each row packed), uploaded
+    /// to a texture the GPU converts and scales into the theme's box. The
+    /// texture is kept across frames of one size and made again for
+    /// another. Nothing is converted or copied on the CPU here beyond the
+    /// upload itself.
+    pub fn set_video_frame(
         &mut self,
         width: u32,
         height: u32,
@@ -765,23 +800,23 @@ impl Surface {
         if planes.len() < y_len + 2 * c_len {
             return Err("a YUV frame short of its planes".to_string());
         }
-        if self.backdrop_yuv != Some((width, height)) {
-            if let Some(old) = self.backdrop.take() {
+        if self.video_size != Some((width, height)) {
+            if let Some(old) = self.video.take() {
                 unsafe { old.destroy() };
             }
             let texture = self
                 .creator
                 .create_texture_streaming(PixelFormatEnum::IYUV, width, height)
                 .map_err(|err| err.to_string())?;
-            self.backdrop = Some(texture);
-            self.backdrop_yuv = Some((width, height));
+            self.video = Some(texture);
+            self.video_size = Some((width, height));
         }
-        let Some(texture) = self.backdrop.as_mut() else {
+        let Some(texture) = self.video.as_mut() else {
             return Ok(());
         };
         let (y, rest) = planes.split_at(y_len);
         let (u, v) = rest.split_at(c_len);
-        self.backdrop_moved = true;
+        self.video_moved = true;
         texture
             .update_yuv(
                 None,
@@ -795,19 +830,87 @@ impl Surface {
             .map_err(|err| err.to_string())
     }
 
-    /// The moving picture gone: the backdrop is a still picture again, or
-    /// none, as `set_backdrop` next says.
-    pub fn clear_backdrop_yuv(&mut self) {
-        if self.backdrop_yuv.take().is_some() {
-            if let Some(old) = self.backdrop.take() {
-                unsafe { old.destroy() };
-            }
+    /// The moving picture gone: its texture freed, its box kept for the next.
+    pub fn clear_video(&mut self) {
+        if let Some(old) = self.video.take() {
+            unsafe { old.destroy() };
+        }
+        if self.video_size.take().is_some() {
+            self.video_moved = true;
         }
     }
 
-    /// Whether a moving picture is the backdrop now.
-    pub fn backdrop_is_yuv(&self) -> bool {
-        self.backdrop_yuv.is_some()
+    /// Whether a moving picture is held now.
+    pub fn has_video(&self) -> bool {
+        self.video_size.is_some()
+    }
+
+    /// The moving picture into its box: the box placed as the frame is
+    /// (its offset and scale), the picture fitted within it, stretched to
+    /// it or covering it with its middle; turned as the frame is turned.
+    fn draw_video(
+        canvas: &mut Canvas<Window>,
+        video: Option<&Texture>,
+        video_size: Option<(u32, u32)>,
+        video_box: Option<VideoBox>,
+        rotation: u32,
+        offset: (i32, i32),
+        scale: f32,
+        window: (u32, u32),
+    ) -> Result<(), String> {
+        let (Some(texture), Some((vw, vh)), Some(b)) = (video, video_size, video_box) else {
+            return Ok(());
+        };
+        let (bx, by) = (
+            offset.0 as f32 + b.x as f32 * scale,
+            offset.1 as f32 + b.y as f32 * scale,
+        );
+        let (bw, bh) = ((b.w as f32 * scale).max(1.0), (b.h as f32 * scale).max(1.0));
+        let (src, (dx, dy, dw, dh)) = match b.fit {
+            VideoFit::Stretch => (None, (bx, by, bw, bh)),
+            VideoFit::Fit => {
+                let r = (bw / vw as f32).min(bh / vh as f32);
+                let (w, h) = ((vw as f32 * r).max(1.0), (vh as f32 * r).max(1.0));
+                (None, (bx + (bw - w) / 2.0, by + (bh - h) / 2.0, w, h))
+            }
+            VideoFit::Cover => {
+                let r = (bw / vw as f32).max(bh / vh as f32);
+                // The part of the picture the box shows, in the picture's pixels.
+                let (sw, sh) = ((bw / r).min(vw as f32), (bh / r).min(vh as f32));
+                let (sx, sy) = ((vw as f32 - sw) / 2.0, (vh as f32 - sh) / 2.0);
+                (
+                    Some(sdl2::rect::Rect::new(
+                        sx.round() as i32,
+                        sy.round() as i32,
+                        sw.round().max(1.0) as u32,
+                        sh.round().max(1.0) as u32,
+                    )),
+                    (bx, by, bw, bh),
+                )
+            }
+        };
+        let (dw, dh) = (dw.round().max(1.0) as u32, dh.round().max(1.0) as u32);
+        if rotation == 0 {
+            let dest = sdl2::rect::Rect::new(dx.round() as i32, dy.round() as i32, dw, dh);
+            canvas
+                .copy(texture, src, dest)
+                .map_err(|err| err.to_string())
+        } else {
+            let centre = rotated_center(
+                (dx + dw as f32 / 2.0, dy + dh as f32 / 2.0),
+                rotation,
+                window,
+            );
+            let dest = sdl2::rect::Rect::new(
+                centre.0.round() as i32 - dw as i32 / 2,
+                centre.1.round() as i32 - dh as i32 / 2,
+                dw,
+                dh,
+            );
+            canvas
+                .copy_ex(texture, src, dest, rotation as f64, None, false, false)
+                .map_err(|err| err.to_string())
+        }
     }
 
     pub fn set_translucent(&mut self, on: bool) {
@@ -1069,8 +1172,8 @@ impl Surface {
                 .map_err(|err| err.to_string())?;
         } else {
             // The window shows this frame already; with a moving picture
-            // under it the window is presented again all the same.
-            if changed.is_empty() && !std::mem::take(&mut self.backdrop_moved) {
+            // in it the window is presented again all the same.
+            if changed.is_empty() && !std::mem::take(&mut self.video_moved) {
                 return Ok(if touched { Shown::Touched } else { Shown::Kept });
             }
             for r in changed {
@@ -1182,6 +1285,21 @@ impl Surface {
                 .map_err(|err| err.to_string())?;
         }
         let dest = sdl2::rect::Rect::new(drawn.0, drawn.1, drawn.2, drawn.3);
+        // The moving picture under the frame, where its box says so: the
+        // frame must leave the box clear for it to show.
+        let video_over = self.video_box.is_some_and(|b| b.over);
+        if !video_over {
+            Self::draw_video(
+                &mut self.canvas,
+                self.video.as_ref(),
+                self.video_size,
+                self.video_box,
+                self.rotation,
+                (x, y),
+                scale,
+                (window_w, window_h),
+            )?;
+        }
         if self.rotation == 0 {
             self.canvas
                 .copy(texture, None, dest)
@@ -1198,6 +1316,19 @@ impl Surface {
                     false,
                 )
                 .map_err(|err| err.to_string())?;
+        }
+        // Or over it, the box covered whatever the theme drew there.
+        if video_over {
+            Self::draw_video(
+                &mut self.canvas,
+                self.video.as_ref(),
+                self.video_size,
+                self.video_box,
+                self.rotation,
+                (x, y),
+                scale,
+                (window_w, window_h),
+            )?;
         }
         self.shows = self.shows.wrapping_add(1);
         if self.grab.as_ref().is_some_and(|(_, at)| self.shows >= *at) {

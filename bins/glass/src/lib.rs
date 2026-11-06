@@ -943,11 +943,13 @@ fn session(
     // The picture of a video file the player plays, under the theme: the
     // harness flag for now; the plugin's switch when it ships.
     #[cfg(all(unix, not(target_os = "android")))]
-    let movie_wanted = env::var_os("GLASS_VIDEO").is_some();
+    let movie_forced = env::var_os("GLASS_VIDEO").is_some();
     #[cfg(all(unix, not(target_os = "android")))]
     let mut movie: Option<video::Video> = None;
     #[cfg(all(unix, not(target_os = "android")))]
     let mut movie_probed: Option<String> = None;
+    #[cfg(all(unix, not(target_os = "android")))]
+    let mut movie_delay_ms: u32 = video::DEFAULT_DELAY_MS;
     // The panel's power: the player's word, the face's idle black, a touch.
     let mut screen = screen::ScreenPower::default();
     let mut wake_screen = false;
@@ -1097,6 +1099,15 @@ fn session(
             }
         }
         let input = source.poll();
+        // The picture of a video file the player plays, where the switch is
+        // on and the meter on show gives it a box.
+        #[cfg(all(unix, not(target_os = "android")))]
+        let movie_wanted = (skin.run.movie || movie_forced) && skin.video.is_some();
+        #[cfg(all(unix, not(target_os = "android")))]
+        if !movie_wanted {
+            movie = None;
+            movie_probed = None;
+        }
         #[cfg(all(unix, not(target_os = "android")))]
         if movie_wanted {
             // The file the player plays, where it is one on this machine.
@@ -1114,14 +1125,17 @@ fn session(
             {
                 movie = None;
                 movie_probed = Some(path.clone());
+                // The lead as the meters have it; the delay the last movie
+                // measured on this player, else the measured default; the
+                // harness may name either.
                 let lead_ms = env::var("GLASS_VIDEO_LEAD_MS")
                     .ok()
                     .and_then(|v| v.parse().ok())
-                    .unwrap_or(0);
+                    .unwrap_or(skin.run.lead_ms);
                 let delay_ms = env::var("GLASS_VIDEO_DELAY_MS")
                     .ok()
                     .and_then(|v| v.parse().ok())
-                    .unwrap_or(0);
+                    .unwrap_or(movie_delay_ms);
                 match video::probe(&path) {
                     Ok(Some(probe)) => {
                         logline::say!(
@@ -1518,6 +1532,21 @@ fn session(
             let movie_due = movie
                 .as_mut()
                 .is_some_and(|m| m.tick(Instant::now(), input.levels.left));
+            #[cfg(all(unix, not(target_os = "android")))]
+            if let Some(m) = movie.as_mut() {
+                let (delay, measured) = m.delay();
+                if measured.is_some() {
+                    movie_delay_ms = delay;
+                }
+                let state = if m.shown().is_some() {
+                    "showing"
+                } else {
+                    "waiting"
+                };
+                if let Some(line) = m.report(state) {
+                    source.report_movie(&line);
+                }
+            }
             if let Some(window) = surface.as_mut() {
                 if let Some(mode) = remote.as_deref().and_then(|r| r.app.take_window_request()) {
                     if let Err(err) = window.set_mode(mode) {
@@ -1556,22 +1585,33 @@ fn session(
                 // somewhere is blended over the backdrop, or the dark colour.
                 window.set_translucent(assets.translucent);
                 #[cfg(all(unix, not(target_os = "android")))]
-                match movie.as_ref() {
-                    Some(m) => {
-                        if movie_due {
-                            let (w, h) = m.size();
-                            if let Some(planes) = m.shown() {
-                                if let Err(err) = window.set_backdrop_yuv(w, h, planes) {
-                                    eprintln!("glass: video: {err}");
+                {
+                    window.set_video_box(skin.video.as_ref().map(|v| pane::VideoBox {
+                        x: v.x,
+                        y: v.y,
+                        w: v.w,
+                        h: v.h,
+                        fit: match v.scale {
+                            lead::Scale::Stretch => pane::VideoFit::Stretch,
+                            lead::Scale::Cover => pane::VideoFit::Cover,
+                            lead::Scale::Fit => pane::VideoFit::Fit,
+                        },
+                        over: v.zorder == lead::ZOrder::Overlay,
+                    }));
+                    match movie.as_ref() {
+                        Some(m) => {
+                            if movie_due {
+                                let (w, h) = m.size();
+                                if let Some(planes) = m.shown() {
+                                    if let Err(err) = window.set_video_frame(w, h, planes) {
+                                        eprintln!("glass: video: {err}");
+                                    }
                                 }
                             }
                         }
-                    }
-                    None => {
-                        if window.backdrop_is_yuv() {
-                            window.clear_backdrop_yuv();
-                            if let Err(err) = window.set_backdrop(backdrop.frame()) {
-                                eprintln!("glass: backdrop: {err}");
+                        None => {
+                            if window.has_video() {
+                                window.clear_video();
                             }
                         }
                     }
