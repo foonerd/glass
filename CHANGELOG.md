@@ -2,6 +2,17 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.27] - 2026-11-07
+
+### Changed
+
+- The Manager's settings sorted by kind, after a report on the forum that the Appearance tab mixed the theme's place with the sound's timing and the movie. The Appearance tab's Display section now holds the theme's place on the screen alone: fit, the blurred art behind, position, scale and the margins. The meters ahead of the sound have a panel of their own on the Screen tab, **The screen and the sound**, since the lead belongs to a screen whose own path to the eye runs behind the sound, whatever theme shows. A new **Video** tab between Screen and System holds everything of the picture of a video file: the switch, the decoder with its fetch and removal, and the sound output delay. Every setting keeps its key, so nothing is migrated and nothing restarts; each of the three panels saves through the one route as before.
+- Find a problem's movie causes and their words in the eleven languages send a user to the Video tab; the Troubleshooting lines and the Manager, Settings, Anymote, Remotes and Meters Reference wiki pages say the new places.
+
+### Diagnostics
+
+The movie's three Find a problem causes point at the Video tab; the sheet rows are unchanged; the Troubleshooting lines for the picture, the decoder and the meters' lead name the new tabs.
+
 ## [0.11.26] - 2026-11-07
 
 - **Every meter in a package's preview, at a switch.** Package tiles a theme's first nine meters into its preview, three across, a card for the Catalog rather than an inventory (asked on the forum, where a theme of thirty meters was expected to show them all). The Themes tab gains the switch **Every meter in a package's preview**, off by default: on, the package's preview tiles every meter, a theme of thirty meters making a picture eleven rows tall, the packaging taking the settle seconds a meter; the packager takes the count on its command line (`--tiles 9`, `--tiles all`). The Catalog's thumbnail of a contributed theme is the preview at the top of its zip, the package's own or one an author put there by hand.
