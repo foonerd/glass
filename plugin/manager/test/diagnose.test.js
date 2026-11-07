@@ -637,7 +637,7 @@ test('the movie: the switch, the profile, the decoder, the box, the display\'s w
   assert.strictEqual(d.key, 'DIAG_MOVIE_DISTRIBUTION_DECODER');
   assert.strictEqual(d.kind, 'note');
   assert.strictEqual(d.with.version, '0.1.0');
-  assert.strictEqual(d.go, 'appearance');
+  assert.strictEqual(d.go, 'video');
   f.status.channel.status = 'play';
   f.status.movie.report = null;
   assert.strictEqual(one(diagnose('movie', f), 'movie').key, 'DIAG_MOVIE_NO_VIDEO', 'playing with no word from the display: the file has no video, or the display has not opened it');

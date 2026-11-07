@@ -1279,6 +1279,7 @@
       <button class="tab" data-view="artwork"></button>
       <button class="tab" data-view="backups"></button>
       <button class="tab" data-view="screen"></button>
+      <button class="tab" data-view="video"></button>
       <button class="tab" data-view="system"></button>
       <button class="tab" data-view="remotes"></button>
       <button class="tab" data-view="status"></button>
@@ -1410,22 +1411,6 @@
           <div>
             <label id="disp-scale-label"></label>
             <input type="number" id="disp-scale" min="10" max="100" placeholder="100">
-          </div>
-          <div>
-            <label id="disp-lead-label"></label>
-            <input type="number" id="disp-lead" min="0" max="200" placeholder="0">
-            <div class="help" id="disp-lead-help"></div>
-          </div>
-          <div class="full">
-            <label class="switch"><input type="checkbox" id="disp-movie"><span id="disp-movie-label"></span></label>
-            <div class="help" id="disp-movie-help"></div>
-            <div class="help" id="disp-movie-decoder"></div>
-            <div class="row" id="disp-movie-decoder-row"><button type="button" id="btn-movie-decoder"></button><span class="help" id="disp-movie-decoder-job"></span></div>
-          </div>
-          <div>
-            <label id="disp-movie-delay-label"></label>
-            <input type="number" id="disp-movie-delay" min="0" max="2000" placeholder="0">
-            <div class="help" id="disp-movie-delay-help"></div>
           </div>
           <div>
             <label id="disp-margin-label"></label>
@@ -1593,6 +1578,20 @@
           <div class="full row screen-controls"><button class="primary" id="btn-screen-apply"></button></div>
         </div>
       </div>
+      <div class="panel" id="sync-panel">
+        <h2 id="sync-title" style="margin:0 0 10px"></h2>
+        <div class="help" id="sync-help" style="margin-bottom:10px"></div>
+        <div class="form">
+          <div>
+            <label id="disp-lead-label"></label>
+            <input type="number" id="disp-lead" min="0" max="200" placeholder="0">
+            <div class="help" id="disp-lead-help"></div>
+          </div>
+          <div class="full row">
+            <button class="primary" id="btn-sync-save"></button>
+          </div>
+        </div>
+      </div>
       <div class="panel" id="look-panel" hidden>
         <h2 id="look-title" style="margin:0 0 6px"></h2>
         <div class="help" id="look-lead"></div>
@@ -1640,6 +1639,30 @@
           <div class="full row"><button class="primary" id="btn-touch-map-apply"></button><button
               id="btn-touch-calibrate"></button></div>
           <div class="full help" id="touch-calibrate-help"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Video -->
+    <section class="view" id="view-video">
+      <div class="panel">
+        <h2 id="video-title"></h2>
+        <div class="help" id="video-help" style="margin-bottom:12px"></div>
+        <div class="form">
+          <div class="full">
+            <label class="switch"><input type="checkbox" id="disp-movie"><span id="disp-movie-label"></span></label>
+            <div class="help" id="disp-movie-help"></div>
+            <div class="help" id="disp-movie-decoder"></div>
+            <div class="row" id="disp-movie-decoder-row"><button type="button" id="btn-movie-decoder"></button><span class="help" id="disp-movie-decoder-job"></span></div>
+          </div>
+          <div>
+            <label id="disp-movie-delay-label"></label>
+            <input type="number" id="disp-movie-delay" min="0" max="2000" placeholder="0">
+            <div class="help" id="disp-movie-delay-help"></div>
+          </div>
+          <div class="full row">
+            <button class="primary" id="btn-video-save"></button>
+          </div>
         </div>
       </div>
     </section>
@@ -2103,7 +2126,7 @@
         document.title = t('MANAGER_TITLE');
         $('title').textContent = t('MANAGER_TITLE');
         $('btn-close').textContent = t('MANAGER_CLOSE');
-        var tabs = { themes: 'MANAGER_TAB_THEMES', face: 'MANAGER_TAB_FACE', catalog: 'MANAGER_TAB_CATALOG', artwork: 'MANAGER_TAB_ARTWORK', backups: 'MANAGER_TAB_BACKUPS', screen: 'MANAGER_TAB_SCREEN', system: 'MANAGER_TAB_SYSTEM', remotes: 'MANAGER_TAB_REMOTES', status: 'MANAGER_TAB_STATUS', about: 'MANAGER_TAB_ABOUT' };
+        var tabs = { themes: 'MANAGER_TAB_THEMES', face: 'MANAGER_TAB_FACE', catalog: 'MANAGER_TAB_CATALOG', artwork: 'MANAGER_TAB_ARTWORK', backups: 'MANAGER_TAB_BACKUPS', screen: 'MANAGER_TAB_SCREEN', video: 'MANAGER_TAB_VIDEO', system: 'MANAGER_TAB_SYSTEM', remotes: 'MANAGER_TAB_REMOTES', status: 'MANAGER_TAB_STATUS', about: 'MANAGER_TAB_ABOUT' };
         $('about-title').textContent = t('MANAGER_ABOUT_TITLE');
         $('about-tagline').textContent = t('MANAGER_ABOUT_TAGLINE');
         $('about-project-title').textContent = t('MANAGER_ABOUT_PROJECT');
@@ -2214,6 +2237,12 @@
         $('disp-x-label').textContent = t('MANAGER_DISPLAY_X');
         $('disp-y-label').textContent = t('MANAGER_DISPLAY_Y');
         $('btn-disp-save').textContent = t('MANAGER_SAVE');
+        $('video-title').textContent = t('MANAGER_VIDEO_TITLE');
+        $('video-help').textContent = t('MANAGER_VIDEO_DOC');
+        $('btn-video-save').textContent = t('MANAGER_SAVE');
+        $('sync-title').textContent = t('MANAGER_SYNC_TITLE');
+        $('sync-help').textContent = t('MANAGER_SYNC_DOC');
+        $('btn-sync-save').textContent = t('MANAGER_SAVE');
         $('tl-width-label').textContent = t('MANAGER_TAILOR_WIDTH');
         $('tl-height-label').textContent = t('MANAGER_TAILOR_HEIGHT');
         $('tl-stretch-label').textContent = t('MANAGER_TAILOR_STRETCH');
@@ -2301,7 +2330,8 @@
         if (name === 'backups') loadBackups();
         if (name === 'status') { loadStatus(); }
         if (name === 'system') { loadUpdate(false); loadEvo(false); if (!stableUi) stableIdle(); loadPerformance(); loadSharing(); loadTouch(); loadLogging(); loadLegacy(); }
-        if (name === 'screen') { loadScreen(); }
+        if (name === 'screen') { loadScreen(); loadDisplay(); }
+        if (name === 'video') loadDisplay();
         if (name === 'remotes') loadRemotes();
         if (window.GlassFace) { if (name === 'face') { GlassFace.show(); } else { GlassFace.hide(); } }
       }
@@ -3028,14 +3058,20 @@
           showDisplayXY(); dispFitFollowsScale(); dispMarginEach();
         }).catch(function (e) { toast(errorText(e), 'error'); });
       }
-      $('btn-disp-save').onclick = function () {
+      // The display's settings saved whole from any of the three panels
+      // that hold them: Appearance (the theme's place), Screen (the meters
+      // ahead of the sound) and Video (the movie).
+      function saveDisplay() {
         var pos = $('disp-position').value;
         var pct = function (id) { var v = parseInt($(id).value, 10); return v > 0 ? Math.min(v, 25) : 0; };
         var margin = $('disp-margin-each').checked ? { top: pct('disp-margin-top'), right: pct('disp-margin-right'), bottom: pct('disp-margin-bottom'), left: pct('disp-margin-left') } : (function () { var a = pct('disp-margin'); return { top: a, right: a, bottom: a, left: a }; })();
         var scale = parseInt($('disp-scale').value, 10);
         var body = { fit: $('disp-fit').checked, backdrop: $('disp-backdrop').checked, movie: $('disp-movie').checked, lead: $('disp-lead').value === '' ? 0 : parseInt($('disp-lead').value, 10), movieDelay: $('disp-movie-delay').value === '' ? 0 : parseInt($('disp-movie-delay').value, 10), position: pos === 'manual' ? 'manual' : 'center', place: pos === 'manual' ? undefined : pos, scale: scale > 0 && scale < 100 ? scale : null, margin: margin, x: parseInt($('disp-x').value, 10) || 0, y: parseInt($('disp-y').value, 10) || 0 };
         api('POST', '/api/display', body).then(function () { toast(t('MANAGER_SAVED')); loadDisplay(); }).catch(function (e) { toast(errorText(e), 'error'); });
-      };
+      }
+      $('btn-disp-save').onclick = saveDisplay;
+      $('btn-sync-save').onclick = saveDisplay;
+      $('btn-video-save').onclick = saveDisplay;
       // The movie's decoder: which serves, the component's state against
       // the lock, the fetch or its removal, and the job followed to its end.
       var movieDecoderTimer = null;
