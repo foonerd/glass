@@ -40,6 +40,12 @@ case "$newest" in
     ;;
 esac
 
+echo "check: every shipped template rendered headless"
+# The display just built draws every meter of every template under plugin/templates
+# from a scratch home: one picture per meter the display lists, each of the
+# template's size with something in it, and a clean exit (scripts/render-check.sh).
+bash scripts/render-check.sh target/debug/glass || { echo "check: the display did not render every shipped template" >&2; exit 1; }
+
 echo "check: browser module"
 # The face: the pipeline for a browser, linted and built for its own target.
 cargo clippy -p page -p glass-face --target wasm32-unknown-unknown --locked -- -D warnings
