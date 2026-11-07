@@ -49,10 +49,13 @@ test('with nothing backed up the folder goes whole', () => {
 test('where the user keeps the themes everything stays', () => {
   const p = player(true, true);
   const said = clear(p.data);
+  // The themes, the face themes, the backups and the ask stay; glass-evo, the
+  // catalogue's cache, the previews and the register go, so a reinstall starts fresh.
+  assert.deepEqual(fs.readdirSync(p.data).sort(), ['.preserve', 'backups', 'faces', 'templates', 'templates_spectrum']);
   assert.ok(fs.existsSync(path.join(p.data, 'templates/1280x720_amber/meters.txt')));
   assert.ok(fs.existsSync(path.join(p.data, 'backups', 'before-0.8.38', 'config.json')));
-  assert.ok(fs.existsSync(path.join(p.data, 'evo/bin')));
-  assert.match(said, /Keeping the themes and backups/);
+  assert.ok(!fs.existsSync(path.join(p.data, 'evo')), 'glass-evo goes');
+  assert.match(said, /Keeping the themes, the fonts and the backups/);
   fs.rmSync(p.dir, { recursive: true, force: true });
 });
 

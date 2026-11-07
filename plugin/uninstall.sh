@@ -2,10 +2,14 @@
 # Glass uninstaller. Themes stay when the settings asked for it; the
 # settings backups stay always.
 
-# What Glass keeps under Internal Storage, cleared: everything, where the
-# user did not ask to keep the themes, but the settings backups. They are
-# what a player is put back from after an uninstall, and a backup removed
-# with the plugin it backs up would be none.
+# What Glass keeps under Internal Storage, cleared: the settings backups
+# always (they are what a player is put back from after an uninstall, and
+# a backup removed with the plugin it backs up would be none), and where
+# the user asked to keep the themes, the themes: the meter themes, the
+# spectrum themes, the face themes, the uploaded fonts, and the ask itself.
+# Everything else goes either way: glass-evo and the decoder (fetched
+# again at a press), the catalogue's cache, the previews, the kept zips
+# and the Manager's own state, so a reinstall starts fresh.
 clear_data() {
   local dir=$1
   [ -d "$dir" ] || return 0
@@ -13,7 +17,8 @@ clear_data() {
   # Volumio removes at the same moment: a settings pair does not survive in halves.
   rm -rf "$dir/config"
   if [ -f "$dir/.preserve" ]; then
-    echo "Keeping the themes and backups under $dir (user setting)"
+    echo "Keeping the themes, the fonts and the backups under $dir (user setting); the rest goes"
+    find "$dir" -mindepth 1 -maxdepth 1 ! -name backups ! -name templates ! -name templates_spectrum ! -name faces ! -name fonts ! -name .preserve -exec rm -rf {} +
     return 0
   fi
   echo "Removing the themes under $dir; the settings backups stay"
