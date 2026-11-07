@@ -2,6 +2,10 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.26] - 2026-11-07
+
+- **Every meter in a package's preview, at a switch.** Package tiles a theme's first nine meters into its preview, three across, a card for the Catalog rather than an inventory (asked on the forum, where a theme of thirty meters was expected to show them all). The Themes tab gains the switch **Every meter in a package's preview**, off by default: on, the package's preview tiles every meter, a theme of thirty meters making a picture eleven rows tall, the packaging taking the settle seconds a meter; the packager takes the count on its command line (`--tiles 9`, `--tiles all`). The Catalog's thumbnail of a contributed theme is the preview at the top of its zip, the package's own or one an author put there by hand.
+
 ## [0.11.25] - 2026-11-06
 
 - **The movie's box cleared whole.** Since 0.11.22 the step that leaves the theme's box clear for the picture named its far corner by its size rather than its corner, so the painting stopped short of the box's last rows (and, after a partial repaint, its last columns) and the theme stayed painted there: a 16:9 picture in a box of 396 rows showed its top 348 and looked glued to the top, on the player's screen, the remotes, the Face tab and Anymote alike. The bounds are corners now, as every step's are; a test paints the box and reads its last row and column.
