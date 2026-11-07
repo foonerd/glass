@@ -141,6 +141,8 @@
     "DO_NOT_DELETE_THEMES_DOC": "启用后：卸载时不移除主题数据文件夹；安装或更新时不覆盖现有主题。适用于您的所有自定义主题（仪表、频谱、磁带、唱机等）。",
     "THEME_TAG_HOLD": "不按版本标签切换主题",
     "THEME_TAG_HOLD_DOC": "用于检查主题：开启时，上面的版本标签规则保留但不生效，无论播放什么，显示的主题保持不变。“状态”标签页会说明。关闭后规则立即重新生效。",
+    "MANAGER_PACKAGE_ALL": "在包的预览中包含所有仪表",
+    "MANAGER_PACKAGE_ALL_HELP": "关闭时，打包会平铺主题的前九个仪表，每行三个：一张目录卡片。开启时会平铺所有仪表，因此三十个仪表的主题会生成十行高的图片，打包每个仪表需要三秒。",
     "USE_SYSTEM_FONTS": "使用系统字体",
     "USE_SYSTEM_FONTS_DOC": "使用 Volumio 系统字体（Lato）代替内置的 GlassFont。GlassFont 支持全球语言（中日韩、阿拉伯文、西里尔文、希伯来文、泰文等）。只有在偏好原始字体或已在 config.txt 中配置了自定义字体时才启用。",
     "SMB_SHARE_CONF": "模板文件共享（SMB）",

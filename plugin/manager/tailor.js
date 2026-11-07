@@ -85,6 +85,8 @@ async function cut(opts) {
 // meter's snapshot, as the display reports it, counts up `onProgress`.
 async function pack(opts) {
   const args = ['--headless', '--package', '--theme', opts.themeDir, '--out', opts.out, '--settle', String(opts.settle || 3)];
+  // How many meters the preview tiles: a count, or every one.
+  if (opts.tiles && /^(all|[1-9][0-9]*)$/.test(String(opts.tiles))) args.push('--tiles', String(opts.tiles));
   let shots = 0;
   const result = await run({
     launcher: opts.launcher, env: opts.env, uid: opts.uid, gid: opts.gid, args: args, timeoutMs: PACKAGE_TIMEOUT_MS,

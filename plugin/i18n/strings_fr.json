@@ -141,6 +141,8 @@
     "DO_NOT_DELETE_THEMES_DOC": "Si activé : lors de la désinstallation, le dossier des thèmes n'est pas supprimé ; lors de l'installation ou de la mise à jour, les thèmes existants ne sont pas écrasés. S'applique à tous vos thèmes personnalisés (meters, spectre, cassette, tourne-disque, etc.).",
     "THEME_TAG_HOLD": "Ne pas changer de thème selon l'étiquette d'édition",
     "THEME_TAG_HOLD_DOC": "Pour relire un thème : les règles d'étiquette d'édition ci-dessus sont conservées et non appliquées tant que ceci est activé ; le thème affiché reste, quoi qu'il joue. L'onglet État le dit. Désactivé, les règles s'appliquent à nouveau aussitôt.",
+    "MANAGER_PACKAGE_ALL": "Chaque mètre dans l'aperçu d'un paquet",
+    "MANAGER_PACKAGE_ALL_HELP": "Désactivé, Empaqueter dispose les neuf premiers mètres du thème, trois par rangée : une carte pour le Catalogue. Activé, il dispose chaque mètre, si bien qu'un thème de trente mètres donne une image de dix rangées et l'empaquetage prend trois secondes par mètre.",
     "USE_SYSTEM_FONTS": "Utiliser les polices systeme",
     "USE_SYSTEM_FONTS_DOC": "Utiliser les polices systeme Volumio (Lato) au lieu de GlassFont integree. GlassFont offre une prise en charge linguistique universelle (CJK, arabe, cyrillique, hebreu, thai, etc.). Activez uniquement si vous preferez les polices originales ou avez configure des polices personnalisees dans config.txt.",
     "SMB_SHARE_CONF": "Partage de fichiers de templates (SMB)",

@@ -141,6 +141,8 @@
     "DO_NOT_DELETE_THEMES_DOC": "Gdy włączone: przy odinstalowaniu folder danych motywów nie jest usuwany; przy instalacji lub aktualizacji istniejące motywy nie są nadpisywane. Dotyczy wszystkich własnych motywów (mierniki, widmo, kaseta, gramofon itd.).",
     "THEME_TAG_HOLD": "Nie przełączaj motywów według tagu edycji",
     "THEME_TAG_HOLD_DOC": "Do przeglądania motywu: powyższe reguły tagów edycji są zachowane i nieaktywne, gdy to jest włączone, więc pokazywany motyw pozostaje niezależnie od tego, co gra. Zakładka Stan o tym informuje. Po wyłączeniu reguły od razu znów działają.",
+    "MANAGER_PACKAGE_ALL": "Każdy miernik w podglądzie pakietu",
+    "MANAGER_PACKAGE_ALL_HELP": "Wyłączone: Pakuj układa pierwsze dziewięć mierników motywu, po trzy w rzędzie: kartę do Katalogu. Włączone: układa każdy miernik, więc motyw z trzydziestoma miernikami daje obraz wysoki na dziesięć rzędów, a pakowanie trwa trzy sekundy na miernik.",
     "USE_SYSTEM_FONTS": "Używaj czcionek systemowych",
     "USE_SYSTEM_FONTS_DOC": "Używa czcionek systemowych Volumio (Lato) zamiast wbudowanej GlassFont. GlassFont zawiera uniwersalną obsługę języków (CJK, arabski, cyrylica, hebrajski, tajski itd.). Włączać tylko w razie preferowania oryginalnych czcionek lub skonfigurowania własnych czcionek w config.txt.",
     "SMB_SHARE_CONF": "Udostępnianie plików szablonów (SMB)",

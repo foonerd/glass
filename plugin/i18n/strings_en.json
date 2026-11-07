@@ -141,6 +141,8 @@
     "DO_NOT_DELETE_THEMES_DOC": "When enabled: on uninstall the theme data folder is not removed; on install or update existing themes are not overwritten. Applies to all your custom themes (meters, spectrum, cassette, turntable, etc.).",
     "THEME_TAG_HOLD": "Do not switch themes by edition tag",
     "THEME_TAG_HOLD_DOC": "For reviewing a theme: the edition tag rules above are kept and not applied while this is on, so the theme on show stays whatever plays. The Status tab says so. Off, the rules apply again at once.",
+    "MANAGER_PACKAGE_ALL": "Every meter in a package's preview",
+    "MANAGER_PACKAGE_ALL_HELP": "Off, Package tiles the theme's first nine meters, three across: a card for the Catalog. On, it tiles every meter, so a theme of thirty meters makes a picture ten rows tall and the packaging takes three seconds a meter.",
     "USE_SYSTEM_FONTS": "Use system fonts",
     "USE_SYSTEM_FONTS_DOC": "Use Volumio system fonts (Lato) instead of built-in GlassFont. GlassFont includes universal language support (CJK, Arabic, Cyrillic, Hebrew, Thai, etc). Enable this only if you prefer the original fonts or have configured custom fonts in config.txt.",
     "SMB_SHARE_CONF": "Template File Sharing (SMB)",

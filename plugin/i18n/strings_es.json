@@ -141,6 +141,8 @@
     "DO_NOT_DELETE_THEMES_DOC": "Si está activado: al desinstalar, la carpeta de datos de temas no se elimina; al instalar o actualizar, los temas existentes no se sobrescriben. Se aplica a todos sus temas personalizados (vúmetros, espectro, casete, tocadiscos, etc.).",
     "THEME_TAG_HOLD": "No cambiar de tema por etiqueta de edición",
     "THEME_TAG_HOLD_DOC": "Para revisar un tema: las reglas de etiqueta de edición de arriba se conservan y no se aplican mientras esto está activado, así que el tema mostrado se mantiene sea lo que sea que suene. La pestaña Estado lo indica. Desactivado, las reglas vuelven a aplicarse de inmediato.",
+    "MANAGER_PACKAGE_ALL": "Todos los medidores en la vista previa de un paquete",
+    "MANAGER_PACKAGE_ALL_HELP": "Apagado, Empaquetar coloca en mosaico los nueve primeros medidores del tema, tres por fila: una tarjeta para el Catálogo. Encendido, coloca todos los medidores, así que un tema de treinta medidores produce una imagen de diez filas y el empaquetado tarda tres segundos por medidor.",
     "USE_SYSTEM_FONTS": "Usar las fuentes del sistema",
     "USE_SYSTEM_FONTS_DOC": "Usar las fuentes del sistema Volumio (Lato) en lugar de la GlassFont integrada. GlassFont incluye compatibilidad universal con idiomas (CJK, árabe, cirílico, hebreo, tailandés, etc.). Actívelo solo si prefiere las fuentes originales o ha configurado fuentes personalizadas en config.txt.",
     "SMB_SHARE_CONF": "Compartir archivos de plantillas (SMB)",

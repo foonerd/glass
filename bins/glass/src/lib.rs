@@ -207,6 +207,8 @@ pub fn run_with(args: Vec<String>, mut face: Option<Box<dyn Overlay>>) -> ExitCo
     let mut tailor_spectrum: Option<String> = None;
     let mut tailor_stretch = false;
     let mut package = false;
+    // How many meters the package's preview tiles: nine, or every one.
+    let mut package_tiles = package::TILES_MAX;
     let mut args = args.into_iter().skip(1).peekable();
     while let Some(arg) = args.next() {
         match arg.as_str() {
@@ -357,6 +359,20 @@ pub fn run_with(args: Vec<String>, mut face: Option<Box<dyn Overlay>>) -> ExitCo
             },
             "--stretch" => tailor_stretch = true,
             "--package" => package = true,
+            "--tiles" => match args.next() {
+                Some(word) if word == "all" => package_tiles = usize::MAX,
+                Some(word) => match word.parse::<usize>() {
+                    Ok(n) if n > 0 => package_tiles = n,
+                    _ => {
+                        eprintln!("glass: --tiles takes a count or all");
+                        return ExitCode::from(2);
+                    }
+                },
+                None => {
+                    eprintln!("glass: --tiles takes a count or all");
+                    return ExitCode::from(2);
+                }
+            },
             "--help" => {
                 let ring = if cfg!(unix) {
                     "Reads the tap's ring under /dev/shm and the player's state."
@@ -382,7 +398,8 @@ pub fn run_with(args: Vec<String>, mut face: Option<Box<dyn Overlay>>) -> ExitCo
                      --tailor writes a copy of a theme and its spectrum twin at another size under --out (the working folder\n\
                        without it): one scale factor and the theme centred, or --stretch to the screen's shape.\n\
                      --package writes a theme (or the cut just made) as the catalogue takes it: the meters snapshotted\n\
-                       for --settle seconds each into one preview, and DIR/<name>.zip with the theme, its twin and the preview.\n\
+                       for --settle seconds each into one preview (the first nine, or --tiles all for every one),\n\
+                       and DIR/<name>.zip with the theme, its twin and the preview.\n\
                      --snapshot shows each meter of the theme (or of the --meter list) for --settle seconds\n\
                      and writes DIR/<theme>/<meter>.png, then leaves.\n\
                      --thumb writes DIR/<theme>/<meter>.thumb.png beside each snapshot, WIDTH pixels wide.\n\
@@ -531,7 +548,14 @@ pub fn run_with(args: Vec<String>, mut face: Option<Box<dyn Overlay>>) -> ExitCo
             let _ = std::fs::remove_dir_all(&work);
             return code;
         }
-        let result = package::build(&name, &theme_dir, twin.as_deref(), &work.join(&name), &out);
+        let result = package::build(
+            &name,
+            &theme_dir,
+            twin.as_deref(),
+            &work.join(&name),
+            &out,
+            package_tiles,
+        );
         let _ = std::fs::remove_dir_all(&work);
         return match result {
             Ok(zip) => {

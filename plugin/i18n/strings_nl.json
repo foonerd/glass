@@ -141,6 +141,8 @@
     "DO_NOT_DELETE_THEMES_DOC": "Indien ingeschakeld: bij het de-installeren wordt de map met themagegevens niet verwijderd; bij het installeren of bijwerken worden bestaande thema's niet overschreven. Geldt voor al uw eigen thema's (meters, spectrum, cassette, draaitafel, enz.).",
     "THEME_TAG_HOLD": "Thema's niet wisselen op editietag",
     "THEME_TAG_HOLD_DOC": "Voor het beoordelen van een thema: de editietagregels hierboven blijven bewaard en worden niet toegepast zolang dit aan staat, zodat het getoonde thema blijft, wat er ook speelt. Het tabblad Status zegt het. Uit, en de regels gelden meteen weer.",
+    "MANAGER_PACKAGE_ALL": "Elke meter in de preview van een pakket",
+    "MANAGER_PACKAGE_ALL_HELP": "Uit: Inpakken tegelt de eerste negen meters van het thema, drie naast elkaar: een kaart voor de Catalogus. Aan: het tegelt elke meter, zodat een thema van dertig meters een afbeelding van tien rijen oplevert en het inpakken drie seconden per meter duurt.",
     "USE_SYSTEM_FONTS": "Systeemlettertypen gebruiken",
     "USE_SYSTEM_FONTS_DOC": "Gebruik de systeemlettertypen van Volumio (Lato) in plaats van het ingebouwde GlassFont. GlassFont heeft universele taalondersteuning (CJK, Arabisch, Cyrillisch, Hebreeuws, Thai, enz.). Schakel dit alleen in als u de oorspronkelijke lettertypen verkiest of eigen lettertypen in config.txt hebt ingesteld.",
     "SMB_SHARE_CONF": "Sjabloonbestanden delen (SMB)",

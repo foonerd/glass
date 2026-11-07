@@ -1783,6 +1783,8 @@ class Manager {
         const result = await tailor.pack({
           launcher: self.paths.launcher, env: self.plugin.launchEnv(), uid: self.previews.uid, gid: self.previews.gid,
           themeDir: path.join(self.paths.meterBase, folder), out: staging, settle: settle,
+          // Every meter in the preview when the Themes tab's switch says so; the first nine otherwise.
+          tiles: self.plugin.managerSettings().packagePreviewAll ? 'all' : '9',
           onProgress: function (done) { job.progress = { done: done, total: Math.max(total, done) }; }
         });
         result.warnings.forEach(function (w) { self.logger.info('glass: manager package ' + folder + ': ' + w); });

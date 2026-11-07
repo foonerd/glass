@@ -141,6 +141,8 @@
     "DO_NOT_DELETE_THEMES_DOC": "Wenn aktiviert: Beim Deinstallieren wird der Theme-Ordner nicht gelöscht; beim Installieren oder Aktualisieren werden vorhandene Themes nicht überschrieben. Gilt für alle benutzerdefinierten Themes (Meter, Spektrum, Kassette, Plattenspieler usw.).",
     "THEME_TAG_HOLD": "Themes nicht nach Editions-Tag wechseln",
     "THEME_TAG_HOLD_DOC": "Zum Prüfen eines Themes: Die Editions-Tag-Regeln oben bleiben erhalten und werden nicht angewendet, solange dies eingeschaltet ist; das gezeigte Theme bleibt, was auch immer spielt. Der Reiter Status sagt es. Aus, gelten die Regeln sofort wieder.",
+    "MANAGER_PACKAGE_ALL": "Jedes Meter in der Vorschau eines Pakets",
+    "MANAGER_PACKAGE_ALL_HELP": "Aus: Paket kachelt die ersten neun Meter des Themas, drei nebeneinander: eine Karte für den Katalog. An: es kachelt jedes Meter, sodass ein Thema mit dreißig Metern ein zehn Reihen hohes Bild ergibt und das Packen drei Sekunden je Meter braucht.",
     "USE_SYSTEM_FONTS": "Systemschriften verwenden",
     "USE_SYSTEM_FONTS_DOC": "Volumio-Systemschriften (Lato) anstelle der integrierten GlassFont verwenden. GlassFont bietet universelle Sprachunterstuetzung (CJK, Arabisch, Kyrillisch, Hebraeisch, Thai usw.). Aktivieren Sie dies nur, wenn Sie die Originalschriften bevorzugen oder benutzerdefinierte Schriften in config.txt konfiguriert haben.",
     "SMB_SHARE_CONF": "Vorlagen-Dateifreigabe (SMB)",

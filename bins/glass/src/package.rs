@@ -14,8 +14,9 @@ use expose::{fit_art, Blend, Frame};
 const GUTTER: [u8; 4] = [58, 65, 80, 255];
 /// The space between tiles and around them, in pixels.
 const GAP: u32 = 2;
-/// How many meters a preview shows at most.
-const TILES_MAX: usize = 9;
+/// How many meters a preview shows at most, unless the player asks for
+/// every one: a catalogue card, not an inventory.
+pub const TILES_MAX: usize = 9;
 
 /// How many columns a preview of `n` tiles takes.
 pub fn columns(n: usize) -> u32 {
@@ -30,10 +31,10 @@ pub fn columns(n: usize) -> u32 {
 
 /// The tiles side by side, `width` pixels wide in all: one tile is the
 /// picture itself; more are scaled to the columns' width, their shape
-/// kept, in rows on the house colour with a gap between; past nine, the
-/// first nine.
-pub fn montage(tiles: &[Frame], width: u32) -> Frame {
-    let tiles: Vec<&Frame> = tiles.iter().take(TILES_MAX).collect();
+/// kept, in rows on the house colour with a gap between; past `most`,
+/// the first `most` (nine for a catalogue card; every one when asked).
+pub fn montage(tiles: &[Frame], width: u32, most: usize) -> Frame {
+    let tiles: Vec<&Frame> = tiles.iter().take(most.max(1)).collect();
     let Some(first) = tiles.first() else {
         return Frame {
             blend: Blend::Normal,
@@ -188,6 +189,7 @@ pub fn build(
     spectrum: Option<&Path>,
     shots: &Path,
     out: &Path,
+    tiles_most: usize,
 ) -> Result<PathBuf, String> {
     fs::create_dir_all(out).map_err(|e| format!("{}: {e}", out.display()))?;
     // The theme's own order of meters, so the preview reads as the theme does.
@@ -220,7 +222,7 @@ pub fn build(
         ));
     }
     let width = tiles[0].width;
-    let preview = montage(&tiles, width);
+    let preview = montage(&tiles, width, tiles_most);
     let preview_path = out.join(format!("{name}.preview.png"));
     expose::write_png(&preview_path, &preview)?;
     let twin = spectrum.map(Path::to_path_buf).or_else(|| {
@@ -255,14 +257,14 @@ mod tests {
     /// each, the gutter between; seven take three columns and three rows.
     #[test]
     fn a_preview_tiles_the_meters_by_their_count() {
-        let one = montage(&[solid(100, 50, [1, 2, 3, 255])], 300);
+        let one = montage(&[solid(100, 50, [1, 2, 3, 255])], 300, TILES_MAX);
         assert_eq!((one.width, one.height), (100, 50));
         let tiles = vec![
             solid(100, 50, [255, 0, 0, 255]),
             solid(100, 50, [0, 255, 0, 255]),
             solid(100, 50, [0, 0, 255, 255]),
         ];
-        let three = montage(&tiles, 302);
+        let three = montage(&tiles, 302, TILES_MAX);
         // Tiles of (302 - 8) / 3 = 98 wide, 49 high; two gaps of 2 around a row of 49.
         assert_eq!((three.width, three.height), (302, 53));
         let px = |f: &Frame, x: u32, y: u32| {
@@ -274,12 +276,21 @@ mod tests {
         assert_eq!(px(&three, 102, 2), [0, 255, 0], "the second, past a gap");
         assert_eq!(px(&three, 202, 2), [0, 0, 255], "the third");
         assert_eq!(columns(7), 3);
-        let seven = montage(&vec![solid(100, 50, [9, 9, 9, 255]); 7], 302);
+        let seven = montage(&vec![solid(100, 50, [9, 9, 9, 255]); 7], 302, TILES_MAX);
         assert_eq!(seven.height, 3 * 49 + 4 * 2);
         assert_eq!(
-            montage(&vec![solid(10, 10, [0; 4]); 12], 100).height,
-            montage(&vec![solid(10, 10, [0; 4]); 9], 100).height
+            montage(&vec![solid(10, 10, [0; 4]); 12], 100, TILES_MAX).height,
+            montage(&vec![solid(10, 10, [0; 4]); 9], 100, TILES_MAX).height
         );
+        // Every meter asked for: twelve tiles make four rows, thirty make ten.
+        let twelve = montage(&vec![solid(10, 10, [0; 4]); 12], 100, usize::MAX);
+        let nine = montage(&vec![solid(10, 10, [0; 4]); 9], 100, usize::MAX);
+        assert!(
+            twelve.height > nine.height,
+            "a fourth row for the twelfth tile"
+        );
+        let thirty = montage(&vec![solid(10, 10, [0; 4]); 30], 100, usize::MAX);
+        assert_eq!(thirty.height, (nine.height - 4 * 2) / 3 * 10 + 11 * 2);
     }
 
     /// A theme folder and a twin into a zip: the entries under the theme's

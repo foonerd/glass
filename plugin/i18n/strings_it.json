@@ -141,6 +141,8 @@
     "DO_NOT_DELETE_THEMES_DOC": "Se attivo: alla disinstallazione la cartella dei dati dei temi non viene rimossa; all'installazione o all'aggiornamento i temi esistenti non vengono sovrascritti. Vale per tutti i temi personalizzati (meter, spettro, cassetta, giradischi ecc.).",
     "THEME_TAG_HOLD": "Non cambiare tema per tag di edizione",
     "THEME_TAG_HOLD_DOC": "Per rivedere un tema: le regole del tag di edizione qui sopra restano e non si applicano finché questo è attivo, così il tema mostrato rimane qualunque cosa suoni. La scheda Stato lo dice. Disattivato, le regole tornano subito ad applicarsi.",
+    "MANAGER_PACKAGE_ALL": "Ogni misuratore nell'anteprima di un pacchetto",
+    "MANAGER_PACKAGE_ALL_HELP": "Spento, Impacchetta affianca i primi nove misuratori del tema, tre per riga: una scheda per il Catalogo. Acceso, affianca ogni misuratore, così un tema di trenta misuratori produce un'immagine alta dieci righe e l'impacchettamento richiede tre secondi per misuratore.",
     "USE_SYSTEM_FONTS": "Usa i font di sistema",
     "USE_SYSTEM_FONTS_DOC": "Usa i font di sistema di Volumio (Lato) al posto del GlassFont integrato. GlassFont include il supporto universale delle lingue (CJK, arabo, cirillico, ebraico, thai ecc.). Attivare solo se si preferiscono i font originali o se sono stati configurati font personalizzati in config.txt.",
     "SMB_SHARE_CONF": "Condivisione dei file dei template (SMB)",

@@ -1309,6 +1309,10 @@
             <div class="help" id="rules-hold-help"></div>
           </div>
           <div class="full">
+            <label class="switch"><input type="checkbox" id="package-all-input"><span id="package-all-label"></span></label>
+            <div class="help" id="package-all-help"></div>
+          </div>
+          <div class="full">
             <label class="switch"><input type="checkbox" id="preserve-input"><span id="preserve-label"></span></label>
             <div class="help" id="preserve-help"></div>
           </div>
@@ -2148,6 +2152,8 @@
         $('rules-help').textContent = t('THEME_TAG_RULES_DOC');
         $('rules-hold-label').textContent = t('THEME_TAG_HOLD');
         $('rules-hold-help').textContent = t('THEME_TAG_HOLD_DOC');
+        $('package-all-label').textContent = t('MANAGER_PACKAGE_ALL');
+        $('package-all-help').textContent = t('MANAGER_PACKAGE_ALL_HELP');
         $('preserve-label').textContent = t('DO_NOT_DELETE_THEMES');
         $('preserve-help').textContent = t('DO_NOT_DELETE_THEMES_DOC');
         $('btn-rules-save').textContent = t('MANAGER_SAVE');
@@ -2680,12 +2686,13 @@
         return api('GET', '/api/settings').then(function (s) {
           $('rules-input').value = s.themeTagRules || '';
           $('rules-hold-input').checked = !!s.themeTagHold;
+          $('package-all-input').checked = !!s.packagePreviewAll;
           $('preserve-input').checked = !!s.doNotDeleteThemes;
           renderLanguage(s);
         }).catch(function () { });
       }
       $('btn-rules-save').onclick = function () {
-        api('POST', '/api/settings', { themeTagRules: $('rules-input').value, themeTagHold: $('rules-hold-input').checked, doNotDeleteThemes: $('preserve-input').checked }).then(function () {
+        api('POST', '/api/settings', { themeTagRules: $('rules-input').value, themeTagHold: $('rules-hold-input').checked, packagePreviewAll: $('package-all-input').checked, doNotDeleteThemes: $('preserve-input').checked }).then(function () {
           toast(t('MANAGER_SAVED'));
           loadStatus();
         }).catch(function (e) { toast(errorText(e), 'error'); });

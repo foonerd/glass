@@ -942,6 +942,7 @@ Glass.prototype.onVolumioStart = function () {
         managerHost: ['string', ''],
         language: ['string', ''],
         themeTagHold: ['boolean', false],
+        packagePreviewAll: ['boolean', false],
         moviePicture: ['boolean', false],
         remotesEnabled: ['boolean', false],
         remoteFramesPort: ['number', 5580],
@@ -7233,6 +7234,7 @@ Glass.prototype.managerSettings = function () {
     return {
         themeTagRules: String(self.config.get('themeTagRules') || ''),
         themeTagHold: self.themeTagHold(),
+        packagePreviewAll: self.config.get('packagePreviewAll') === true,
         doNotDeleteThemes: self.config.get('doNotDeleteThemes') === true,
         managerPort: parseInt(self.config.get('managerPort'), 10) || MANAGER_DEFAULT_PORT,
         managerHost: String(self.config.get('managerHost') || ''),
@@ -7251,6 +7253,14 @@ Glass.prototype.setManagerSettings = function (data) {
             self.config.set('themeTagRules', rules);
             changed = true;
             try { self.applyThemeTag(self.lastState); } catch (e) {}
+        }
+    }
+    if (data.packagePreviewAll !== undefined) {
+        // Every meter in a package's preview, or the first nine: a catalogue card by default.
+        var all = data.packagePreviewAll === true || data.packagePreviewAll === 'true';
+        if ((self.config.get('packagePreviewAll') === true) !== all) {
+            self.config.set('packagePreviewAll', all);
+            changed = true;
         }
     }
     if (data.themeTagHold !== undefined) {
