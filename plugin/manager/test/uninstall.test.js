@@ -50,7 +50,7 @@ test('where the user keeps the themes everything stays', () => {
   const p = player(true, true);
   const said = clear(p.data);
   // The themes, the face themes, the backups and the ask stay; glass-evo, the
-  // catalogue's cache, the previews and the register go, so a reinstall starts fresh.
+  // catalogue's cache, the previews and the register go: a reinstall carries nothing else.
   assert.deepEqual(fs.readdirSync(p.data).sort(), ['.preserve', 'backups', 'faces', 'templates', 'templates_spectrum']);
   assert.ok(fs.existsSync(path.join(p.data, 'templates/1280x720_amber/meters.txt')));
   assert.ok(fs.existsSync(path.join(p.data, 'backups', 'before-0.8.38', 'config.json')));

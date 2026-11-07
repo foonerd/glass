@@ -9,7 +9,8 @@
 # spectrum themes, the face themes, the uploaded fonts, and the ask itself.
 # Everything else goes either way: glass-evo and the decoder (fetched
 # again at a press), the catalogue's cache, the previews, the kept zips
-# and the Manager's own state, so a reinstall starts fresh.
+# and the Manager's own state: a reinstall carries nothing but the themes
+# and the backups, and takes its settings from the newest backup.
 clear_data() {
   local dir=$1
   [ -d "$dir" ] || return 0
