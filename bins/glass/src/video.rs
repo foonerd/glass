@@ -1433,6 +1433,104 @@ fn luma_of(planes: &[u8], width: u32, height: u32) -> u8 {
 mod tests {
     use super::*;
 
+    /// The decoder child itself, where a decoder is on the PATH (here and on
+    /// a runner that has one): the probe of the crate's own two-second clip,
+    /// the picture decoded from half a second in at a smaller shape, every
+    /// frame whole, and the sound's envelope with its beats and its silences.
+    /// Where the machine has no decoder the test says so and passes: the
+    /// child's own run is proven where it can be, never claimed where it
+    /// cannot.
+    #[test]
+    fn the_decoder_child_probes_decodes_and_hears_the_test_clip() {
+        let found = |program: &str| {
+            let path = std::path::Path::new(program);
+            if path.is_absolute() {
+                return path.is_file();
+            }
+            std::env::var_os("PATH")
+                .map(|p| std::env::split_paths(&p).any(|dir| dir.join(program).is_file()))
+                .unwrap_or(false)
+        };
+        if !(found(&decoder()) && found(&prober())) {
+            eprintln!("no decoder on the PATH: the child's test is skipped");
+            return;
+        }
+        let file = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/glass-test-clip.mp4");
+        let probe = probe(file)
+            .expect("the prober runs")
+            .expect("a video stream");
+        assert_eq!(
+            (probe.codec.as_str(), probe.width, probe.height),
+            ("h264", 320, 180)
+        );
+        assert!((probe.fps - 25.0).abs() < 0.01, "fps {}", probe.fps);
+
+        // The picture from half a second in, scaled to 160x90: the frames
+        // whole and counted, the first stamped where the decode began.
+        let mut decoder =
+            Decoder::start(file, &probe, (160, 90), 0.5, None).expect("the decoder starts");
+        let frame_len = 160 * 90 * 3 / 2;
+        let mut frames = 0u32;
+        let mut first = None;
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while Instant::now() < deadline {
+            match decoder.next() {
+                Some(d) => {
+                    assert_eq!(d.planes.len(), frame_len, "a frame's planes");
+                    first.get_or_insert(d.pts);
+                    frames += 1;
+                    decoder.give_back(d.planes);
+                }
+                None if decoder.ended.load(Ordering::Acquire) => break,
+                None => thread::sleep(Duration::from_millis(20)),
+            }
+        }
+        decoder.stop();
+        assert!(
+            (30..=40).contains(&frames),
+            "{frames} frames for a second and a half at 25 a second"
+        );
+        assert!(
+            (first.unwrap_or(0.0) - 0.5).abs() < 0.001,
+            "the first frame at {first:?}"
+        );
+
+        // The sound: two seconds in bins of ten milliseconds, a tone gated on
+        // for a short beat every so often, silence between.
+        let envelope = Envelope::start(file, 0.0).expect("the envelope starts");
+        let deadline = Instant::now() + Duration::from_secs(20);
+        while !envelope.ended() && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(20));
+        }
+        assert!(envelope.ended(), "the envelope's child did not end");
+        let bins: Vec<(f64, f32)> = envelope
+            .bins
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .iter()
+            .copied()
+            .collect();
+        assert!(
+            (185..=215).contains(&bins.len()),
+            "{} bins for two seconds",
+            bins.len()
+        );
+        // The beats against the file's own peak, whatever level the encoder
+        // left: a fifth of the bins or so carry the tone, most carry nothing.
+        let peak = bins.iter().map(|b| b.1).fold(0f32, f32::max);
+        assert!(peak > 0.02, "the clip's sound is heard (peak {peak})");
+        let loud = bins.iter().filter(|b| b.1 > peak * 0.5).count();
+        let quiet = bins.iter().filter(|b| b.1 < peak * 0.05).count();
+        assert!(
+            loud >= 20 && quiet >= 100,
+            "beats {loud}, silence {quiet}, peak {peak}"
+        );
+        assert!(
+            bins.windows(2).all(|w| w[1].0 > w[0].0),
+            "the bins' clock runs forward"
+        );
+    }
+
     #[test]
     fn the_probers_line_is_read() {
         assert_eq!(
