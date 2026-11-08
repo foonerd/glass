@@ -3544,7 +3544,9 @@
       // a part of the likeness opens its section. Nothing reaches the player
       // until the save. The model is lookmodel.js, which its tests share.
       var LOOK = window.GlassLook;
-      var lookUi = { f: null, chosen: '', base: null, v: null, saved: null, own: {}, picked: {}, open: '', more: {}, mode: 'idle', picture: '', anchor: {}, safe: true };
+      var lookUi = { f: null, chosen: '', base: null, v: null, saved: null, own: {}, picked: {}, open: '', more: {}, mode: 'idle', picture: '', anchor: {}, safe: true, stamps: {} };
+      // The pictures' stamps by name, from the player's list: a picture's address carries its stamp.
+      function lookStamps(list) { lookUi.stamps = {}; (list || []).forEach(function (b) { if (b && b.name) lookUi.stamps[b.name] = b.stamp || 0; }); }
       var LOOK_ICONS = {
         previous: '<rect x="5" y="5" width="2.6" height="14"/><path d="M19 5v14L9 12z"/>',
         play: '<path d="M7 4l13 8-13 8z"/>',
@@ -3566,7 +3568,7 @@
         }).catch(function () { return ''; });
       }
       function loadLook() {
-        return Promise.all([api('GET', '/api/face'), lookPicture()]).then(function (r) { lookUi.picture = r[1]; renderLook(r[0]); }).catch(function (e) { toast(errorText(e), 'error'); });
+        return Promise.all([api('GET', '/api/face'), lookPicture(), api('GET', '/api/backgrounds').catch(function () { return { backgrounds: [] }; })]).then(function (r) { lookUi.picture = r[1]; lookStamps(r[2].backgrounds); renderLook(r[0]); }).catch(function (e) { toast(errorText(e), 'error'); });
       }
       function lookFind(name) { return ((lookUi.f && lookUi.f.looks) || []).filter(function (l) { return l.name === name; })[0]; }
       // What stands beneath the user's adjustments: the built-in look, the
@@ -4050,7 +4052,9 @@
             '<div class="cap">' + esc(c.title) + '<small>' + esc(c.says) + '</small></div></button>';
         }).join('') + tile;
       }
-      function lookPicUrl(name) { return '/api/backgrounds/' + encodeURIComponent(name) + '/file'; }
+      // The address carries the picture's stamp: a picture uploaded again under the same
+      // name is a new address, so the browser never shows a load it remembered.
+      function lookPicUrl(name) { return '/api/backgrounds/' + encodeURIComponent(name) + '/file?v=' + (lookUi.stamps[name] || 0); }
       // The pictures to choose from: none (the theme), each in the folder, and an upload.
       function lookPictures() {
         var box = $('look-pictures');
@@ -4333,7 +4337,8 @@
           confirmDialog(t('MANAGER_DELETE'), t('MANAGER_LOOK_PICTURE_DELETE_ASK') + ' ' + name, t('MANAGER_DELETE')).then(function (yes) {
             if (!yes) return;
             api('DELETE', '/api/backgrounds/' + encodeURIComponent(name)).then(function (r) {
-              lookUi.f.backgrounds = r.backgrounds || [];
+              lookUi.f.backgrounds = (r.backgrounds || []).map(function (b) { return typeof b === 'string' ? b : b.name; });
+              delete lookUi.stamps[name];
               if (lookUi.v['idle.picture'] === name) { lookUi.v['idle.picture'] = ''; lookUi.saved.v['idle.picture'] = ''; }
               paintLook(true);
             }).catch(function (err) { toast(errorText(err), 'error'); });
@@ -4351,6 +4356,7 @@
         var file = input.files[0];
         api('POST', '/api/backgrounds/upload?name=' + encodeURIComponent(file.name), file, 'application/octet-stream').then(function (r) {
           lookUi.f.backgrounds = (r.backgrounds || []).map(function (b) { return b.name; });
+          lookStamps(r.backgrounds);
           lookUi.v['idle.picture'] = r.name; lookUi.mode = 'idle';
           paintLook(true);
         }).catch(function () { toast(t('MANAGER_LOOK_PICTURE_BAD'), 'error'); });

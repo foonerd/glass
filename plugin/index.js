@@ -3253,9 +3253,11 @@ Glass.prototype.backgroundsList = function () {
     var names = [];
     try { names = fs.readdirSync(BACKGROUNDS_DIR).filter(backgrounds.isName).sort(); } catch (e) { /* no folder yet */ }
     return names.map(function (name) {
-        var bytes = 0;
-        try { bytes = fs.statSync(BACKGROUNDS_DIR + '/' + name).size; } catch (e) {}
-        return { name: name, bytes: bytes };
+        var bytes = 0, stamp = 0;
+        try { var st = fs.statSync(BACKGROUNDS_DIR + '/' + name); bytes = st.size; stamp = Math.floor(st.mtimeMs); } catch (e) {}
+        // The stamp rides in the picture's address, so a picture uploaded again
+        // under the same name is a new address and a fresh load in the page.
+        return { name: name, bytes: bytes, stamp: stamp };
     });
 };
 
