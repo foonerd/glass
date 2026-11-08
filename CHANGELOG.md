@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.29] - 2026-11-08
+
+### Fixed
+
+- The panel did not dim after a reboot. "Dim while nothing plays" was scheduled only on a stop that followed playing, so a player that came up standing still kept the brightness at play until a track had played and stopped; the three settings themselves were kept. The panel now dims at a start as it does after a stop, with the same delay the look says, whenever the player stands still and nothing is dimmed or on its way. Since the dim shipped in 0.10.26; reported from a player with a backlight.
+
+### Diagnostics
+
+No new check: the Status tab's screen rows say the panel's brightness and whether it is dimmed. The Screen Power page says the panel dims at a start.
+
 ## [0.11.28] - 2026-11-08
 
 ### Fixed
