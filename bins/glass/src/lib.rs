@@ -1721,10 +1721,8 @@ fn session(
                 // is too dear on a Pi), behind the letterbox; the art comes
                 // back as the backdrop when the picture returns to its box.
                 #[cfg(not(target_os = "android"))]
-                let movie_behind = movie_full
-                    && movie
-                        .as_ref()
-                        .is_some_and(|m| m.shown().is_some());
+                let movie_behind =
+                    movie_full && movie.as_ref().is_some_and(|m| m.shown().is_some());
                 #[cfg(target_os = "android")]
                 let movie_behind = false;
                 if movie_behind {
@@ -2299,7 +2297,10 @@ pub(crate) fn screen_available() -> bool {
 /// GPU scales it to the window. A few milliseconds once a second.
 fn movie_backdrop(planes: &[u8], size: (u32, u32), screen: (u32, u32)) -> Frame {
     let (vw, vh) = (size.0.max(2) as usize, size.1.max(2) as usize);
-    let (qw, qh) = ((screen.0 / 4).max(8) as usize, (screen.1 / 4).max(8) as usize);
+    let (qw, qh) = (
+        (screen.0 / 4).max(8) as usize,
+        (screen.1 / 4).max(8) as usize,
+    );
     let y_len = vw * vh;
     let c_len = (vw / 2) * (vh / 2);
     let mut small = Frame {

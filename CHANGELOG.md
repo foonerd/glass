@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.38] - 2026-11-08
+
+### Added
+
+- **A tap in the movie's box brings the picture to the whole screen; the next tap brings it back.** On the player's screen and on the Linux and Windows remotes the decoder is started again at the screen's size, so the film shows at its own resolution rather than the box's; the picture keeps its shape, the bars beside or above it filled by a blurred, dimmed copy of the frame refreshed about once a second, and the theme and the face are hidden under it until the next tap. While the movie shows, a tap in its box is the movie's: the face's controls, the theme's touch rules and exit-on-touch do not see it; a remote's own way out, a finger held two seconds, stays ahead of it. On the Face tab and Anymote the film goes to the whole stage over the theme with a blurred copy behind, and back at the next tap. Each screen answers its own tap. Nothing to set. Asked in the community.
+
+### Diagnostics
+
+The display's movie line carries whether the picture is at the whole screen; the Status tab's Movie row says "at the whole screen after a tap; a tap brings the theme back" while it is; Find a problem notes it under the movie symptom; a remote's Status panel says it in its movie row; the Troubleshooting page has a row for a theme gone behind the film; the Meters Reference, Anymote and Remotes pages say how the tap works.
+
 ## [0.11.37] - 2026-11-08
 
 ### Fixed

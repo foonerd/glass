@@ -75,10 +75,22 @@ mod tests {
     fn a_tap_in_the_box_is_the_movies_and_toggles() {
         let mut tap = MovieTap::default();
         let t0 = Instant::now();
-        assert_eq!(tap.pointer(PointerKind::Down, 400, 250, t0, BOX), (true, false));
-        assert_eq!(tap.pointer(PointerKind::Move, 404, 252, t0, BOX), (true, false));
         assert_eq!(
-            tap.pointer(PointerKind::Up, 406, 254, t0 + Duration::from_millis(120), BOX),
+            tap.pointer(PointerKind::Down, 400, 250, t0, BOX),
+            (true, false)
+        );
+        assert_eq!(
+            tap.pointer(PointerKind::Move, 404, 252, t0, BOX),
+            (true, false)
+        );
+        assert_eq!(
+            tap.pointer(
+                PointerKind::Up,
+                406,
+                254,
+                t0 + Duration::from_millis(120),
+                BOX
+            ),
             (true, true)
         );
     }
@@ -89,13 +101,25 @@ mod tests {
         let t0 = Instant::now();
         tap.pointer(PointerKind::Down, 400, 250, t0, BOX);
         assert_eq!(
-            tap.pointer(PointerKind::Up, 400, 250, t0 + Duration::from_millis(900), BOX),
+            tap.pointer(
+                PointerKind::Up,
+                400,
+                250,
+                t0 + Duration::from_millis(900),
+                BOX
+            ),
             (true, false),
             "held too long"
         );
         tap.pointer(PointerKind::Down, 400, 250, t0, BOX);
         assert_eq!(
-            tap.pointer(PointerKind::Up, 480, 250, t0 + Duration::from_millis(100), BOX),
+            tap.pointer(
+                PointerKind::Up,
+                480,
+                250,
+                t0 + Duration::from_millis(100),
+                BOX
+            ),
             (true, false),
             "dragged away"
         );
@@ -105,14 +129,32 @@ mod tests {
     fn outside_the_box_or_without_one_nothing_is_taken() {
         let mut tap = MovieTap::default();
         let t0 = Instant::now();
-        assert_eq!(tap.pointer(PointerKind::Down, 10, 10, t0, BOX), (false, false));
-        assert_eq!(tap.pointer(PointerKind::Move, 12, 12, t0, BOX), (false, false));
-        assert_eq!(tap.pointer(PointerKind::Up, 12, 12, t0, BOX), (false, false));
-        assert_eq!(tap.pointer(PointerKind::Down, 400, 250, t0, None), (false, false));
-        assert_eq!(tap.pointer(PointerKind::Up, 400, 250, t0, None), (false, false));
+        assert_eq!(
+            tap.pointer(PointerKind::Down, 10, 10, t0, BOX),
+            (false, false)
+        );
+        assert_eq!(
+            tap.pointer(PointerKind::Move, 12, 12, t0, BOX),
+            (false, false)
+        );
+        assert_eq!(
+            tap.pointer(PointerKind::Up, 12, 12, t0, BOX),
+            (false, false)
+        );
+        assert_eq!(
+            tap.pointer(PointerKind::Down, 400, 250, t0, None),
+            (false, false)
+        );
+        assert_eq!(
+            tap.pointer(PointerKind::Up, 400, 250, t0, None),
+            (false, false)
+        );
         // A finger down in the box, the movie gone before it lifts: the lift is nobody's.
         tap.pointer(PointerKind::Down, 400, 250, t0, BOX);
-        assert_eq!(tap.pointer(PointerKind::Up, 400, 250, t0, None), (false, false));
+        assert_eq!(
+            tap.pointer(PointerKind::Up, 400, 250, t0, None),
+            (false, false)
+        );
     }
 
     #[test]
@@ -120,9 +162,18 @@ mod tests {
         let mut tap = MovieTap::default();
         let t0 = Instant::now();
         let full = Some((0, 0, 1280, 720));
-        assert_eq!(tap.pointer(PointerKind::Down, 10, 700, t0, full), (true, false));
         assert_eq!(
-            tap.pointer(PointerKind::Up, 12, 702, t0 + Duration::from_millis(50), full),
+            tap.pointer(PointerKind::Down, 10, 700, t0, full),
+            (true, false)
+        );
+        assert_eq!(
+            tap.pointer(
+                PointerKind::Up,
+                12,
+                702,
+                t0 + Duration::from_millis(50),
+                full
+            ),
             (true, true)
         );
     }
