@@ -65,6 +65,11 @@ function evo(f) {
   const picture = String(settings['idle.picture'] || '').trim();
   const pictureFound = !!(f.picture && f.picture.found);
   if (picture && !pictureFound) problems.push('picture-missing');
+  // The pictures in turn: the switch, the minutes, and how many pictures the folder holds.
+  const slideOn = /^(on|true|1|yes)$/i.test(String(settings['idle.slide'] || '').trim());
+  const slideEvery = Math.min(240, Math.max(1, parseInt(settings['idle.slide.every'], 10) || 10));
+  const pictures = typeof f.pictures === 'number' ? f.pictures : null;
+  if (picture && slideOn && pictures !== null && pictures < 2) problems.push('slide-alone');
   const w = f.weather || {};
   const reading = w.reading || null;
   const readingAge = reading && reading.at ? Math.max(0, Math.round((f.now || Date.now()) / 1000 - reading.at)) : null;
@@ -92,6 +97,7 @@ function evo(f) {
       unknownSkies: unknownSkies((Array.isArray(look.files) ? look.files.map(function (x) { return x.path; }) : []).concat(Array.isArray(f.themeSkies) ? f.themeSkies : []))
     },
     picture: picture ? { name: picture, found: pictureFound } : null,
+    slide: { on: !!(picture && slideOn), every: slideEvery, count: pictures },
     idleWait: String(settings['idle.wait'] || builtIn['idle.wait'] || 'none'),
     // The plugin's persist period, which "After the persist period" waits for.
     persistS: typeof f.persistS === 'number' ? f.persistS : null,

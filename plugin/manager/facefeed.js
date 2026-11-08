@@ -30,7 +30,7 @@ class FaceFeed {
     this.upstreamLive = false;
     this.retry = null;
     this.backoff = RETRY_MIN_MS;
-    this.last = { config: null, state: null, showing: null, infinity: null, queue: null, persist: null, views: null, weather: null, favourite: null, power: null, movie: null };
+    this.last = { picture: null, config: null, state: null, showing: null, infinity: null, queue: null, persist: null, views: null, weather: null, favourite: null, power: null, movie: null };
     this.hops = 0;
   }
 
@@ -59,9 +59,11 @@ class FaceFeed {
       weather: self.last.weather || (now.weather ? JSON.stringify(now.weather) : null),
       favourite: self.last.favourite || (now.favourite ? JSON.stringify(now.favourite) : null),
       power: self.last.power || (now.power ? JSON.stringify(now.power) : null),
-      movie: self.last.movie || (now.movie ? JSON.stringify(now.movie) : null)
+      movie: self.last.movie || (now.movie ? JSON.stringify(now.movie) : null),
+      // The picture in turn as last told, so a page that opens mid-show starts on it.
+      picture: self.last.picture
     };
-    ['config', 'state', 'showing', 'infinity', 'queue', 'persist', 'views', 'weather', 'favourite', 'power', 'movie'].forEach(function (kind) {
+    ['config', 'state', 'showing', 'infinity', 'queue', 'persist', 'views', 'weather', 'favourite', 'power', 'movie', 'picture'].forEach(function (kind) {
       if (opening[kind]) self.write(res, 'plugin', opening[kind]);
     });
     self.write(res, 'feed', JSON.stringify({ frames: self.upstreamLive }));

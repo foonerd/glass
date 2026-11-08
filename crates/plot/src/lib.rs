@@ -907,6 +907,7 @@ mod tests {
         let input = Input {
             heard: Vec::new(),
             movie: None,
+            picture: None,
             language: String::new(),
             play_here: Default::default(),
             queue: Default::default(),
@@ -1245,6 +1246,7 @@ mod analyser_tests {
         let input = Input {
             heard: Vec::new(),
             movie: None,
+            picture: None,
             language: String::new(),
             play_here: Default::default(),
             queue: Default::default(),
@@ -1319,6 +1321,7 @@ mod analyser_tests {
         let input = Input {
             heard: Vec::new(),
             movie: None,
+            picture: None,
             language: String::new(),
             play_here: Default::default(),
             queue: Default::default(),
@@ -1380,6 +1383,7 @@ mod analyser_tests {
             let input = Input {
                 heard: Vec::new(),
                 movie: None,
+                picture: None,
                 language: String::new(),
                 play_here: Default::default(),
                 queue: Default::default(),
@@ -1463,6 +1467,7 @@ mod analyser_tests {
         let input = Input {
             heard: Vec::new(),
             movie: None,
+            picture: None,
             language: String::new(),
             play_here: Default::default(),
             queue: Default::default(),

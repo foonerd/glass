@@ -1719,6 +1719,7 @@ Glass.prototype.onStart = function () {
         self.pushRemoteConfig();
         // The panel's power as asked, so a display that starts anew holds it.
         self.pushScreenWish();
+        self.slidePushNow();
         // Whether the board can go to standby, for the face's Power page.
         self.pushPower();
     }, function (message, conn) {
@@ -1903,6 +1904,7 @@ Glass.prototype.onStart = function () {
 
         if (status === 'play') {
             self.undim();
+            self.slideStop();
             if (self.persistTimer) {
                 clearTimeout(self.persistTimer);
                 self.persistTimer = null;
@@ -2005,6 +2007,8 @@ Glass.prototype.onStart = function () {
             // with the same delay; once dimmed or on its way, nothing more.
             self.scheduleDim();
         }
+
+        if (status !== 'play') { try { self.slideStart(); } catch (eSlide) { self.logger.warn(id + 'pictures in turn: ' + (eSlide && eSlide.message ? eSlide.message : eSlide)); } }
 
         lastService = state.service || '';
         lastUri = state.uri || '';
@@ -3214,6 +3218,7 @@ const FACES_DIR = DATA_DIR + '/faces';
 const BACKGROUNDS_DIR = DATA_DIR + '/backgrounds';
 const backgrounds = require('./manager/backgrounds');
 const backups = require('./manager/backups');
+const slideshow = require('./manager/slideshow');
 const weather = require('./manager/weather');
 const WEATHER_FILE = DATA_DIR + '/weather.json';
 
@@ -3244,6 +3249,73 @@ const OWN_X_UNIT_FILE = PluginPath + '/' + screenowner.OWN_X_UNIT + '.service';
 // look's keys by name, the face themes installed, and the plugin's word on
 // whether frost over a moving theme suits this board.
 // ---- The user's pictures for the screen when nothing plays -----------------
+
+// The pictures in turn when nothing plays (the look's idle.slide and its
+// lines, manager/slideshow.js): every so many minutes the next picture of
+// the folder, in its order or at random, is told to the player's display,
+// the browser faces and the remotes as a picture line, with the change and
+// the motion the look asks; the first line names the picture chosen, so
+// every face follows the line from the start. Playing ends it and an empty
+// name hands the choice back to the look. The motion is held off where the
+// performance profile holds the movie off, for the same reason.
+Glass.prototype.slideSettings = function () {
+    var self = this;
+    return slideshow.settings(meterConfig && meterConfig.current ? meterConfig.current : {}, self.backgroundsList(), self.movieAllowed());
+};
+Glass.prototype.slideLine = function (name) {
+    var self = this;
+    var found = self.backgroundsList().filter(function (b) { return b.name === name; })[0];
+    return slideshow.line(name, found ? found.stamp : 0, self.slideSettings());
+};
+Glass.prototype.slideTell = function (line) {
+    var self = this;
+    var text = JSON.stringify(line);
+    if (text === self.slideLast) { return; }
+    self.slideLast = text;
+    if (self.face) { try { self.face.push(line); } catch (e) { /* the pages hear it at the next change */ } }
+    if (self.channel) {
+        self.channel.pushLocal(line);
+        self.channel.clients.slice().forEach(function (c) { if (c.remote) { self.channel.tell(c, line); } });
+    }
+};
+Glass.prototype.slideStart = function () {
+    var self = this;
+    var s = self.slideSettings();
+    if (!s.on) { self.slideStop(); return; }
+    if (self.slideTimer) { return; }
+    self.slideCurrent = s.names.indexOf(s.chosen) !== -1 ? s.chosen : s.names[0];
+    self.slideTell(self.slideLine(self.slideCurrent));
+    var tick = function () {
+        self.slideTimer = null;
+        var now = self.slideSettings();
+        if (!now.on) { self.slideStop(); return; }
+        self.slideCurrent = slideshow.next(now.names, self.slideCurrent, now.random);
+        self.logger.info(id + 'pictures in turn: ' + self.slideCurrent);
+        self.slideTell(self.slideLine(self.slideCurrent));
+        self.slideTimer = setTimeout(tick, now.every * 60000);
+    };
+    self.slideTimer = setTimeout(tick, s.every * 60000);
+};
+Glass.prototype.slideStop = function () {
+    var self = this;
+    if (self.slideTimer) { clearTimeout(self.slideTimer); self.slideTimer = null; }
+    if (self.slideLast) { self.slideTell({ kind: 'picture', name: '' }); self.slideLast = null; }
+};
+// The look changed: the show starts again as it now says, where the player stands still.
+Glass.prototype.slideRefresh = function () {
+    var self = this;
+    if (self.slideTimer) { clearTimeout(self.slideTimer); self.slideTimer = null; }
+    self.slideLast = null;
+    if (!(self.lastState && self.lastState.status === 'play')) { self.slideStart(); }
+};
+// A display that connects hears the picture in turn as it stands.
+Glass.prototype.slidePushNow = function () {
+    var self = this;
+    if (!self.slideLast) { return; }
+    var line = JSON.parse(self.slideLast);
+    self.slideLast = null;
+    self.slideTell(line);
+};
 
 // The pictures in the folder, by name: those dropped there through the
 // share and those uploaded here.
@@ -3361,6 +3433,7 @@ Glass.prototype.applyFaceChanges = function (changes, quietly) {
     fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
     try { self.updateConfigVersion(); } catch (e) {}
     if (!quietly && fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
+    try { self.slideRefresh(); } catch (e) { /* the show follows at the next state */ }
     return true;
 };
 

@@ -3973,6 +3973,12 @@
             field('MANAGER_LOOK_HOW_SOLID', slider('glass.bar', 'solid', 10, 100, 1, 'CLEAR', 'SOLID')),
             field('MANAGER_LOOK_BLUR', onoff('glass.frost', 'frost'), esc(t(lookUi.f.frostSuits ? 'MANAGER_LOOK_BLUR_SUITS' : 'MANAGER_LOOK_BLUR_HEAVY'))),
             field('MANAGER_LOOK_PICTURE_DIM', slider('idle.dim', 'share', 0, 90, 1, 'NONE', 'FULL'), '', 'idlepic'),
+            field('MANAGER_LOOK_SLIDE', onoff('idle.slide', 'switch'), esc(t('MANAGER_LOOK_SLIDE_HINT')), 'idlepic'),
+            field('MANAGER_LOOK_SLIDE_EVERY', minutes('idle.slide.every'), esc(t('MANAGER_LOOK_SLIDE_EVERY_HINT')), 'slideshow'),
+            field('MANAGER_LOOK_SLIDE_RANDOM', onoff('idle.slide.random', 'switch'), esc(t('MANAGER_LOOK_SLIDE_RANDOM_HINT')), 'slideshow'),
+            field('MANAGER_LOOK_SLIDE_TRANSITION', choice('idle.slide.transition', ['none', 'fade', 'merge'], 'MANAGER_LOOK_SLIDE_TRANSITION_'), '', 'slideshow'),
+            field('MANAGER_LOOK_SLIDE_MS', millis('idle.slide.ms'), esc(t('MANAGER_LOOK_SLIDE_MS_HINT')), 'slidems'),
+            field('MANAGER_LOOK_SLIDE_MOTION', onoff('idle.slide.motion', 'switch'), esc(t('MANAGER_LOOK_SLIDE_MOTION_HINT')), 'slideshow'),
             field('MANAGER_LOOK_SCREEN_OFF', minutes('idle.off'), esc(t('MANAGER_LOOK_SCREEN_OFF_HINT'))),
             field('MANAGER_LOOK_SCREEN_FADE', millis('idle.fade'), esc(t('MANAGER_LOOK_SCREEN_FADE_HINT')), 'screenoff'),
             field('MANAGER_LOOK_IDLE_WAIT', choice('idle.wait', ['none', 'persist'], 'MANAGER_LOOK_IDLE_WAIT_'), esc(t('MANAGER_LOOK_IDLE_WAIT_HINT')), 'idlewait')]],
@@ -4045,7 +4051,7 @@
         // for when nothing plays, which goes with whichever look is chosen.
         var pic = lookUi.v['idle.picture'];
         var tile = '<button class="look-card' + (lookUi.pictures ? ' on' : '') + '" data-idle-pic="1" aria-expanded="' + (lookUi.pictures ? 'true' : 'false') + '">' +
-          lookLikeness(lookUi.v, { mode: 'idle', scale: scale, suits: !!f.frostSuits, picture: pic ? lookPicUrl(pic) : null, dim: pic ? LOOK.share(lookUi.v['idle.dim'], 0.25) : 0, pick: false }) +
+          lookLikeness(lookUi.v, { mode: 'idle', scale: scale, suits: !!f.frostSuits, picture: lookPicFor(pic), dim: pic ? LOOK.share(lookUi.v['idle.dim'], 0.25) : 0, pick: false }) +
           '<div class="cap">' + esc(t('MANAGER_LOOK_PICTURE')) + '<small>' + esc(pic || t('MANAGER_LOOK_PICTURE_NONE')) + '</small></div></button>';
         return cards.map(function (c) {
           return '<button class="look-card" data-look="' + esc(c.name) + '">' + lookLikeness(LOOK.lay(f.builtIn, c.keys), { mode: 'idle', scale: scale, suits: !!f.frostSuits, picture: lookUi.picture, pick: false }) +
@@ -4055,6 +4061,8 @@
       // The address carries the picture's stamp: a picture uploaded again under the same
       // name is a new address, so the browser never shows a load it remembered.
       function lookPicUrl(name) { return '/api/backgrounds/' + encodeURIComponent(name) + '/file?v=' + (lookUi.stamps[name] || 0); }
+      // The picture the likeness shows for a choice: the one named.
+      function lookPicFor(pic) { return pic ? lookPicUrl(pic) : null; }
       // The pictures to choose from: none (the theme), each in the folder, and an upload.
       function lookPictures() {
         var box = $('look-pictures');
@@ -4156,7 +4164,7 @@
         var own = { clock: !!lookUi.base && v['measure.clock'] !== lookUi.base['measure.clock'], date: !!lookUi.base && v['measure.date'] !== lookUi.base['measure.date'], weather: !!lookUi.base && v['measure.weather'] !== lookUi.base['measure.weather'] };
         // When nothing plays, a picture of the user's own stands in the theme's place.
         var idlePic = lookUi.mode === 'idle' && v['idle.picture'];
-        $('look-preview').innerHTML = lookLikeness(v, { mode: lookUi.mode, scale: scale, suits: suits, picture: idlePic ? lookPicUrl(v['idle.picture']) : lookUi.picture, dim: idlePic ? LOOK.share(v['idle.dim'], 0.25) : 0, pick: true, own: own });
+        $('look-preview').innerHTML = lookLikeness(v, { mode: lookUi.mode, scale: scale, suits: suits, picture: idlePic ? lookPicFor(v['idle.picture']) : lookUi.picture, dim: idlePic ? LOOK.share(v['idle.dim'], 0.25) : 0, pick: true, own: own });
         lookFit($('look-panel'));
         lookMotion();
         lookModuleSkies(lookUi.chosen);
@@ -4202,7 +4210,7 @@
         });
         // A row shows while it has something to say: a clock's rows while the
         // clock shows, a date's own background while the date stands at the top.
-        var when = { clock: LOOK.isOn(v['clock.show']), date: LOOK.isOn(v['date.show']), weather: LOOK.isOn(v['weather.show']), buttons: true, idlepic: !!v['idle.picture'], screenoff: (parseInt(v['idle.off'], 10) || 0) > 0, idlewait: !!(f.builtIn && f.builtIn['idle.wait'] !== undefined) };
+        var when = { clock: LOOK.isOn(v['clock.show']), date: LOOK.isOn(v['date.show']), weather: LOOK.isOn(v['weather.show']), buttons: true, idlepic: !!v['idle.picture'], slideshow: !!v['idle.picture'] && LOOK.isOn(v['idle.slide']), slidems: !!v['idle.picture'] && LOOK.isOn(v['idle.slide']) && (v['idle.slide.transition'] || 'fade') !== 'none', screenoff: (parseInt(v['idle.off'], 10) || 0) > 0, idlewait: !!(f.builtIn && f.builtIn['idle.wait'] !== undefined) };
         // The clock's faces show where the glass-evo that is here knows them
         // (its built-in look names the key), and each face's own rows with it.
         var clockFace = LOOK.clockFace(v);
@@ -4714,7 +4722,7 @@
           ['MANAGER_ST_EVO_DISPLAY', !e.displayStartedAt ? t('MANAGER_ST_EVO_DISPLAY_NONE') : t(e.displayBinary ? 'MANAGER_ST_EVO_DISPLAY_FACE' : 'MANAGER_ST_EVO_DISPLAY_GLASS') + ' · ' + t('MANAGER_ST_SINCE') + ' ' + fmtDate(e.displayStartedAt) + (e.componentInstalledAt ? ' · ' + t('MANAGER_ST_EVO_INSTALLED') + ' ' + fmtDate(e.componentInstalledAt) : '') + (e.displayOlder ? ' · ' + t('MANAGER_ST_EVO_DISPLAY_OLDER') : '')],
           ['MANAGER_ST_EVO_VIEWS', !v ? '-' : t('MANAGER_VIEWS_' + String(v.mode || 'follow').toUpperCase()) + ' · ' + (v.face ? t('MANAGER_ST_EVO_MODULE_EVO') + (v.version ? ' ' + v.version : '') : t('MANAGER_ST_EVO_MODULE_GLASS')) + (e.pages !== null ? ' · ' + e.pages + ' ' + t('MANAGER_ST_FACE_PAGES') : '')],
           ['MANAGER_ST_EVO_LOOK', (look.name ? look.name + ' (' + t('MANAGER_ST_EVO_LOOK_' + String(look.source).toUpperCase()) + ')' : t('MANAGER_ST_EVO_LOOK_BUILTIN')) + (look.name && look.source !== 'missing' ? ' · ' + look.skies + ' ' + t('MANAGER_ST_EVO_SKIES') : '') + (look.themeBrings ? ' · ' + t('MANAGER_ST_EVO_THEME_BRINGS') + (look.themeSkies ? ', ' + look.themeSkies + ' ' + t('MANAGER_ST_EVO_SKIES') : '') : '')],
-          ['MANAGER_LOOK_PICTURE', !e.picture ? t('MANAGER_ST_EVO_PICTURE_NONE') : e.picture.name + ' · ' + t(e.picture.found ? 'MANAGER_ST_FOUND' : 'MANAGER_ST_MISSING')],
+          ['MANAGER_LOOK_PICTURE', !e.picture ? t('MANAGER_ST_EVO_PICTURE_NONE') : e.picture.name + ' · ' + t(e.picture.found ? 'MANAGER_ST_FOUND' : 'MANAGER_ST_MISSING') + (e.slide && e.slide.on ? ' · ' + t('MANAGER_ST_EVO_PICTURE_SLIDE').replace('{n}', String(e.slide.every)) : '')],
           ['MANAGER_LOOK_IDLE_WAIT', e.idleWait === 'persist' ? t('MANAGER_LOOK_IDLE_WAIT_PERSIST') + (typeof e.persistS === 'number' ? ' (' + e.persistS + ' s)' : '') : t('MANAGER_LOOK_IDLE_WAIT_NONE')],
           ['MANAGER_FACE_SIZE', !e.faceSize ? '-' : t('MANAGER_FACE_SIZE_' + String(e.faceSize).toUpperCase())],
           ['MANAGER_ST_EVO_BUTTONS', typeof e.buttons !== 'boolean' ? '-' : t(e.buttons ? 'MANAGER_ST_EVO_BUTTONS_SHOWN' : 'MANAGER_ST_EVO_BUTTONS_HIDDEN') + (e.buttons && e.buttonsIdle === 'leave' ? ' · ' + t('MANAGER_ST_EVO_BUTTONS_IDLE_LEAVE') : '')],

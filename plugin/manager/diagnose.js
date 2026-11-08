@@ -464,8 +464,10 @@ const CHECKS = [
     run(f) {
       const e = f.status.evo;
       if (!e || !e.component || !e.picture) return null;
-      return e.picture.found ? ok('evo-picture', 'DIAG_EVO_PICTURE', { name: e.picture.name })
-        : cause('evo-picture', 'DIAG_EVO_PICTURE_MISSING', { name: e.picture.name }, 'screen');
+      if (!e.picture.found) return cause('evo-picture', 'DIAG_EVO_PICTURE_MISSING', { name: e.picture.name }, 'screen');
+      // The pictures in turn with one picture alone in the folder: nothing turns.
+      if (e.slide && e.slide.on && typeof e.slide.count === 'number' && e.slide.count < 2) return note('evo-picture', 'DIAG_EVO_PICTURE_ALONE', { name: e.picture.name }, 'screen');
+      return ok('evo-picture', 'DIAG_EVO_PICTURE', { name: e.picture.name });
     }
   },
   {

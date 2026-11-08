@@ -116,13 +116,13 @@ pub mod face {
     pub use expose::{
         blur, fit_art, read_art, read_covering, read_frames, render_text, ui, Fonts, Frame,
     };
-    pub use intake::{host_picture, Command};
+    pub use intake::{host_picture, host_picture_from, Command};
     /// A text file and whether one is there, read where the display reads
     /// its own: the file system on a player, the page's file table in a browser.
     pub use lead::{is_file, read_to_string};
     pub use lead::{
-        sky_of, Browse, BrowseItem, Day, FontFiles, Hour, Input, Metadata, QueueEntry, Sky,
-        TextStyle, ThemeItem, Themes, Weather,
+        sky_of, Browse, BrowseItem, Day, FontFiles, Hour, Input, Metadata, PictureLine, QueueEntry,
+        Sky, TextStyle, ThemeItem, Themes, Weather,
     };
 }
 

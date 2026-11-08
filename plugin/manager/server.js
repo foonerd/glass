@@ -1553,6 +1553,7 @@ class Manager {
       return fs.readdirSync(path.join(this.paths.meterBase, theme, 'skies'));
     });
     read('picture', () => ({ found: !!plugin.backgroundPath(String((f.look && f.look.settings['idle.picture']) || '')) }));
+    read('pictures', () => plugin.backgroundsList().length);
     read('faceSize', () => plugin.screenSettings().faceSize);
     read('weather', () => plugin.weatherState());
     return f;

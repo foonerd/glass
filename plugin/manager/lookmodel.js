@@ -31,6 +31,9 @@
     'idle.fade': '500',
     // When the player stops (glass-evo 0.1.53): the idle screen at once, or after the plugin's persist period.
     'idle.wait': 'none',
+    // The pictures in turn (`idle.slide` on): every picture of the folder, the chosen one first;
+    // the minutes each shows, the order, the change's transition and its length, and the motion while one shows.
+    'idle.slide': 'off', 'idle.slide.every': '10', 'idle.slide.random': 'off', 'idle.slide.transition': 'fade', 'idle.slide.ms': '500', 'idle.slide.motion': 'off',
     // The clock on the idle screen's grid (glass-evo 0.1.39): the cells it
     // occupies and where it stands inside them; an empty place is the
     // arrangement before the grid.

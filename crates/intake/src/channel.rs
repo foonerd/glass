@@ -57,6 +57,9 @@ pub enum Event {
     Weather(Option<lead::Weather>),
     /// The player's word on the movie, for a remote display.
     Movie(lead::MovieLine),
+    /// The player's word on the picture for when nothing plays, while the
+    /// pictures show in turn; an empty name hands the choice back to the look.
+    Picture(lead::PictureLine),
     /// The player's queue as the plugin pushes it, on connect and on every
     /// change: the tracks in order, for the next line and the queue's length.
     Queue(Vec<QueueItem>),
@@ -593,6 +596,30 @@ pub fn decode(line: &[u8]) -> Option<Event> {
                 .unwrap_or(0)
                 .min(200) as u32,
         })),
+        "picture" => Some(Event::Picture(lead::PictureLine {
+            name: text("name"),
+            url: text("url"),
+            stamp: value.get("stamp").and_then(Value::as_u64).unwrap_or(0),
+            transition: match text("transition").as_str() {
+                "fade" => "fade".to_string(),
+                "merge" => "merge".to_string(),
+                _ => "none".to_string(),
+            },
+            ms: value
+                .get("ms")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                .min(10_000) as u32,
+            motion: value
+                .get("motion")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
+            span: value
+                .get("span")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+                .min(86_400_000) as u32,
+        })),
         "queue" => Some(Event::Queue(
             value
                 .get("items")
@@ -665,6 +692,45 @@ pub fn decode(line: &[u8]) -> Option<Event> {
 #[cfg(test)]
 mod decode_tests {
     use super::*;
+
+    /// The picture line while the pictures show in turn: the name, the
+    /// address with the stamp, the transition held to the three it may be,
+    /// its length bounded, the motion; a field left out is its default.
+    #[test]
+    fn the_picture_line_names_the_picture_its_transition_and_its_motion() {
+        let line = decode(br#"{"kind":"picture","name":"hall.jpg","url":"/api/backgrounds/hall.jpg/file?v=7","stamp":7,"transition":"merge","ms":800,"motion":true,"span":600000}"#);
+        assert_eq!(
+            line,
+            Some(Event::Picture(lead::PictureLine {
+                name: "hall.jpg".into(),
+                url: "/api/backgrounds/hall.jpg/file?v=7".into(),
+                stamp: 7,
+                transition: "merge".into(),
+                ms: 800,
+                motion: true,
+                span: 600_000
+            }))
+        );
+        let bare =
+            decode(br#"{"kind":"picture","name":"hall.jpg","transition":"wipe","ms":99999}"#);
+        assert_eq!(
+            bare,
+            Some(Event::Picture(lead::PictureLine {
+                name: "hall.jpg".into(),
+                url: String::new(),
+                stamp: 0,
+                transition: "none".into(),
+                ms: 10_000,
+                motion: false,
+                span: 0
+            })),
+            "a transition not known is none; the length is bounded"
+        );
+        assert!(
+            matches!(decode(br#"{"kind":"picture","name":""}"#), Some(Event::Picture(lead::PictureLine { name, .. })) if name.is_empty()),
+            "an empty name is a line, which hands the choice back to the look"
+        );
+    }
 
     /// The player's answer to a browse: the location, the items with what
     /// the face needs of each, the serial of the ask; a field the plugin

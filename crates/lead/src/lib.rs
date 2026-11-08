@@ -3963,6 +3963,32 @@ pub struct MovieLine {
     pub lead_ms: u32,
 }
 
+/// The player's word on the picture for when nothing plays, pushed while
+/// the pictures show in turn: the picture's name in the folder such
+/// pictures are kept in, its address with the file's stamp for a face that
+/// is brought its pictures, the transition to it (`none`, `fade`, `merge`)
+/// and its length, whether the picture moves while it shows and for how
+/// long it shows. An empty name hands the choice back to the look.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PictureLine {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default)]
+    pub stamp: u64,
+    #[serde(default)]
+    pub transition: String,
+    #[serde(default)]
+    pub ms: u32,
+    #[serde(default)]
+    pub motion: bool,
+    /// How long the picture shows before the next, in milliseconds: the
+    /// motion's span.
+    #[serde(default)]
+    pub span: u32,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct Input {
     pub levels: Levels,
@@ -3980,6 +4006,11 @@ pub struct Input {
     /// The player's word on the movie, as its last line said; none before.
     #[serde(default)]
     pub movie: Option<MovieLine>,
+    /// The player's word on the picture for when nothing plays, as its last
+    /// line said, while the pictures show in turn; none before and none
+    /// once a line named no picture.
+    #[serde(default)]
+    pub picture: Option<PictureLine>,
     /// The player's queue, every track, for a face that lists it: shared
     /// between frames, made again when the queue changes.
     #[serde(default)]

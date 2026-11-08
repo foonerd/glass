@@ -1270,15 +1270,26 @@ fn row_picture_in_table(reported: &str) -> (String, String) {
 /// good once the manager said there is none. On a machine always `None`:
 /// there a face reads the folder its launcher names.
 pub fn host_picture(name: &str) -> Option<String> {
+    host_picture_from(name, "")
+}
+
+/// The same picture asked for at `url` where the player's line gave one
+/// (its address carries the file's stamp, so a picture uploaded again
+/// under the same name is a fresh load in the browser); the plain address
+/// where the line gave none.
+pub fn host_picture_from(name: &str, url: &str) -> Option<String> {
     let name = name.trim();
     if !wants::host_pictures() || !bring::picture_name_ok(name) {
         return None;
     }
     keep_brought_pictures_bounded();
-    table_file(
-        &format!("backgrounds/{name}"),
-        &format!("/api/backgrounds/{}/file", bring::encode(name)),
-    )
+    let url = url.trim();
+    let address = if url.starts_with("/api/backgrounds/") {
+        url.to_string()
+    } else {
+        format!("/api/backgrounds/{}/file", bring::encode(name))
+    };
+    table_file(&format!("backgrounds/{name}"), &address)
 }
 
 /// A file the host brings: its path when it is in the table, `None` when
@@ -1987,6 +1998,9 @@ pub struct TapSource {
     weather_held: Option<lead::Weather>,
     /// The player's word on the movie, as its last line said.
     movie_held: Option<lead::MovieLine>,
+    /// The player's word on the picture for when nothing plays, as its last
+    /// line said; none once a line named no picture.
+    picture_held: Option<lead::PictureLine>,
     /// The player's last word on a track among its favourites: the track's
     /// location and whether it is one. The snapshot says it of the playing
     /// track alone.
@@ -2280,6 +2294,7 @@ impl TapSource {
             grab_asked: None,
             weather_held: None,
             movie_held: None,
+            picture_held: None,
             favourite_held: None,
             standby_held: false,
             browse_held: None,
@@ -2929,6 +2944,9 @@ impl Source for TapSource {
                 Event::Show { meter } => self.show_asked = Some(meter),
                 Event::Weather(weather) => self.weather_held = weather,
                 Event::Movie(movie) => self.movie_held = Some(movie),
+                Event::Picture(picture) => {
+                    self.picture_held = (!picture.name.trim().is_empty()).then_some(picture)
+                }
                 Event::Queue(items) => {
                     self.queue_entries = std::sync::Arc::new(
                         items
@@ -3144,6 +3162,7 @@ impl Source for TapSource {
             metadata,
             weather: self.weather_held.clone(),
             movie: self.movie_held.clone(),
+            picture: self.picture_held.clone(),
             queue: self.queue_entries.clone(),
             browse: self.browse_dressed(),
             queue_art: self.queue_art_dressed(),
@@ -3480,6 +3499,7 @@ pub fn input_from_records(
     Input {
         heard: Vec::new(),
         movie: None,
+        picture: None,
         language: String::new(),
         play_here: Default::default(),
         levels,

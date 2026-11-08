@@ -16,7 +16,7 @@ function evoFacts() {
     displayBinary: '/data/INTERNAL/glass/evo/bin/arm/glass-evo', displayStartedAt: '2026-10-08T11:00:00Z', componentInstalledAt: '2026-10-08T10:00:00Z', displayOlder: false,
     views: { mode: 'follow', face: true, has: true, version: '0.2.4' }, pages: 1,
     look: { name: 'Mine', source: 'user', skies: 2, themeBrings: false, themeFolder: null, themeSkies: 0, unknownSkies: [] },
-    picture: { name: 'lake.jpg', found: true }, idleWait: 'none', persistS: 15, faceSize: 'normal', buttons: true, motion: true, smallBoard: false,
+    picture: { name: 'lake.jpg', found: true }, slide: { on: false, every: 10, count: 1 }, idleWait: 'none', persistS: 15, faceSize: 'normal', buttons: true, motion: true, smallBoard: false,
     weather: { on: true, place: 'Bergen, Vestland, Norway', unit: 'C', span: 'week', readingAgeS: 900, error: '' },
     problems: []
   };
@@ -101,6 +101,10 @@ test('the look and the picture: a look named but not installed, the theme\'s own
   assert.strictEqual(picture.key, 'DIAG_EVO_PICTURE_MISSING');
   assert.strictEqual(picture.kind, 'cause');
   assert.strictEqual(one(diagnose('face', facts({ picture: null })), 'evo-picture'), undefined, 'no picture named, nothing to check');
+  const alone = one(diagnose('face', facts({ slide: { on: true, every: 10, count: 1 } })), 'evo-picture');
+  assert.strictEqual(alone.key, 'DIAG_EVO_PICTURE_ALONE', 'the pictures in turn with one picture alone');
+  assert.strictEqual(alone.kind, 'note');
+  assert.strictEqual(one(diagnose('face', facts({ slide: { on: true, every: 10, count: 3 } })), 'evo-picture').key, 'DIAG_EVO_PICTURE', 'three pictures turn');
   const skies = one(diagnose('forecast', facts({ look: Object.assign(evoFacts().look, { unknownSkies: ['rainy.gif', 'notes.txt'] }) })), 'evo-skies');
   assert.strictEqual(skies.kind, 'note');
   assert.strictEqual(skies.with.names, 'rainy.gif, notes.txt');
