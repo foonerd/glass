@@ -238,6 +238,12 @@ test('slow: a rate the display lowered, a rate above what suits the board, and w
   assert.ok(!kinds(diagnose('other', f)).includes('note:evo-stayed'), 'brought along: nothing to note');
   f.update.last = { from: '0.7.92', to: '0.7.93', phase: 'done', ok: false, evo: { stayed: '0.7.90', reason: 'x' } };
   assert.ok(!kinds(diagnose('other', f)).includes('note:evo-stayed'), 'the upgrade did not take: the install check has it');
+  // The burn-in guard on: a note under the face with how far and how often; off, nothing.
+  f = healthy(); f.status.evo.guard = { on: true, px: 8, every: 2 };
+  assert.deepStrictEqual(one(diagnose('face', f), 'evo-guard').with, { px: 8, n: 2 });
+  assert.strictEqual(one(diagnose('face', f), 'evo-guard').kind, 'note');
+  f.status.evo.guard = { on: false, px: 6, every: 3 };
+  assert.ok(!kinds(diagnose('face', f)).includes('note:evo-guard'));
   // Facts that are missing make no finding and no crash.
   assert.deepStrictEqual(diagnose('touch', { status: {} }).findings, []);
 });

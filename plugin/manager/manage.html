@@ -3936,7 +3936,8 @@
           return '<span class="range"><span>' + esc(t('MANAGER_LOOK_END_' + from)) + '</span><input type="range" data-key="' + key + '" data-kind="' + kind + '" min="' + min + '" max="' + max + '" step="' + step + '" aria-label="' + esc(t('MANAGER_LOOK_END_' + from) + ' – ' + t('MANAGER_LOOK_END_' + to)) + '"><span>' + esc(t('MANAGER_LOOK_END_' + to)) + '</span></span>';
         };
         var onoff = function (key, kind) { return '<input type="checkbox" class="look-toggle" data-key="' + key + '" data-kind="' + kind + '">'; };
-        var minutes = function (key) { return '<input type="number" min="0" max="1440" step="1" data-key="' + key + '" data-kind="minutes" style="width:90px">'; };
+        var minutes = function (key, least, most) { return '<input type="number" min="' + (least === undefined ? 0 : least) + '" max="' + (most === undefined ? 1440 : most) + '" step="1" data-key="' + key + '" data-kind="minutes" style="width:90px">'; };
+        var pixels = function (key, least, most) { return '<input type="number" min="' + least + '" max="' + most + '" step="1" data-key="' + key + '" data-kind="minutes" style="width:90px">'; };
         var millis = function (key) { return '<input type="number" min="0" max="120000" step="100" data-key="' + key + '" data-kind="millis" style="width:110px">'; };
         var colour = function (key) { return '<input type="color" data-key="' + key + '" data-kind="colour">'; };
         // A colour that is a word (from the artwork, the same as the rest) until it is one of its own.
@@ -3983,7 +3984,11 @@
             field('MANAGER_LOOK_SLIDE_MOTION', onoff('idle.slide.motion', 'switch'), esc(t('MANAGER_LOOK_SLIDE_MOTION_HINT')), 'slideshow'),
             field('MANAGER_LOOK_SCREEN_OFF', minutes('idle.off'), esc(t('MANAGER_LOOK_SCREEN_OFF_HINT'))),
             field('MANAGER_LOOK_SCREEN_FADE', millis('idle.fade'), esc(t('MANAGER_LOOK_SCREEN_FADE_HINT')), 'screenoff'),
-            field('MANAGER_LOOK_IDLE_WAIT', choice('idle.wait', ['none', 'persist'], 'MANAGER_LOOK_IDLE_WAIT_'), esc(t('MANAGER_LOOK_IDLE_WAIT_HINT')), 'idlewait')]],
+            field('MANAGER_LOOK_IDLE_WAIT', choice('idle.wait', ['none', 'persist'], 'MANAGER_LOOK_IDLE_WAIT_'), esc(t('MANAGER_LOOK_IDLE_WAIT_HINT')), 'idlewait'),
+            // The burn-in guard for OLED and plasma panels: off unless turned on; on opens its two lines.
+            field('MANAGER_LOOK_GUARD', onoff('idle.guard', 'switch'), esc(t('MANAGER_LOOK_GUARD_HINT'))),
+            field('MANAGER_LOOK_GUARD_PX', pixels('idle.guard.px', 1, 16), esc(t('MANAGER_LOOK_GUARD_PX_HINT')), 'guard'),
+            field('MANAGER_LOOK_GUARD_EVERY', minutes('idle.guard.every', 1, 30), esc(t('MANAGER_LOOK_GUARD_EVERY_HINT')), 'guard')]],
           ['clock', 'MANAGER_LOOK_CLOCK', [
             field('MANAGER_LOOK_SHOW_CLOCK', onoff('clock.show', 'switch')),
             field('MANAGER_LOOK_SHOWS', pattern('clock.format', LOOK.CLOCK_PATTERNS), '', 'clock'),
@@ -4213,7 +4218,7 @@
         });
         // A row shows while it has something to say: a clock's rows while the
         // clock shows, a date's own background while the date stands at the top.
-        var when = { clock: LOOK.isOn(v['clock.show']), date: LOOK.isOn(v['date.show']), weather: LOOK.isOn(v['weather.show']), buttons: true, idlepic: !!v['idle.picture'], slideshow: !!v['idle.picture'] && LOOK.isOn(v['idle.slide']), slidems: !!v['idle.picture'] && LOOK.isOn(v['idle.slide']) && (v['idle.slide.transition'] || 'fade') !== 'none', screenoff: (parseInt(v['idle.off'], 10) || 0) > 0, idlewait: !!(f.builtIn && f.builtIn['idle.wait'] !== undefined) };
+        var when = { clock: LOOK.isOn(v['clock.show']), date: LOOK.isOn(v['date.show']), weather: LOOK.isOn(v['weather.show']), buttons: true, idlepic: !!v['idle.picture'], slideshow: !!v['idle.picture'] && LOOK.isOn(v['idle.slide']), slidems: !!v['idle.picture'] && LOOK.isOn(v['idle.slide']) && (v['idle.slide.transition'] || 'fade') !== 'none', screenoff: (parseInt(v['idle.off'], 10) || 0) > 0, idlewait: !!(f.builtIn && f.builtIn['idle.wait'] !== undefined), guard: LOOK.isOn(v['idle.guard']) };
         // The clock's faces show where the glass-evo that is here knows them
         // (its built-in look names the key), and each face's own rows with it.
         var clockFace = LOOK.clockFace(v);
@@ -4729,7 +4734,8 @@
           ['MANAGER_LOOK_IDLE_WAIT', e.idleWait === 'persist' ? t('MANAGER_LOOK_IDLE_WAIT_PERSIST') + (typeof e.persistS === 'number' ? ' (' + e.persistS + ' s)' : '') : t('MANAGER_LOOK_IDLE_WAIT_NONE')],
           ['MANAGER_FACE_SIZE', !e.faceSize ? '-' : t('MANAGER_FACE_SIZE_' + String(e.faceSize).toUpperCase())],
           ['MANAGER_ST_EVO_BUTTONS', typeof e.buttons !== 'boolean' ? '-' : t(e.buttons ? 'MANAGER_ST_EVO_BUTTONS_SHOWN' : 'MANAGER_ST_EVO_BUTTONS_HIDDEN') + (e.buttons && e.buttonsIdle === 'leave' ? ' · ' + t('MANAGER_ST_EVO_BUTTONS_IDLE_LEAVE') : '')],
-          ['MANAGER_ST_EVO_FORECAST', !w.on ? t('MANAGER_ST_OFF') : (reveal ? w.place : t('MANAGER_ST_HIDDEN')) + ' · °' + w.unit + ' · ' + t(w.span === 'week' ? 'MANAGER_LOOK_SPAN_WEEK' : 'MANAGER_LOOK_SPAN_TODAY') + ' · ' + (w.readingAgeS === null ? t('MANAGER_ST_EVO_NO_READING') : t('MANAGER_ST_EVO_READING_AGO').replace('{age}', ago(w.readingAgeS)) + (w.source ? ' · ' + t('MANAGER_ST_EVO_FORECAST_FROM').replace('{source}', w.source) : '')) + (w.error ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + w.error : '')]
+          ['MANAGER_ST_EVO_FORECAST', !w.on ? t('MANAGER_ST_OFF') : (reveal ? w.place : t('MANAGER_ST_HIDDEN')) + ' · °' + w.unit + ' · ' + t(w.span === 'week' ? 'MANAGER_LOOK_SPAN_WEEK' : 'MANAGER_LOOK_SPAN_TODAY') + ' · ' + (w.readingAgeS === null ? t('MANAGER_ST_EVO_NO_READING') : t('MANAGER_ST_EVO_READING_AGO').replace('{age}', ago(w.readingAgeS)) + (w.source ? ' · ' + t('MANAGER_ST_EVO_FORECAST_FROM').replace('{source}', w.source) : '')) + (w.error ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + w.error : '')],
+          ['MANAGER_LOOK_GUARD', e.guard && e.guard.on ? t('MANAGER_ST_EVO_GUARD').replace('{px}', e.guard.px).replace('{n}', e.guard.every) : t('MANAGER_ST_OFF')]
         ];
       }
       function screenRows(sc) {

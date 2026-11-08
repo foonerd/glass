@@ -68,6 +68,10 @@ function evo(f) {
   // The pictures in turn: the switch, the minutes, and how many pictures the folder holds.
   const slideOn = /^(on|true|1|yes)$/i.test(String(settings['idle.slide'] || '').trim());
   const slideEvery = Math.min(240, Math.max(1, parseInt(settings['idle.slide.every'], 10) || 10));
+  // The burn-in guard: on, how far and how often, as the face reads them.
+  const guardOn = /^(on|true|1|yes)$/i.test(String(settings['idle.guard'] || '').trim());
+  const guardPx = Math.min(16, Math.max(1, parseInt(settings['idle.guard.px'], 10) || 6));
+  const guardEvery = Math.min(30, Math.max(1, parseInt(settings['idle.guard.every'], 10) || 3));
   const pictures = typeof f.pictures === 'number' ? f.pictures : null;
   if (picture && slideOn && pictures !== null && pictures < 2) problems.push('slide-alone');
   const w = f.weather || {};
@@ -98,6 +102,7 @@ function evo(f) {
     },
     picture: picture ? { name: picture, found: pictureFound } : null,
     slide: { on: !!(picture && slideOn), every: slideEvery, count: pictures },
+    guard: { on: guardOn, px: guardPx, every: guardEvery },
     idleWait: String(settings['idle.wait'] || builtIn['idle.wait'] || 'none'),
     // The plugin's persist period, which "After the persist period" waits for.
     persistS: typeof f.persistS === 'number' ? f.persistS : null,

@@ -484,6 +484,17 @@ const CHECKS = [
     }
   },
   {
+    // The burn-in guard is on: the clock, the date and the forecast shift
+    // by a few pixels every few minutes by design. Worth saying to a user
+    // puzzled by the movement, with where the switch is.
+    id: 'evo-guard', symptoms: ['face', 'look'],
+    run(f) {
+      const e = f.status.evo;
+      if (!e || !e.component || !e.guard || !e.guard.on) return null;
+      return note('evo-guard', 'DIAG_EVO_GUARD', { px: e.guard.px, n: e.guard.every }, 'screen');
+    }
+  },
+  {
     id: 'evo-skies', symptoms: ['face', 'look', 'forecast'],
     run(f) {
       const e = f.status.evo;
