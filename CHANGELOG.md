@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.31] - 2026-11-08
+
+### Fixed
+
+- A picture for the screen uploaded again under a name the page had already asked for showed in the look panel's likeness only after a hard refresh of the browser, and a picture replaced by another of the same name showed the old one until then: the likeness painted the picture from a fixed address per name, and a browser remembers what it loaded, or failed to load, at an address for the life of the page. The player now lists each picture with its stamp and the page puts the stamp in the picture's address, so a new picture is a new address and a fresh load, in the likeness, the cards and the thumbnails alike.
+
+### Diagnostics
+
+No new check.
+
 ## [0.11.30] - 2026-11-08
 
 ### Fixed
