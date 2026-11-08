@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.36] - 2026-11-08
+
+### Added
+
+- **A burn-in guard for OLED and plasma panels.** The look panel's Backgrounds section ends with **Guard against burn-in**, off unless turned on: on, the clock, the date and the forecast, with their glass, shift as one by up to **Shift, pixels** (1 to 16, 6 unless set) every **Every, minutes** (1 to 30, 3 unless set), the position drawn afresh each time so it spreads over the whole square and no bright pixel stands still for long. The picture behind them does not move. The same keys reach the player's screen, the Face tab, Anymote and the likeness, which shift together. Asked on the forum. Eleven languages.
+
+### Diagnostics
+
+The Status tab's glass-evo section has a row for the guard (off, or the shift and the interval); Find a problem notes a guard that is on under the face and look symptoms, with how far and how often and where the switch is; the Troubleshooting page has a row for a clock that stands a few pixels off or moves slightly; the Screen page and glass-evo's Face Themes page carry the lines and the keys.
+
 ## [0.11.35] - 2026-11-08
 
 ### Added
