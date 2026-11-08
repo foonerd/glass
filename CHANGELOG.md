@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.32] - 2026-11-08
+
+### Fixed
+
+- A backup never took the forecast's place and unit, and a restore never put them back: they live in a file of their own beside the three a backup copied, since the forecast shipped in 0.8.79. A backup now takes that file whenever the player has one, a restore puts it back and the forecast reads it again and asks for a reading, and the zip that moves between players carries it. A backup made before this one has no such file and restoring it leaves the place as it stands. The backup's handling of its files moved into a module of its own with tests: what is taken, what is held to its rules before a restore touches anything, what comes back and what is left alone, and what a backup brought from another player keeps.
+
+### Diagnostics
+
+No new check; the Backups page names the fourth file.
+
 ## [0.11.31] - 2026-11-08
 
 ### Fixed
