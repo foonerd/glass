@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.33] - 2026-11-08
+
+### Added
+
+- **The pictures in turn when nothing plays.** The look panel's Backgrounds section has **Pictures in turn**, off unless turned on: on, every picture of the player's folder shows in turn behind the clock and the date, the chosen one first, each for **Change every** minutes (10 unless set), in the folder's order or **In random order**, with a **Transition** between them (none, a fade through the ground, or the two merged) over so many milliseconds, and, with **Motion while a picture shows**, a slow drift and zoom over the picture, the Ken Burns way, held off by the Light and Minimal performance profiles as the movie is. Off, the picture chosen shows alone as before. The player tells the next picture to its own display, the Face tab, Anymote and the remotes as a line over the channel, so the pictures change live, with no restart; a page that opens mid-show starts on the picture showing. Asked on the forum. Eleven languages.
+
+### Diagnostics
+
+Find a problem's picture check notes a show with one picture alone; the Status tab's picture row says the show is on and its interval. The Screen page and glass-evo's Face Themes page carry the lines and the keys.
+
 ## [0.11.32] - 2026-11-08
 
 ### Fixed
