@@ -4106,7 +4106,8 @@
             ? found.map(function (p, i) { return '<button class="textlink" style="display:block;margin:4px 0" data-weather-place="' + i + '">' + esc(p.name) + '</button>'; }).join('')
             : '<span class="help">' + esc(t('MANAGER_LOOK_WEATHER_NOT_FOUND')) + '</span>') + '</div>' : '') +
           (w.place && w.error ? '<div class="help" style="color:var(--danger)">' + esc(t('MANAGER_LOOK_WEATHER_FAILED')) + '</div>' : '') +
-          '<div class="help" style="margin-top:8px">' + esc(t('MANAGER_LOOK_WEATHER_CREDIT')) + ' <a href="' + esc(w.source.url) + '" target="_blank" rel="noopener">' + esc(w.source.name) + '</a></div>';
+          // The credit names the source that served the reading on show: Open-Meteo, or MET Norway when Open-Meteo could not be reached.
+          '<div class="help" style="margin-top:8px">' + esc(t('MANAGER_LOOK_WEATHER_CREDIT')) + ' <a href="' + esc((w.served || w.source).url) + '" target="_blank" rel="noopener">' + esc((w.served || w.source).name) + '</a></div>';
       }
       function weatherTook(state) { lookUi.weather = state; lookUi.weatherFound = null; lookUi.weatherAsked = ''; paintWeather(); paintLook(); }
       function weatherSearch() {
@@ -4728,7 +4729,7 @@
           ['MANAGER_LOOK_IDLE_WAIT', e.idleWait === 'persist' ? t('MANAGER_LOOK_IDLE_WAIT_PERSIST') + (typeof e.persistS === 'number' ? ' (' + e.persistS + ' s)' : '') : t('MANAGER_LOOK_IDLE_WAIT_NONE')],
           ['MANAGER_FACE_SIZE', !e.faceSize ? '-' : t('MANAGER_FACE_SIZE_' + String(e.faceSize).toUpperCase())],
           ['MANAGER_ST_EVO_BUTTONS', typeof e.buttons !== 'boolean' ? '-' : t(e.buttons ? 'MANAGER_ST_EVO_BUTTONS_SHOWN' : 'MANAGER_ST_EVO_BUTTONS_HIDDEN') + (e.buttons && e.buttonsIdle === 'leave' ? ' · ' + t('MANAGER_ST_EVO_BUTTONS_IDLE_LEAVE') : '')],
-          ['MANAGER_ST_EVO_FORECAST', !w.on ? t('MANAGER_ST_OFF') : (reveal ? w.place : t('MANAGER_ST_HIDDEN')) + ' · °' + w.unit + ' · ' + t(w.span === 'week' ? 'MANAGER_LOOK_SPAN_WEEK' : 'MANAGER_LOOK_SPAN_TODAY') + ' · ' + (w.readingAgeS === null ? t('MANAGER_ST_EVO_NO_READING') : t('MANAGER_ST_EVO_READING_AGO').replace('{age}', ago(w.readingAgeS))) + (w.error ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + w.error : '')]
+          ['MANAGER_ST_EVO_FORECAST', !w.on ? t('MANAGER_ST_OFF') : (reveal ? w.place : t('MANAGER_ST_HIDDEN')) + ' · °' + w.unit + ' · ' + t(w.span === 'week' ? 'MANAGER_LOOK_SPAN_WEEK' : 'MANAGER_LOOK_SPAN_TODAY') + ' · ' + (w.readingAgeS === null ? t('MANAGER_ST_EVO_NO_READING') : t('MANAGER_ST_EVO_READING_AGO').replace('{age}', ago(w.readingAgeS)) + (w.source ? ' · ' + t('MANAGER_ST_EVO_FORECAST_FROM').replace('{source}', w.source) : '')) + (w.error ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + w.error : '')]
         ];
       }
       function screenRows(sc) {

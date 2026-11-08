@@ -569,7 +569,10 @@ const CHECKS = [
       if (w.readingAgeS === null) return cause('forecast-reading', 'DIAG_FORECAST_NO_READING', { error });
       const minutes = Math.round(w.readingAgeS / 60);
       if (w.readingAgeS > 3 * 3600) return cause('forecast-reading', 'DIAG_FORECAST_STALE', { minutes, error });
-      return w.error ? note('forecast-reading', 'DIAG_FORECAST_ERROR', { minutes, error: w.error }) : ok('forecast-reading', 'DIAG_FORECAST_FRESH', { minutes });
+      if (w.error) return note('forecast-reading', 'DIAG_FORECAST_ERROR', { minutes, error: w.error });
+      // The reading came from the second source: the first could not be reached, worth knowing on a network that blocks it.
+      if (w.firstError && w.source) return note('forecast-reading', 'DIAG_FORECAST_SECOND', { minutes, source: w.source, error: w.firstError });
+      return ok('forecast-reading', 'DIAG_FORECAST_FRESH', { minutes });
     }
   },
   {

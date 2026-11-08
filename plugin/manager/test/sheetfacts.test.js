@@ -27,7 +27,7 @@ function facts(over) {
     picture: { found: true },
     persistS: 15,
     faceSize: 'large',
-    weather: { place: { name: 'Bergen, Vestland, Norway', latitude: 60.39, longitude: 5.32 }, unit: 'C', reading: { at: NOW / 1000 - 900 }, error: '' },
+    weather: { place: { name: 'Bergen, Vestland, Norway', latitude: 60.39, longitude: 5.32 }, unit: 'C', reading: { at: NOW / 1000 - 900, source: 'MET Norway' }, error: '', firstError: 'ENETUNREACH', served: { name: 'MET Norway', url: 'https://www.met.no/en' } },
     now: NOW
   }, over || {});
 }
@@ -50,7 +50,7 @@ test('the glass-evo section carries the component, the owner, the views, the loo
   assert.strictEqual(s.buttons, true, 'the buttons show unless a key says off');
   assert.strictEqual(s.motion, true, 'the skies move unless the setting says off');
   assert.strictEqual(s.smallBoard, false);
-  assert.deepStrictEqual(s.weather, { on: true, place: 'Bergen, Vestland, Norway', unit: 'C', span: 'week', readingAgeS: 900, error: '' });
+  assert.deepStrictEqual(s.weather, { on: true, place: 'Bergen, Vestland, Norway', unit: 'C', span: 'week', readingAgeS: 900, error: '', source: 'MET Norway', firstError: 'ENETUNREACH' }, 'the source that served the reading, and what the first said');
   assert.deepStrictEqual(s.problems, []);
 });
 
@@ -72,7 +72,7 @@ test('a component older than this Glass works with, a look or a picture named bu
   assert.deepStrictEqual(noPicture.picture, { name: 'lake.jpg', found: false });
   assert.deepStrictEqual(noPicture.problems, ['picture-missing']);
   const noReading = evo(facts({ weather: { place: { name: 'X' }, unit: 'F', reading: null, error: 'timed out' } }));
-  assert.deepStrictEqual(noReading.weather, { on: true, place: 'X', unit: 'F', span: 'week', readingAgeS: null, error: 'timed out' });
+  assert.deepStrictEqual(noReading.weather, { on: true, place: 'X', unit: 'F', span: 'week', readingAgeS: null, error: 'timed out', source: null, firstError: '' });
   assert.deepStrictEqual(noReading.problems, ['no-reading']);
 });
 
@@ -84,7 +84,7 @@ test('the built-in look, a shipped look, no picture, the forecast off, and nothi
   assert.strictEqual(plain.persistS, null);
   assert.strictEqual(plain.motion, false);
   assert.strictEqual(plain.smallBoard, true);
-  assert.deepStrictEqual(plain.weather, { on: false, place: null, unit: 'C', span: 'today', readingAgeS: null, error: '' });
+  assert.deepStrictEqual(plain.weather, { on: false, place: null, unit: 'C', span: 'today', readingAgeS: null, error: '', source: null, firstError: '' });
   const shipped = evo(facts({ look: Object.assign(facts().look, { settings: { theme: 'Example' }, files: [] }) }));
   assert.strictEqual(shipped.look.source, 'shipped');
   assert.strictEqual(shipped.look.skies, 0);

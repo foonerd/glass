@@ -1749,6 +1749,7 @@ Glass.prototype.onStart = function () {
     // of anyone before a place is set.
     self.forecast = new weather.Forecast({
         file: WEATHER_FILE,
+        version: pluginVersion,
         get: require('./manager/catalog').get,
         logger: { info: function (m) { self.logger.info(id + m); }, warn: function (m) { self.logger.warn(id + m); } },
         push: function (message) { if (self.channel) { self.channel.weather = message; self.channel.push(message); } }

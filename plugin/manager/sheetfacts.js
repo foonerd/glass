@@ -113,7 +113,11 @@ function evo(f) {
       unit: w.unit || 'C',
       span: String(settings['weather.span'] || builtIn['weather.span'] || 'today'),
       readingAgeS: readingAge,
-      error: w.error || ''
+      error: w.error || '',
+      // The source that served the reading on show, and what the first
+      // source said when the second served it.
+      source: reading && w.served && w.served.name ? w.served.name : null,
+      firstError: w.firstError || ''
     },
     problems: problems
   };
