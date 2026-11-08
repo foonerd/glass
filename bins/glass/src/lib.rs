@@ -1158,7 +1158,12 @@ fn session(
                 String::new()
             };
             if path.is_empty() {
+                // The player stopped: the picture goes, and so does the
+                // memory of the file as probed, so the same file played
+                // again is opened again (it stayed shut until another file
+                // came, from the first release of the movie to 0.11.36).
                 movie = None;
+                movie_probed = None;
             } else if movie.as_ref().is_none_or(|m| m.file() != path)
                 && movie_probed.as_deref() != Some(path.as_str())
             {
