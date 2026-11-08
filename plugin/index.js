@@ -402,13 +402,10 @@ const BackupsPath = DATA_DIR + '/backups';
 const CustomFontsPath = DATA_DIR + '/fonts';
 const fontFiles = require('./manager/fonts');
 const cardash = require('./manager/cardash');
-const BackupSchemaVersion = 1;
 const BackupNameRegex = /^[A-Za-z0-9 _.\-]{1,64}$/;
 const BackupMinFreeBytes = 10 * 1024 * 1024;
 const BackupWarnCount = 20;
 const BackupManifestName = 'manifest.json';
-const PeppyConfBackupName = 'peppymeter_config.txt';
-const SpectrumConfBackupName = 'spectrum_config.txt';
 const ThemeGalleryDir = PluginPath + '/theme-gallery';
 const THEME_GALLERY_CACHE_EXTS = ['.png', '.jpg', '.jpeg'];
 // Artist fanart: an on-disk cache served through /albumart?sectionimage=...
@@ -3216,6 +3213,7 @@ const FACES_DIR = DATA_DIR + '/faces';
 // The user's own pictures for the screen when nothing plays.
 const BACKGROUNDS_DIR = DATA_DIR + '/backgrounds';
 const backgrounds = require('./manager/backgrounds');
+const backups = require('./manager/backups');
 const weather = require('./manager/weather');
 const WEATHER_FILE = DATA_DIR + '/weather.json';
 
@@ -6103,9 +6101,21 @@ Glass.prototype.listSettingsBackups = function () {
     return results;
 };
 
+// Where the settings live that a backup takes and a restore puts back:
+// Volumio's config.json, the two engine files, and the forecast's file.
+Glass.prototype.backupSources = function () {
+    return {
+        config: this.commandRouter.pluginManager.getConfigurationFile(this.context, 'config.json'),
+        meter: MeterConfigFile,
+        spectrum: SpectrumConfigFile,
+        weather: WEATHER_FILE
+    };
+};
+
 // A backup by name: config.json, the meter and the spectrum configuration
-// under a named directory with a manifest. Results carry an error code
-// that is a string of the plugin's, so the manager's page can say it.
+// and the forecast's file under a named directory with a manifest
+// (manager/backups.js). Results carry an error code that is a string of
+// the plugin's, so the manager's page can say it.
 Glass.prototype.backupCreate = function (name, options) {
     var self = this;
     options = options || {};
@@ -6130,28 +6140,12 @@ Glass.prototype.backupCreate = function (name, options) {
         } catch (e) {
             self.logger.warn(id + 'backupCreate: statfsSync failed, skipping disk check: ' + e.message);
         }
-        var configFile = self.commandRouter.pluginManager.getConfigurationFile(self.context, 'config.json');
-        var sources = [[configFile, 'config.json'], [MeterConfigFile, 'meter.txt'], [SpectrumConfigFile, 'spectrum.txt']];
-        for (var i = 0; i < sources.length; i++) {
-            if (!fs.existsSync(sources[i][0])) {
-                return { error: 'GLASS.BACKUP_SOURCE_MISSING', message: sources[i][1] };
-            }
-        }
-        fs.mkdirSync(targetDir, { recursive: true });
-        fs.copySync(configFile, targetDir + '/config.json');
-        fs.copySync(MeterConfigFile, targetDir + '/' + PeppyConfBackupName);
-        fs.copySync(SpectrumConfigFile, targetDir + '/' + SpectrumConfBackupName);
-        var manifest = {
-            schema_version: BackupSchemaVersion,
-            plugin_version: pluginVersion,
-            created: new Date().toISOString(),
-            name: backupName,
-            files: ['config.json', PeppyConfBackupName, SpectrumConfBackupName]
-        };
-        // Said either way: an upgrade's own are kept to the newest few, a user's are never touched.
-        manifest.automatic = options.automatic === true;
-        fs.writeFileSync(targetDir + '/' + BackupManifestName, JSON.stringify(manifest, null, 2));
-        self.logger.info(id + 'backupCreate: created backup "' + backupName + '"');
+        // The three files the player always has and the forecast's when there
+        // is one (manager/backups.js); the manifest says which came, and whether
+        // the backup is an upgrade's own (kept to the newest few) or the user's.
+        var made = backups.create(targetDir, self.backupSources(), { name: backupName, pluginVersion: pluginVersion, automatic: options.automatic === true });
+        if (made.error) { return made; }
+        self.logger.info(id + 'backupCreate: created backup "' + backupName + '" (' + made.files.join(', ') + ')');
         return { ok: true, name: backupName, warn: self.listSettingsBackups().length >= BackupWarnCount ? 'GLASS.BACKUP_COUNT_WARN' : null };
     } catch (e) {
         self.logger.error(id + 'backupCreate: ' + e.message);
@@ -6212,39 +6206,20 @@ Glass.prototype.backupRestore = function (name) {
     try {
         var found = self.backupDir(name);
         if (found.error) { return found; }
-        var sourceDir = found.dir;
-        var manifestPath = sourceDir + '/' + BackupManifestName;
-        if (!fs.existsSync(manifestPath)) { return { error: 'GLASS.BACKUP_NOT_FOUND' }; }
-        var manifest;
-        try {
-            manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-        } catch (e) {
-            return { error: 'GLASS.BACKUP_MANIFEST_INVALID' };
-        }
-        if (!manifest || typeof manifest !== 'object' || manifest.schema_version === undefined) {
-            return { error: 'GLASS.BACKUP_MANIFEST_INVALID' };
-        }
-        if (manifest.schema_version > BackupSchemaVersion) {
-            return { error: 'GLASS.BACKUP_SCHEMA_UNSUPPORTED' };
-        }
-        var srcConfigJson = sourceDir + '/config.json';
-        var srcPeppyConf = sourceDir + '/' + PeppyConfBackupName;
-        var srcSpectrumConf = sourceDir + '/' + SpectrumConfBackupName;
-        if (!fs.existsSync(srcConfigJson) || !fs.existsSync(srcPeppyConf) || !fs.existsSync(srcSpectrumConf)) {
-            return { error: 'GLASS.BACKUP_FILES_MISSING' };
-        }
-        try { JSON.parse(fs.readFileSync(srcConfigJson, 'utf8')); } catch (e) { return { error: 'GLASS.BACKUP_CONFIG_CORRUPT' }; }
-        try { ini.parse(fs.readFileSync(srcPeppyConf, 'utf8')); } catch (e) { return { error: 'GLASS.BACKUP_PEPPYCONF_CORRUPT' }; }
-        try { ini.parse(fs.readFileSync(srcSpectrumConf, 'utf8')); } catch (e) { return { error: 'GLASS.BACKUP_SPECTRUMCONF_CORRUPT' }; }
-
-        var configFile = self.commandRouter.pluginManager.getConfigurationFile(self.context, 'config.json');
-        fs.copySync(srcConfigJson, configFile);
-        fs.copySync(srcPeppyConf, MeterConfigFile);
-        fs.copySync(srcSpectrumConf, SpectrumConfigFile);
+        var sources = self.backupSources();
+        // Checked whole before anything is touched; what the backup has goes
+        // back, what it lacks (the forecast's file in a backup from before it
+        // rode along) leaves the player's as it stands.
+        var back = backups.restore(found.dir, sources);
+        if (back.error) { return back; }
 
         // The caches follow the files, so later saves keep the restored values.
-        self.config.loadFile(configFile);
+        self.config.loadFile(sources.config);
         self.loadConfigs();
+        // The forecast reads its place and unit again where they came back, and asks for a reading.
+        if (back.restored.indexOf('weather') !== -1 && self.forecast) {
+            try { self.forecast.stop(); self.forecast.start(); } catch (e) { self.logger.warn(id + 'backupRestore: the forecast did not restart: ' + e.message); }
+        }
 
         // What the restored config.json decides is applied again: the
         // display port at the next launch and whether the themes stay.
@@ -6254,7 +6229,7 @@ Glass.prototype.backupRestore = function (name) {
         self.updateConfigVersion();
         if (fs.existsSync(runFlag)) { fs.removeSync(runFlag); }
 
-        self.logger.info(id + 'backupRestore: restored backup "' + found.name + '"');
+        self.logger.info(id + 'backupRestore: restored backup "' + found.name + '" (' + back.restored.join(', ') + (back.left.length ? '; without ' + back.left.join(', ') : '') + ')');
         uiNeedsUpdate = true;
         self.updateUIConfig();
         return { ok: true, name: found.name };
@@ -6270,40 +6245,10 @@ Glass.prototype.backupRestore = function (name) {
 Glass.prototype.backupAdopt = function (stagingDir, wantedName) {
     var self = this;
     try {
-        var manifestPath = stagingDir + '/' + BackupManifestName;
-        if (!fs.existsSync(manifestPath)) { return { error: 'GLASS.BACKUP_MANIFEST_INVALID' }; }
-        var manifest;
-        try {
-            manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
-        } catch (e) {
-            return { error: 'GLASS.BACKUP_MANIFEST_INVALID' };
-        }
-        if (!manifest || typeof manifest !== 'object' || manifest.schema_version === undefined) {
-            return { error: 'GLASS.BACKUP_MANIFEST_INVALID' };
-        }
-        if (manifest.schema_version > BackupSchemaVersion) { return { error: 'GLASS.BACKUP_SCHEMA_UNSUPPORTED' }; }
-        var files = ['config.json', PeppyConfBackupName, SpectrumConfBackupName];
-        for (var i = 0; i < files.length; i++) {
-            if (!fs.existsSync(stagingDir + '/' + files[i])) { return { error: 'GLASS.BACKUP_FILES_MISSING' }; }
-        }
-        try { JSON.parse(fs.readFileSync(stagingDir + '/config.json', 'utf8')); } catch (e) { return { error: 'GLASS.BACKUP_CONFIG_CORRUPT' }; }
-        try { ini.parse(fs.readFileSync(stagingDir + '/' + PeppyConfBackupName, 'utf8')); } catch (e) { return { error: 'GLASS.BACKUP_PEPPYCONF_CORRUPT' }; }
-        try { ini.parse(fs.readFileSync(stagingDir + '/' + SpectrumConfBackupName, 'utf8')); } catch (e) { return { error: 'GLASS.BACKUP_SPECTRUMCONF_CORRUPT' }; }
-
-        var base = String(wantedName || manifest.name || 'imported').trim().replace(/[^A-Za-z0-9 _.\-]/g, '-').replace(/^[.\-]+/, '').slice(0, 56).trim() || 'imported';
-        if (!BackupNameRegex.test(base) || base.indexOf('..') !== -1) { base = 'imported'; }
-        if (!fs.existsSync(BackupsPath)) { fs.mkdirSync(BackupsPath, { recursive: true }); }
-        var name = base;
-        var n = 1;
-        while (fs.existsSync(BackupsPath + '/' + name)) { name = base + '-' + (++n); }
-        var target = BackupsPath + '/' + name;
-        fs.mkdirSync(target);
-        files.forEach(function (f) { fs.copySync(stagingDir + '/' + f, target + '/' + f); });
-        manifest.name = name;
-        manifest.imported = new Date().toISOString();
-        fs.writeFileSync(target + '/' + BackupManifestName, JSON.stringify(manifest, null, 2));
-        self.logger.info(id + 'backupAdopt: backup "' + name + '" taken in');
-        return { ok: true, name: name };
+        var taken = backups.adopt(stagingDir, BackupsPath, wantedName);
+        if (taken.error) { return taken; }
+        self.logger.info(id + 'backupAdopt: backup "' + taken.name + '" taken in (' + taken.files.join(', ') + ')');
+        return { ok: true, name: taken.name };
     } catch (e) {
         self.logger.error(id + 'backupAdopt: ' + e.message);
         return { error: 'GLASS.BACKUP_CREATE_FAILED', message: e.message };
