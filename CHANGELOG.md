@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.30] - 2026-11-08
+
+### Fixed
+
+- The uninstall of 0.11.28, with "Do not delete themes" on, removed more than it should have: it kept the themes, the fonts and the backups and removed everything else under Glass's Internal Storage, among it files that are the user's and not the plugin's, the pictures for the screen when nothing plays, the forecast's place, and a development key. The uninstall now removes only what the plugin made and can make again, glass-evo and the kept one before it, the decoder, the catalogue's cache, the previews, the kept zips, the Manager's own state, the last picture of the screen and the screen's register, and leaves every other file where it is. With the switch off everything but the backups goes, as before. The lifecycle replayed on two players before the tag.
+
+### Diagnostics
+
+No new check; the Troubleshooting page's Starting over names what goes and what stays.
+
 ## [0.11.29] - 2026-11-08
 
 ### Fixed
