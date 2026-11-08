@@ -14,9 +14,15 @@ const SCRIPT = path.join(__dirname, '..', '..', 'uninstall.sh');
 function player(preserve, backups) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'glass-uninstall-'));
   const data = path.join(dir, 'glass');
-  for (const d of ['templates/1280x720_amber', 'templates_spectrum/1280x720_amber', 'catalog/downloads', 'previews/x', 'evo/bin', 'faces/Mine']) fs.mkdirSync(path.join(data, d), { recursive: true });
+  for (const d of ['templates/1280x720_amber', 'templates_spectrum/1280x720_amber', 'catalog/downloads', 'previews/x', 'evo/bin', 'evovpeg/bin', 'upgrade', 'held', 'faces/Mine', 'backgrounds', 'dev']) fs.mkdirSync(path.join(data, d), { recursive: true });
   fs.writeFileSync(path.join(data, 'templates/1280x720_amber/meters.txt'), '[m]\n');
   fs.writeFileSync(path.join(data, 'screen-owner.json'), '{}');
+  fs.writeFileSync(path.join(data, 'screen.png'), 'png');
+  fs.writeFileSync(path.join(data, 'evo-state'), '{}');
+  fs.writeFileSync(path.join(data, 'backgrounds', 'mine.jpg'), 'jpg');
+  fs.writeFileSync(path.join(data, 'dev', 'fanart.key'), 'key');
+  fs.writeFileSync(path.join(data, 'weather.json'), '{"place":"here"}');
+  fs.writeFileSync(path.join(data, 'notes.txt'), 'the user put this here');
   fs.mkdirSync(path.join(data, 'backups'), { recursive: true });
   if (backups) {
     fs.mkdirSync(path.join(data, 'backups', 'before-0.8.38'), { recursive: true });
@@ -49,13 +55,18 @@ test('with nothing backed up the folder goes whole', () => {
 test('where the user keeps the themes everything stays', () => {
   const p = player(true, true);
   const said = clear(p.data);
-  // The themes, the face themes, the backups and the ask stay; glass-evo, the
-  // catalogue's cache, the previews and the register go: a reinstall carries nothing else.
-  assert.deepEqual(fs.readdirSync(p.data).sort(), ['.preserve', 'backups', 'faces', 'templates', 'templates_spectrum']);
+  // What the plugin made goes (glass-evo, the decoder, the catalogue's cache, the previews,
+  // the kept zips, the Manager's state, the screen's picture and register); everything the
+  // user has stays: the themes, the face themes, the backups, the ask, the pictures for the
+  // screen, the development key, the forecast's file, and a file of their own.
+  assert.deepEqual(fs.readdirSync(p.data).sort(), ['.preserve', 'backgrounds', 'backups', 'dev', 'faces', 'notes.txt', 'templates', 'templates_spectrum', 'weather.json']);
   assert.ok(fs.existsSync(path.join(p.data, 'templates/1280x720_amber/meters.txt')));
   assert.ok(fs.existsSync(path.join(p.data, 'backups', 'before-0.8.38', 'config.json')));
+  assert.ok(fs.existsSync(path.join(p.data, 'dev', 'fanart.key')), 'the development key stays');
+  assert.ok(fs.existsSync(path.join(p.data, 'backgrounds', 'mine.jpg')), 'the user\'s pictures stay');
   assert.ok(!fs.existsSync(path.join(p.data, 'evo')), 'glass-evo goes');
-  assert.match(said, /Keeping the themes, the fonts and the backups/);
+  assert.ok(!fs.existsSync(path.join(p.data, 'evovpeg')), 'the decoder goes');
+  assert.match(said, /Keeping the themes, the fonts, the backups and the user's own files/);
   fs.rmSync(p.dir, { recursive: true, force: true });
 });
 

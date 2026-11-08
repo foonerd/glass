@@ -4,13 +4,15 @@
 
 # What Glass keeps under Internal Storage, cleared: the settings backups
 # always (they are what a player is put back from after an uninstall, and
-# a backup removed with the plugin it backs up would be none), and where
-# the user asked to keep the themes, the themes: the meter themes, the
-# spectrum themes, the face themes, the uploaded fonts, and the ask itself.
-# Everything else goes either way: glass-evo and the decoder (fetched
-# again at a press), the catalogue's cache, the previews, the kept zips
-# and the Manager's own state: a reinstall carries nothing but the themes
-# and the backups, and takes its settings from the newest backup.
+# a backup removed with the plugin it backs up would be none). Where the
+# user asked to keep the themes, what goes is only what the plugin made
+# and can make again: glass-evo and the kept one before it, the decoder,
+# the catalogue's cache, the previews, the kept zips, the Manager's own
+# state, the last picture of the screen and the screen's register. Every
+# other file stays: the themes, the face themes, the fonts, the user's own
+# pictures for the screen, the forecast's place, a development key, the
+# ask itself, and anything the user put there by hand. A reinstall takes
+# its settings from the newest backup.
 clear_data() {
   local dir=$1
   [ -d "$dir" ] || return 0
@@ -18,8 +20,10 @@ clear_data() {
   # Volumio removes at the same moment: a settings pair does not survive in halves.
   rm -rf "$dir/config"
   if [ -f "$dir/.preserve" ]; then
-    echo "Keeping the themes, the fonts and the backups under $dir (user setting); the rest goes"
-    find "$dir" -mindepth 1 -maxdepth 1 ! -name backups ! -name templates ! -name templates_spectrum ! -name faces ! -name fonts ! -name .preserve -exec rm -rf {} +
+    echo "Keeping the themes, the fonts, the backups and the user's own files under $dir (user setting); what the plugin made goes"
+    for made in evo evo.prev evovpeg catalog previews upgrade held evo-state screen.png screen-owner.json; do
+      rm -rf "$dir/$made"
+    done
     return 0
   fi
   echo "Removing the themes under $dir; the settings backups stay"
