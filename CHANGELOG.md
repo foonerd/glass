@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.28] - 2026-11-08
+
+### Fixed
+
+- "Do not delete themes" kept more than its words said: with it on, an uninstall kept the whole of Glass's Internal Storage, glass-evo, the decoder, the catalogue's cache, the previews, the kept zips and the Manager's own state. The uninstall now keeps, with the switch on, the themes (meters, spectrum, faces, fonts), the backups and the ask itself, and nothing else; with it off, the backups alone, as before. A reinstall takes its settings from the newest backup, as it did; the Troubleshooting page says so, and how to start truly afresh. Found by the lifecycle replay on two players; the whole lifecycle replayed on both before the tag.
+
+### Diagnostics
+
+No new check; the Troubleshooting page's Starting over says exactly what stays through an uninstall and where a reinstall's settings come from.
+
 ## [0.11.27] - 2026-11-07
 
 ### Changed
