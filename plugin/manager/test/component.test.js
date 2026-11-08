@@ -272,6 +272,98 @@ test('a Glass about to go in brings the component with it, or does not go in', a
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('a Glass going in brings glass-evo along to the release that goes with it, the one of its own version first, else the newest that fits; one that cannot come stays, said', async () => {
+  // The releases the player sees, by tag and as the latest, each a zip of its own.
+  const seen = { tags: {}, latest: null, fail: null, test: false };
+  const make = function (version, options) {
+    const zip = componentZip(version, options);
+    const rel = release(version, zip);
+    rel.prerelease = !!(options && options.prerelease);
+    return { release: rel, zip: zip };
+  };
+  const { root, component, job } = rig({
+    releasesUrl: 'releases/latest',
+    test: function () { return seen.test; },
+    fetch: async function (url, opts) {
+      if (seen.fail && url.indexOf(seen.fail) !== -1) throw new Error('no answer from ' + url);
+      if (url === 'releases/latest') return { body: Buffer.from(JSON.stringify(seen.latest.release)) };
+      const m = /^releases\/tags\/v(.+)$/.exec(url);
+      if (m) {
+        if (!seen.tags[m[1]]) { const e = new Error('404'); e.status = 404; throw e; }
+        return { body: Buffer.from(JSON.stringify(seen.tags[m[1]].release)) };
+      }
+      const which = Object.keys(seen.tags).map(function (v) { return seen.tags[v]; }).concat([seen.latest]).find(function (r) { return r && url === r.release.assets[0].browser_download_url; });
+      opts.sink(which.zip, which.zip.length);
+      return {};
+    }
+  });
+  await component.init();
+  const staged = function (version, least) {
+    const file = path.join(root, 'glass-' + version + '.zip');
+    fs.writeFileSync(file, buildZip([{ name: 'index.js', data: '// glass' }, { name: 'package.json', data: JSON.stringify({ name: 'glass', glassEvo: { least: least } }) }]));
+    return { file: file, version: version };
+  };
+  // Every release's zip at its own address, so the fetch tells them apart.
+  const publish = function (version, options) { const r = make(version, options); r.release.assets[0].browser_download_url = 'zip-' + version; seen.tags[version] = r; return r; };
+  seen.latest = publish('0.8.0', { requires: '0.8.0' });
+  await component.check(true);
+  await component.install(job());
+  assert.equal(component.view().installed.version, '0.8.0');
+
+  // Glass 0.8.1 goes in; it works with 0.8.0 by the least, and glass-evo 0.8.1 is published: along it comes, first.
+  publish('0.8.1', { requires: '0.8.1' });
+  let j = job();
+  assert.equal(await pair(component, staged('0.8.1', '0.7.0'), j), true);
+  assert.deepEqual([component.view().installed.version, component.view().previous.version, j.evo], ['0.8.1', '0.8.0', { from: '0.8.0', to: '0.8.1' }]);
+
+  // Glass 0.8.2 goes in; no glass-evo 0.8.2 is published, the latest seen is 0.8.1, what is here: it stays, nothing said.
+  seen.latest = seen.tags['0.8.1'];
+  j = job();
+  assert.equal(await pair(component, staged('0.8.2', '0.7.0'), j), false);
+  assert.deepEqual([component.view().installed.version, j.evo], ['0.8.1', undefined]);
+
+  // Glass 0.8.3 goes in; glass-evo 0.8.3 is a test release and the player takes none: the newest it sees that fits (0.8.2, published meanwhile) comes instead.
+  publish('0.8.3', { requires: '0.8.3', prerelease: true });
+  seen.latest = publish('0.8.2', { requires: '0.8.2' });
+  j = job();
+  assert.equal(await pair(component, staged('0.8.3', '0.7.0'), j), true);
+  assert.deepEqual([component.view().installed.version, j.evo], ['0.8.2', { from: '0.8.1', to: '0.8.2' }]);
+  // The same player taking test releases: the one of the Glass's own version.
+  seen.test = true;
+  j = job();
+  assert.equal(await pair(component, staged('0.8.3', '0.7.0'), j), true);
+  assert.deepEqual([component.view().installed.version, j.evo.to], ['0.8.3', '0.8.3']);
+  seen.test = false;
+
+  // Glass 0.8.4 goes in; glass-evo 0.8.4 is published but needs Glass 0.8.5: a misfit at the unpack; nothing newer fits otherwise (the latest is 0.8.2): it stays, said.
+  publish('0.8.4', { requires: '0.8.5' });
+  j = job();
+  assert.equal(await pair(component, staged('0.8.4', '0.7.0'), j), false);
+  assert.equal(component.view().installed.version, '0.8.3');
+  assert.equal(j.evo.stayed, '0.8.3');
+  assert.match(j.evo.reason, /needs Glass 0\.8\.5/);
+
+  // Glass 0.8.5 goes in and GitHub does not answer at all: it stays, said, and the Glass is not stopped (the caller's business).
+  seen.fail = 'releases';
+  j = job();
+  assert.equal(await pair(component, staged('0.8.5', '0.7.0'), j), false);
+  assert.deepEqual([component.view().installed.version, j.evo.stayed], ['0.8.3', '0.8.3']);
+  assert.match(j.evo.reason, /no answer/);
+  seen.fail = null;
+
+  // A Glass by hand brings nothing along: what was given goes in.
+  publish('0.8.5', { requires: '0.8.5' });
+  j = job();
+  assert.equal(await pair(component, staged('0.8.5', '0.7.0'), j, { byHand: true }), false);
+  assert.deepEqual([component.view().installed.version, j.evo], ['0.8.3', undefined]);
+  // The one needed (the least above what is here) still comes as before, and is said the same way.
+  seen.latest = seen.tags['0.8.5'];
+  j = job();
+  assert.equal(await pair(component, staged('0.8.5', '0.8.5'), j), true);
+  assert.deepEqual([component.view().installed.version, j.evo], ['0.8.5', { from: '0.8.3', to: '0.8.5' }]);
+  fs.rmSync(root, { recursive: true, force: true });
+});
+
 test('the face for a browser is carried out of the component, checked, where the manifest names one', async function () {
   const r = rig();
   await r.component.init();

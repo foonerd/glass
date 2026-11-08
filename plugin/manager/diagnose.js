@@ -60,6 +60,19 @@ const CHECKS = [
     }
   },
   {
+    // The last upgrade of Glass that took left glass-evo where it was:
+    // the release that goes with the new Glass could not be brought along
+    // (not reachable, not checking out, a misfit). The pair still works
+    // by the least; Update on the System tab brings it. Worth knowing
+    // under every symptom.
+    id: 'evo-stayed', symptoms: SYMPTOMS,
+    run(f) {
+      const last = f.update && f.update.last;
+      if (!last || last.phase !== 'done' || !last.ok || !last.evo || !last.evo.stayed) return null;
+      return note('evo-stayed', 'DIAG_EVO_STAYED', { glass: last.to, version: last.evo.stayed, reason: last.evo.reason || '-' }, 'system');
+    }
+  },
+  {
     id: 'legacy', symptoms: SYMPTOMS,
     run(f) { return f.status.legacy ? cause('legacy', 'DIAG_LEGACY_ON') : null; }
   },

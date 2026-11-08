@@ -2061,6 +2061,8 @@
       };
       var esc = function (s) { return String(s === undefined || s === null ? '' : s).replace(/[&<>"']/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]; }); };
       var fmtBytes = function (n) { if (!n && n !== 0) return ''; if (n < 1024) return n + ' B'; if (n < 1048576) return (n / 1024).toFixed(0) + ' kB'; if (n < 1073741824) return (n / 1048576).toFixed(1) + ' MB'; return (n / 1073741824).toFixed(2) + ' GB'; };
+      // What the last upgrade did with glass-evo: brought along ({from, to}) or left where it was ({stayed, reason}); nothing where none is installed.
+      var lastEvoWords = function (last) { if (!last || !last.evo) return ''; return last.evo.to ? ' · ' + t('MANAGER_UPD_LAST_EVO') + ' ' + last.evo.to : ' · ' + t('MANAGER_UPD_LAST_EVO_STAYED') + ' ' + last.evo.stayed; };
       var fmtDate = function (iso) { if (!iso) return ''; var d = new Date(iso); if (isNaN(d.getTime())) return String(iso); var p = function (n) { return n < 10 ? '0' + n : n; }; return d.getFullYear() + '-' + p(d.getMonth() + 1) + '-' + p(d.getDate()) + ' ' + p(d.getHours()) + ':' + p(d.getMinutes()); };
 
       // ---- transport --------------------------------------------------------
@@ -3331,7 +3333,7 @@
             ]],
             ['MANAGER_ST_SECTION_HOUSE', [
               ['MANAGER_ST_LOGGING', !s.logging ? '-' : String(s.logging.level || '') + (s.logging.targets && s.logging.targets.length ? ' · ' + s.logging.targets.join(', ') : '')],
-              ['MANAGER_ST_UPGRADE', !s.upgrade || !s.upgrade.last ? t('MANAGER_ST_UPGRADE_NONE') : s.upgrade.last.from + ' · ' + s.upgrade.last.to + ' · ' + fmtDate(s.upgrade.last.at) + (s.upgrade.last.phase && s.upgrade.last.phase !== 'done' ? ' · ' + s.upgrade.last.phase : '')],
+              ['MANAGER_ST_UPGRADE', !s.upgrade || !s.upgrade.last ? t('MANAGER_ST_UPGRADE_NONE') : s.upgrade.last.from + ' · ' + s.upgrade.last.to + ' · ' + fmtDate(s.upgrade.last.at) + (s.upgrade.last.phase && s.upgrade.last.phase !== 'done' ? ' · ' + s.upgrade.last.phase : '') + lastEvoWords(s.upgrade.last)],
               ['MANAGER_ST_LAST_JOB', (function () {
                 var j = s.upgrade && s.upgrade.job;
                 var h = s.upgrade && s.upgrade.held;
@@ -4962,7 +4964,7 @@
         }
         if (u.checkedAt) lines.push('<div class="help">' + esc(t('MANAGER_CATALOG_FETCHED')) + ' ' + esc(fmtDate(u.checkedAt)) + '</div>');
         if (u.error) lines.push('<div class="help">' + esc(t('MANAGER_UPD_CHECK_FAILED')) + ' ' + esc(u.error.message || u.error.error) + '</div>');
-        if (u.last && u.last.phase === 'done') lines.push('<div class="help">' + esc(u.last.ok ? t('MANAGER_UPD_LAST') : t('MANAGER_UPD_LAST_FAILED')) + ' ' + esc(u.last.from) + ' to ' + esc(u.last.to) + ' (' + esc(fmtDate(u.last.endedAt || u.last.at)) + ')</div>');
+        if (u.last && u.last.phase === 'done') lines.push('<div class="help">' + esc(u.last.ok ? t('MANAGER_UPD_LAST') : t('MANAGER_UPD_LAST_FAILED')) + ' ' + esc(u.last.from) + ' to ' + esc(u.last.to) + ' (' + esc(fmtDate(u.last.endedAt || u.last.at)) + ')' + esc(lastEvoWords(u.last)) + '</div>');
         if (u.last && u.last.phase === 'failed') lines.push('<div class="help">' + esc(t('MANAGER_UPD_LAST_FAILED')) + ' ' + esc(u.last.from) + ' to ' + esc(u.last.to) + ': ' + esc(u.last.error || '') + '</div>');
         lines.push('<div class="help">' + esc(u.previous ? t('MANAGER_UPD_PREVIOUS') + ' ' + u.previous.version + ' (' + fmtBytes(u.previous.bytes) + ')' : t('MANAGER_UPD_NONE')) + '</div>');
         $('upd-body').innerHTML = lines.join('');

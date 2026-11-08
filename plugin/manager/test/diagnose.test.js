@@ -230,6 +230,14 @@ test('slow: a rate the display lowered, a rate above what suits the board, and w
   const r = diagnose('other', f);
   // "Something else" runs everything: the five common checks, and of glass-evo's what stands (the component paired, the display its own).
   assert.deepStrictEqual(kinds(r), ['cause:legacy', 'cause:binary', 'cause:disk', 'note:release', 'note:journal', 'ok:evo-component', 'ok:evo-display']);
+  // The last upgrade that took left glass-evo where it was: a note with the reason; one that brought it along, or that did not take, says nothing here.
+  f = healthy(); f.update.last = { from: '0.7.92', to: '0.7.93', phase: 'done', ok: true, evo: { stayed: '0.7.90', reason: 'no answer from GitHub' } };
+  assert.deepStrictEqual(one(diagnose('other', f), 'evo-stayed').with, { glass: '0.7.93', version: '0.7.90', reason: 'no answer from GitHub' });
+  assert.strictEqual(one(diagnose('other', f), 'evo-stayed').kind, 'note');
+  f.update.last.evo = { from: '0.7.90', to: '0.7.93' };
+  assert.ok(!kinds(diagnose('other', f)).includes('note:evo-stayed'), 'brought along: nothing to note');
+  f.update.last = { from: '0.7.92', to: '0.7.93', phase: 'done', ok: false, evo: { stayed: '0.7.90', reason: 'x' } };
+  assert.ok(!kinds(diagnose('other', f)).includes('note:evo-stayed'), 'the upgrade did not take: the install check has it');
   // Facts that are missing make no finding and no crash.
   assert.deepStrictEqual(diagnose('touch', { status: {} }).findings, []);
 });

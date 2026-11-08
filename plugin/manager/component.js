@@ -10,7 +10,10 @@
 // manifest the least Glass (requires.glass), Glass's package the least
 // glass-evo (glassEvo.least). A pair outside either is never installed,
 // and a Glass about to be installed that needs a newer component has it
-// installed first.
+// installed first. The pair moves forward together: a Glass going in
+// brings the component to the release that goes with it, the one of its
+// own version where published, else the newest it works with, before
+// the Glass itself; one that cannot be brought along stays, said.
 
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -18,7 +21,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { get } = require('./catalog');
 const { Zip, safeName } = require('./zip');
-const { compareVersions, offered, fetchChecked, verifyAgainstRelease, verifyArchiveFile } = require('./update');
+const { compareVersions, offered, released, fetchChecked, verifyAgainstRelease, verifyArchiveFile } = require('./update');
 
 const RELEASES_URL = 'https://api.github.com/repos/foonerd/glass-evo/releases/latest';
 const ASSET = /^glass-evo-(\d+\.\d+\.\d+)\.zip$/;
@@ -117,6 +120,51 @@ function pairPlan(installed, target) {
   return { action: 'none' };
 }
 
+// The pair moves forward together: a Glass going in that the component
+// here already works with still brings the component to the release
+// that goes with that Glass, before the Glass itself: the release of the
+// Glass's own version where one is published, newer than the one here,
+// fitting it and no test release unless the player takes them; else the
+// newest release the player sees that is newer and fits. Nothing newer
+// that fits: the component stays. One that cannot be brought along (not
+// reachable, not checking out, a misfit at the unpack) does not stop the
+// Glass, which the component here works with by the least: it stays, and
+// `job.evo` says so ({stayed, reason}), as it says what came ({from, to}).
+// Answers whether the component was changed.
+async function along(component, here, target, job) {
+  const stays = function (reason) {
+    const why = reason && reason.message ? reason.message : String(reason);
+    if (job) job.evo = { stayed: here.version, reason: why };
+    component.logger.info('glass: manager upgrade: glass-evo stays at ' + here.version + ' with Glass ' + target.version + ': ' + why);
+    return false;
+  };
+  const fits = function (release) {
+    return !!release && !!release.version && compareVersions(release.version, here.version) > 0 && (!target.least || compareVersions(release.version, target.least) >= 0) && (!release.prerelease || !!component.test());
+  };
+  let candidate = null;
+  try {
+    const same = await released(component.fetch, component.releasesUrl, target.version, ASSET);
+    if (same && same.version === target.version && fits(same)) candidate = same;
+  } catch (e) { /* no release of that version: the newest seen is asked next */ }
+  if (!candidate) {
+    try {
+      await component.check(true);
+    } catch (e) {
+      return stays(e);
+    }
+    if (fits(component.latest)) candidate = component.latest;
+  }
+  if (!candidate) return false;
+  try {
+    const result = await component.installRelease(job, candidate, { glass: target.version, least: target.least });
+    if (job) job.evo = { from: result.from, to: result.to };
+    component.logger.info('glass: manager upgrade: glass-evo brought to ' + result.to + ' with Glass ' + target.version);
+    return true;
+  } catch (e) {
+    return stays(e);
+  }
+}
+
 // Before a Glass goes in, the component that is here is brought to what
 // that Glass works with: the staged zip's package names the least
 // glass-evo, and an older one is updated first, held to that Glass. A
@@ -141,7 +189,7 @@ async function pair(component, staged, job, options) {
     await zip.close();
   }
   const plan = pairPlan(here, { version: staged.version, least: least });
-  if (plan.action === 'none') return false;
+  if (plan.action === 'none') return options.byHand ? false : along(component, here, { version: staged.version, least: least }, job);
   if (plan.action === 'back') {
     // The one kept before it goes back in, held to the Glass that will run
     // and the least that Glass names, not to the pair running now.
@@ -177,6 +225,7 @@ async function pair(component, staged, job, options) {
       throw new ComponentError('pair', 'Glass ' + staged.version + ' needs glass-evo ' + plan.least + ' or later, which could not be installed (' + (e && e.message ? e.message : e) + '); nothing was changed');
     }
   }
+  if (job) job.evo = { from: here.version, to: component.installed().version };
   component.logger.info('glass: manager upgrade: glass-evo brought to ' + component.installed().version + ' for Glass ' + staged.version);
   return true;
 }

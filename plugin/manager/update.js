@@ -322,7 +322,8 @@ class Updater {
       last.ok = last.to === this.version;
       last.endedAt = new Date().toISOString();
       await this.saveState();
-      this.logger.info('glass: manager upgrade from ' + last.from + ' to ' + last.to + (last.ok ? ' took' : ' did not take, running ' + this.version));
+      const evo = last.evo ? (last.evo.to ? ', glass-evo ' + last.evo.to + ' with it' : ', glass-evo stayed at ' + last.evo.stayed) : '';
+      this.logger.info('glass: manager upgrade from ' + last.from + ' to ' + last.to + (last.ok ? ' took' + evo : ' did not take, running ' + this.version));
     }
     if (typeof this.plugin.backupPruneAutomatic === 'function') {
       try { this.plugin.backupPruneAutomatic(KEEP_AUTOMATIC_BACKUPS); } catch (e) { /* said in the log */ }
@@ -472,7 +473,8 @@ class Updater {
     });
     if (before && before !== kept) await fsp.rm(before, { force: true });
     self.state.previous = { version: self.version, zip: kept, bytes: wrote.bytes, files: wrote.files, at: new Date().toISOString() };
-    self.state.last = { from: self.version, to: staged.version, at: new Date().toISOString(), phase: 'applying', backup: backup.name || null };
+    // `job.evo`: what the pair rule did with glass-evo for this Glass ({from, to} or {stayed, reason}), or null where none is installed.
+    self.state.last = { from: self.version, to: staged.version, at: new Date().toISOString(), phase: 'applying', backup: backup.name || null, evo: job.evo || null };
     await self.saveState();
 
     job.state = 'applying';

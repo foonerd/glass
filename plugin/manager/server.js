@@ -1847,6 +1847,7 @@ class Manager {
         const kept = self.held.get('evo');
         const paired = await pair(self.component, staged, job, { held: kept });
         if (kept && kept.used) await self.held.take('evo');
+        if (job.evo && job.evo.to) job.name = 'Glass ' + staged.version + ' · glass-evo ' + job.evo.to;
         let result;
         try {
           result = await self.updater.apply(job, staged);
@@ -1969,9 +1970,15 @@ class Manager {
         // The pair rule once more, as the online path has it: satisfied by
         // the kept zip or by what is installed, or, where the player sees
         // the glass-evo it needs online, fetching it.
+        // A Glass that needs no newer glass-evo still brings it along to
+        // the release that goes with it where the player can see GitHub
+        // now (one fresh look that succeeds); a player that cannot takes
+        // the Glass alone, glass-evo staying as it is.
         const fetching = p.action === 'install-glass-fetching-evo';
+        const sees = p.action === 'install-glass' && !!self.component.installed().installed ? await self.component.check(true).then(() => true, () => false) : false;
         try {
-          paired = (await pair(self.component, staged, job, fetching ? {} : { byHand: true })) || paired;
+          paired = (await pair(self.component, staged, job, fetching || sees ? {} : { byHand: true })) || paired;
+          if (job.evo && job.evo.to) job.name = 'Glass ' + staged.version + ' · glass-evo ' + job.evo.to;
         } catch (e) {
           if (!fetching) throw e;
           // The glass-evo it needs could not be fetched after all: the
