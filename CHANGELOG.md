@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.34] - 2026-11-08
+
+### Changed
+
+- **The pair moves forward together.** An upgrade of Glass through the Manager brings glass-evo along to the release that goes with the new Glass: the one of its own version where published, else the newest the new Glass works with, installed first and put back when the upgrade does not go in; before, glass-evo stayed where it worked and the header badge said a newer one was known. A glass-evo that cannot be brought along (its release out of reach, its zip not checking out) does not stop the upgrade: Glass goes in, and the last-upgrade line on the System tab and the Status tab's Last upgrade row say glass-evo stayed and why; Update brings it. A Glass zip installed from a file brings glass-evo along the same way where the player can see GitHub, and installs alone where it cannot. The upgrade confirmation says so. The first upgrade performed by this release brings glass-evo along; the upgrade to this release is performed by the release before it, which leaves glass-evo where it is. Asked on the forum and decided for safety, since the two may depend on each other. Eleven languages.
+
+### Diagnostics
+
+Find a problem notes, under every symptom, a last upgrade that left glass-evo behind, with the reason; the Status tab's Last upgrade row and the System tab's last-upgrade line carry "with glass-evo" or "glass-evo stayed at"; the Troubleshooting page has a row for a glass-evo that did not move with an upgrade; the Manager page's glass-evo paragraph says the rule.
+
 ## [0.11.33] - 2026-11-08
 
 ### Added
