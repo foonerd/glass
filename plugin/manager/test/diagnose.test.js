@@ -650,6 +650,13 @@ test('the movie: the switch, the profile, the decoder, the box, the display\'s w
   const d = one(diagnose('movie', f), 'movie');
   assert.strictEqual(d.key, 'DIAG_MOVIE_DISTRIBUTION_DECODER');
   assert.strictEqual(d.kind, 'note');
+  // The picture at the whole screen after a tap in its box: a note that the theme is hidden by design and a tap brings it back.
+  f.status.movie.decoderSource = 'component';
+  f.status.movie.report.full = true;
+  const full = one(diagnose('movie', f), 'movie');
+  assert.deepStrictEqual([full.kind, full.key, full.with], ['note', 'DIAG_MOVIE_FULL', { w: 1920, h: 1080 }]);
+  f.status.movie.report.full = false;
+  assert.strictEqual(one(diagnose('movie', f), 'movie').kind, 'ok');
   assert.strictEqual(d.with.version, '0.1.0');
   assert.strictEqual(d.go, 'video');
   f.status.channel.status = 'play';

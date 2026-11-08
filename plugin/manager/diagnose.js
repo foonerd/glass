@@ -697,6 +697,8 @@ const CHECKS = [
       const r = m.report;
       const playing = !!(f.status.channel && f.status.channel.status === 'play');
       if (playing && (!r || !r.at || f.now - r.at > 120000)) return note('movie', 'DIAG_MOVIE_NO_VIDEO', {}, null);
+      // At the whole screen after a tap in its box: the theme is hidden under it by design; a tap brings it back. Said first.
+      if (r && r.state === 'showing' && r.full) return note('movie', 'DIAG_MOVIE_FULL', { w: r.width, h: r.height }, null);
       // The distribution's ffmpeg serves until the player's own decoder is fetched: said beside a picture that shows.
       if (r && r.state === 'showing' && m.decoderSource === 'distribution') return note('movie', 'DIAG_MOVIE_DISTRIBUTION_DECODER', { w: r.width, h: r.height, version: m.decoderWanted || '' }, 'video');
       if (r && r.state === 'showing') {

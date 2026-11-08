@@ -205,6 +205,8 @@ Channel.prototype.attach = function (conn) {
                     measured: message.measured === null || message.measured === undefined ? null : parseFloat(message.measured),
                     fixed: message.fixed === true,
                     hardware: message.hardware ? String(message.hardware).slice(0, 32) : null,
+                    // The picture at the whole screen after a tap in its box.
+                    full: message.full === true,
                     at: Date.now()
                 };
                 if (self.onMovie) { self.onMovie(); }

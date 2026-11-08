@@ -1083,7 +1083,8 @@ impl Video {
     /// What the display does with the picture, for the player: the file,
     /// its shape, the delay and whether it was measured; sent once per
     /// change through `report`.
-    pub fn report(&mut self, state: &str) -> Option<serde_json::Value> {
+    /// `full`: the picture at the whole screen after a tap in its box.
+    pub fn report(&mut self, state: &str, full: bool) -> Option<serde_json::Value> {
         let (delay, measured) = self.delay();
         let value = serde_json::json!({
             "file": self.file,
@@ -1095,6 +1096,7 @@ impl Video {
             "measured": measured.map(|c| (c * 100.0).round() / 100.0),
             "fixed": self.fixed,
             "hardware": self.hardware,
+            "full": full,
         });
         let text = value.to_string();
         if text == self.reported {

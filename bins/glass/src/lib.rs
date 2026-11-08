@@ -24,6 +24,7 @@ use std::time::Duration;
 #[cfg(target_os = "android")]
 pub mod android;
 mod governor;
+mod movietap;
 mod package;
 pub mod probe;
 mod remote;
@@ -979,6 +980,12 @@ fn session(
     let mut movie_told = false;
     #[cfg(not(target_os = "android"))]
     let mut movie_word: Option<String> = None;
+    // The movie at the whole screen after a tap in its box, and the tap's
+    // detector; the blurred copy behind the letterbox is made about once a
+    // second while it is full.
+    let mut movie_full = false;
+    let mut movie_tap = movietap::MovieTap::default();
+    let mut movie_blurred_at: Option<Instant> = None;
     // The panel's power: the player's word, the face's idle black, a touch.
     let mut screen = screen::ScreenPower::default();
     let mut wake_screen = false;
@@ -1477,13 +1484,21 @@ fn session(
             // and the theme's box is over it: the picture is drawn under
             // the frame and shows through, and the face over the frame
             // covers it where the face draws.
+            // At the whole screen after a tap the hole is the whole frame,
+            // whatever the box's zorder: the theme is hidden under the picture.
             #[cfg(not(target_os = "android"))]
             let movie_hole: Option<(u32, u32, u32, u32)> = movie
                 .as_ref()
                 .filter(|m| m.shown().is_some())
                 .and(skin.video.as_ref())
-                .filter(|v| v.zorder == lead::ZOrder::Overlay)
-                .map(|v| (v.x, v.y, v.w, v.h));
+                .filter(|v| movie_full || v.zorder == lead::ZOrder::Overlay)
+                .map(|v| {
+                    if movie_full {
+                        (0, 0, skin.width, skin.height)
+                    } else {
+                        (v.x, v.y, v.w, v.h)
+                    }
+                });
             #[cfg(target_os = "android")]
             let movie_hole: Option<(u32, u32, u32, u32)> = None;
             let (mut frame, mut damage): (&Frame, &[Rect]) = {
@@ -1541,7 +1556,9 @@ fn session(
             } else {
                 Wall::default()
             };
-            if let Some(face) = face.as_deref_mut() {
+            // No face over the picture at the whole screen: the tap that
+            // brings the theme back brings the face with it.
+            if let Some(face) = face.as_deref_mut().filter(|_| !movie_full) {
                 let face_keys = face_keys_with_remote(&skin.run.face, remote.as_deref());
                 // A remote's Status panel says how the controls were
                 // composed, and the journal once per change.
@@ -1633,7 +1650,7 @@ fn session(
                     } else {
                         "waiting"
                     };
-                    if let Some(line) = m.report(state) {
+                    if let Some(line) = m.report(state, movie_full) {
                         source.report_movie(&line);
                         movie_told = true;
                     }
@@ -1657,9 +1674,10 @@ fn session(
                     (Some(l), Some(_), Some(m)) => {
                         let (delay, _) = m.delay();
                         format!(
-                            "{} showing, the player's sound {delay} ms behind its position{}",
+                            "{} showing, the player's sound {delay} ms behind its position{}{}",
                             l.file,
-                            m.report_hardware().map(|h| format!(", decoded by the board's {h}")).unwrap_or_default()
+                            m.report_hardware().map(|h| format!(", decoded by the board's {h}")).unwrap_or_default(),
+                            if movie_full { ", at the whole screen after a tap (a tap brings the theme back)" } else { "" }
                         )
                     }
                     _ => String::new(),
@@ -1698,7 +1716,33 @@ fn session(
                 } else {
                     ""
                 };
-                if backdrop.follow(art, window.screen_size()) {
+                // At the whole screen the backdrop is a blurred, dimmed copy
+                // of the frame, made about once a second (a blur every frame
+                // is too dear on a Pi), behind the letterbox; the art comes
+                // back as the backdrop when the picture returns to its box.
+                #[cfg(not(target_os = "android"))]
+                let movie_behind = movie_full
+                    && movie
+                        .as_ref()
+                        .is_some_and(|m| m.shown().is_some());
+                #[cfg(target_os = "android")]
+                let movie_behind = false;
+                if movie_behind {
+                    #[cfg(not(target_os = "android"))]
+                    if movie_blurred_at.is_none_or(|at| at.elapsed() >= Duration::from_secs(1)) {
+                        if let Some(m) = movie.as_ref() {
+                            if let Some(planes) = m.shown() {
+                                let behind = movie_backdrop(planes, m.size(), window.screen_size());
+                                if let Err(err) = window.set_backdrop(Some(&behind)) {
+                                    eprintln!("glass: backdrop: {err}");
+                                }
+                                movie_blurred_at = Some(Instant::now());
+                            }
+                        }
+                    }
+                    // The art's backdrop let go, so it is made again after.
+                    backdrop.follow("", window.screen_size());
+                } else if backdrop.follow(art, window.screen_size()) {
                     if let Err(err) = window.set_backdrop(backdrop.frame()) {
                         eprintln!("glass: backdrop: {err}");
                     }
@@ -1708,19 +1752,34 @@ fn session(
                 window.set_translucent(assets.translucent || movie_hole.is_some());
                 #[cfg(not(target_os = "android"))]
                 {
-                    window.set_video_box(skin.video.as_ref().map(|v| pane::VideoBox {
-                        x: v.x,
-                        y: v.y,
-                        w: v.w,
-                        h: v.h,
-                        fit: match v.scale {
-                            lead::Scale::Stretch => pane::VideoFit::Stretch,
-                            lead::Scale::Cover => pane::VideoFit::Cover,
-                            lead::Scale::Fit => pane::VideoFit::Fit,
-                        },
-                        // Under the frame always: an overlay box is a hole
-                        // in the theme, so the face stays over the picture.
-                        over: false,
+                    // At the whole screen after a tap the box is the frame,
+                    // the picture fitted in it (the bars show the blurred copy).
+                    window.set_video_box(skin.video.as_ref().map(|v| {
+                        if movie_full {
+                            pane::VideoBox {
+                                x: 0,
+                                y: 0,
+                                w: skin.width,
+                                h: skin.height,
+                                fit: pane::VideoFit::Fit,
+                                over: false,
+                            }
+                        } else {
+                            pane::VideoBox {
+                                x: v.x,
+                                y: v.y,
+                                w: v.w,
+                                h: v.h,
+                                fit: match v.scale {
+                                    lead::Scale::Stretch => pane::VideoFit::Stretch,
+                                    lead::Scale::Cover => pane::VideoFit::Cover,
+                                    lead::Scale::Fit => pane::VideoFit::Fit,
+                                },
+                                // Under the frame always: an overlay box is a hole
+                                // in the theme, so the face stays over the picture.
+                                over: false,
+                            }
+                        }
                     }));
                     match movie.as_ref() {
                         Some(m) => {
@@ -1811,6 +1870,48 @@ fn session(
                 }
                 let mut acted = false;
                 let mut dismiss = false;
+                // The movie's box takes a tap before the face and the theme
+                // see it, while the movie shows: a finger down in the box
+                // and up within a moment brings the picture to the whole
+                // screen, the next tap brings it back; in full screen the
+                // whole frame is the box. The movie is dropped on a toggle
+                // and opened again at the new size by the loop.
+                #[cfg(not(target_os = "android"))]
+                {
+                    let shown = movie.as_ref().is_some_and(|m| m.shown().is_some());
+                    let boxed = match (shown, skin.video.as_ref()) {
+                        (true, Some(_)) if movie_full => Some((0, 0, skin.width, skin.height)),
+                        (true, Some(v)) => Some((v.x, v.y, v.w, v.h)),
+                        _ => None,
+                    };
+                    let now = Instant::now();
+                    let mut toggled = false;
+                    events.retain(|event| {
+                        let (taken, tapped) =
+                            movie_tap.pointer(event.kind, event.x, event.y, now, boxed);
+                        if tapped {
+                            toggled = true;
+                        }
+                        !taken
+                    });
+                    if toggled {
+                        movie_full = !movie_full;
+                        acted = true;
+                        movie = None;
+                        movie_probed = None;
+                        movie_blurred_at = None;
+                        logline::say!(
+                            Info,
+                            "video",
+                            "{}",
+                            if movie_full {
+                                "a tap in the box: the picture to the whole screen"
+                            } else {
+                                "a tap: the picture back to its box"
+                            }
+                        );
+                    }
+                }
                 // The face sees every touch first; what it takes, the
                 // theme's controls and the touch rules do not.
                 if let Some(face) = face.as_deref_mut() {
@@ -2190,6 +2291,53 @@ pub(crate) fn screen_available() -> bool {
     cfg!(any(windows, target_os = "macos", target_os = "android"))
         || env::var_os("DISPLAY").is_some_and(|v| !v.is_empty())
         || env::var_os("WAYLAND_DISPLAY").is_some_and(|v| !v.is_empty())
+}
+
+/// The backdrop behind the movie at the whole screen: a small copy of the
+/// frame's planes (YUV 4:2:0, `size` wide and high) in colour at a quarter
+/// of the screen, blurred as the art's backdrop is and dimmed to half; the
+/// GPU scales it to the window. A few milliseconds once a second.
+fn movie_backdrop(planes: &[u8], size: (u32, u32), screen: (u32, u32)) -> Frame {
+    let (vw, vh) = (size.0.max(2) as usize, size.1.max(2) as usize);
+    let (qw, qh) = ((screen.0 / 4).max(8) as usize, (screen.1 / 4).max(8) as usize);
+    let y_len = vw * vh;
+    let c_len = (vw / 2) * (vh / 2);
+    let mut small = Frame {
+        blend: expose::Blend::Normal,
+        width: qw as u32,
+        height: qh as u32,
+        rgba: vec![0; qw * qh * 4],
+    };
+    if planes.len() >= y_len + 2 * c_len {
+        let (yp, rest) = planes.split_at(y_len);
+        let (up, vp) = rest.split_at(c_len);
+        for oy in 0..qh {
+            let sy = oy * vh / qh;
+            for ox in 0..qw {
+                let sx = ox * vw / qw;
+                let yv = yp[sy * vw + sx] as f32;
+                let ci = (sy / 2) * (vw / 2) + sx / 2;
+                let u = up[ci] as f32 - 128.0;
+                let v = vp[ci.min(c_len - 1)] as f32 - 128.0;
+                let r = (yv + 1.402 * v).clamp(0.0, 255.0) as u8;
+                let g = (yv - 0.344 * u - 0.714 * v).clamp(0.0, 255.0) as u8;
+                let b = (yv + 1.772 * u).clamp(0.0, 255.0) as u8;
+                let i = (oy * qw + ox) * 4;
+                small.rgba[i] = r;
+                small.rgba[i + 1] = g;
+                small.rgba[i + 2] = b;
+                small.rgba[i + 3] = 255;
+            }
+        }
+    }
+    let mut blurred = expose::blur(&small, (qw.max(qh) as u32 / 40).max(2));
+    for px in blurred.rgba.chunks_mut(4) {
+        px[0] /= 2;
+        px[1] /= 2;
+        px[2] /= 2;
+        px[3] = 255;
+    }
+    blurred
 }
 
 /// What the launcher named to draw on, `SDL_VIDEODRIVER`, from what the

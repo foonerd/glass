@@ -42,7 +42,10 @@
   // The movie: what the player says of it (the file to play, the boxes of
   // the theme's meters, the sound's delay), the video element laid over
   // the theme's box, and the player's position it is held to.
-  var movie = { line: null, video: null, src: '', stateAt: 0, timer: null, failed: '', hole: '' };
+  // `full`: the picture at the stage's whole size after a tap in its box,
+  // a blurred copy behind it on a small canvas drawn once a second; `tap`
+  // the finger down in the box, until it lifts.
+  var movie = { line: null, video: null, src: '', stateAt: 0, timer: null, failed: '', hole: '', full: false, blur: null, tap: null, blurredAt: 0 };
 
   var $ = function (id) { return document.getElementById(id); };
   var encoder = new TextEncoder();
@@ -321,21 +324,90 @@
     var v = movie.video;
     if (!v || !movie.line || !face.ready) return;
     var box = movie.line.boxes ? movie.line.boxes[face.meter] : null;
-    if (!box || !movie.src || movie.failed) { v.style.display = 'none'; movieHole(null); return; }
+    if (!box || !movie.src || movie.failed) { v.style.display = 'none'; movieHole(null); movieBlurShow(false); return; }
     var canvas = $('face-canvas');
     var rect = canvas.getBoundingClientRect();
     var stageRect = $('face-stage').getBoundingClientRect();
     var k = face.width ? rect.width / face.width : 1;
+    canvas.style.position = 'relative';
+    canvas.style.zIndex = '1';
+    if (movie.full) {
+      // At the whole stage after a tap: the element over the theme and the
+      // face, the picture kept in proportion, a blurred copy behind it in
+      // the bars; the module leaves the whole theme clear meanwhile.
+      v.style.left = (rect.left - stageRect.left) + 'px';
+      v.style.top = (rect.top - stageRect.top) + 'px';
+      v.style.width = rect.width + 'px';
+      v.style.height = rect.height + 'px';
+      v.style.objectFit = 'contain';
+      v.style.zIndex = '3';
+      v.style.display = '';
+      movieBlurShow(true, rect, stageRect);
+      movieHole({ x: 0, y: 0, w: face.width, h: face.height });
+      return;
+    }
+    movieBlurShow(false);
     v.style.left = (rect.left - stageRect.left + box.x * k) + 'px';
     v.style.top = (rect.top - stageRect.top + box.y * k) + 'px';
     v.style.width = (box.w * k) + 'px';
     v.style.height = (box.h * k) + 'px';
     v.style.objectFit = box.scale === 'cover' ? 'cover' : (box.scale === 'stretch' ? 'fill' : 'contain');
     v.style.zIndex = '0';
-    canvas.style.position = 'relative';
-    canvas.style.zIndex = '1';
     v.style.display = '';
     movieHole(box.zorder === 'background' || v.readyState < 2 ? null : box);
+  }
+  // The blurred copy behind the picture at the whole stage: a small canvas
+  // under the video element, blurred and dimmed by CSS, drawn from the
+  // video about once a second (movieFollow).
+  function movieBlurShow(on, rect, stageRect) {
+    var b = movie.blur;
+    if (!on) { if (b) b.style.display = 'none'; return; }
+    if (!b) {
+      b = document.createElement('canvas');
+      b.id = 'face-movie-blur';
+      b.width = 32; b.height = 18;
+      b.style.position = 'absolute';
+      b.style.pointerEvents = 'none';
+      b.style.filter = 'blur(18px) brightness(0.5)';
+      b.style.transform = 'scale(1.1)';
+      $('face-stage').appendChild(b);
+      movie.blur = b;
+    }
+    b.style.left = (rect.left - stageRect.left) + 'px';
+    b.style.top = (rect.top - stageRect.top) + 'px';
+    b.style.width = rect.width + 'px';
+    b.style.height = rect.height + 'px';
+    b.style.zIndex = '2';
+    b.style.display = '';
+    movieBlurDraw(true);
+  }
+  function movieBlurDraw(force) {
+    var b = movie.blur, v = movie.video;
+    if (!b || !v || !movie.full || b.style.display === 'none' || v.readyState < 2) return;
+    var now = Date.now();
+    if (!force && now - movie.blurredAt < 1000) return;
+    movie.blurredAt = now;
+    try { b.getContext('2d').drawImage(v, 0, 0, b.width, b.height); } catch (e) { /* not yet drawable */ }
+  }
+  // A tap in the movie's box (a finger down in it and up within a moment
+  // and a few pixels) brings the picture to the whole stage, the next tap
+  // back; while the picture is full the whole stage is the box. Pointer
+  // events in the frame's pixels; true when the event is the movie's.
+  function movieTap(kind, x, y) {
+    var v = movie.video;
+    if (!v || !movie.src || movie.failed || !movie.line || v.style.display === 'none') { movie.tap = null; return false; }
+    var box = movie.full ? { x: 0, y: 0, w: face.width, h: face.height } : (movie.line.boxes ? movie.line.boxes[face.meter] : null);
+    if (!box) { movie.tap = null; return false; }
+    var inside = x >= box.x && y >= box.y && x < box.x + box.w && y < box.y + box.h;
+    if (kind === 0) { movie.tap = inside ? { x: x, y: y, at: Date.now() } : null; return inside; }
+    if (kind === 1) return !!movie.tap;
+    var tap = movie.tap; movie.tap = null;
+    if (!tap) return false;
+    if (Date.now() - tap.at <= 400 && Math.abs(x - tap.x) <= 24 && Math.abs(y - tap.y) <= 24 && inside) {
+      movie.full = !movie.full;
+      moviePlace();
+    }
+    return true;
   }
   // The theme's box cut clear in the module, or painted whole again.
   function movieHole(box) {
@@ -390,6 +462,8 @@
     }
     if (playing && v.paused) { var p = v.play(); if (p && p.catch) p.catch(function () { /* the browser wants a gesture: the next tap */ }); }
     if (!playing && !v.paused) v.pause();
+    // The blurred copy behind the picture at the whole stage, about once a second.
+    movieBlurDraw(false);
   }
 
   // ---- the finger on the controls ---------------------------------------
@@ -458,6 +532,8 @@
       if (!rect.width || !rect.height) return;
       var x = Math.round((e.clientX - rect.left) * face.width / rect.width);
       var y = Math.round((e.clientY - rect.top) * face.height / rect.height);
+      // The movie's box takes a tap before the module sees the pointer.
+      if (movieTap(kind, x, y)) return;
       var acts;
       try {
         acts = guarded(function () { face.ex.pointer(kind, x, y); return JSON.parse(answer() || '[]'); });
