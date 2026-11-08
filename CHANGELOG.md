@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.37] - 2026-11-08
+
+### Fixed
+
+- **The movie's picture came back only with another file after a stop.** When the player stopped, the display let the picture go but kept the file in mind as already probed, so the same file played again was never opened again; Play after a pause from the Face tab or Anymote goes through a stop, which is where it showed. The display forgets the file when the player stops and opens it again the next time it plays. Since the first release of the movie. Found while testing on the player.
+
+### Diagnostics
+
+None needed: Find a problem's movie check already says when the picture is waiting or missing, and the Status tab's Movie row reads the display's report.
+
 ## [0.11.36] - 2026-11-08
 
 ### Added
