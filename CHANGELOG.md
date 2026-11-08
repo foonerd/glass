@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.35] - 2026-11-08
+
+### Added
+
+- **A second forecast source, with automatic fallback.** The forecast asks Open-Meteo first, as before; when Open-Meteo cannot be reached (a network that blocks it, an error, a timeout, an answer that is no forecast) MET Norway is asked in the same refresh and serves the reading, in the same shape, so the face shows the forecast all the same; the next refresh asks Open-Meteo again. Nothing to set. The credit under the place names the source that served, the Status tab's Forecast row names it, and the place search falls back to OpenStreetMap's Nominatim when Open-Meteo's search does not answer. The player identifies itself to the services as their terms ask. Asked on the forum by a user whose network could not reach the one source. Eleven languages.
+
+### Diagnostics
+
+Find a problem notes a reading that came from the second source, with what the first said; the Status tab's Forecast row carries "from" the source; the Troubleshooting page has a row for a network that cannot reach Open-Meteo; the Screen page and glass-evo's Face Themes page name both sources.
+
 ## [0.11.34] - 2026-11-08
 
 ### Changed
