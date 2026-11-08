@@ -1,7 +1,7 @@
 'use strict';
 const test = require('node:test');
 const assert = require('node:assert');
-const { request, report, state, settings, wantedLevel, dimDelayMs, brightnessAtPlay, DIM_FADE_MS } = require('../screenpower');
+const { request, report, state, settings, wantedLevel, dimDelayMs, dimAtStandstill, brightnessAtPlay, DIM_FADE_MS } = require('../screenpower');
 
 test('a fade rides with a brightness in milliseconds, whole and up to a minute; the dim and the undim take a second', () => {
   assert.deepEqual(request({ brightness: 30, fade: 1000 }), { brightness: 30, fade: 1000 });
@@ -98,4 +98,16 @@ test('the state answers from the report, else from the wish, and says whether a 
   assert.equal(told.brightness, 50);
   assert.equal(told.ours, true, "the display's word on the screen beats the plugin's guess");
   assert.equal(told.reported, true);
+});
+
+test('the panel dims at a standstill where no play went before: the dim on with a level, the player not playing, nothing dimmed or on its way', () => {
+  const on = { dim: true, idleLevel: 6, level: 31 };
+  assert.equal(dimAtStandstill(on, 'stop', false, false), true, 'after a reboot the player stands still');
+  assert.equal(dimAtStandstill(on, 'pause', false, false), true, 'a pause stands still too');
+  assert.equal(dimAtStandstill(on, 'play', false, false), false, 'playing never dims');
+  assert.equal(dimAtStandstill(on, 'stop', true, false), false, 'dimmed already');
+  assert.equal(dimAtStandstill(on, 'stop', false, true), false, 'a dim on its way');
+  assert.equal(dimAtStandstill({ dim: false, idleLevel: 6, level: 31 }, 'stop', false, false), false, 'the switch off');
+  assert.equal(dimAtStandstill({ dim: true, idleLevel: null, level: 31 }, 'stop', false, false), false, 'no idle level');
+  assert.equal(dimAtStandstill(null, 'stop', false, false), false, 'no settings');
 });

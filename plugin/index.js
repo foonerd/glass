@@ -2002,6 +2002,11 @@ Glass.prototype.onStart = function () {
                     self.pushPersist('', 0, 0);
                 } catch (e) {}
             }
+        } else if (screenpower.dimAtStandstill(screenpower.settings(self.config), status, self.dimmed, !!self.dimTimer)) {
+            // The player stands still with no play gone before: at the plugin's
+            // start and after a reboot. The panel dims as it does after a stop,
+            // with the same delay; once dimmed or on its way, nothing more.
+            self.scheduleDim();
         }
 
         lastService = state.service || '';

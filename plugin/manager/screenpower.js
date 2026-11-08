@@ -80,6 +80,18 @@ function dimDelayMs(idleWait, persistS) {
   return String(idleWait || 'none') === 'persist' ? Math.max(0, Number(persistS) || 0) * 1000 : 0;
 }
 
+// Whether the panel is to dim now because the player stands still with no
+// stop to come: at the plugin's start and after a reboot, where no play
+// ever ends. The dim must be on with a level, the player not playing, the
+// panel not dimmed yet and no dim already on its way; a transition from
+// play is the stop's own business (the grace for a track change, the
+// persist period), so this is asked only where no play went before.
+function dimAtStandstill(s, status, dimmed, pending) {
+  if (!s || !s.dim || s.idleLevel === null) return false;
+  if (String(status) === 'play') return false;
+  return !dimmed && !pending;
+}
+
 // The display's report, kept as it came: the power, the means, the
 // brightness and its top where there is a backlight, and whose the screen is.
 function report(message) {
@@ -119,4 +131,4 @@ function state(last, wish, display, idle) {
   };
 }
 
-module.exports = { request, report, state, settings, wantedLevel, dimDelayMs, brightnessAtPlay, DIM_FADE_MS };
+module.exports = { request, report, state, settings, wantedLevel, dimDelayMs, dimAtStandstill, brightnessAtPlay, DIM_FADE_MS };
