@@ -10,11 +10,17 @@
 #
 #   scripts/fetch-components.sh                 every component, every architecture
 #   scripts/fetch-components.sh outcast-lite    one component
+#
+# COMPONENTS_ROOT names another tree to unpack under (its target/components/),
+# the locks and the key still this tree's: glass-evo's package scripts fetch
+# the movie's decoder through this script from the Glass they are built on,
+# so the one lock names the version both flavours of a remote carry.
 set -euo pipefail
 ROOT=$(CDPATH='' cd -- "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 ARCHES="arm armv7 armv8 x64"
 PUB="$ROOT/keys/release-signing.pub"
+COMPONENTS_ROOT=${COMPONENTS_ROOT:-$ROOT}
 
 fetch() { # url, file
   curl -fsSL --retry 3 --retry-delay 5 -o "$2" "$1" || { echo "fetch-components: $1 did not arrive" >&2; exit 1; }
@@ -27,7 +33,7 @@ one() {
   repository=$(sed -n 's/^REPOSITORY=//p' "$lock")
   [[ -n "$name" && -n "$version" && -n "$repository" ]] || { echo "fetch-components: $lock needs NAME, VERSION and REPOSITORY" >&2; exit 1; }
   base="https://github.com/$repository/releases/download/v$version"
-  dir="$ROOT/target/components/$name"
+  dir="$COMPONENTS_ROOT/target/components/$name"
   if [[ -f "$dir/VERSION" && "$(cat "$dir/VERSION")" == "$version" ]]; then
     echo "fetch-components: $name $version is here already"
     return 0
