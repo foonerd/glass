@@ -17,7 +17,7 @@ if [ -f "$UNIT_DIR/glass-remote.service" ]; then
   rm -f "$UNIT_DIR/glass-remote.service"
   command -v systemctl >/dev/null 2>&1 && systemctl --user daemon-reload || true
 fi
-rm -f "$PREFIX/bin/glass" \
+rm -f "$PREFIX/bin/glass" "$PREFIX/bin/evovpeg" "$PREFIX/bin/evovprobe" \
       "$PREFIX/share/applications/glass-remote.desktop" \
       "$PREFIX/share/applications/glass-remote-settings.desktop" \
       "$PREFIX/share/icons/hicolor/scalable/apps/glass-remote.svg"

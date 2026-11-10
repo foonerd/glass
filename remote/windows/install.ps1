@@ -44,6 +44,12 @@ $programs = [IO.Path]::GetFullPath((Join-Path $env:LOCALAPPDATA 'Programs/Glass 
 New-Item -ItemType Directory -Force -Path $programs | Out-Null
 Copy-Item (Join-Path $source $display) (Join-Path $programs 'glass.exe') -Force
 Copy-Item (Join-Path $source 'SDL2.dll') $programs -Force
+# The movie's decoder the archive carries, beside the display: evovpeg.exe
+# and evovprobe.exe, which the remote runs unless its settings say the
+# machine's own ffmpeg.
+foreach ($prog in 'evovpeg.exe', 'evovprobe.exe') {
+    if (Test-Path (Join-Path $source $prog)) { Copy-Item (Join-Path $source $prog) $programs -Force; Write-Output "installed: $(Join-Path $programs $prog)" }
+}
 # Files unpacked from a download carry the mark of the web; without it
 # SmartScreen does not ask about a program it has not seen before.
 Get-ChildItem $programs | Unblock-File -ErrorAction SilentlyContinue

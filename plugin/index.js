@@ -1289,6 +1289,22 @@ Glass.prototype.movieDecoder = function () {
         job: facts.job
     };
 };
+// The decoder fetched by the player itself when the picture is wanted and
+// the player has none, or an older one than the lock names: no button to
+// find; a try that failed is made again an hour later. Asked at the start
+// and whenever the movie's line changes (a switch, a theme, a track).
+Glass.prototype.movieDecoderAuto = function () {
+    var self = this;
+    if (self.movieDecoderHeld) { return false; }
+    var wanted = self.movieWanted() && self.movieAllowed();
+    var facts;
+    try { facts = self.movieDecoderComponent().facts(); } catch (e) { return false; }
+    if (!moviedecoder.shouldFetch(facts, wanted, Date.now(), self.movieDecoderAutoAt || 0)) { return false; }
+    self.movieDecoderAutoAt = Date.now();
+    self.logger.info(id + 'movie decoder: fetching ' + facts.wanted.name + ' ' + facts.wanted.version + ' by itself: the picture is wanted and the player has ' + (facts.state === 'older' ? 'an older one' : 'none'));
+    self.fetchMovieDecoder().catch(function (e) { self.logger.warn(id + 'movie decoder: the fetch by itself failed: ' + (e && e.message ? e.message : e)); });
+    return true;
+};
 // The component fetched and put in place, then the display started again
 // so it runs the programs; `remove` the other way. Both answer the job or
 // the facts; a fetch under way is answered as it stands.
@@ -1303,6 +1319,9 @@ Glass.prototype.fetchMovieDecoder = function () {
 };
 Glass.prototype.removeMovieDecoder = function () {
     var self = this;
+    // Removed by hand: the fetch by itself holds off until the picture's
+    // switch is turned off and on, or the backend starts again.
+    self.movieDecoderHeld = true;
     return self.movieDecoderComponent().remove().then(function () { self.relaunchDisplay(); return self.movieDecoder(); });
 };
 // `screen.delay`: milliseconds the sound output runs behind mpd's position,
@@ -1398,6 +1417,8 @@ Glass.prototype.movieFaceLine = function () {
 Glass.prototype.pushMovieFace = function () {
     var self = this;
     if (!self.face) { return; }
+    // The decoder fetched by the player itself where the picture is wanted and none serves.
+    try { self.movieDecoderAuto(); } catch (e) { /* said in the log */ }
     var line = self.movieFaceLine();
     var text = JSON.stringify(line);
     if (text === self.movieFaceLast) { return; }
@@ -1757,6 +1778,8 @@ Glass.prototype.onStart = function () {
         push: function (message) { if (self.channel) { self.channel.weather = message; self.channel.push(message); } }
     });
     self.forecast.start();
+    // The movie's decoder fetched by the player itself where the picture is wanted and none serves.
+    try { self.movieDecoderAuto(); } catch (e) { /* said in the log */ }
     // The pointer, resolved from the screen's choice and what the player has now.
     try { self.refreshPointerShown(); } catch (e) { self.logger.warn(id + 'screen: pointer not resolved: ' + (e && e.message ? e.message : e)); }
     // The screen by fact, watched from now on; a driver key from the old choice goes back to Auto.
@@ -4360,7 +4383,7 @@ Glass.prototype.saveDisplayConf = function (confData) {
     var pos_fit = use_SDL2 && (confData.positionFit === true || confData.positionFit === 'true') ? 'True' : 'False';
     if (confData.screenMovie !== undefined) {
         var movieWish = confData.screenMovie === true || confData.screenMovie === 'true';
-        if (self.movieWanted() !== movieWish) { self.config.set('moviePicture', movieWish); }
+        if (self.movieWanted() !== movieWish) { self.config.set('moviePicture', movieWish); self.movieDecoderHeld = false; }
     }
     // The share of the theme's size and where it sits: a page that does not
     // send them leaves them as they stand; a share below 100 turns fit off.
@@ -7134,7 +7157,7 @@ Glass.prototype.setDisplayPlacement = function (data) {
     var backdrop = data.backdrop === undefined ? now.backdrop : (data.backdrop === true || data.backdrop === 'true');
     if (data.movie !== undefined) {
         var movie = data.movie === true || data.movie === 'true';
-        if (self.movieWanted() !== movie) { self.config.set('moviePicture', movie); }
+        if (self.movieWanted() !== movie) { self.config.set('moviePicture', movie); self.movieDecoderHeld = false; }
     }
     var position = data.position === undefined ? now.position : String(data.position);
     if (['center', 'manual'].indexOf(position) === -1) { return { error: 'GLASS.MANAGER_BAD_REQUEST' }; }

@@ -700,7 +700,13 @@ impl RemoteApp {
             let binary = upgrade::binary_from(&archive, &paths)?;
             let exe =
                 std::env::current_exe().map_err(|e| format!("this binary's own path: {e}"))?;
-            upgrade::install(&binary, &exe, &self.cache, &product, &release)
+            upgrade::install(&binary, &exe, &self.cache, &product, &release)?;
+            // The movie's decoder the archive carries, beside the new binary.
+            let extras = upgrade::extras_from(&archive, upgrade::arch_folders());
+            for word in upgrade::install_extras(&exe, &extras) {
+                logline::say!(Info, "remotes", "upgrade: {word}");
+            }
+            Ok(())
         })();
         match done {
             Ok(()) => {

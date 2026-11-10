@@ -426,6 +426,11 @@ pub struct RemoteConfig {
     /// the system's output.
     #[serde(default)]
     pub play_here_device: String,
+    /// The movie's decoder on this remote: `own` (unless said) for the
+    /// evovpeg the archive carries beside the display, `system` for the
+    /// machine's own ffmpeg and ffprobe on the path.
+    #[serde(default)]
+    pub decoder: String,
 }
 
 fn default_frames_port() -> u16 {
@@ -512,6 +517,7 @@ impl Default for RemoteConfig {
             play_here_gain: DEFAULT_PLAY_HERE_GAIN,
             language: String::new(),
             play_here_device: String::new(),
+            decoder: String::new(),
         }
     }
 }

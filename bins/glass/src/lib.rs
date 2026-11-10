@@ -1241,7 +1241,7 @@ fn session(
                         // is missing where the probe never started.
                         if served {
                             movie_missing = Some(if e.contains("did not start") {
-                                "This machine has no decoder for the film: install ffmpeg (with ffprobe) on the path and start the remote again.".to_string()
+                                "No decoder ran on this machine: install the remote again from the release archive, which carries the decoder beside the display, or install ffmpeg (with ffprobe) on the path, and start the remote again.".to_string()
                             } else {
                                 format!("The film could not be opened here: {e}")
                             });
@@ -1703,14 +1703,18 @@ fn session(
                     (Some(l), _, _) if !l.on => "off on the player".to_string(),
                     (Some(_), None, _) => "the meter shown gives the picture no box".to_string(),
                     (Some(l), Some(_), None) if !l.url.is_empty() && movie_probed.is_some() => {
-                        "the file could not be opened here: a decoder (ffmpeg and ffprobe) on this machine shows it".to_string()
+                        "the file could not be opened here: no decoder ran (the release archive carries one beside the display; else ffmpeg and ffprobe on this machine's path)".to_string()
                     }
                     (Some(l), Some(_), Some(m)) => {
                         let (delay, _) = m.delay();
+                        let own = env::var("GLASS_MOVIE_DECODER")
+                            .map(|d| d.contains("evovpeg"))
+                            .unwrap_or(false);
                         format!(
-                            "{} showing, the player's sound {delay} ms behind its position{}{}",
+                            "{} showing, the player's sound {delay} ms behind its position, decoded by {}{}{}",
                             l.file,
-                            m.report_hardware().map(|h| format!(", decoded by the board's {h}")).unwrap_or_default(),
+                            if own { "Glass's own evovpeg" } else { "this machine's ffmpeg" },
+                            m.report_hardware().map(|h| format!(" and the board's {h}")).unwrap_or_default(),
                             if movie_full { ", at the whole screen after a tap (a tap brings the theme back)" } else { "" }
                         )
                     }

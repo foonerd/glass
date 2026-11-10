@@ -165,3 +165,18 @@ test('a component of another version than the lock reads as older or newer', () 
   fs.unlinkSync(path.join(dir, 'bin', 'evovprobe'));
   assert.equal(d.facts().state, 'missing');
 });
+
+test('the player fetches its decoder by itself when the picture is wanted and it has none or an older one, once an hour at most', () => {
+  const { shouldFetch, RETRY_MS } = require('../moviedecoder');
+  const missing = { state: 'missing', job: null };
+  assert.equal(shouldFetch(missing, true, 1000, 0), true);
+  assert.equal(shouldFetch(missing, false, 1000, 0), false, 'the picture not wanted');
+  assert.equal(shouldFetch({ state: 'older', job: null }, true, 1000, 0), true, 'older than the lock names');
+  assert.equal(shouldFetch({ state: 'installed', job: null }, true, 1000, 0), false);
+  assert.equal(shouldFetch({ state: 'newer', job: null }, true, 1000, 0), false, 'a newer one stands');
+  assert.equal(shouldFetch({ state: 'missing', job: { state: 'downloading' } }, true, 1000, 0), false, 'a fetch under way');
+  assert.equal(shouldFetch({ state: 'missing', job: { state: 'failed' } }, true, 1000, 0), true, 'a failed job is no bar');
+  assert.equal(shouldFetch(missing, true, 1000 + RETRY_MS - 1, 1000), false, 'too soon after the last try');
+  assert.equal(shouldFetch(missing, true, 1000 + RETRY_MS, 1000), true, 'an hour on');
+  assert.equal(shouldFetch(null, true, 1000, 0), false);
+});

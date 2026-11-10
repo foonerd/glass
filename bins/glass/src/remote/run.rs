@@ -1168,6 +1168,25 @@ pub fn remote_main(
         }
         std::env::set_var(lead::HOME_VAR, &home);
         std::env::remove_var("GLASS_CONFIG");
+        // The movie's decoder: the evovpeg the archive carries beside this
+        // binary, named to the display as the player's plugin names its own,
+        // unless the config says the machine's own (`decoder: system`) or
+        // the environment already names one.
+        if config.decoder.trim() != "system" && std::env::var_os("GLASS_MOVIE_DECODER").is_none() {
+            if let Some((decoder, prober)) = std::env::current_exe()
+                .ok()
+                .and_then(|exe| crate::video::beside(&exe))
+            {
+                logline::say!(
+                    Info,
+                    "remotes",
+                    "the movie's decoder beside the display: {}",
+                    decoder.display()
+                );
+                std::env::set_var("GLASS_MOVIE_DECODER", &decoder);
+                std::env::set_var("GLASS_MOVIE_PROBER", &prober);
+            }
+        }
         // A face reads its themes where the launcher says: on a remote, the
         // look the sync brought from the player.
         std::env::set_var("GLASS_FACES", home.join("faces"));

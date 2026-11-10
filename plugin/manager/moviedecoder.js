@@ -267,4 +267,17 @@ function compare(a, b) {
   return 0;
 }
 
-module.exports = { Decoder, DecoderError, parseLock, compare, DISTRIBUTION };
+// Whether the player should fetch its decoder by itself now: the picture
+// wanted (the switch on and the profile allowing it), the component missing
+// or older than the lock names, no fetch under way, and the last try (a
+// failure) an hour or more ago. Pure, for the plugin's clock.
+const RETRY_MS = 60 * 60 * 1000;
+function shouldFetch(facts, wanted, nowMs, lastTryMs) {
+  if (!wanted || !facts) return false;
+  if (facts.state !== 'missing' && facts.state !== 'older') return false;
+  if (facts.job && facts.job.state !== 'installed' && facts.job.state !== 'failed') return false;
+  if (lastTryMs && nowMs - lastTryMs < RETRY_MS) return false;
+  return true;
+}
+
+module.exports = { Decoder, DecoderError, parseLock, compare, DISTRIBUTION, shouldFetch, RETRY_MS };

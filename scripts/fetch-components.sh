@@ -53,6 +53,24 @@ one() {
     [[ -d "$dir/$arch/$top" ]] || { echo "fetch-components: $top.tar.gz does not unpack to $top/" >&2; exit 1; }
     echo "  $top: verified, $(grep -c . "$dir/$arch/MANIFEST") files"
   done
+  # A Windows build, where the lock names its asset (WINDOWS=windows-x64): a
+  # zip, held to the same sums and the same manifest inside it.
+  local windows
+  windows=$(sed -n 's/^WINDOWS=//p' "$lock")
+  if [[ -n "$windows" ]]; then
+    top="$name-$version-$windows"
+    fetch "$base/$top.zip" "$dir/download/$top.zip"
+    (cd "$dir/download" && grep -F " $top.zip" SHA256SUMS | sha256sum -c --quiet -) \
+      || { echo "fetch-components: $top.zip is not the file the signed sums name" >&2; exit 1; }
+    mkdir -p "$dir/$windows"
+    unzip -q -o "$dir/download/$top.zip" -d "$dir/$windows"
+    [[ -f "$dir/$windows/MANIFEST" && -f "$dir/$windows/MANIFEST.sig" ]] || { echo "fetch-components: $top.zip carries no MANIFEST" >&2; exit 1; }
+    openssl pkeyutl -verify -pubin -inkey "$PUB" -rawin -in "$dir/$windows/MANIFEST" -sigfile "$dir/$windows/MANIFEST.sig" > /dev/null \
+      || { echo "fetch-components: the MANIFEST of $top.zip is not signed with the evo release key" >&2; exit 1; }
+    (cd "$dir/$windows" && sha256sum -c --quiet MANIFEST) || { echo "fetch-components: $top.zip does not match its MANIFEST" >&2; exit 1; }
+    [[ -d "$dir/$windows/$top" ]] || { echo "fetch-components: $top.zip does not unpack to $top/" >&2; exit 1; }
+    echo "  $top: verified, $(grep -c . "$dir/$windows/MANIFEST") files"
+  fi
   echo "$version" > "$dir/VERSION"
 }
 

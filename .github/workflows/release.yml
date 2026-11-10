@@ -56,17 +56,32 @@ jobs:
       - name: The zip names the commit it was built from
         run: |
           unzip -p dist/glass-*.zip build.json | grep -F "\"commit\": \"$(git rev-parse --short HEAD)\""
+      # The movie's decoder beside the display in every remote archive: evovpeg
+      # fetched as outcast-lite is (components/evovpeg.lock, verified before
+      # anything of it is packed), so a remote works out of the box with no
+      # ffmpeg on the machine's path. The plugin zip is packed before this and
+      # does not carry it: the player fetches its own on demand.
+      - name: The movie's decoder beside the display, for the remotes
+        run: |
+          scripts/fetch-components.sh evovpeg
+          v=$(sed -n 's/^VERSION=//p' components/evovpeg.lock)
+          for arch in arm armv7 armv8 x64; do
+            for p in evovpeg evovprobe; do
+              install -D -m 755 "target/components/evovpeg/$arch/evovpeg-$v-$arch/bin/$p" "bin/$arch/$p"
+            done
+          done
       - name: Per-architecture archives of the display, the tap and the remote installer
         run: |
           version=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)
           for arch in arm armv7 armv8 x64; do
             tar -C . --exclude="bin/$arch/outcast-lite" --transform "s,^,glass-$version-$arch/," -czf "dist/glass-$version-$arch.tar.gz" "bin/$arch" "lib/$arch" remote/README.md remote/linux
           done
-          # What a remote needs is a few megabytes; anything more is the
-          # build's leavings, never to be published again.
+          # What a remote needs is a few megabytes of its own and about
+          # twelve of the decoder; anything more is the build's leavings,
+          # never to be published again.
           for f in dist/glass-*-*.tar.gz; do
             size=$(stat -c %s "$f")
-            if [ "$size" -gt 16000000 ]; then
+            if [ "$size" -gt 40000000 ]; then
               echo "$f is $size bytes, more than a remote needs:" >&2
               tar -tzf "$f" | head -40 >&2
               exit 1
@@ -211,6 +226,13 @@ jobs:
         run: |
           top="glass-${GITHUB_REF_NAME#v}-windows-x64"
           rm -rf "dist/$top" && mkdir -p "dist/$top/remote"
+          # The movie's decoder beside the display, as the Linux archives
+          # carry it: evovpeg's Windows build, fetched and verified here.
+          scripts/fetch-components.sh evovpeg
+          v=$(sed -n 's/^VERSION=//p' components/evovpeg.lock)
+          for p in evovpeg evovprobe; do
+            install -D -m 755 "target/components/evovpeg/windows-x64/evovpeg-$v-windows-x64/bin/$p.exe" "bin/windows-x64/$p.exe"
+          done
           cp -r bin/windows-x64 "dist/$top/bin"
           cp -r remote/windows remote/README.md "dist/$top/remote/"
           (cd dist && zip -qr "$top.zip" "$top") && rm -rf "dist/$top"

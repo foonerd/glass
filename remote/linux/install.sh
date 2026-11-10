@@ -60,6 +60,15 @@ if [ -z "$BIN" ]; then
 fi
 
 install -D -m 755 "$BIN" "$PREFIX/bin/glass"
+# The movie's decoder the archive carries, beside the display: evovpeg and
+# evovprobe, which the remote runs unless its settings say the machine's own.
+for prog in evovpeg evovprobe; do
+  PROG=$(binary_named "$prog")
+  if [ -n "$PROG" ]; then
+    install -D -m 755 "$PROG" "$PREFIX/bin/$prog"
+    echo "installed: $PREFIX/bin/$prog"
+  fi
+done
 install -D -m 644 "$HERE/glass-remote.svg" "$PREFIX/share/icons/hicolor/scalable/apps/glass-remote.svg"
 mkdir -p "$PREFIX/share/applications"
 for entry in glass-remote glass-remote-settings; do

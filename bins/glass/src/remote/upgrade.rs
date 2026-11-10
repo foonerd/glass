@@ -785,6 +785,71 @@ pub struct Examined {
     pub version: String,
     pub files: usize,
     pub binary: Vec<u8>,
+    /// The movie's decoder the archive carries beside the binary (evovpeg
+    /// and evovprobe, by their file names), to go beside the new binary.
+    pub extras: Vec<(String, Vec<u8>)>,
+}
+
+/// The decoder programs an archive carries beside this machine's binary:
+/// `evovpeg` and `evovprobe` under one of the folders this machine takes
+/// (`bin/<arch>/`, or `bin/` on Windows with `.exe`), by file name with
+/// their bytes. Empty for an archive from before the decoder shipped.
+pub fn decoder_entries(entries: &[(String, Vec<u8>)], folders: &[&str]) -> Vec<(String, Vec<u8>)> {
+    let mut found = Vec::new();
+    for program in ["evovpeg", "evovprobe"] {
+        for path in binary_paths(program, folders) {
+            if let Some((_, data)) = entries
+                .iter()
+                .find(|(n, _)| *n == path || n.ends_with(&format!("/{path}")))
+            {
+                let name = path.rsplit('/').next().unwrap_or(program).to_string();
+                found.push((name, data.clone()));
+                break;
+            }
+        }
+    }
+    if found.len() == 2 {
+        found
+    } else {
+        Vec::new()
+    }
+}
+
+/// The decoder programs of an archive, for the upgrade from GitHub.
+pub fn extras_from(archive: &[u8], folders: &[&str]) -> Vec<(String, Vec<u8>)> {
+    tar_gz_entries(archive)
+        .map(|entries| decoder_entries(&entries, folders))
+        .unwrap_or_default()
+}
+
+/// The decoder programs beside the binary just put in place, each written
+/// as `<name>.new` and swapped in; nothing of them is a fault of the
+/// upgrade, which stands with the binary alone, so a failure is a word.
+pub fn install_extras(exe: &Path, extras: &[(String, Vec<u8>)]) -> Vec<String> {
+    let mut said = Vec::new();
+    let Some(dir) = exe.parent() else {
+        return said;
+    };
+    for (name, data) in extras {
+        let target = dir.join(name);
+        let new = dir.join(format!("{name}.new"));
+        let put = std::fs::write(&new, data).and_then(|_| {
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755))?;
+            }
+            std::fs::rename(&new, &target)
+        });
+        match put {
+            Ok(()) => said.push(format!("{} beside the display", target.display())),
+            Err(e) => {
+                let _ = std::fs::remove_file(&new);
+                said.push(format!("{} not put in place: {e}", target.display()));
+            }
+        }
+    }
+    said
 }
 
 /// The two products' descriptors, for an archive of either kind.
@@ -825,6 +890,7 @@ pub fn examine_archive(
                 version: version.to_string(),
                 files,
                 binary: data.clone(),
+                extras: decoder_entries(&entries, folders),
             });
         }
     }
@@ -852,7 +918,11 @@ pub fn install_examined(
         sig_url: None,
         source: String::new(),
     };
-    install(&examined.binary, exe, cache, running, &release)
+    install(&examined.binary, exe, cache, running, &release)?;
+    for word in install_extras(exe, &examined.extras) {
+        logline::say!(Info, "remotes", "upgrade: {word}");
+    }
+    Ok(())
 }
 
 fn beside(exe: &Path, suffix: &str) -> PathBuf {

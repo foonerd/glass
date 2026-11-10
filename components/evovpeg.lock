@@ -1,0 +1,11 @@
+# evovpeg, the movie's decoder: FFmpeg built down to decoding a video file's picture
+# stream to raw frames on a pipe and probing a file, static, signed with the evo release
+# key (keys/release-signing.pub). The release workflow fetches the release this names
+# (scripts/fetch-components.sh), verifies it and puts evovpeg and evovprobe beside the
+# display in every remote archive: the Linux tarballs per architecture and, from the
+# asset WINDOWS names, the Windows zip. The player fetches its own on demand from the
+# plugin's lock (plugin/components/evovpeg.lock), which names the same version.
+NAME=evovpeg
+VERSION=0.3.2
+REPOSITORY=foonerd/evovpeg
+WINDOWS=windows-x64

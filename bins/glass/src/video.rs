@@ -58,6 +58,40 @@ fn decoder() -> String {
 fn prober() -> String {
     program(PROBER, "GLASS_MOVIE_PROBER")
 }
+
+/// The decoder and the prober a remote carries beside its own binary
+/// (`evovpeg` and `evovprobe`, `.exe` on Windows, in the binary's folder),
+/// both present and files; none where either is missing.
+pub fn beside(exe: &std::path::Path) -> Option<(std::path::PathBuf, std::path::PathBuf)> {
+    let dir = exe.parent()?;
+    let ext = if cfg!(windows) { ".exe" } else { "" };
+    let decoder = dir.join(format!("evovpeg{ext}"));
+    let prober = dir.join(format!("evovprobe{ext}"));
+    (decoder.is_file() && prober.is_file()).then_some((decoder, prober))
+}
+
+#[cfg(test)]
+mod beside_tests {
+    use super::beside;
+
+    #[test]
+    fn the_two_programs_beside_the_binary_are_found_only_together() {
+        let dir = std::env::temp_dir().join(format!("glass-beside-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join(if cfg!(windows) { "glass.exe" } else { "glass" });
+        std::fs::write(&exe, b"").unwrap();
+        assert_eq!(beside(&exe), None, "nothing beside it");
+        let ext = if cfg!(windows) { ".exe" } else { "" };
+        std::fs::write(dir.join(format!("evovpeg{ext}")), b"").unwrap();
+        assert_eq!(beside(&exe), None, "the decoder alone is not enough");
+        std::fs::write(dir.join(format!("evovprobe{ext}")), b"").unwrap();
+        let found = beside(&exe).expect("both beside it");
+        assert_eq!(found.0, dir.join(format!("evovpeg{ext}")));
+        assert_eq!(found.1, dir.join(format!("evovprobe{ext}")));
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
 /// mpd on the player.
 const MPD: &str = "127.0.0.1:6600";
 /// How often the clock reads mpd.

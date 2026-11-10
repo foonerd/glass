@@ -5,6 +5,6 @@
 # the player's own folder; until then the display runs the distribution's ffmpeg and
 # ffprobe by name. PROGRAMS names the decoder and the prober, in that order.
 NAME=evovpeg
-VERSION=0.2.0
+VERSION=0.3.2
 REPOSITORY=foonerd/evovpeg
 PROGRAMS=evovpeg evovprobe
