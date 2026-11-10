@@ -296,6 +296,40 @@ fn draw_hint(frame: &mut Frame, fonts: &Fonts) {
     }
 }
 
+/// The movie's box on a remote that cannot show the picture: a dark panel
+/// over the box with the words, line under line, sized to the box, so the
+/// screen itself says what is missing rather than standing empty.
+pub fn draw_missing(frame: &mut Frame, fonts: &Fonts, boxed: (u32, u32, u32, u32), lines: &[&str]) {
+    let (bx, by, bw, bh) = boxed;
+    if bw < 8 || bh < 8 || lines.is_empty() {
+        return;
+    }
+    ui::fill(frame, bx as i32, by as i32, bw, bh, [16, 16, 18, 235]);
+    let size = (bh / 10).clamp(14, 40).min(bw / 20);
+    let rendered: Vec<Frame> = lines
+        .iter()
+        .enumerate()
+        .filter_map(|(i, text)| {
+            let ink = if i == 0 { [240, 240, 240] } else { [200, 200, 204] };
+            let style = if i == 0 { TextStyle::Bold } else { TextStyle::Regular };
+            words(fonts, style, if i == 0 { size } else { size * 4 / 5 }, ink, text)
+        })
+        .collect();
+    let gap = size / 2;
+    let total: u32 = rendered.iter().map(|l| l.height).sum::<u32>() + gap * rendered.len().saturating_sub(1) as u32;
+    let mut y = by as i32 + (bh as i32 - total as i32) / 2;
+    for line in &rendered {
+        let line = if line.width > bw.saturating_sub(16) {
+            fit_art(line, bw.saturating_sub(16).max(1), (line.height * bw.saturating_sub(16).max(1) / line.width.max(1)).max(1))
+        } else {
+            line.clone()
+        };
+        let x = bx as i32 + (bw as i32 - line.width as i32) / 2;
+        ui::blit(frame, &line, x, y, 255);
+        y += line.height as i32 + gap as i32;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

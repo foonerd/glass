@@ -986,6 +986,11 @@ fn session(
     let mut movie_full = false;
     let mut movie_tap = movietap::MovieTap::default();
     let mut movie_blurred_at: Option<Instant> = None;
+    // On a remote: why the film the player plays cannot be shown here (the
+    // decoder missing, the file not opening), drawn in the movie's box so
+    // the screen says it rather than standing empty; none while it shows.
+    let mut movie_missing: Option<String> = None;
+    let mut missing_was = false;
     // The panel's power: the player's word, the face's idle black, a touch.
     let mut screen = screen::ScreenPower::default();
     let mut wake_screen = false;
@@ -1143,6 +1148,7 @@ fn session(
         if !movie_wanted {
             movie = None;
             movie_probed = None;
+            movie_missing = None;
         }
         #[cfg(not(target_os = "android"))]
         if movie_wanted {
@@ -1171,11 +1177,13 @@ fn session(
                 // came, from the first release of the movie to 0.11.36).
                 movie = None;
                 movie_probed = None;
+                movie_missing = None;
             } else if movie.as_ref().is_none_or(|m| m.file() != path)
                 && movie_probed.as_deref() != Some(path.as_str())
             {
                 movie = None;
                 movie_probed = Some(path.clone());
+                movie_missing = None;
                 // The lead as the meters have it; the delay the last movie
                 // measured on this player, else the measured default; the
                 // harness may name either.
@@ -1227,7 +1235,18 @@ fn session(
                         ));
                     }
                     Ok(None) => logline::say!(Verbose, "video", "{path}: no video stream"),
-                    Err(e) => logline::say!(Warn, "video", "{path}: {e}"),
+                    Err(e) => {
+                        logline::say!(Warn, "video", "{path}: {e}");
+                        // A remote says so in the box: the words name what
+                        // is missing where the probe never started.
+                        if served {
+                            movie_missing = Some(if e.contains("did not start") {
+                                "This machine has no decoder for the film: install ffmpeg (with ffprobe) on the path and start the remote again.".to_string()
+                            } else {
+                                format!("The film could not be opened here: {e}")
+                            });
+                        }
+                    }
                 }
             }
         }
@@ -1597,9 +1616,23 @@ fn session(
             // The remote's own page over everything, or its hint along the
             // bottom, on a copy of the frame.
             let exit_now = Instant::now();
-            if exit.drawing(exit_now) {
+            // A remote that cannot show the film says so in the movie's box,
+            // on a copy of the frame, under the remote's own page where that
+            // is open too.
+            let say_missing = remote.is_some() && movie_missing.is_some() && skin.video.is_some();
+            if say_missing || exit.drawing(exit_now) {
                 exit_frame = frame.clone();
-                exit.draw(&mut exit_frame, &assets.fonts, exit_now);
+                if let (true, Some(word), Some(v)) = (say_missing, movie_missing.as_deref(), skin.video.as_ref()) {
+                    remote::exit::draw_missing(
+                        &mut exit_frame,
+                        &assets.fonts,
+                        (v.x, v.y, v.w, v.h),
+                        &["No picture on this remote", word],
+                    );
+                }
+                if exit.drawing(exit_now) {
+                    exit.draw(&mut exit_frame, &assets.fonts, exit_now);
+                }
                 frame = &exit_frame;
             }
             let whole = [Rect {
@@ -1618,7 +1651,8 @@ fn session(
                 Show::Kept => damage = &[],
             }
             // The page or the hint on, and the frame after they go, go up whole.
-            if exit.drawing(exit_now) || exit_was_drawing {
+            if exit.drawing(exit_now) || exit_was_drawing || say_missing || missing_was {
+                missing_was = say_missing;
                 damage = &whole;
             }
             exit_was_drawing = exit.drawing(exit_now);
