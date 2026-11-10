@@ -2,6 +2,21 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.42] - 2026-11-10
+
+### Fixed
+
+- **A remote's own upgrade places the decoder beside the display on Windows too.** The upgrade from the Version panel read the decoder out of a gzipped tar alone, so on Windows, where the release is a zip, the new display went in and the decoder did not, without a word; the remote then said no decoder ran. The decoder is read from either archive form, swapped in beside the display the way the display is (the one before kept as `.prev`, so a decoder that is running is renamed rather than written over), and the log says when an archive carries none.
+- **A remote's movie report is no longer a warning on the player.** The player took a movie report from its own display only and logged a remote's as "not a command", a warning in the recent problems at every film a remote showed. A remote's report is heard and kept by no one, as its screen and meter reports are.
+
+### Changed
+
+- **The decoder programs in the Windows archive are signed with the display.** `evovpeg.exe` and `evovprobe.exe` carried the release key's signature on evovpeg's own release, checked before packing, and no Windows code signature; they are now placed before the signing step and signed with Azure Trusted Signing as `glass.exe` and the installer scripts are, in Glass's archive and glass-evo's bundle alike.
+
+### Diagnostics
+
+A remote's log says "beside the display" for each decoder program an upgrade placed, or that the archive carries none; the player's recent problems no longer carry a remote's movie reports; the Remotes page and glass-evo's On a Remote Display page say the decoder programs are signed.
+
 ## [0.11.41] - 2026-11-10
 
 ### Changed
