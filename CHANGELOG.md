@@ -2,6 +2,20 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.39] - 2026-11-10
+
+### Added
+
+- **The movie's decoder on every surface.** The Linux and Windows remote archives carry Glass's own decoder, evovpeg 0.3.2, beside the display, verified against its signed release before it is packed; the installers put it beside the display and the remote's own upgrade keeps it in step, so a remote shows the film out of the box with no ffmpeg on the machine. A remote that should use the machine's own ffmpeg and ffprobe says so in its settings file (`"decoder": "system"`); its status panel names which decoder runs. The player fetches its own decoder by itself the first time the picture is wanted and none serves, or an older one than the release names, trying again an hour after a failure; the Video tab's button fetches it at once as before. The player's decoder moves to evovpeg 0.3.2, which reads a file over HTTP as well as from the player's storage. Asked on the forum.
+
+### Changed
+
+- **A remote that cannot show the film says so in the movie's box.** A remote with no decoder to run showed the theme with the box standing empty and the reason only on its status panel. The box now carries the words on the screen itself, "No picture on this remote: no decoder ran on this machine", with what to do, and a file that cannot be opened for another reason puts that reason there the same way, until the player plays something else or the picture is turned off.
+
+### Diagnostics
+
+The words in the box are the diagnostic on a remote's screen, its status panel's movie row names the decoder that runs; the Status tab's Movie row on the player says which decoder serves; the Video tab's decoder line says the player fetches it by itself; the Remotes, Manager and Troubleshooting pages say so.
+
 ## [0.11.38] - 2026-11-08
 
 ### Added

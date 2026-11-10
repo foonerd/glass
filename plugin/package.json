@@ -1,6 +1,6 @@
 {
   "name": "glass",
-  "version": "0.11.38",
+  "version": "0.11.39",
   "description": "Glass: VU meters, spectrum, turntables and reels on the player's display",
   "main": "index.js",
   "author": "foonerd; audio path from PeppyMeter Screensaver by 2aCD (original) and Just a Nerd",
@@ -34,6 +34,6 @@
       "amd64"
     ],
     "details": "Glass draws VU meters, spectrum analysers, turntables and tape decks on the player's display from PeppyMeter themes. It is a native display, one small binary, with no Python and no browser in the path. Glass replaces PeppyMeter Screensaver: only one of the two may be enabled.",
-    "changelog": "0.11.38 A tap in the movie's box brings the picture to the whole screen, decoded at the screen's size with a blurred copy in the bars and the theme hidden; the next tap brings the box back; the Face tab, Anymote and the remotes the same"
+    "changelog": "0.11.39 The movie's decoder on every surface: evovpeg 0.3.2 carried beside the display in the Linux and Windows remote archives, a remote running it unless told to use the machine's ffmpeg and saying in its box when none runs; the player fetching its own by itself when the picture is wanted"
   }
 }
