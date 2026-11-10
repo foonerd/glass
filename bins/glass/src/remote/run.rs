@@ -1171,7 +1171,9 @@ pub fn remote_main(
         // The movie's decoder: the evovpeg the archive carries beside this
         // binary, named to the display as the player's plugin names its own,
         // unless the config says the machine's own (`decoder: system`) or
-        // the environment already names one.
+        // the environment already names one. Not on Android, which shows no
+        // movie and has no video module.
+        #[cfg(not(target_os = "android"))]
         if config.decoder.trim() != "system" && std::env::var_os("GLASS_MOVIE_DECODER").is_none() {
             if let Some((decoder, prober)) = std::env::current_exe()
                 .ok()
