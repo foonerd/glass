@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.40] - 2026-11-10
+
+### Fixed
+
+- **The words in a remote's movie box read from across the room.** The words a remote shows in the movie's box when it cannot show the film (0.11.39) were set in one line and shrunk to the box's width, a few pixels tall. They now wrap word by word to the box's width at their own size, the title in bold above, the whole set smaller only when the box is too small for it; the panel is set once for its words and the box and kept while they stay.
+
+### Diagnostics
+
+The words in the box are the diagnostic itself; nothing else changes.
+
 ## [0.11.39] - 2026-11-10
 
 ### Added
