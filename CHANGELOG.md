@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.43] - 2026-11-10
+
+### Fixed
+
+- **A Windows remote on a machine with no graphics driver no longer freezes.** Where Windows draws the desktop with its own Microsoft Basic Display Adapter (a virtual machine, a server, a card without its driver), the display drew through Direct3D on Microsoft's software rasteriser, and the window stopped answering Windows while the display itself ran on: Windows reported the program as not responding, the picture stood, and an upgrade's restart never came, though the settings page and the log went on. The display now asks Windows which adapter draws the desktop and, where that is Microsoft's stand-in alone, draws its window with SDL's own renderer, saying so in its log and on the Status panel's draws-with line, which also names the adapter. `SDL_RENDER_DRIVER` in the environment overrides the choice.
+
+### Diagnostics
+
+The Status panel's **draws with** line names the renderer and the adapter that draws the desktop; the Troubleshooting page has the symptom, and the one for a Windows remote upgraded from a release that read Linux archives only, which receives the decoder with its following upgrade.
+
 ## [0.11.42] - 2026-11-10
 
 ### Fixed
