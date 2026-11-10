@@ -4,6 +4,8 @@ All notable changes to Glass are recorded here. The format follows [Keep a Chang
 
 ## [0.11.43] - 2026-11-10
 
+**Breaking change for Windows remotes.** A Windows remote at 0.11.41 or earlier cannot bring itself to this release from its Version panel in one piece: the program that unpacks an upgrade is the one being upgraded from, and those releases read Linux archives only, so the movie's decoder is left out; and on a machine with no graphics driver the old display can stop answering Windows at its restart. Bring such a remote to this release once by running the installer from the release's zip (`remote\windows\install.ps1`), which keeps its settings, its players and its menu entries; from then on the Version panel's upgrades work as before and carry the decoder. Linux and Android remotes are not affected.
+
 ### Fixed
 
 - **A Windows remote on a machine with no graphics driver no longer freezes.** Where Windows draws the desktop with its own Microsoft Basic Display Adapter (a virtual machine, a server, a card without its driver), the display drew through Direct3D on Microsoft's software rasteriser, and the window stopped answering Windows while the display itself ran on: Windows reported the program as not responding, the picture stood, and an upgrade's restart never came, though the settings page and the log went on. The display now asks Windows which adapter draws the desktop and, where that is Microsoft's stand-in alone, draws its window with SDL's own renderer, saying so in its log and on the Status panel's draws-with line, which also names the adapter. `SDL_RENDER_DRIVER` in the environment overrides the choice.
