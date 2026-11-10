@@ -991,6 +991,7 @@ fn session(
     // the screen says it rather than standing empty; none while it shows.
     let mut movie_missing: Option<String> = None;
     let mut missing_was = false;
+    let mut missing_panel: Option<remote::exit::MissingPanel> = None;
     // The panel's power: the player's word, the face's idle black, a touch.
     let mut screen = screen::ScreenPower::default();
     let mut wake_screen = false;
@@ -1635,6 +1636,7 @@ fn session(
                         &assets.fonts,
                         (v.x, v.y, v.w, v.h),
                         &["No picture on this remote", word],
+                        &mut missing_panel,
                     );
                 }
                 if exit.drawing(exit_now) {

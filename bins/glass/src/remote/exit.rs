@@ -296,57 +296,153 @@ fn draw_hint(frame: &mut Frame, fonts: &Fonts) {
     }
 }
 
+/// The panel a remote draws over the movie's box when it cannot show the
+/// picture, set once for its words and the box's size and kept until
+/// either changes, so a frame costs one blit and not a line of text set
+/// for every word.
+pub struct MissingPanel {
+    words: Vec<String>,
+    width: u32,
+    height: u32,
+    frame: Frame,
+}
+
 /// The movie's box on a remote that cannot show the picture: a dark panel
-/// over the box with the words, line under line, sized to the box, so the
-/// screen itself says what is missing rather than standing empty.
-pub fn draw_missing(frame: &mut Frame, fonts: &Fonts, boxed: (u32, u32, u32, u32), lines: &[&str]) {
+/// over the box with the words, the first line the title in bold and the
+/// rest wrapped word by word to the box's width at a size that reads from
+/// across the room, so the screen itself says what is missing rather than
+/// standing empty. `panel` keeps the setting between frames.
+pub fn draw_missing(
+    frame: &mut Frame,
+    fonts: &Fonts,
+    boxed: (u32, u32, u32, u32),
+    lines: &[&str],
+    panel: &mut Option<MissingPanel>,
+) {
     let (bx, by, bw, bh) = boxed;
     if bw < 8 || bh < 8 || lines.is_empty() {
         return;
     }
-    ui::fill(frame, bx as i32, by as i32, bw, bh, [16, 16, 18, 235]);
-    let size = (bh / 10).clamp(14, 40).min(bw / 20);
-    let rendered: Vec<Frame> = lines
-        .iter()
-        .enumerate()
-        .filter_map(|(i, text)| {
-            let ink = if i == 0 {
-                [240, 240, 240]
-            } else {
-                [200, 200, 204]
-            };
-            let style = if i == 0 {
-                TextStyle::Bold
-            } else {
-                TextStyle::Regular
-            };
-            words(
-                fonts,
-                style,
-                if i == 0 { size } else { size * 4 / 5 },
-                ink,
-                text,
-            )
-        })
-        .collect();
-    let gap = size / 2;
-    let total: u32 = rendered.iter().map(|l| l.height).sum::<u32>()
-        + gap * rendered.len().saturating_sub(1) as u32;
-    let mut y = by as i32 + (bh as i32 - total as i32) / 2;
-    for line in &rendered {
-        let line = if line.width > bw.saturating_sub(16) {
-            fit_art(
-                line,
-                bw.saturating_sub(16).max(1),
-                (line.height * bw.saturating_sub(16).max(1) / line.width.max(1)).max(1),
-            )
-        } else {
-            line.clone()
-        };
-        let x = bx as i32 + (bw as i32 - line.width as i32) / 2;
-        ui::blit(frame, &line, x, y, 255);
-        y += line.height as i32 + gap as i32;
+    let stale = match panel {
+        Some(p) => {
+            p.width != bw
+                || p.height != bh
+                || p.words.len() != lines.len()
+                || p.words.iter().zip(lines).any(|(a, b)| a != b)
+        }
+        None => true,
+    };
+    if stale {
+        *panel = Some(MissingPanel {
+            words: lines.iter().map(|s| s.to_string()).collect(),
+            width: bw,
+            height: bh,
+            frame: missing_panel(fonts, bw, bh, lines),
+        });
     }
+    if let Some(p) = panel {
+        ui::blit(frame, &p.frame, bx as i32, by as i32, 255);
+    }
+}
+
+/// The panel itself at the box's size: the dark ground, the title bold and
+/// the rest wrapped to the width, the whole set smaller step by step until
+/// it fits the height, then centred.
+pub fn missing_panel(fonts: &Fonts, bw: u32, bh: u32, lines: &[&str]) -> Frame {
+    let mut panel = Frame {
+        width: bw,
+        height: bh,
+        rgba: vec![0; bw as usize * bh as usize * 4],
+        ..Default::default()
+    };
+    ui::fill(&mut panel, 0, 0, bw, bh, [16, 16, 18, 235]);
+    let inset = (bw / 16).clamp(8, 48).min(bh / 4);
+    let max_w = bw.saturating_sub(inset * 2).max(1);
+    let room = bh.saturating_sub(inset * 2).max(1);
+    let mut size = (bh / 10).clamp(14, 40).min(bw / 20).max(10);
+    loop {
+        let (set, total) = set_lines(fonts, size, max_w, lines);
+        if total <= room || size <= 10 {
+            let gap = size / 3;
+            let mut y = ((bh as i32 - total as i32) / 2).max(inset as i32 / 2);
+            for line in &set {
+                let x = (bw as i32 - line.width as i32) / 2;
+                ui::blit(&mut panel, line, x, y, 255);
+                y += line.height as i32 + gap as i32;
+            }
+            return panel;
+        }
+        size = size.saturating_sub(2).max(10);
+    }
+}
+
+/// The lines set at a size: the first bold, the rest regular and a fifth
+/// smaller, each wrapped to `max_w`; the frames and the height they take
+/// with the gaps between them.
+fn set_lines(fonts: &Fonts, size: u32, max_w: u32, lines: &[&str]) -> (Vec<Frame>, u32) {
+    let mut set = Vec::new();
+    for (i, text) in lines.iter().enumerate() {
+        let (style, ink, at) = if i == 0 {
+            (TextStyle::Bold, [240, 240, 240], size)
+        } else {
+            (TextStyle::Regular, [200, 200, 204], (size * 4 / 5).max(8))
+        };
+        set.extend(wrap(fonts, style, at, ink, text, max_w));
+    }
+    let gap = size / 3;
+    let total =
+        set.iter().map(|l| l.height).sum::<u32>() + gap * set.len().saturating_sub(1) as u32;
+    (set, total)
+}
+
+/// The words of a text packed into lines no wider than `max_w`, each line
+/// set at its size; one word wider than the width on its own is scaled
+/// down to it.
+fn wrap(
+    fonts: &Fonts,
+    style: TextStyle,
+    size: u32,
+    ink: [u8; 3],
+    text: &str,
+    max_w: u32,
+) -> Vec<Frame> {
+    let mut lines: Vec<Frame> = Vec::new();
+    let mut current = String::new();
+    let mut set: Option<Frame> = None;
+    for word in text.split_whitespace() {
+        let candidate = if current.is_empty() {
+            word.to_string()
+        } else {
+            format!("{current} {word}")
+        };
+        match words(fonts, style, size, ink, &candidate) {
+            Some(line) if line.width <= max_w || current.is_empty() => {
+                current = candidate;
+                set = Some(line);
+            }
+            Some(_) => {
+                lines.extend(set.take());
+                current = word.to_string();
+                set = words(fonts, style, size, ink, word);
+            }
+            None => {}
+        }
+    }
+    lines.extend(set);
+    lines
+        .into_iter()
+        .map(|line| {
+            if line.width > max_w {
+                fit_art(
+                    &line,
+                    max_w,
+                    (line.height * max_w / line.width.max(1)).max(1),
+                )
+            } else {
+                line
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -355,6 +451,90 @@ mod tests {
 
     const W: u32 = 1280;
     const H: u32 = 720;
+
+    const MISSING: &str = "No decoder ran on this machine: install the remote again from the release archive, which carries the decoder beside the display, or install ffmpeg (with ffprobe) on the path, and start the remote again.";
+
+    /// The words of the missing-decoder panel wrap to the box's width at
+    /// their own size, several lines of it, not one line shrunk to the
+    /// width: the first release set them in one line a few pixels tall.
+    #[test]
+    fn the_missing_words_wrap_to_the_box_at_their_size() {
+        let fonts = Fonts::default();
+        let lines = wrap(
+            &fonts,
+            TextStyle::Regular,
+            32,
+            [200, 200, 204],
+            MISSING,
+            1200,
+        );
+        assert!(lines.len() >= 3, "{} lines", lines.len());
+        assert!(lines.iter().all(|l| l.width <= 1200));
+        assert!(
+            lines.iter().all(|l| l.height >= 24),
+            "the lines keep their size"
+        );
+        let one = wrap(
+            &fonts,
+            TextStyle::Regular,
+            32,
+            [200, 200, 204],
+            "ffmpeg",
+            1200,
+        );
+        assert_eq!(one.len(), 1);
+        let narrow = wrap(
+            &fonts,
+            TextStyle::Regular,
+            32,
+            [200, 200, 204],
+            "supercalifragilistic",
+            40,
+        );
+        assert_eq!(narrow.len(), 1);
+        assert!(
+            narrow[0].width <= 40,
+            "a word too wide on its own is scaled to the width"
+        );
+        let panel = missing_panel(&fonts, 1216, 410, &["No picture on this remote", MISSING]);
+        assert_eq!((panel.width, panel.height), (1216, 410));
+        let small = missing_panel(&fonts, 240, 120, &["No picture on this remote", MISSING]);
+        assert_eq!((small.width, small.height), (240, 120));
+    }
+
+    /// The panel is set once and kept while the words and the box stay;
+    /// another box or other words set it again.
+    #[test]
+    fn the_missing_panel_is_kept_between_frames() {
+        let fonts = Fonts::default();
+        let mut frame = Frame {
+            width: W,
+            height: H,
+            rgba: vec![0; W as usize * H as usize * 4],
+            ..Default::default()
+        };
+        let mut panel = None;
+        let lines = ["No picture on this remote", MISSING];
+        draw_missing(&mut frame, &fonts, (32, 32, 1216, 410), &lines, &mut panel);
+        let first = panel.as_ref().map(|p| p.frame.clone()).expect("set");
+        draw_missing(&mut frame, &fonts, (32, 32, 1216, 410), &lines, &mut panel);
+        assert_eq!(panel.as_ref().map(|p| &p.frame), Some(&first));
+        draw_missing(&mut frame, &fonts, (32, 32, 600, 300), &lines, &mut panel);
+        assert_eq!(
+            panel.as_ref().map(|p| (p.width, p.height)),
+            Some((600, 300))
+        );
+        let other = [
+            "No picture on this remote",
+            "The film could not be opened here: a short word",
+        ];
+        draw_missing(&mut frame, &fonts, (32, 32, 600, 300), &other, &mut panel);
+        assert_eq!(panel.as_ref().map(|p| p.words[1].as_str()), Some(other[1]));
+        assert!(
+            frame.rgba[(40 * W as usize + 40) * 4 + 3] > 0,
+            "the panel landed on the frame"
+        );
+    }
 
     fn centre_of(row: Row, asking: bool) -> (i32, i32) {
         let (bx, by, bw, _, row_h, header) = layout(W, H, asking);
