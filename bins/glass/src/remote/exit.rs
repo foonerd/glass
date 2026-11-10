@@ -310,17 +310,36 @@ pub fn draw_missing(frame: &mut Frame, fonts: &Fonts, boxed: (u32, u32, u32, u32
         .iter()
         .enumerate()
         .filter_map(|(i, text)| {
-            let ink = if i == 0 { [240, 240, 240] } else { [200, 200, 204] };
-            let style = if i == 0 { TextStyle::Bold } else { TextStyle::Regular };
-            words(fonts, style, if i == 0 { size } else { size * 4 / 5 }, ink, text)
+            let ink = if i == 0 {
+                [240, 240, 240]
+            } else {
+                [200, 200, 204]
+            };
+            let style = if i == 0 {
+                TextStyle::Bold
+            } else {
+                TextStyle::Regular
+            };
+            words(
+                fonts,
+                style,
+                if i == 0 { size } else { size * 4 / 5 },
+                ink,
+                text,
+            )
         })
         .collect();
     let gap = size / 2;
-    let total: u32 = rendered.iter().map(|l| l.height).sum::<u32>() + gap * rendered.len().saturating_sub(1) as u32;
+    let total: u32 = rendered.iter().map(|l| l.height).sum::<u32>()
+        + gap * rendered.len().saturating_sub(1) as u32;
     let mut y = by as i32 + (bh as i32 - total as i32) / 2;
     for line in &rendered {
         let line = if line.width > bw.saturating_sub(16) {
-            fit_art(line, bw.saturating_sub(16).max(1), (line.height * bw.saturating_sub(16).max(1) / line.width.max(1)).max(1))
+            fit_art(
+                line,
+                bw.saturating_sub(16).max(1),
+                (line.height * bw.saturating_sub(16).max(1) / line.width.max(1)).max(1),
+            )
         } else {
             line.clone()
         };

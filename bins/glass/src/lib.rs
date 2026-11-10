@@ -1240,7 +1240,12 @@ fn session(
                         // A remote says so in the box: the words name what
                         // is missing where the probe never started.
                         if served {
-                            movie_missing = Some(if e.contains("did not start") {
+                            // A prober that could not be run, by whichever words the
+                            // start gave (not found on the path, no such file).
+                            let no_decoder = e.contains("did not start")
+                                || e.contains("not found")
+                                || e.contains("No such file");
+                            movie_missing = Some(if no_decoder {
                                 "No decoder ran on this machine: install the remote again from the release archive, which carries the decoder beside the display, or install ffmpeg (with ffprobe) on the path, and start the remote again.".to_string()
                             } else {
                                 format!("The film could not be opened here: {e}")
@@ -1622,7 +1627,9 @@ fn session(
             let say_missing = remote.is_some() && movie_missing.is_some() && skin.video.is_some();
             if say_missing || exit.drawing(exit_now) {
                 exit_frame = frame.clone();
-                if let (true, Some(word), Some(v)) = (say_missing, movie_missing.as_deref(), skin.video.as_ref()) {
+                if let (true, Some(word), Some(v)) =
+                    (say_missing, movie_missing.as_deref(), skin.video.as_ref())
+                {
                     remote::exit::draw_missing(
                         &mut exit_frame,
                         &assets.fonts,
