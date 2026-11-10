@@ -347,6 +347,8 @@ pub struct Surface {
     driver: String,
     renderer: String,
     software: bool,
+    /// On Windows, the adapter that draws the desktop, by name.
+    adapter: Option<String>,
     /// The frame size the window was made or fitted for.
     frame_size: (u32, u32),
     /// Pointer events since the last take, in frame pixels.
@@ -449,6 +451,126 @@ pub mod kms {
     #[cfg(target_os = "linux")]
     pub fn screen_card_index() -> Option<u32> {
         connected_card(&connectors()).and_then(|card| card_index(&card))
+    }
+}
+
+/// The display adapters Windows knows, by name, through user32's
+/// EnumDisplayDevicesW: enough to tell a machine with no graphics driver,
+/// where Windows draws the desktop with its own stand-in, from one with a
+/// card and its driver.
+#[cfg(windows)]
+mod adapters {
+    #[repr(C)]
+    struct DisplayDeviceW {
+        cb: u32,
+        device_name: [u16; 32],
+        device_string: [u16; 128],
+        state_flags: u32,
+        device_id: [u16; 128],
+        device_key: [u16; 128],
+    }
+    const ATTACHED_TO_DESKTOP: u32 = 0x0000_0001;
+    #[link(name = "user32")]
+    extern "system" {
+        fn EnumDisplayDevicesW(
+            device: *const u16,
+            index: u32,
+            out: *mut DisplayDeviceW,
+            flags: u32,
+        ) -> i32;
+    }
+
+    /// Every adapter in Windows's order: its name and whether it draws the
+    /// desktop.
+    pub fn all() -> Vec<(String, bool)> {
+        let mut out = Vec::new();
+        for index in 0..64u32 {
+            // SAFETY: the struct is sized by `cb` as the call expects and
+            // lives for the call; a null device name asks for the adapters
+            // themselves; a zero return ends them.
+            let mut device: DisplayDeviceW = unsafe { std::mem::zeroed() };
+            device.cb = std::mem::size_of::<DisplayDeviceW>() as u32;
+            if unsafe { EnumDisplayDevicesW(std::ptr::null(), index, &mut device, 0) } == 0 {
+                break;
+            }
+            let end = device
+                .device_string
+                .iter()
+                .position(|c| *c == 0)
+                .unwrap_or(device.device_string.len());
+            out.push((
+                String::from_utf16_lossy(&device.device_string[..end]),
+                device.state_flags & ATTACHED_TO_DESKTOP != 0,
+            ));
+        }
+        out
+    }
+}
+
+/// Whether an adapter's name is Microsoft's own stand-in for a machine with
+/// no graphics driver: the Basic Display Adapter, or the Basic Render
+/// Driver behind it.
+#[cfg(any(windows, test))]
+fn basic_adapter(name: &str) -> bool {
+    let lower = name.to_ascii_lowercase();
+    lower.contains("microsoft basic display adapter")
+        || lower.contains("microsoft basic render driver")
+}
+
+/// The adapter that draws the desktop and whether Microsoft's stand-in
+/// draws it alone: the first adapter attached to the desktop, by name, and
+/// true when every attached one is the stand-in. Nothing where no adapter
+/// is attached, and nothing at all off Windows.
+#[cfg(any(windows, test))]
+fn desktop_adapter_of(adapters: &[(String, bool)]) -> Option<(String, bool)> {
+    let attached: Vec<&(String, bool)> = adapters.iter().filter(|(_, on)| *on).collect();
+    let (name, _) = attached.first()?;
+    Some((name.clone(), attached.iter().all(|(n, _)| basic_adapter(n))))
+}
+
+#[cfg(windows)]
+fn desktop_adapter() -> Option<(String, bool)> {
+    desktop_adapter_of(&adapters::all())
+}
+
+#[cfg(not(windows))]
+fn desktop_adapter() -> Option<(String, bool)> {
+    None
+}
+
+#[cfg(test)]
+mod adapter_tests {
+    use super::desktop_adapter_of;
+
+    /// Microsoft's stand-in alone on the desktop is what asks for SDL's own
+    /// renderer; a card beside it, or a card alone, does not; a stand-in
+    /// not attached to the desktop counts for nothing.
+    #[test]
+    fn the_stand_in_alone_is_told_from_a_card() {
+        let basic = |on: bool| ("Microsoft Basic Display Adapter".to_string(), on);
+        let card = |on: bool| ("NVIDIA GeForce RTX 3060".to_string(), on);
+        assert_eq!(
+            desktop_adapter_of(&[basic(true)]),
+            Some(("Microsoft Basic Display Adapter".to_string(), true))
+        );
+        assert_eq!(
+            desktop_adapter_of(&[basic(true), basic(true)]),
+            Some(("Microsoft Basic Display Adapter".to_string(), true))
+        );
+        assert_eq!(
+            desktop_adapter_of(&[card(true), basic(false)]),
+            Some(("NVIDIA GeForce RTX 3060".to_string(), false))
+        );
+        assert_eq!(
+            desktop_adapter_of(&[basic(true), card(true)]),
+            Some(("Microsoft Basic Display Adapter".to_string(), false))
+        );
+        assert_eq!(
+            desktop_adapter_of(&[("Microsoft Basic Render Driver".to_string(), true)]),
+            Some(("Microsoft Basic Render Driver".to_string(), true))
+        );
+        assert_eq!(desktop_adapter_of(&[basic(false)]), None);
+        assert_eq!(desktop_adapter_of(&[]), None);
     }
 }
 
@@ -619,6 +741,24 @@ impl Surface {
             }
         }
         let window = builder.build().map_err(|err| err.to_string())?;
+        // A desktop drawn by Microsoft's stand-in adapter alone, no graphics
+        // driver (a virtual machine, a server, a card without its driver):
+        // Direct3D then runs on Microsoft's software rasteriser, and the
+        // window stops answering Windows while the display runs on (the
+        // loop drawing and pumping its events, the window ghosted; two
+        // dumps and a run with SDL's own renderer showed it, 2026-11-10).
+        // SDL's own renderer draws there, unless the environment names a
+        // renderer itself, which SDL honours as it stands.
+        let adapter = desktop_adapter();
+        if let Some((name, true)) = &adapter {
+            if std::env::var_os("SDL_RENDER_DRIVER").is_none() {
+                sdl2::hint::set("SDL_RENDER_DRIVER", "software");
+                println!(
+                    "glass: the desktop is drawn by {name}, no graphics driver: SDL's own renderer draws the window"
+                );
+            }
+        }
+        let adapter = adapter.map(|(name, _)| name);
         let canvas = window
             .into_canvas()
             .build()
@@ -665,6 +805,7 @@ impl Surface {
             driver,
             renderer,
             software,
+            adapter,
             frame_size: (width, height),
             pointer: Vec::new(),
             last_offset: (0, 0),
@@ -684,6 +825,12 @@ impl Surface {
     /// whether it draws in software, for a report.
     pub fn renderer(&self) -> (String, String, bool) {
         (self.driver.clone(), self.renderer.clone(), self.software)
+    }
+
+    /// On Windows, the adapter that draws the desktop, by name, for a
+    /// report; nothing elsewhere.
+    pub fn adapter(&self) -> Option<&str> {
+        self.adapter.as_deref()
     }
 
     /// Set the panel's touch frame right from now on, as a calibration

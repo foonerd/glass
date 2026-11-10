@@ -68,10 +68,13 @@ pub struct Status {
     /// showing through the decoder that serves and the delay applied.
     pub movie: String,
     /// What draws the frames, once the window opened: the video driver, the
-    /// renderer, and whether it draws in software.
+    /// renderer, whether it draws in software, and on Windows the adapter
+    /// that draws the desktop (Microsoft's own stand-in where there is no
+    /// graphics driver, which is where SDL's own renderer is chosen).
     pub driver: String,
     pub renderer: String,
     pub software: bool,
+    pub adapter: String,
     /// Whose the player's screen is, as the last sync heard it.
     pub face_owner: String,
     /// Play here on this remote: the switch, the volume, what the sound is

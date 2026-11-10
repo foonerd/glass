@@ -918,11 +918,13 @@ fn session(
                     if let Some(remote) = remote.as_deref() {
                         let monitors = remote::run::monitors_of(&surface);
                         let (driver, renderer, software) = surface.renderer();
+                        let adapter = surface.adapter().map(str::to_string).unwrap_or_default();
                         remote.app.set_status(|s| {
                             s.monitors = monitors;
                             s.driver = driver;
                             s.renderer = renderer;
                             s.software = software;
+                            s.adapter = adapter;
                         });
                     }
                     *window = Some((options, surface));
