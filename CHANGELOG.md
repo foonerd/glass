@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.41] - 2026-11-10
+
+### Changed
+
+- **glass-evo's remote bundles carry the movie's decoder too.** The decoder beside the display went into Glass's own remote archives in 0.11.39 and not into glass-evo's bundles, which are packed by glass-evo's release from the same Glass; a remote installed from a glass-evo bundle found no decoder beside it and showed the words in the movie's box. The pair moves together: glass-evo's Linux and Windows bundles now carry evovpeg beside the display as Glass's archives do, fetched and verified through Glass's component script from the Glass they are built on, so the one lock names the decoder both flavours of a remote carry. The script takes another tree to unpack under for that.
+
+### Diagnostics
+
+Nothing new: the words in the box and the status panel's movie row say the same on either flavour.
+
 ## [0.11.40] - 2026-11-10
 
 ### Fixed
