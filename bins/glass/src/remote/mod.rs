@@ -701,8 +701,16 @@ impl RemoteApp {
             let exe =
                 std::env::current_exe().map_err(|e| format!("this binary's own path: {e}"))?;
             upgrade::install(&binary, &exe, &self.cache, &product, &release)?;
-            // The movie's decoder the archive carries, beside the new binary.
+            // The movie's decoder the archive carries, beside the new binary;
+            // said either way, so a remote left without one says why.
             let extras = upgrade::extras_from(&archive, upgrade::arch_folders());
+            if extras.is_empty() {
+                logline::say!(
+                    Info,
+                    "remotes",
+                    "upgrade: the archive carries no decoder beside the display for this machine"
+                );
+            }
             for word in upgrade::install_extras(&exe, &extras) {
                 logline::say!(Info, "remotes", "upgrade: {word}");
             }

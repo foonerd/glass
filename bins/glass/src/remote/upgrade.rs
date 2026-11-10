@@ -815,15 +815,21 @@ pub fn decoder_entries(entries: &[(String, Vec<u8>)], folders: &[&str]) -> Vec<(
     }
 }
 
-/// The decoder programs of an archive, for the upgrade from GitHub.
+/// The decoder programs of an archive, for the upgrade from GitHub: a zip
+/// or a gzipped tar by what it begins with, as the binary is read. (The
+/// first release read the tar alone, and a Windows remote, whose release
+/// is a zip, was left without the decoder and without a word.)
 pub fn extras_from(archive: &[u8], folders: &[&str]) -> Vec<(String, Vec<u8>)> {
-    tar_gz_entries(archive)
+    entries_of(archive)
         .map(|entries| decoder_entries(&entries, folders))
         .unwrap_or_default()
 }
 
 /// The decoder programs beside the binary just put in place, each written
-/// as `<name>.new` and swapped in; nothing of them is a fault of the
+/// as `<name>.new` and swapped in the way the display is: the one before
+/// moved aside as `<name>.prev` (a program that runs can be renamed on
+/// Windows, not written over) and the new one taking its name, the one
+/// before put back when that fails. Nothing of them is a fault of the
 /// upgrade, which stands with the binary alone, so a failure is a word.
 pub fn install_extras(exe: &Path, extras: &[(String, Vec<u8>)]) -> Vec<String> {
     let mut said = Vec::new();
@@ -833,13 +839,23 @@ pub fn install_extras(exe: &Path, extras: &[(String, Vec<u8>)]) -> Vec<String> {
     for (name, data) in extras {
         let target = dir.join(name);
         let new = dir.join(format!("{name}.new"));
+        let prev = dir.join(format!("{name}.prev"));
         let put = std::fs::write(&new, data).and_then(|_| {
             #[cfg(unix)]
             {
                 use std::os::unix::fs::PermissionsExt;
                 std::fs::set_permissions(&new, std::fs::Permissions::from_mode(0o755))?;
             }
-            std::fs::rename(&new, &target)
+            let _ = std::fs::remove_file(&prev);
+            let had = target.is_file();
+            if had {
+                std::fs::rename(&target, &prev)?;
+            }
+            std::fs::rename(&new, &target).inspect_err(|_| {
+                if had {
+                    let _ = std::fs::rename(&prev, &target);
+                }
+            })
         });
         match put {
             Ok(()) => said.push(format!("{} beside the display", target.display())),
@@ -1768,6 +1784,86 @@ mod tests {
             file_from_tar_gz(&archive, &binary_paths("glass", &["x64"])).unwrap(),
             big
         );
+    }
+
+    /// The decoder comes out of a Windows zip as out of a Linux tar, by
+    /// the folder this machine takes; an archive from before the decoder
+    /// shipped gives nothing. (The first release read the tar alone, and a
+    /// Windows remote's upgrade left the decoder out, without a word.)
+    #[test]
+    fn the_decoder_comes_out_of_a_zip_as_out_of_a_tar() {
+        let zip = zip_of(&[
+            (
+                "glass-0.11.42-windows-x64/bin/glass.exe",
+                b"MZ display",
+                true,
+            ),
+            ("glass-0.11.42-windows-x64/bin/SDL2.dll", b"MZ sdl", false),
+            (
+                "glass-0.11.42-windows-x64/bin/evovpeg.exe",
+                b"MZ decoder",
+                true,
+            ),
+            (
+                "glass-0.11.42-windows-x64/bin/evovprobe.exe",
+                b"MZ prober",
+                false,
+            ),
+        ]);
+        let extras = extras_from(&zip, &["windows-x64"]);
+        assert_eq!(
+            extras,
+            vec![
+                ("evovpeg.exe".to_string(), b"MZ decoder".to_vec()),
+                ("evovprobe.exe".to_string(), b"MZ prober".to_vec()),
+            ]
+        );
+        let tar = tar_gz(&[
+            ("glass-0.11.42-x64/bin/x64/glass", b"ELF display"),
+            ("glass-0.11.42-x64/bin/x64/evovpeg", b"ELF decoder"),
+            ("glass-0.11.42-x64/bin/x64/evovprobe", b"ELF prober"),
+        ]);
+        let extras = extras_from(&tar, &["x64"]);
+        assert_eq!(
+            extras.iter().map(|(n, _)| n.as_str()).collect::<Vec<_>>(),
+            ["evovpeg", "evovprobe"]
+        );
+        let before = tar_gz(&[("glass-0.11.38-x64/bin/x64/glass", b"ELF display")]);
+        assert!(extras_from(&before, &["x64"]).is_empty());
+        let half = zip_of(&[("glass-0.11.42-windows-x64/bin/evovpeg.exe", b"MZ", true)]);
+        assert!(
+            extras_from(&half, &["windows-x64"]).is_empty(),
+            "both or none"
+        );
+    }
+
+    /// The decoder is put beside the display by a swap, the one before kept
+    /// as `.prev`, and a first install has no `.prev`.
+    #[test]
+    fn the_decoder_is_swapped_in_beside_the_display() {
+        let dir = std::env::temp_dir().join(format!("glass-extras-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let exe = dir.join("glass");
+        std::fs::write(&exe, b"display").unwrap();
+        let extras = vec![
+            ("evovpeg".to_string(), b"one".to_vec()),
+            ("evovprobe".to_string(), b"probe".to_vec()),
+        ];
+        let said = install_extras(&exe, &extras);
+        assert_eq!(said.len(), 2);
+        assert!(
+            said.iter().all(|w| w.ends_with("beside the display")),
+            "{said:?}"
+        );
+        assert_eq!(std::fs::read(dir.join("evovpeg")).unwrap(), b"one");
+        assert!(!dir.join("evovpeg.prev").exists());
+        let again = vec![("evovpeg".to_string(), b"two".to_vec())];
+        install_extras(&exe, &again);
+        assert_eq!(std::fs::read(dir.join("evovpeg")).unwrap(), b"two");
+        assert_eq!(std::fs::read(dir.join("evovpeg.prev")).unwrap(), b"one");
+        assert!(!dir.join("evovpeg.new").exists());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// A zip of one stored and one deflated file, as `zip` writes them.

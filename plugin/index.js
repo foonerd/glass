@@ -210,9 +210,12 @@ Channel.prototype.attach = function (conn) {
                     at: Date.now()
                 };
                 if (self.onMovie) { self.onMovie(); }
-            } else if (message && (message.kind === 'screen' || message.kind === 'showing') && conn.remote) {
-                // A remote's display says the same of its own screen and
-                // its own meter: not the player's to keep, and no problem.
+            } else if (message && (message.kind === 'screen' || message.kind === 'showing' || message.kind === 'movie') && conn.remote) {
+                // A remote's display says the same of its own screen, its
+                // own meter and its own movie: not the player's to keep,
+                // and no problem (a remote's movie report was logged as
+                // not a command, a warning in the recent problems at every
+                // film a remote showed).
             } else if (message && message.kind === 'showing' && !conn.remote) {
                 // The player's own display says which meter it shows; the
                 // remotes that follow the player hear of it.

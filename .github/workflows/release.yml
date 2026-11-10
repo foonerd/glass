@@ -203,11 +203,21 @@ jobs:
             echo "no signed apk from the Android build: none is published"
           fi
           ls -la dist bin/windows-x64
-      # The Windows binary and the installer are signed with Azure Trusted
-      # Signing when the repository holds the account (variables
-      # TRUSTED_SIGNING_ENDPOINT, _ACCOUNT, _PROFILE; secrets AZURE_TENANT_ID,
-      # AZURE_CLIENT_ID, AZURE_SUBSCRIPTION_ID for a federated login);
-      # without them the archive is published unsigned.
+      # The movie's decoder beside the display in the Windows archive, as the
+      # Linux archives carry it: evovpeg's Windows build, fetched and verified
+      # here, placed before the signing so it is signed as the display is.
+      - name: The movie's decoder beside the display, for the Windows archive
+        run: |
+          scripts/fetch-components.sh evovpeg
+          v=$(sed -n 's/^VERSION=//p' components/evovpeg.lock)
+          for p in evovpeg evovprobe; do
+            install -D -m 755 "target/components/evovpeg/windows-x64/evovpeg-$v-windows-x64/bin/$p.exe" "bin/windows-x64/$p.exe"
+          done
+      # The Windows binary, the decoder beside it and the installer are signed
+      # with Azure Trusted Signing when the repository holds the account
+      # (variables TRUSTED_SIGNING_ENDPOINT, _ACCOUNT, _PROFILE; secrets
+      # AZURE_TENANT_ID, AZURE_CLIENT_ID, AZURE_SUBSCRIPTION_ID for a
+      # federated login); without them the archive is published unsigned.
       - name: Azure login for Trusted Signing
         if: ${{ vars.TRUSTED_SIGNING_ACCOUNT != '' }}
         uses: azure/login@v3
@@ -215,7 +225,7 @@ jobs:
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
-      - name: Sign the Windows binary and the installer
+      - name: Sign the Windows binary, the decoder beside it and the installer
         if: ${{ vars.TRUSTED_SIGNING_ACCOUNT != '' }}
         run: scripts/sign-windows.sh
         env:
@@ -226,13 +236,8 @@ jobs:
         run: |
           top="glass-${GITHUB_REF_NAME#v}-windows-x64"
           rm -rf "dist/$top" && mkdir -p "dist/$top/remote"
-          # The movie's decoder beside the display, as the Linux archives
-          # carry it: evovpeg's Windows build, fetched and verified here.
-          scripts/fetch-components.sh evovpeg
-          v=$(sed -n 's/^VERSION=//p' components/evovpeg.lock)
-          for p in evovpeg evovprobe; do
-            install -D -m 755 "target/components/evovpeg/windows-x64/evovpeg-$v-windows-x64/bin/$p.exe" "bin/windows-x64/$p.exe"
-          done
+          # bin/windows-x64 holds the display, SDL2.dll and the decoder
+          # beside it, signed above.
           cp -r bin/windows-x64 "dist/$top/bin"
           cp -r remote/windows remote/README.md "dist/$top/remote/"
           (cd dist && zip -qr "$top.zip" "$top") && rm -rf "dist/$top"
