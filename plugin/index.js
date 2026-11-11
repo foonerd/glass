@@ -141,8 +141,6 @@ Channel.prototype.attach = function (conn) {
     if (self.showing) { self.tell(conn, { kind: 'showing', theme: self.showing.theme, meter: self.showing.meter }); }
     if (self.infinity !== null) { self.tell(conn, { kind: 'infinity', on: self.infinity }); }
     if (self.weather) { self.tell(conn, self.weather); }
-    // A remote display needs the player's word on the movie from its first frame.
-    if (conn.remote && self.onMovieLine) { try { self.tell(conn, self.onMovieLine()); } catch (e) { /* at the next change */ } }
     if (self.favourite) { self.tell(conn, self.favourite); }
     if (self.power) { self.tell(conn, self.power); }
     conn.on('data', function (chunk) {
@@ -179,6 +177,13 @@ Channel.prototype.attach = function (conn) {
                     since: new Date().toISOString()
                 };
                 self.logger.info(id + 'channel: remote ' + conn.remote.name + ' (' + conn.remote.address + ', ' + conn.remote.release + ')');
+                // A remote display needs the player's word on the movie from
+                // its first frame: told here, once the hello has said this is
+                // a remote. (It was told at the connection, before the hello,
+                // where nothing was a remote yet, so a remote that connected
+                // while the film already played saw no picture until the
+                // line changed, a theme switch on the player being one change.)
+                if (self.onMovieLine) { try { self.tell(conn, self.onMovieLine()); } catch (e) { /* at the next change */ } }
             } else if (message && message.kind === 'probe' && conn.remote) {
                 // A remote asks whether UDP reaches it: three probe datagrams
                 // go to its frames port, and the answer says how many went
@@ -1407,7 +1412,12 @@ Glass.prototype.movieFaceLine = function () {
         kind: 'movie',
         on: on,
         file: file ? path.basename(file) : null,
-        url: file && container ? '/api/movie/file?at=' + encodeURIComponent(file) : null,
+        // The address for every video file: a native remote decodes any of
+        // them; a browser page reads `playable` and takes the address only
+        // for the containers it plays itself. (Until 0.11.43 the address
+        // came for those alone, and a native remote showed no MKV, AVI or
+        // MPEG file though its decoder reads them.)
+        url: file ? '/api/movie/file?at=' + encodeURIComponent(file) : null,
         type: container,
         playable: file ? !!container : null,
         boxes: on ? self.movieBoxes() : {},

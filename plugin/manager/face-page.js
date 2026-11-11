@@ -424,7 +424,10 @@
     var line = movie.line;
     var v = movieElement();
     if (!v) return;
-    var wanted = line && line.on && line.url ? line.url : '';
+    // The address is taken only for a container the browser plays itself;
+    // the line carries one for every video file, since a native remote
+    // decodes any of them.
+    var wanted = line && line.on && line.url && line.playable !== false ? line.url : '';
     if (line && line.on && line.file && line.playable === false) {
       say(face.t('MANAGER_FACE_MOVIE_UNPLAYABLE'), true);
     } else if (movie.src && !wanted && !movie.failed) {
