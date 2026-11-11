@@ -2,6 +2,17 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.44] - 2026-11-11
+
+### Fixed
+
+- **A remote with a theme of its own shows the film from the moment it connects.** The player tells a remote its word on the movie when the remote connects, but told it before the remote's hello had said it was a remote, so the line never went; a remote that connected while the film already played, or while it stood paused, showed no picture in its own theme's box until something changed the line, which a theme switch on the player happened to do, and then kept the picture when the player's theme was switched back, since it decides from its own theme once it has the line. The line is now told at the hello. Asked on the forum.
+- **A native remote shows a film in any container the player serves.** The address a remote fetches the file from came only for the containers a browser plays (MP4, M4V, MOV, WebM, OGV), so a MKV, AVI, TS, MPG or WMV file showed on the player's screen and never on a Linux or Windows remote, though its decoder reads them. The address comes for every video file; the Face tab and Anymote take it only for the containers they play themselves, as before.
+
+### Diagnostics
+
+Nothing new: a remote's Status panel's movie row and the player's Status tab say what shows, as before.
+
 ## [0.11.43] - 2026-11-10
 
 **Breaking change for Windows remotes.** A Windows remote at 0.11.41 or earlier cannot bring itself to this release from its Version panel in one piece: the program that unpacks an upgrade is the one being upgraded from, and those releases read Linux archives only, so the movie's decoder is left out; and on a machine with no graphics driver the old display can stop answering Windows at its restart. Bring such a remote to this release once by running the installer from the release's zip (`remote\windows\install.ps1`), which keeps its settings, its players and its menu entries; from then on the Version panel's upgrades work as before and carry the decoder. Linux and Android remotes are not affected.

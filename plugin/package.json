@@ -1,6 +1,6 @@
 {
   "name": "glass",
-  "version": "0.11.43",
+  "version": "0.11.44",
   "description": "Glass: VU meters, spectrum, turntables and reels on the player's display",
   "main": "index.js",
   "author": "foonerd; audio path from PeppyMeter Screensaver by 2aCD (original) and Just a Nerd",
@@ -34,6 +34,6 @@
       "amd64"
     ],
     "details": "Glass draws VU meters, spectrum analysers, turntables and tape decks on the player's display from PeppyMeter themes. It is a native display, one small binary, with no Python and no browser in the path. Glass replaces PeppyMeter Screensaver: only one of the two may be enabled.",
-    "changelog": "0.11.43 A Windows remote on a machine with no graphics driver draws its window with SDL's own renderer, where Direct3D on Microsoft's software rasteriser left the window unresponsive"
+    "changelog": "0.11.44 A remote with a theme of its own shows the film from the moment it connects, and a native remote shows a film in any container the player serves"
   }
 }
