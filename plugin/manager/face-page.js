@@ -316,10 +316,11 @@
     return v;
   }
   // The element placed in the box of the meter on show, as the canvas is
-  // drawn on the page, always under the canvas: for an overlay box the
-  // module leaves the theme clear there while a picture shows, so the
-  // picture shows through the theme and the face stays over it; for a
-  // background box the theme's own clear parts let it through.
+  // drawn on the page, always under the canvas: the module leaves the theme
+  // clear there while a picture shows, so the picture shows through the
+  // theme and the face stays over it. For a background box the theme's
+  // meters, texts and foreground stay over the picture; for an overlay box
+  // nothing of the theme does.
   function moviePlace() {
     var v = movie.video;
     if (!v || !movie.line || !face.ready) return;
@@ -354,7 +355,7 @@
     v.style.objectFit = box.scale === 'cover' ? 'cover' : (box.scale === 'stretch' ? 'fill' : 'contain');
     v.style.zIndex = '0';
     v.style.display = '';
-    movieHole(box.zorder === 'background' || v.readyState < 2 ? null : box);
+    movieHole(v.readyState < 2 ? null : box);
   }
   // The blurred copy behind the picture at the whole stage: a small canvas
   // under the video element, blurred and dimmed by CSS, drawn from the
@@ -409,14 +410,18 @@
     }
     return true;
   }
-  // The theme's box cut clear in the module, or painted whole again.
+  // The theme's box cut clear in the module, under the theme's meters and
+  // foreground for a background box and over everything for overlay (the
+  // whole stage after a tap has no zorder: over everything); or painted
+  // whole again.
   function movieHole(box) {
     if (!face.ex || typeof face.ex.set_hole !== 'function') return;
-    var key = box ? [box.x, box.y, box.w, box.h].join(',') : '';
+    var under = !!(box && box.zorder === 'background');
+    var key = box ? [box.x, box.y, box.w, box.h, under ? 'under' : 'over'].join(',') : '';
     if (movie.hole === key) return;
     movie.hole = key;
     try {
-      guarded(function () { if (box) face.ex.set_hole(box.x, box.y, box.w, box.h); else face.ex.clear_hole(); });
+      guarded(function () { if (box) face.ex.set_hole(box.x, box.y, box.w, box.h, under); else face.ex.clear_hole(); });
     } catch (e) { /* an older module: the picture sits under an opaque theme */ }
   }
   // The player's word applied: the file to play, or none.

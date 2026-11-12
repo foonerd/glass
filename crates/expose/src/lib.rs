@@ -634,14 +634,30 @@ pub fn resample_picture_onto(
     Ok(size)
 }
 
+/// The movie's box left clear in the frame while a picture is on, so the
+/// picture drawn under the frame shows through.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Hole {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+    /// Cut after the background artwork and before the meters, so what the
+    /// theme draws over its background (the needles, the spectrum, the
+    /// texts, the overlay artwork, the foreground) is painted over the
+    /// picture: the box's `background`. Else cut last, the picture over
+    /// everything the theme drew: `overlay`, and the whole screen after a tap.
+    pub under: bool,
+}
+
 /// `background` is the theme picture. It is copied in place. It is not scaled.
 /// A theme is authored at its own resolution, so a mismatch leaves the dark fill.
 pub struct Stack<'a> {
     pub screen: Option<&'a Frame>,
     pub face: Option<&'a Frame>,
-    /// A box of the frame left clear, for the movie's picture under it
-    /// (x, y, w, h); none without a picture on.
-    pub hole: Option<(u32, u32, u32, u32)>,
+    /// A box of the frame left clear, for the movie's picture drawn under
+    /// the frame to show through; none without a picture on.
+    pub hole: Option<Hole>,
     /// The meter foreground with its opaque spans.
     pub front: Option<&'a Spans>,
     /// The indicator picture for the left or mono channel: a needle sprite,
@@ -1132,13 +1148,27 @@ pub fn raster_over<'m>(
         }
     }
     plan_folder_layers(scene, stack.folder_pictures, ZOrder::Background, &mut ops);
-    plan_video_idle(scene, stack.video_idle, ZOrder::Background, &mut ops);
     plan_fanart(
         scene.fanart.as_ref(),
         stack.fanart,
         ZOrder::Background,
         &mut ops,
     );
+    // The video box with `background`: over the background artwork, under
+    // the meters and everything drawn after them. The film's hole is cut
+    // here, and the idle picture lands here while no film is up.
+    plan_video_idle(scene, stack.video_idle, ZOrder::Background, &mut ops);
+    if let Some(hole) = stack
+        .hole
+        .filter(|hole| hole.under && hole.w > 0 && hole.h > 0)
+    {
+        ops.push(Op::Hole {
+            x: hole.x,
+            y: hole.y,
+            w: hole.w,
+            h: hole.h,
+        });
+    }
     if scene.meter.visible {
         if let (true, Some(linear), Some(sprite)) = (linear, &scene.meter.linear, stack.needle) {
             let right_sprite = stack.needle_right.or(stack.needle);
@@ -1244,10 +1274,18 @@ pub fn raster_over<'m>(
     if let Some((color, alpha)) = overlay {
         ops.push(Op::Fade { color, alpha });
     }
-    if let Some((x, y, w, h)) = stack.hole {
-        if w > 0 && h > 0 {
-            ops.push(Op::Hole { x, y, w, h });
-        }
+    // The box with `overlay`, and the whole screen after a tap: cut last,
+    // the picture over everything the theme drew.
+    if let Some(hole) = stack
+        .hole
+        .filter(|hole| !hole.under && hole.w > 0 && hole.h > 0)
+    {
+        ops.push(Op::Hole {
+            x: hole.x,
+            y: hole.y,
+            w: hole.w,
+            h: hole.h,
+        });
     }
     // Only the boxes of steps that differ from the last frame's are
     // painted; the canvas keeps the rest. A new base or size repaints all.
@@ -9766,6 +9804,83 @@ mod video_idle_tests {
             at(painted.frame, 20, 15),
             [200, 20, 20],
             "under the theme, the box clear"
+        );
+    }
+
+    /// The film's hole with `background` is cut over the theme's background
+    /// and under what the theme draws over it: the box is clear where the
+    /// foreground paints nothing, and the foreground's pixels stand over the
+    /// film. With `overlay` the hole is cut last and takes the foreground too.
+    #[test]
+    fn the_film_under_background_lies_over_the_base_and_under_the_foreground() {
+        let scene = Scene {
+            width: 100,
+            height: 60,
+            ..Scene::default()
+        };
+        let base = solid(100, 60, [50, 50, 50, 255]);
+        // A green bar across row 13, the rest clear: a bezel over the box.
+        let mut bar = solid(100, 60, [0, 0, 0, 0]);
+        for x in 0..100u32 {
+            let i = ((13 * 100 + x) * 4) as usize;
+            bar.rgba[i..i + 4].copy_from_slice(&[10, 200, 10, 255]);
+        }
+        let front = Spans::new(bar);
+        let rgba = |frame: &Frame, x: u32, y: u32| {
+            let i = ((y * frame.width + x) * 4) as usize;
+            [
+                frame.rgba[i],
+                frame.rgba[i + 1],
+                frame.rgba[i + 2],
+                frame.rgba[i + 3],
+            ]
+        };
+        let hole = |under: bool| Hole {
+            x: 10,
+            y: 10,
+            w: 40,
+            h: 20,
+            under,
+        };
+        let stack = |under: bool| Stack {
+            screen: Some(&base),
+            hole: Some(hole(under)),
+            front: Some(&front),
+            ..stack(None)
+        };
+        let mut motion = Motion::default();
+        let painted = raster_over(&scene, stack(true), &mut motion, 0);
+        assert_eq!(
+            rgba(painted.frame, 20, 15)[3],
+            0,
+            "the box clear for the film"
+        );
+        assert_eq!(
+            rgba(painted.frame, 20, 13),
+            [10, 200, 10, 255],
+            "the foreground over the film"
+        );
+        assert_eq!(
+            rgba(painted.frame, 70, 40),
+            [50, 50, 50, 255],
+            "the theme outside the box"
+        );
+        let mut motion = Motion::default();
+        let painted = raster_over(&scene, stack(false), &mut motion, 0);
+        assert_eq!(
+            rgba(painted.frame, 20, 15)[3],
+            0,
+            "the box clear for the film"
+        );
+        assert_eq!(
+            rgba(painted.frame, 20, 13)[3],
+            0,
+            "overlay: the film over the foreground too"
+        );
+        assert_eq!(
+            rgba(painted.frame, 5, 13),
+            [10, 200, 10, 255],
+            "the foreground beside the box stands"
         );
     }
 }

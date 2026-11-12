@@ -11,7 +11,9 @@ use std::thread;
 use std::time::Instant;
 
 use controls::{controls_of, interactive_now, override_scene, Act, Pointer, Touch};
-use expose::{fit_art, raster_over, write_png, Frame, MeterAssets, Motion, Pictures, Rect, Stack};
+use expose::{
+    fit_art, raster_over, write_png, Frame, Hole, MeterAssets, Motion, Pictures, Rect, Stack,
+};
 use intake::{Overrides, Selector, Source, TapSource};
 use lead::{
     frame_period, should_mark_dismiss, Input, InteractiveMode, SkinDesc, DISMISS_FILE_VAR, RUN_FLAG,
@@ -1507,27 +1509,42 @@ fn session(
             if profiling {
                 motion.profile = Some(Vec::new());
             }
-            // The movie's box left clear in the theme while a picture is on
-            // and the theme's box is over it: the picture is drawn under
-            // the frame and shows through, and the face over the frame
-            // covers it where the face draws.
-            // At the whole screen after a tap the hole is the whole frame,
-            // whatever the box's zorder: the theme is hidden under the picture.
+            // The movie's box left clear in the theme while a picture is on:
+            // the picture is drawn under the frame and shows through, and
+            // the face over the frame covers it where the face draws. With
+            // `background` the hole is cut over the theme's background
+            // artwork and under its meters, so what the theme draws over
+            // its background (the meters, the texts, the foreground) stands
+            // over the picture; with `overlay` it is cut last, the picture
+            // over everything. At the whole screen after a tap the hole is
+            // the whole frame, whatever the box's zorder: the theme is
+            // hidden under the picture.
             #[cfg(not(target_os = "android"))]
-            let movie_hole: Option<(u32, u32, u32, u32)> = movie
+            let movie_hole: Option<Hole> = movie
                 .as_ref()
                 .filter(|m| m.shown().is_some())
                 .and(skin.video.as_ref())
-                .filter(|v| movie_full || v.zorder == lead::ZOrder::Overlay)
                 .map(|v| {
                     if movie_full {
-                        (0, 0, skin.width, skin.height)
+                        Hole {
+                            x: 0,
+                            y: 0,
+                            w: skin.width,
+                            h: skin.height,
+                            under: false,
+                        }
                     } else {
-                        (v.x, v.y, v.w, v.h)
+                        Hole {
+                            x: v.x,
+                            y: v.y,
+                            w: v.w,
+                            h: v.h,
+                            under: v.zorder == lead::ZOrder::Background,
+                        }
                     }
                 });
             #[cfg(target_os = "android")]
-            let movie_hole: Option<(u32, u32, u32, u32)> = None;
+            let movie_hole: Option<Hole> = None;
             let (mut frame, mut damage): (&Frame, &[Rect]) = {
                 let painted = raster_over(
                     &scene,

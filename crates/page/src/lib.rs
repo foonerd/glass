@@ -39,7 +39,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use controls::{controls_of, interactive_now, override_scene, Act, Pointer, Touch};
-use expose::{raster_over, MeterAssets, Motion, Pictures, Stack};
+use expose::{raster_over, Hole, MeterAssets, Motion, Pictures, Stack};
 use intake::bring::{
     asset_plan, config_texts, theme_plan, Bring, Choice, RemoteConfig, ThemeFiles,
 };
@@ -123,8 +123,9 @@ pub struct Page {
     /// What the face asked of the player, until the page takes it.
     asked: Vec<Happened>,
     /// The movie's box left clear in the theme while the page's own video
-    /// element shows a picture under the canvas (x, y, w, h).
-    hole: Option<(u32, u32, u32, u32)>,
+    /// element shows a picture under the canvas: under the theme's meters
+    /// and foreground for a `background` box, over everything for `overlay`.
+    hole: Option<Hole>,
     /// The page's clock at the last frame, its zone, and the time of day
     /// they make.
     now_ms: u64,
@@ -414,8 +415,8 @@ impl Page {
     /// The movie's box left clear in the theme, under the face, while the
     /// page's video element shows a picture beneath the canvas; none
     /// paints the theme whole again.
-    pub fn set_hole(&mut self, hole: Option<(u32, u32, u32, u32)>) {
-        self.hole = hole.filter(|h| h.2 > 0 && h.3 > 0);
+    pub fn set_hole(&mut self, hole: Option<Hole>) {
+        self.hole = hole.filter(|h| h.w > 0 && h.h > 0);
     }
 
     pub fn width(&self) -> u32 {
@@ -745,8 +746,10 @@ pub mod host {
         with(|page| page.width())
     }
 
-    pub fn set_hole(x: u32, y: u32, w: u32, h: u32) {
-        with(|page| page.set_hole(Some((x, y, w, h))))
+    /// `under` for a `background` box: the hole cut under the theme's
+    /// meters and foreground; else over everything the theme drew.
+    pub fn set_hole(x: u32, y: u32, w: u32, h: u32, under: bool) {
+        with(|page| page.set_hole(Some(Hole { x, y, w, h, under })))
     }
 
     pub fn clear_hole() {
@@ -910,9 +913,9 @@ macro_rules! exports {
                 host::frame_width()
             }
             #[no_mangle]
-            pub extern "C" fn set_hole(x: u32, y: u32, w: u32, h: u32) {
+            pub extern "C" fn set_hole(x: u32, y: u32, w: u32, h: u32, under: bool) {
                 armed();
-                host::set_hole(x, y, w, h)
+                host::set_hole(x, y, w, h, under)
             }
             #[no_mangle]
             pub extern "C" fn clear_hole() {
