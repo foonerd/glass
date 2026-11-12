@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.45] - 2026-11-12
+
+### Fixed
+
+- **Volumio's stand-in picture no longer blurs to a dark box behind the theme.** Where a track has no cover, a video file for one, Volumio answers its own dark artwork in place of a cover, and the display took it for one: with the album art set to show behind the theme, the bars around the theme showed that artwork blurred, a dark box, where the Settings page promised the colour. The display now learns the player's stand-in pictures from the player itself and counts one as no cover, on the player's screen and on every remote, so the colour shows, the rows show their own marks, and a remote's Status row says "the dark colour: the track has no cover". Asked on the forum.
+
+### Diagnostics
+
+The remote's Status panel's "On the screen" row says when the colour shows for want of a cover; the display's log says "is the player's stand-in picture: no cover" at the fetch; the Troubleshooting page has the row.
+
 ## [0.11.44] - 2026-11-11
 
 ### Fixed
