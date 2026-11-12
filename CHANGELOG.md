@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.46] - 2026-11-12
+
+### Added
+
+- **The album art or the fan art in the video box while no film plays.** A theme's video box has a new key, `video.idle`: `albumart` shows the track's cover there, `fanart` the fan art on show, at the box's size with its scale and zorder, as the film would be; absent, the box shows the theme as it is, as before. The picture goes when a film comes and returns when it ends; a track without a cover shows nothing. On the player's screen, the remotes and the browser pages alike. The Meters Reference has the key.
+
+### Diagnostics
+
+Nothing new: the theme's own keys, read as the others are.
+
 ## [0.11.45] - 2026-11-12
 
 ### Fixed
