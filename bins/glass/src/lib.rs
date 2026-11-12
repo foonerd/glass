@@ -966,7 +966,7 @@ fn session(
     // bare, when the player asks for it, or a remote for itself: made once
     // per track and screen size. A remote's page says which it got.
     let mut backdrop = expose::Backdrop::default();
-    let mut backdrop_said: Option<bool> = None;
+    let mut backdrop_said: Option<String> = None;
     // The picture of a video file the player plays, under the theme: the
     // harness flag for now; the plugin's switch when it ships.
     #[cfg(not(target_os = "android"))]
@@ -1747,24 +1747,27 @@ fn session(
                     Some(remote) => remote.backdrop_wanted(skin.run.backdrop),
                     None => skin.run.backdrop,
                 };
-                if let Some(remote) = remote.as_deref() {
-                    if backdrop_said != Some(blurred) {
-                        backdrop_said = Some(blurred);
-                        remote.app.set_status(|s| {
-                            s.backdrop = if blurred {
-                                "the album art blurred"
-                            } else {
-                                "a dark colour"
-                            }
-                            .to_string();
-                        });
-                    }
-                }
                 let art = if blurred {
                     input.metadata.art_file.as_str()
                 } else {
                     ""
                 };
+                if let Some(remote) = remote.as_deref() {
+                    // Said as it stands: the art blurred, the colour by the
+                    // setting, or the colour because the track has no cover
+                    // (the player's stand-in picture counts as none).
+                    let said = if !blurred {
+                        "a dark colour"
+                    } else if art.is_empty() {
+                        "the dark colour: the track has no cover"
+                    } else {
+                        "the album art blurred"
+                    };
+                    if backdrop_said.as_deref() != Some(said) {
+                        backdrop_said = Some(said.to_string());
+                        remote.app.set_status(|s| s.backdrop = said.to_string());
+                    }
+                }
                 // At the whole screen the backdrop is a blurred, dimmed copy
                 // of the frame, made about once a second (a blur every frame
                 // is too dear on a Pi), behind the letterbox; the art comes

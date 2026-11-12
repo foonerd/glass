@@ -1353,9 +1353,112 @@ fn fetch_row_art(reported: &str) -> Option<PathBuf> {
     fetch_art_into(reported, "glass-art-rows", ROWS_KEPT)
 }
 
+/// The player's stand-in covers: the pictures Volumio answers where it has
+/// no cover for a track, its own artwork as a JPEG when nothing is named
+/// and as a PNG when a path with an icon is named. Learned once from the
+/// player itself, by their digests, for the player named now; a fetched
+/// cover equal to one is no cover, so the blurred backdrop falls to the
+/// colour and a row shows its own mark, instead of the stand-in blurred
+/// to a dark box. Until learned, nothing is refused.
+#[cfg(not(target_arch = "wasm32"))]
+static STANDINS: std::sync::Mutex<Option<(String, Vec<[u8; 32]>)>> = std::sync::Mutex::new(None);
+
+/// Where the player answers a stand-in: nothing named, a video file with
+/// no cover, a music file with no cover.
+#[cfg(not(target_arch = "wasm32"))]
+const STANDIN_ASKS: [&str; 3] = [
+    "/albumart",
+    "/albumart?path=%2Fglass-no-such-file%2Fx.mp4&icon=fa-file-video-o",
+    "/albumart?path=%2Fglass-no-such-file%2Fx.flac&icon=fa-music",
+];
+
+#[cfg(not(target_arch = "wasm32"))]
+fn digest_of(bytes: &[u8]) -> [u8; 32] {
+    use sha2::{Digest, Sha256};
+    Sha256::digest(bytes).into()
+}
+
+/// Whether `bytes` are one of the stand-ins learned.
+#[cfg(not(target_arch = "wasm32"))]
+fn is_standin_of(bytes: &[u8], learned: &[[u8; 32]]) -> bool {
+    !learned.is_empty() && learned.contains(&digest_of(bytes))
+}
+
+/// The stand-ins of the player named now: learned on the first ask, kept
+/// while the player stays, learned again when it changes; none while the
+/// player could not be asked, and asked again at the next fetch then.
+#[cfg(not(target_arch = "wasm32"))]
+fn standins() -> Vec<[u8; 32]> {
+    let base = player_http();
+    if let Ok(known) = STANDINS.lock() {
+        if let Some((for_base, digests)) = known.as_ref() {
+            if *for_base == base {
+                return digests.clone();
+            }
+        }
+    }
+    let agent = ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(3)))
+        .build()
+        .new_agent();
+    let mut digests: Vec<[u8; 32]> = Vec::new();
+    for ask in STANDIN_ASKS {
+        let Ok(mut response) = agent.get(format!("{base}{ask}")).call() else {
+            continue;
+        };
+        let Ok(bytes) = response.body_mut().read_to_vec() else {
+            continue;
+        };
+        if picture_kind(&bytes).is_none() {
+            continue;
+        }
+        let digest = digest_of(&bytes);
+        if !digests.contains(&digest) {
+            digests.push(digest);
+        }
+    }
+    if digests.is_empty() {
+        return digests;
+    }
+    logline::say!(
+        Verbose,
+        "artwork",
+        "album art: the player's stand-in pictures learned at {base}: {}",
+        digests.len()
+    );
+    if let Ok(mut known) = STANDINS.lock() {
+        *known = Some((base, digests.clone()));
+    }
+    digests
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod standin_tests {
+    use super::{digest_of, is_standin_of};
+
+    /// A picture equal to a learned stand-in is no cover; any other
+    /// picture is one; with nothing learned nothing is refused.
+    #[test]
+    fn a_learned_stand_in_is_no_cover_and_nothing_else_is() {
+        let standin = b"\x89PNG\r\n\x1a\nthe player's own artwork".to_vec();
+        let cover = b"\xff\xd8\xff\xe0a real cover".to_vec();
+        let learned = vec![digest_of(&standin)];
+        assert!(is_standin_of(&standin, &learned));
+        assert!(!is_standin_of(&cover, &learned));
+        assert!(!is_standin_of(&standin, &[]));
+        let mut altered = standin.clone();
+        altered.push(0);
+        assert!(
+            !is_standin_of(&altered, &learned),
+            "one byte more is another picture"
+        );
+    }
+}
+
 /// The picture at a reported location, fetched into the cache folder
 /// `folder` under the system's temporary directory and kept there with
-/// the newest `keep`; the file it landed in, or none.
+/// the newest `keep`; the file it landed in, or none: none too where the
+/// picture is the player's stand-in for a track without a cover.
 #[cfg(not(target_arch = "wasm32"))]
 fn fetch_art_into(reported: &str, folder: &str, keep: usize) -> Option<PathBuf> {
     let dir = std::env::temp_dir().join(folder);
@@ -1368,6 +1471,18 @@ fn fetch_art_into(reported: &str, folder: &str, keep: usize) -> Option<PathBuf> 
     }
     let path = dir.join(format!("{:016x}.img", fnv1a(reported)));
     if path.is_file() {
+        // A stand-in kept from before it was known as one goes; no cover.
+        if std::fs::read(&path)
+            .map(|bytes| is_standin_of(&bytes, &standins()))
+            .unwrap_or(false)
+        {
+            let _ = std::fs::remove_file(&path);
+            art_gave_up(
+                false,
+                &format!("{reported} is the player's stand-in picture: no cover"),
+            );
+            return None;
+        }
         // Taken up again: it counts as new, so it is not the next to go.
         if let Ok(file) = std::fs::OpenOptions::new().write(true).open(&path) {
             let _ = file.set_modified(std::time::SystemTime::now());
@@ -1406,6 +1521,15 @@ fn fetch_art_into(reported: &str, folder: &str, keep: usize) -> Option<PathBuf> 
         art_gave_up(
             false,
             &format!("{url} answered no picture ({} bytes)", bytes.len()),
+        );
+        return None;
+    }
+    // The player's own stand-in, answered where a track has no cover, is
+    // no cover: nothing is kept, the colour shows.
+    if is_standin_of(&bytes, &standins()) {
+        art_gave_up(
+            false,
+            &format!("{url} is the player's stand-in picture: no cover"),
         );
         return None;
     }
