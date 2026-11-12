@@ -122,6 +122,10 @@ pub struct Scene {
     /// The fanart slot with the picture on show and its transition, when the skin has one.
     #[serde(default)]
     pub fanart: Option<Fanart>,
+    /// The picture the video box shows while no film plays, when the skin
+    /// names one and the picture is there.
+    #[serde(default)]
+    pub video_idle: Option<VideoIdle>,
     /// How turning pictures are paced, as `rotation.quality` sets it: how
     /// many times a second a record, a reel or turning art is drawn anew,
     /// and in steps of how many degrees. None draws every frame at the
@@ -219,9 +223,24 @@ pub struct FolderLayer {
     pub file: String,
 }
 
+/// The picture the video box shows while no film plays, as `video.idle`
+/// names it: the box, its scale and zorder, and the file of the album art
+/// or of the fan art on show.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct VideoIdle {
+    pub x: u32,
+    pub y: u32,
+    pub w: u32,
+    pub h: u32,
+    pub scale: lead::Scale,
+    pub zorder: lead::ZOrder,
+    pub file: String,
+}
+
 impl Default for Scene {
     fn default() -> Self {
         Self {
+            video_idle: None,
             skin: String::new(),
             width: 0,
             height: 0,
@@ -627,6 +646,30 @@ fn volume_words(format: &str, mute: &str, volume: impl std::fmt::Display, muted:
     }
 }
 
+/// The picture the video box shows while no film plays, as `video.idle`
+/// says: the track's album art or the fan art on show; none where the
+/// key is not set, the meter has no box, or the picture is not there.
+fn video_idle(skin: &SkinDesc, metadata: &Metadata) -> Option<VideoIdle> {
+    let video = skin.video.as_ref()?;
+    let file = match video.idle {
+        lead::VideoIdle::None => return None,
+        lead::VideoIdle::AlbumArt => &metadata.art_file,
+        lead::VideoIdle::Fanart => &metadata.fanart_file,
+    };
+    if file.is_empty() {
+        return None;
+    }
+    Some(VideoIdle {
+        x: video.x,
+        y: video.y,
+        w: video.w,
+        h: video.h,
+        scale: video.scale,
+        zorder: video.zorder,
+        file: file.clone(),
+    })
+}
+
 pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
     let meter_max = skin.meter_max.max(1.0);
     let spectrum_max = skin.spectrum_max.max(1.0);
@@ -647,6 +690,7 @@ pub fn step(skin: &SkinDesc, input: &Input) -> Scene {
         needle: skin.needle,
         texts: texts(skin, &input.metadata),
         art: art(skin, &input.metadata),
+        video_idle: video_idle(skin, &input.metadata),
         type_area: type_area(skin, &input.metadata),
         mono: (input.levels.mono / meter_max).clamp(0.0, 1.0),
         meter: skin.meter.clone(),

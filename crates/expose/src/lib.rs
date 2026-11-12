@@ -323,6 +323,7 @@ pub fn raster(scene: &Scene) -> Frame {
             spectra: &[],
             folder_pictures: &[],
             fanart: (None, None),
+            video_idle: None,
             vinyl: None,
             tonearm: None,
             reels: (None, None),
@@ -661,6 +662,10 @@ pub struct Stack<'a> {
     pub folder_pictures: &'a [Option<FolderPicture>],
     /// The fanart on show and the one it replaces, fitted to the slot.
     pub fanart: (Option<&'a FolderPicture>, Option<&'a FolderPicture>),
+    /// The picture the video box shows while no film plays (`video.idle`),
+    /// fitted to the box; none while a film is up, so a film drawn under
+    /// the theme is not covered by it.
+    pub video_idle: Option<&'a FolderPicture>,
     /// The record picture, already stretched to `vinyl.dimension`, and the tonearm picture.
     pub vinyl: Option<&'a Frame>,
     pub tonearm: Option<&'a Frame>,
@@ -1127,6 +1132,7 @@ pub fn raster_over<'m>(
         }
     }
     plan_folder_layers(scene, stack.folder_pictures, ZOrder::Background, &mut ops);
+    plan_video_idle(scene, stack.video_idle, ZOrder::Background, &mut ops);
     plan_fanart(
         scene.fanart.as_ref(),
         stack.fanart,
@@ -1232,6 +1238,9 @@ pub fn raster_over<'m>(
             at: stack.face_at,
         });
     }
+    // The video box's idle picture over everything in the box, the meter
+    // foreground included, where the film with `overlay` would be.
+    plan_video_idle(scene, stack.video_idle, ZOrder::Overlay, &mut ops);
     if let Some((color, alpha)) = overlay {
         ops.push(Op::Fade { color, alpha });
     }
@@ -2671,6 +2680,8 @@ pub struct Pictures {
     /// slot's picture changes.
     folder_pictures: Vec<Option<FolderPicture>>,
     fanart: (PictureSlot, PictureSlot),
+    /// The video box's idle picture as last fitted, with what it was fitted for.
+    video_idle: Option<(plot::VideoIdle, FolderPicture)>,
     vinyl: PlainSlot,
     reels: (PlainSlot, PlainSlot),
     /// The changer's bar, drawn again when its spec, its discs or the pose
@@ -2822,6 +2833,32 @@ impl Pictures {
             }
             None => self.art = None,
         }
+        // The video box's idle picture, fitted to the box as a folder
+        // layer is, kept while the file and the box stay.
+        match &scene.video_idle {
+            Some(idle) => {
+                let stale = self
+                    .video_idle
+                    .as_ref()
+                    .is_none_or(|(known, _)| known != idle);
+                if stale {
+                    let spec = FolderLayerSpec {
+                        files: Vec::new(),
+                        x: idle.x,
+                        y: idle.y,
+                        w: idle.w,
+                        h: idle.h,
+                        scale: idle.scale,
+                        zorder: idle.zorder,
+                        border: 0,
+                        border_color: [255, 255, 255],
+                    };
+                    self.video_idle = FolderPicture::load(Path::new(&idle.file), &spec)
+                        .map(|picture| (idle.clone(), picture));
+                }
+            }
+            None => self.video_idle = None,
+        }
         self.icon.follow(scene.type_area.as_ref());
         let mut changed = self.folder.len() != scene.folder_layers.len();
         if changed {
@@ -2955,6 +2992,12 @@ impl Pictures {
     /// The album art stretched to its box.
     pub fn art(&self) -> Option<&Frame> {
         self.art.as_ref().map(|(_, frame)| frame)
+    }
+
+    /// The video box's idle picture fitted to the box, when the scene
+    /// names one and it could be read.
+    pub fn video_idle(&self) -> Option<&FolderPicture> {
+        self.video_idle.as_ref().map(|(_, picture)| picture)
     }
 
     /// The type icon fitted to its area.
@@ -5418,6 +5461,7 @@ mod changer_tests {
                     spectra: &[],
                     folder_pictures: &[],
                     fanart: (None, None),
+                    video_idle: None,
                     vinyl: None,
                     tonearm: None,
                     reels: (None, None),
@@ -9617,6 +9661,115 @@ fn alpha_op(picture: &FolderPicture, alpha: u8) -> Op<'_> {
 /// the new over the transition; a `fade` takes the old one out in the first
 /// half and the new one in over the second, or the new one in alone when
 /// there is no old picture; `none` shows the picture as it is.
+/// The video box's idle picture, where the scene names one at `zorder`
+/// and the stack brings it (none while a film is up).
+fn plan_video_idle<'a>(
+    scene: &Scene,
+    picture: Option<&'a FolderPicture>,
+    zorder: ZOrder,
+    ops: &mut Vec<Op<'a>>,
+) {
+    if let (Some(idle), Some(picture)) = (&scene.video_idle, picture) {
+        if idle.zorder == zorder {
+            ops.push(alpha_op(picture, 255));
+        }
+    }
+}
+
+#[cfg(test)]
+mod video_idle_tests {
+    use super::*;
+
+    fn solid(w: u32, h: u32, rgba: [u8; 4]) -> Frame {
+        Frame {
+            blend: Blend::Normal,
+            width: w,
+            height: h,
+            rgba: rgba.repeat((w * h) as usize),
+        }
+    }
+
+    fn stack<'a>(idle: Option<&'a FolderPicture>) -> Stack<'a> {
+        Stack {
+            screen: None,
+            face: None,
+            hole: None,
+            front: None,
+            needle: None,
+            needle_right: None,
+            face_at: (0, 0),
+            fonts: None,
+            art: None,
+            icon: None,
+            spectra: &[],
+            folder_pictures: &[],
+            fanart: (None, None),
+            video_idle: idle,
+            vinyl: None,
+            tonearm: None,
+            reels: (None, None),
+            lenses: LensStack::default(),
+            indicators: None,
+            base: None,
+            changer: None,
+        }
+    }
+
+    /// The idle picture lands in the video box at its zorder when the
+    /// stack brings it, and nothing lands there when it does not (a film
+    /// up), whatever the scene names.
+    #[test]
+    fn the_idle_picture_fills_the_box_only_when_brought() {
+        let scene = Scene {
+            width: 100,
+            height: 60,
+            video_idle: Some(plot::VideoIdle {
+                x: 10,
+                y: 10,
+                w: 40,
+                h: 20,
+                scale: Scale::Fit,
+                zorder: ZOrder::Overlay,
+                file: "cover.png".to_string(),
+            }),
+            ..Scene::default()
+        };
+        let picture = FolderPicture {
+            frame: solid(40, 20, [200, 20, 20, 255]),
+            at: (10, 10),
+        };
+        let at = |frame: &Frame, x: u32, y: u32| {
+            let i = ((y * frame.width + x) * 4) as usize;
+            [frame.rgba[i], frame.rgba[i + 1], frame.rgba[i + 2]]
+        };
+        let mut motion = Motion::default();
+        let painted = raster_over(&scene, stack(Some(&picture)), &mut motion, 0);
+        assert_eq!(at(painted.frame, 20, 15), [200, 20, 20], "inside the box");
+        assert_ne!(at(painted.frame, 70, 40), [200, 20, 20], "outside it");
+        let mut motion = Motion::default();
+        let painted = raster_over(&scene, stack(None), &mut motion, 0);
+        assert_ne!(
+            at(painted.frame, 20, 15),
+            [200, 20, 20],
+            "a film up: nothing"
+        );
+        let under = Scene {
+            video_idle: scene.video_idle.clone().map(|mut i| {
+                i.zorder = ZOrder::Background;
+                i
+            }),
+            ..scene.clone()
+        };
+        let mut motion = Motion::default();
+        let painted = raster_over(&under, stack(Some(&picture)), &mut motion, 0);
+        assert_eq!(
+            at(painted.frame, 20, 15),
+            [200, 20, 20],
+            "under the theme, the box clear"
+        );
+    }
+}
+
 fn plan_fanart<'a>(
     fanart: Option<&Fanart>,
     pictures: (Option<&'a FolderPicture>, Option<&'a FolderPicture>),
@@ -11838,6 +11991,7 @@ mod tests {
                     spectra: &[],
                     folder_pictures: &[],
                     fanart: (None, None),
+                    video_idle: None,
                     vinyl: None,
                     tonearm: None,
                     reels: (None, None),
@@ -11867,6 +12021,7 @@ mod tests {
                     spectra: &[],
                     folder_pictures: &[],
                     fanart: (None, None),
+                    video_idle: None,
                     vinyl: None,
                     tonearm: None,
                     reels: (None, None),
@@ -11948,6 +12103,7 @@ mod tests {
                     spectra: &[],
                     folder_pictures: &[],
                     fanart: (None, None),
+                    video_idle: None,
                     vinyl: None,
                     tonearm: Some(&arm),
                     reels: (None, None),
@@ -12081,6 +12237,7 @@ mod tests {
                 spectra: &[],
                 folder_pictures: &[],
                 fanart: (None, None),
+                video_idle: None,
                 vinyl: None,
                 tonearm: None,
                 reels: (None, None),

@@ -2507,12 +2507,25 @@ pub fn meter_fanart(meters_txt: &str, meter: &str) -> Option<FanartSpec> {
     })
 }
 
+/// What the video box shows while no film plays, `video.idle`: nothing,
+/// the theme as it is (unless said); the album art of the track; or the
+/// fan art on show. Drawn at the box's size with the box's scale and
+/// zorder, as the film would be.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum VideoIdle {
+    #[default]
+    None,
+    AlbumArt,
+    Fanart,
+}
+
 /// The box a meter gives the picture of a video file the player plays,
 /// `video.pos` and `video.dimension`, with `video.scale` (fit, stretch or
 /// cover, fit unless said) and `video.zorder` (background, under the
 /// theme where it leaves the box clear, or overlay over it; overlay
-/// unless said). A meter without the keys shows no picture, and the
-/// player's own switch decides whether any meter does.
+/// unless said), and `video.idle`, what the box shows while no film
+/// plays. A meter without the keys shows no picture, and the player's
+/// own switch decides whether any meter does.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct VideoSpec {
     pub x: u32,
@@ -2521,6 +2534,8 @@ pub struct VideoSpec {
     pub h: u32,
     pub scale: Scale,
     pub zorder: ZOrder,
+    #[serde(default)]
+    pub idle: VideoIdle,
 }
 
 pub fn meter_video(meters_txt: &str, meter: &str) -> Option<VideoSpec> {
@@ -2562,7 +2577,38 @@ pub fn meter_video(meters_txt: &str, meter: &str) -> Option<VideoSpec> {
             Some("background") => ZOrder::Background,
             _ => ZOrder::Overlay,
         },
+        idle: match get("video.idle")
+            .map(|v| v.trim().to_ascii_lowercase())
+            .as_deref()
+        {
+            Some("albumart") | Some("album art") | Some("art") | Some("cover") => {
+                VideoIdle::AlbumArt
+            }
+            Some("fanart") | Some("fan art") => VideoIdle::Fanart,
+            _ => VideoIdle::None,
+        },
     })
+}
+
+#[cfg(test)]
+mod video_idle_tests {
+    use super::{meter_video, VideoIdle};
+
+    /// `video.idle` names what the box shows without a film: the album
+    /// art, the fan art, or nothing, which is the word's absence too.
+    #[test]
+    fn the_idle_key_names_the_art_the_fanart_or_nothing() {
+        let boxed = "[m]\nvideo.pos = 52,52\nvideo.dimension = 704,396\n";
+        assert_eq!(meter_video(boxed, "m").unwrap().idle, VideoIdle::None);
+        let art = format!("{boxed}video.idle = albumart\n");
+        assert_eq!(meter_video(&art, "m").unwrap().idle, VideoIdle::AlbumArt);
+        let art = format!("{boxed}video.idle = Album Art\n");
+        assert_eq!(meter_video(&art, "m").unwrap().idle, VideoIdle::AlbumArt);
+        let fan = format!("{boxed}video.idle = fanart\n");
+        assert_eq!(meter_video(&fan, "m").unwrap().idle, VideoIdle::Fanart);
+        let odd = format!("{boxed}video.idle = clock\n");
+        assert_eq!(meter_video(&odd, "m").unwrap().idle, VideoIdle::None);
+    }
 }
 
 /// A state indicator's look: a coloured LED shape, or one picture per state,
@@ -6486,7 +6532,8 @@ mod tests {
                 w: 1120,
                 h: 630,
                 scale: Scale::Cover,
-                zorder: ZOrder::Background
+                zorder: ZOrder::Background,
+                idle: VideoIdle::None,
             })
         );
         assert_eq!(meter_video(v, "n"), None, "a box of nothing is none");

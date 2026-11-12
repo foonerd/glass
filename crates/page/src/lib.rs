@@ -471,6 +471,7 @@ impl Page {
                 spectra: &assets.spectra,
                 folder_pictures: showing.pictures.folder_pictures(),
                 fanart: showing.pictures.fanart(),
+                video_idle: showing.pictures.video_idle(),
                 vinyl: showing.pictures.vinyl(),
                 tonearm: assets.tonearm.as_ref(),
                 reels: showing.pictures.reels(&scene, assets),

@@ -1545,6 +1545,17 @@ fn session(
                         spectra: &assets.spectra,
                         folder_pictures: pictures.folder_pictures(),
                         fanart: pictures.fanart(),
+                        video_idle: {
+                            #[cfg(not(target_os = "android"))]
+                            let film_up = movie.is_some();
+                            #[cfg(target_os = "android")]
+                            let film_up = false;
+                            if film_up {
+                                None
+                            } else {
+                                pictures.video_idle()
+                            }
+                        },
                         vinyl: pictures.vinyl(),
                         tonearm: assets.tonearm.as_ref(),
                         reels: pictures.reels(&scene, &assets),
@@ -2215,6 +2226,17 @@ fn session(
                             spectra: &assets.spectra,
                             folder_pictures: pictures.folder_pictures(),
                             fanart: pictures.fanart(),
+                            video_idle: {
+                                #[cfg(not(target_os = "android"))]
+                                let film_up = movie.is_some();
+                                #[cfg(target_os = "android")]
+                                let film_up = false;
+                                if film_up {
+                                    None
+                                } else {
+                                    pictures.video_idle()
+                                }
+                            },
                             vinyl: pictures.vinyl(),
                             tonearm: assets.tonearm.as_ref(),
                             reels: pictures.reels(&scene, &assets),

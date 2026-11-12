@@ -293,6 +293,7 @@ const KEPT: &[&str] = &[
     "fanart.zorder",
     "video.scale",
     "video.zorder",
+    "video.idle",
     "fill.alpha",
     "flip.left.x",
     "flip.right.x",
