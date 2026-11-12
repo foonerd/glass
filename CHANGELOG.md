@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.47] - 2026-11-12
+
+### Fixed
+
+- **A film under the theme with `video.zorder = background` now shows, over the theme's background and under what the theme draws over it.** The box's `background` had put the film under the theme's background picture itself, so on a theme whose picture is opaque in the box, as most are, the film never showed, while the fan art's `background` lies over that picture: the one word meant two things, and a bezel drawn in the foreground could not frame a film. The film now lies where the fan art with `background` lies: over the background picture and the background artwork, under the needles and bars, the spectrum, the texts, the overlay artwork and the foreground, so the foreground frames the film and meters sit over it. `overlay` is as it was, the film over everything in the box, and so is the whole screen after a tap. The idle picture of `video.idle` lands at the same place with `background`. The same on the player's screen, the native remotes and the browser pages. The drawing order, with the movie's two places in it, is on the Themes page and the Skin Creation Guide; the Meters Reference row says where each value puts the film. Asked on the forum.
+
+### Diagnostics
+
+A Troubleshooting line for a meter, a text or the foreground over the picture: the box's `background`, by design, and `overlay` the other way. The Find a problem check and the sheet are as they were: the picture shows or it does not, and the theme's keys say where.
+
 ## [0.11.46] - 2026-11-12
 
 ### Added
