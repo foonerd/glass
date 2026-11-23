@@ -118,6 +118,17 @@ test('the buttons as the face composes them: the user over the theme on show, ov
   assert.strictEqual(idle({ themeLook: { folder: 'T', keys: { 'buttons.idle': 'leave' } }, settings: Object.assign({}, look.settings, { 'buttons.idle': 'stay' }) }), 'stay', 'the user over the theme');
   assert.strictEqual(idle({ looks: [{ name: 'Mine', shipped: false, keys: { 'buttons.idle': 'leave' } }] }), 'leave', 'the look chosen');
   assert.strictEqual(evo({}).buttonsIdle, 'stay');
+  // What the More sheet's arrows step, composed the same way; unsaid is the meters of the theme on show.
+  const arrows = (more) => evo(facts({ look: Object.assign({}, look, more) })).arrows;
+  assert.strictEqual(arrows({}), 'meters');
+  assert.strictEqual(arrows({ settings: Object.assign({}, look.settings, { 'sheet.arrows': ' Themes ' }) }), 'themes', 'the user says the themes, as the face reads the word');
+  assert.strictEqual(arrows({ settings: Object.assign({}, look.settings, { 'sheet.arrows': 'looks' }) }), 'meters', 'a word that is none');
+  assert.strictEqual(arrows({ looks: [{ name: 'Mine', shipped: false, keys: { 'sheet.arrows': 'themes' } }] }), 'themes', 'the look chosen');
+  assert.strictEqual(arrows({ looks: [{ name: 'Mine', shipped: false, keys: { 'sheet.arrows': 'themes' } }], settings: Object.assign({}, look.settings, { 'sheet.arrows': 'meters' }) }), 'meters', 'the user over the look');
+  assert.strictEqual(evo({}).arrows, 'meters');
+  // How many meters the theme on show has, where the plugin said.
+  assert.strictEqual(evo(facts({ meters: 8 })).meters, 8);
+  assert.strictEqual(evo(facts()).meters, null, 'unsaid: unknown');
 });
 
 test('the remotes each with their product, version and standing, through the standing handed in', () => {

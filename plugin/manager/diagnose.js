@@ -484,6 +484,18 @@ const CHECKS = [
     }
   },
   {
+    // The More sheet's arrows step the meters of the theme on show and that
+    // theme has one meter: a touch on them changes nothing, by design.
+    // Worth saying to a user puzzled by arrows that seem dead, with where
+    // the choice is.
+    id: 'evo-arrows', symptoms: ['touch', 'face', 'look'],
+    run(f) {
+      const e = f.status.evo;
+      if (!e || !e.component || e.buttons === false || e.arrows !== 'meters' || e.meters !== 1) return null;
+      return note('evo-arrows', 'DIAG_EVO_ARROWS_ONE', { theme: f.status.activeTheme || '' }, 'screen');
+    }
+  },
+  {
     // The burn-in guard is on: the clock, the date and the forecast shift
     // by a few pixels every few minutes by design. Worth saying to a user
     // puzzled by the movement, with where the switch is.

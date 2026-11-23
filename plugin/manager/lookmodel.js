@@ -19,6 +19,8 @@
     'buttons.glass': 'bar', 'buttons.tint': 'tint',
     // The queue and the browser (glass-evo 0.10.7): by the screen, a sheet, a drawer, or the whole screen.
     'lists.shape': 'auto', 'power.ask': 'screen',
+    // The More sheet's two arrows (glass-evo 0.11.48): what a tap on them steps, the meters of the theme on show or the installed themes.
+    'sheet.arrows': 'meters',
     'clock.show': 'on', 'clock.format': '%H:%M', 'clock.ink': 'ink', 'clock.opacity': '0.86', 'clock.glass': '0.55', 'clock.tint': 'tint',
     'clock.face': 'type', 'clock.dial': 'station', 'clock.unlit': '0.08', 'clock.hands': 'ink', 'clock.marks': 'ink', 'clock.second': 'accent', 'clock.disc': 'style', 'clock.card': '#17171a',
     'date.show': 'off', 'date.place': 'top', 'date.format': '%A %-d %B', 'date.ink': 'ink', 'date.opacity': '0.86', 'date.glass': '0.55', 'date.tint': 'tint',
@@ -70,6 +72,13 @@
   function dialStyle(v) {
     var style = String((v || {})['clock.dial'] || '').trim().toLowerCase();
     return DIAL_STYLES.indexOf(style) === -1 ? 'station' : style;
+  }
+  // What the More sheet's arrows step, as the face reads the word: the
+  // meters of the theme on show unless it says the themes.
+  var ARROWS = ['meters', 'themes'];
+  function arrows(v) {
+    var word = String((v || {})['sheet.arrows'] || '').trim().toLowerCase();
+    return ARROWS.indexOf(word) === -1 ? 'meters' : word;
   }
   // Taken to the letter: a pattern, and a picture's file name.
   var PATTERNS = /\.format$|^idle\.picture$/;
@@ -373,7 +382,7 @@
 
   return {
     BUILTIN: BUILTIN, KEYS: KEYS, CLOCK_PATTERNS: CLOCK_PATTERNS, DATE_PATTERNS: DATE_PATTERNS,
-    CLOCK_FACES: CLOCK_FACES, DIAL_STYLES: DIAL_STYLES, clockFace: clockFace, dialStyle: dialStyle, LIST_SHAPES: LIST_SHAPES, listShape: listShape,
+    CLOCK_FACES: CLOCK_FACES, DIAL_STYLES: DIAL_STYLES, clockFace: clockFace, dialStyle: dialStyle, LIST_SHAPES: LIST_SHAPES, listShape: listShape, ARROWS: ARROWS, arrows: arrows,
     known: known, lay: lay, same: same, differs: differs, changes: changes, buttonsGlass: buttonsGlass,
     isOn: isOn, colourOf: colourOf, rgb: rgb, share: share, frostOn: frostOn, backgrounds: backgrounds,
     cells: cells, cellsText: cellsText, align: align, flexed: flexed, turned: turned, SPANS: SPANS, span: span, GRID_ROWS: GRID_ROWS, GRID_COLUMNS: GRID_COLUMNS,

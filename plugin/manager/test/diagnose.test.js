@@ -244,6 +244,18 @@ test('slow: a rate the display lowered, a rate above what suits the board, and w
   assert.strictEqual(one(diagnose('face', f), 'evo-guard').kind, 'note');
   f.status.evo.guard = { on: false, px: 6, every: 3 };
   assert.ok(!kinds(diagnose('face', f)).includes('note:evo-guard'));
+  // The More sheet's arrows step the theme's meters and the theme on show has one: a note where the touch, the face or the look is asked about; more meters, the themes stepped, or the buttons hidden, nothing.
+  f = healthy(); f.status.evo.arrows = 'meters'; f.status.evo.meters = 1;
+  assert.deepStrictEqual(one(diagnose('touch', f), 'evo-arrows').with, { theme: '1280x720_theme' });
+  assert.strictEqual(one(diagnose('face', f), 'evo-arrows').kind, 'note');
+  f.status.evo.meters = 8;
+  assert.ok(!kinds(diagnose('touch', f)).includes('note:evo-arrows'), 'meters to step through');
+  f.status.evo.meters = 1; f.status.evo.arrows = 'themes';
+  assert.ok(!kinds(diagnose('touch', f)).includes('note:evo-arrows'), 'the arrows step the themes');
+  f.status.evo.arrows = 'meters'; f.status.evo.buttons = false;
+  assert.ok(!kinds(diagnose('touch', f)).includes('note:evo-arrows'), 'no buttons, no sheet');
+  f = healthy();
+  assert.ok(!kinds(diagnose('face', f)).includes('note:evo-arrows'), 'an older status says nothing of the arrows');
   // Facts that are missing make no finding and no crash.
   assert.deepStrictEqual(diagnose('touch', { status: {} }).findings, []);
 });

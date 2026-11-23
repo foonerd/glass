@@ -727,6 +727,12 @@ fn session(
         .unwrap_or_default();
     // A remote showing the player's meter does not rotate on its own.
     let mirroring = remote.as_deref().is_some_and(|r| r.follow && r.same_meter);
+    // A meter stepped to by hand is told to the player: by its own display
+    // always, by a remote that shows the player's meter where the player
+    // is one that takes the word.
+    let steps_told = remote
+        .as_deref()
+        .is_none_or(|r| mirroring && r.player_takes_steps());
     // Why a session starts again, when it does.
     let mut reload: Option<&'static str> = None;
     let frame_rate = intake::installed_frame_rate();
@@ -1124,14 +1130,18 @@ fn session(
     let mut backlight_fade: Option<screen::BacklightFade> = None;
     loop {
         let frame_started = Instant::now();
+        // A step by hand, from a theme's own button or the face's arrows:
+        // the meter beside the one on show by the one rule, and the player
+        // told, so that where one meter is set that one moves with it and
+        // the player's own screen and every view that follows it show it.
+        // A remote that keeps a meter of its own steps for itself alone.
         if let Some(step) = meter_step.take() {
-            let name = if step > 0 {
-                selector.next()
-            } else {
-                selector.previous()
-            };
-            if let Some(name) = name {
-                switch_meter!(name);
+            let theme = intake::installed_meter_names();
+            if let Some(name) = selector.step(&skin.name, i32::from(step), &theme) {
+                switch_meter!(name.clone());
+                if steps_told {
+                    source.command(&intake::Command::with("meter", serde_json::json!(name)));
+                }
             }
         }
         // The plugin asks the player's own screen for a meter by name (a
@@ -1274,7 +1284,16 @@ fn session(
                         continue;
                     }
                 }
-                source.command(&command);
+                // The face's arrows on the meters are the display's to
+                // carry out, as a theme's own buttons are: a step at the
+                // top of the next frame.
+                match command.name.as_str() {
+                    "meter.next" => meter_step = Some(1),
+                    "meter.previous" => meter_step = Some(-1),
+                    _ => {
+                        source.command(&command);
+                    }
+                }
             }
         }
         // A touch on a panel that is off woke it last frame.
@@ -1380,12 +1399,31 @@ fn session(
         // On a remote: the player's theme changed and this one follows it,
         // or the settings changed on the page. The session starts again.
         if let Some(remote) = remote.as_deref_mut() {
-            if let Some((version, theme, _)) = source.take_config() {
+            // The one meter set on the player was stepped by hand: the
+            // meter to show for it, once the session's word is taken.
+            let mut stepped_to: Option<String> = None;
+            if let Some(seen) = source.take_config() {
+                let (version, theme) = (seen.version, seen.theme);
                 let other_theme = !theme.is_empty() && theme != remote.theme;
                 let other_version = !version.is_empty()
                     && !remote.config_version.is_empty()
                     && version != remote.config_version;
-                if remote.follow && (other_theme || other_version) {
+                if seen.stepped && mirroring && !other_theme {
+                    // Nothing changed but the one meter: a remote showing
+                    // the player's meter takes the version and the meter
+                    // and carries on, where any other change starts the
+                    // session again.
+                    if other_version {
+                        logline::say!(
+                            Info,
+                            "remotes",
+                            "the player's one meter is now {}, its configuration {version}",
+                            seen.meter
+                        );
+                        remote.config_version = version;
+                    }
+                    stepped_to = Some(seen.meter);
+                } else if remote.follow && (other_theme || other_version) {
                     if other_theme {
                         logline::say!(Info, "remotes", "the player's theme is now {theme}");
                     } else {
@@ -1414,6 +1452,14 @@ fn session(
                     {
                         switch_meter!(meter);
                     }
+                }
+            }
+            // The player's one meter stepped by hand: shown here too, where
+            // this remote did not step to it itself and no screen of the
+            // player's own said so.
+            if let Some(meter) = stepped_to {
+                if meter != skin.name && intake::installed_meter_names().contains(&meter) {
+                    switch_meter!(meter);
                 }
             }
         }

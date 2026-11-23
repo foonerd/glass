@@ -122,6 +122,9 @@ pub struct Page {
     laid: Laid,
     /// What the face asked of the player, until the page takes it.
     asked: Vec<Happened>,
+    /// Steps to another meter the face asked for while it drew, until the
+    /// next frame takes them.
+    steps: Vec<i32>,
     /// The movie's box left clear in the theme while the page's own video
     /// element shows a picture under the canvas: under the theme's meters
     /// and foreground for a `background` box, over everything for `overlay`.
@@ -293,24 +296,33 @@ impl Page {
         Ok(())
     }
 
-    /// The meter before or after the one on show in the rotation, or in
-    /// the theme's order without one; the name now on show.
+    /// A step by hand to the meter before or after the one on show, by
+    /// the rule every screen steps by (`intake::stepped`); the name now on
+    /// show, none where there is no other meter.
     fn step_meter(&mut self, step: i32) -> Option<String> {
         let rotation = intake::installed_rotation();
-        let names = if rotation.names.is_empty() {
-            intake::installed_meter_names()
-        } else {
-            rotation.names
-        };
-        if names.is_empty() {
-            return None;
-        }
-        let current = self.meter().to_string();
-        let at = names.iter().position(|n| *n == current).unwrap_or(0) as i32;
-        let next = (at + step).rem_euclid(names.len() as i32) as usize;
-        let name = names[next].clone();
+        let theme = intake::installed_meter_names();
+        let name = intake::stepped(&rotation.names, &theme, self.meter(), step)?;
         self.start(Some(&name)).ok()?;
         Some(self.meter().to_string())
+    }
+
+    /// What the face asked for: its arrows on the meters are steps of this
+    /// page's own, as a theme's buttons are, and the page hears of the
+    /// meter now on show; everything else is a command for the player.
+    fn asked_by_face(&mut self, commands: Vec<intake::Command>) -> Vec<Happened> {
+        let mut out = Vec::new();
+        for command in commands {
+            match face_step(&command) {
+                Some(step) => {
+                    if let Some(name) = self.step_meter(step) {
+                        out.push(Happened::Meter(name));
+                    }
+                }
+                None => out.push(Happened::Command(command)),
+            }
+        }
+        out
     }
 
     /// A finger or a mouse on the canvas, in the frame's pixels: a tap on
@@ -319,6 +331,7 @@ impl Page {
     pub fn pointer(&mut self, event: Pointer) -> Vec<Happened> {
         // The face sees every touch first; what it takes, the theme's
         // controls do not, and what it asks of the player goes at once.
+        let mut from_face: Option<(bool, Vec<intake::Command>)> = None;
         if let (Some(face), Some(showing)) = (self.overlay.as_deref_mut(), self.showing.as_ref()) {
             let view = View {
                 input: &showing.input,
@@ -334,7 +347,10 @@ impl Page {
                 theme_dir: &showing.skin.theme_dir,
             };
             let taken = face.pointer(event.kind, event.x, event.y, &view);
-            let asked: Vec<Happened> = face.commands().into_iter().map(Happened::Command).collect();
+            from_face = Some((taken, face.commands()));
+        }
+        if let Some((taken, commands)) = from_face {
+            let asked = self.asked_by_face(commands);
             if taken {
                 return asked;
             }
@@ -435,6 +451,12 @@ impl Page {
         lead::set_clock_us(now_ms.saturating_mul(1000));
         self.now_ms = now_ms;
         self.wall = Wall::at(now_ms as i64, self.zone.0, &self.zone.1);
+        // A step the face asked for while it drew: taken before this frame.
+        for step in std::mem::take(&mut self.steps) {
+            if let Some(name) = self.step_meter(step) {
+                self.asked.push(Happened::Meter(name));
+            }
+        }
         let Page {
             showing,
             touch,
@@ -442,6 +464,7 @@ impl Page {
             overlay,
             laid,
             asked,
+            steps,
             wall,
             hole,
             ..
@@ -504,12 +527,28 @@ impl Page {
             theme_dir: &showing.skin.theme_dir,
         };
         let drew = laid.lay(face, base, !moved, &view).drew;
-        asked.extend(face.commands().into_iter().map(Happened::Command));
+        for command in face.commands() {
+            match face_step(&command) {
+                Some(step) => steps.push(step),
+                None => asked.push(Happened::Command(command)),
+            }
+        }
         if drew {
             laid.frame()
         } else {
             Some(base)
         }
+    }
+}
+
+/// The step a face's command asks of the display that draws it: its arrows
+/// on the meters (`meter.next`, `meter.previous`, a theme's own words for
+/// its buttons); none for a command meant for the player.
+fn face_step(command: &intake::Command) -> Option<i32> {
+    match command.name.as_str() {
+        "meter.next" => Some(1),
+        "meter.previous" => Some(-1),
+        _ => None,
     }
 }
 

@@ -170,6 +170,19 @@ test('a clock has a face and a dial a style, as glass-evo names them', () => {
   assert.strictEqual(look.colourOf(laid['clock.hands']), null, 'a word, not a colour');
 });
 
+test('the More sheet\'s arrows step the meters of the theme on show unless the word says the themes', () => {
+  assert.strictEqual(look.BUILTIN['sheet.arrows'], 'meters', 'as it comes: the meters');
+  assert.strictEqual(look.arrows(look.lay()), 'meters');
+  assert.strictEqual(look.arrows({ 'sheet.arrows': ' Themes ' }), 'themes', 'as the face reads the word');
+  assert.strictEqual(look.arrows({ 'sheet.arrows': 'looks' }), 'meters', 'a word that is none');
+  assert.strictEqual(look.arrows({}), 'meters');
+  assert.deepStrictEqual(look.ARROWS, ['meters', 'themes']);
+  // The user's word lies over a look's and is saved only where it differs from what stands beneath.
+  const laid = look.lay({}, { 'sheet.arrows': 'themes' }, { 'sheet.arrows': 'meters' });
+  assert.strictEqual(laid['sheet.arrows'], 'meters');
+  assert.strictEqual(look.changes(look.lay(), look.lay({ 'sheet.arrows': 'themes' }), {})['sheet.arrows'], 'themes');
+  assert.strictEqual(look.changes(look.lay(), look.lay(), { 'sheet.arrows': 'themes' })['sheet.arrows'], null, 'back to the meters: the key removed');
+});
 
 // The likeness's box is the display's: the pane's own test vectors
 // (crates/pane/src/lib.rs) and the boxes the likeness drew before the

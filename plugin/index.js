@@ -1121,7 +1121,39 @@ Glass.prototype.showMeter = function (meter) {
     return !!(this.channel && this.channel.show(meter));
 };
 
-Glass.prototype.runCommand = function (message) {
+// A meter stepped to by hand, by a theme's own meter.next and
+// meter.previous buttons or by the face's arrows: on the player's own
+// screen (`screen`), in a browser view (`browser`) or on a remote that
+// shows the player's meter (`remote`). Where one meter is set, the one
+// meter is now this one: saved in the configuration without the display
+// starting again, since the screen that stepped shows it already, and the
+// remotes told that nothing else changed. A step made anywhere but on the
+// player's own screen is shown there too, and the screen's answer brings
+// every view that follows it along. `told` says whether a screen was
+// there to ask.
+Glass.prototype.meterStepped = function (name, from) {
+    var self = this;
+    var meter = String(name === undefined || name === null ? '' : name).trim();
+    var now = self.meterSelection();
+    if (!meter || now.available.indexOf(meter) === -1) {
+        self.logger.warn(id + 'meter: ' + (meter ? meter.slice(0, 64) : 'nothing') + ' is no meter of the theme on show; no step taken');
+        return { ok: false, error: 'unknown-meter' };
+    }
+    var saved = false;
+    if (now.mode === 'single' && now.names[0] !== meter) {
+        meterConfig.current.meter = meter;
+        fs.writeFileSync(MeterConfigFile, ini.stringify(meterConfig, { whitespace: true }));
+        try { self.updateConfigVersion(true); } catch (e) {}
+        uiNeedsUpdate = true;
+        self.updateUIConfig();
+        saved = true;
+        self.logger.info(id + 'meter: stepped to ' + meter + ', the one meter set from now');
+    }
+    var told = from === 'screen' ? false : self.showMeter(meter);
+    return { ok: true, meter: meter, saved: saved, told: told };
+};
+
+Glass.prototype.runCommand = function (message, conn) {
     var self = this;
     var router = self.commandRouter;
     var name = String(message.name || '');
@@ -1157,6 +1189,10 @@ Glass.prototype.runCommand = function (message) {
             case 'power': self.powerAsked(value); break;
             case 'themes': return self.themesAsk(value);
             case 'theme': self.themeAsked(value); break;
+            // A meter stepped to by hand on the display that says so: the
+            // player's own screen shows it already, a remote's step is
+            // shown on the player's screen too.
+            case 'meter': self.meterStepped(value, conn && conn.remote ? 'remote' : 'screen'); break;
             default: self.logger.warn(id + 'channel: unknown command ' + name);
         }
     } catch (e) {
@@ -1761,7 +1797,7 @@ Glass.prototype.onStart = function () {
     }, function (message, conn) {
         // A command with an answer (browse, search) answers the display
         // that asked, and it alone: another display's list is its own.
-        var answer = self.runCommand(message);
+        var answer = self.runCommand(message, conn);
         if (answer && typeof answer.then === 'function') {
             answer.then(function (line) {
                 if (line && conn && self.channel) { self.channel.tell(conn, line); }
@@ -5086,17 +5122,22 @@ Glass.prototype.saveRotationConf = function (confData) {
 
 // The configuration as the remotes follow it: its version, the theme on
 // show and the meter selection, on the channel to every display connected.
-Glass.prototype.pushRemoteConfig = function () {
+// `stepped`: the version moved only because the one meter set was stepped
+// by hand; a remote that shows the player's meter takes the version and
+// the meter and carries on, where any other change starts its session again.
+Glass.prototype.pushRemoteConfig = function (stepped) {
   var self = this;
   if (!self.channel || !remoteConfigVersion) { return; }
   // The face's dates: the language set in Glass, else the player's own
   // code as Volumio has it (the face names the days in every language
   // Volumio offers).
   var spoken = self.languageSet() || self.playerLanguage();
-  self.channel.push({ kind: 'config', language: spoken, playHere: self.playHereOn(), version: remoteConfigVersion, theme: self.activeTheme(), meter: String((meterConfig && meterConfig.current && meterConfig.current.meter) || '') });
+  var line = { kind: 'config', language: spoken, playHere: self.playHereOn(), version: remoteConfigVersion, theme: self.activeTheme(), meter: String((meterConfig && meterConfig.current && meterConfig.current.meter) || '') };
+  if (stepped === true) { line.stepped = true; }
+  self.channel.push(line);
 };
 
-Glass.prototype.updateConfigVersion = function () {
+Glass.prototype.updateConfigVersion = function (stepped) {
   const self = this;
   
   try {
@@ -5112,7 +5153,7 @@ Glass.prototype.updateConfigVersion = function () {
         remoteConfigVersion = newHash;
         self.logger.info(id + 'Config version updated: ' + remoteConfigVersion);
         // The remotes hear of it at once, and the beacon carries it from now.
-        self.pushRemoteConfig();
+        self.pushRemoteConfig(stepped === true);
         self.sendBeacon();
       }
     }

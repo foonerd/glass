@@ -33,6 +33,10 @@ pub enum Event {
         version: String,
         theme: String,
         meter: String,
+        /// The version moved only because the one meter set was stepped by
+        /// hand to `meter`: a display that shows the player's meter takes
+        /// the version and the meter and carries on; nothing else changed.
+        stepped: bool,
         /// The player's language code, for the words a face draws.
         language: String,
         /// Whether the player serves its sound to a page (Play here).
@@ -551,6 +555,10 @@ pub fn decode(line: &[u8]) -> Option<Event> {
             version: text("version"),
             theme: text("theme"),
             meter: text("meter"),
+            stepped: value
+                .get("stepped")
+                .and_then(Value::as_bool)
+                .unwrap_or(false),
             language: text("language"),
             play_here: value
                 .get("playHere")
@@ -744,9 +752,19 @@ mod decode_tests {
                 version: "v".into(),
                 theme: "t".into(),
                 meter: "m".into(),
+                stepped: false,
                 language: "de".into(),
                 play_here: true
             })
+        );
+        assert!(
+            matches!(
+                decode(
+                    br#"{"kind":"config","version":"v","theme":"t","meter":"m","stepped":true}"#
+                ),
+                Some(Event::Config { stepped: true, .. })
+            ),
+            "the one meter stepped by hand: said so, for a display to carry on"
         );
         let unsaid = decode(br#"{"kind":"config","version":"v","theme":"t","meter":"m"}"#);
         assert!(
@@ -1060,7 +1078,8 @@ mod tests {
                 play_here: false,
                 version: "abcd1234".into(),
                 theme: "1280x720_x".into(),
-                meter: "gold".into()
+                meter: "gold".into(),
+                stepped: false
             }
         );
         assert!(channel.send(&Command::new("toggle")));

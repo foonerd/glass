@@ -219,18 +219,38 @@ impl Selector {
         }
     }
 
-    /// The meter before the one on show in a list rotation; in a random
-    /// rotation another meter, since the order has none.
-    pub fn previous(&mut self) -> Option<String> {
-        if self.rotation.names.is_empty() {
-            return None;
-        }
-        if !self.rotation.random {
-            let len = self.rotation.names.len();
-            self.index = (self.index + 2 * len - 2) % len;
-        }
-        self.next()
+    /// A step by hand from the meter on show (`stepped`): the meter it
+    /// lands on, the walk going on from there; none where there is no
+    /// other meter to step to. `theme` is the theme's meters in its order.
+    pub fn step(&mut self, current: &str, step: i32, theme: &[String]) -> Option<String> {
+        let name = stepped(&self.rotation.names, theme, current, step)?;
+        self.shown(&name);
+        Some(name)
     }
+}
+
+/// The meter a step by hand lands on from the one on show: a theme's own
+/// `meter.next` and `meter.previous` buttons, and a face's arrows. The one
+/// after it (`step` above zero) or before it in the rotation's order, which
+/// is the list's own for a list of meters and the theme's for all meters at
+/// random; where one meter is set the rotation is empty and the order is
+/// the theme's. Round at either end. A meter on show that the order does
+/// not hold steps in at the order's first, or back in at its last. None
+/// where there is no other meter. One rule for every screen: the display
+/// and the browser pages both step by it.
+pub fn stepped(rotation: &[String], theme: &[String], current: &str, step: i32) -> Option<String> {
+    let names = if rotation.is_empty() { theme } else { rotation };
+    if names.is_empty() || step == 0 {
+        return None;
+    }
+    let len = names.len() as i32;
+    let to = match names.iter().position(|n| n == current) {
+        Some(at) => (at as i32 + step.signum()).rem_euclid(len),
+        None if step > 0 => 0,
+        None => len - 1,
+    };
+    let name = &names[to as usize];
+    (name != current).then(|| name.clone())
 }
 
 /// The theme folder the configuration names, or `None` without one.
@@ -2097,11 +2117,24 @@ impl Hops for RingHops {
 }
 
 /// The tap's hops and the player's state: what the display shows.
+/// A configuration change as the player's channel announced it: the
+/// configuration's version, the theme on show and the meter set, and
+/// whether the version moved only because the one meter set was stepped by
+/// hand to that meter (nothing else changed, and a display that shows the
+/// player's meter need not start again for it).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ConfigSeen {
+    pub version: String,
+    pub theme: String,
+    pub meter: String,
+    pub stepped: bool,
+}
+
 pub struct TapSource {
     /// The hops: the ring on the player, the wire on a remote.
     hops: Box<dyn Hops>,
     /// The configuration change the channel last announced, until taken.
-    config_seen: Option<(String, String, String)>,
+    config_seen: Option<ConfigSeen>,
     /// The language of the face's dates: the player's as its last config
     /// line said, unless this host set one of its own.
     language: String,
@@ -2314,9 +2347,8 @@ impl TapSource {
         self.channel.as_mut().is_some_and(|c| c.send(command))
     }
 
-    /// The configuration change the channel announced since the last call:
-    /// its version, the theme on show and the meter.
-    pub fn take_config(&mut self) -> Option<(String, String, String)> {
+    /// The configuration change the channel announced since the last call.
+    pub fn take_config(&mut self) -> Option<ConfigSeen> {
         self.config_seen.take()
     }
 
@@ -3048,6 +3080,7 @@ impl Source for TapSource {
                     version,
                     theme,
                     meter,
+                    stepped,
                     language,
                     play_here,
                 } => {
@@ -3055,7 +3088,12 @@ impl Source for TapSource {
                         self.language = language;
                     }
                     self.play_here.served = play_here;
-                    self.config_seen = Some((version, theme, meter));
+                    self.config_seen = Some(ConfigSeen {
+                        version,
+                        theme,
+                        meter,
+                        stepped,
+                    });
                 }
                 Event::PlayHere { served, on, gain } => {
                     if let Some(served) = served {
@@ -4111,8 +4149,7 @@ mod tests {
             "the meter after the one shown"
         );
         assert_eq!(list.next(), Some("a".into()));
-        list.shown("d");
-        assert_eq!(list.previous(), Some("c".into()), "and the one before it");
+        list.shown("c");
         list.shown("not of this theme");
         assert_eq!(
             list.next(),
@@ -4131,6 +4168,60 @@ mod tests {
             rest.iter().all(|n| n != other && *n != first),
             "a random round does not draw the shown meter again: {rest:?}"
         );
+    }
+
+    /// A step by hand: the meter after or before the one on show, in the
+    /// list's order for a list, in the theme's at random and with one
+    /// meter set, round at both ends; the walk goes on from where it lands.
+    #[test]
+    fn a_step_by_hand_goes_to_the_meter_beside_the_one_on_show() {
+        let theme: Vec<String> = ["a", "b", "c", "d"].map(String::from).to_vec();
+        let list: Vec<String> = ["d", "b"].map(String::from).to_vec();
+        // A list: its own order, whatever the theme's.
+        assert_eq!(stepped(&list, &theme, "d", 1), Some("b".into()));
+        assert_eq!(stepped(&list, &theme, "b", 1), Some("d".into()), "round");
+        assert_eq!(stepped(&list, &theme, "d", -1), Some("b".into()));
+        // All meters at random: the rotation holds the theme's order.
+        assert_eq!(stepped(&theme, &theme, "b", 1), Some("c".into()));
+        assert_eq!(stepped(&theme, &theme, "b", -1), Some("a".into()));
+        assert_eq!(stepped(&theme, &theme, "d", 1), Some("a".into()), "round");
+        assert_eq!(
+            stepped(&theme, &theme, "a", -1),
+            Some("d".into()),
+            "round the other way"
+        );
+        // One meter set: no rotation, the theme's order.
+        assert_eq!(stepped(&[], &theme, "c", 1), Some("d".into()));
+        assert_eq!(stepped(&[], &theme, "c", -1), Some("b".into()));
+        // A meter on show that the order does not hold steps in at an end.
+        assert_eq!(stepped(&list, &theme, "a", 1), Some("d".into()));
+        assert_eq!(stepped(&list, &theme, "a", -1), Some("b".into()));
+        // Nothing to step to: one meter in all, none at all, no step.
+        let one: Vec<String> = vec!["a".into()];
+        assert_eq!(stepped(&[], &one, "a", 1), None);
+        assert_eq!(stepped(&one, &theme, "a", -1), None);
+        assert_eq!(stepped(&[], &[], "a", 1), None);
+        assert_eq!(stepped(&theme, &theme, "a", 0), None);
+        // The walk goes on from the meter stepped to: a list's next
+        // rotation is the one after it, a random round leaves it out.
+        let mut walk = Selector::seeded(rotation(false, theme.clone()), 1);
+        assert_eq!(walk.step("a", 1, &theme), Some("b".into()));
+        assert_eq!(walk.next(), Some("c".into()), "the walk follows the step");
+        assert_eq!(walk.step("c", -1, &theme), Some("b".into()));
+        assert_eq!(walk.next(), Some("c".into()));
+        let mut random = Selector::seeded(rotation(true, theme.clone()), 5);
+        assert_eq!(
+            random.step("a", 1, &theme),
+            Some("b".into()),
+            "at random a step is still the next of the theme"
+        );
+        let mut fixed = Selector::seeded(rotation(false, Vec::new()), 1);
+        assert_eq!(
+            fixed.step("b", 1, &theme),
+            Some("c".into()),
+            "one meter set: the step moves through the theme"
+        );
+        assert_eq!(fixed.next(), None, "and nothing rotates by itself");
     }
 
     #[test]

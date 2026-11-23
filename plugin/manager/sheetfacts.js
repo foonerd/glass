@@ -62,6 +62,9 @@ function evo(f) {
   const chosen = found && found.keys ? found.keys : {};
   const buttons = settings['buttons.show'] || brought['buttons.show'] || chosen['buttons.show'] || builtIn['buttons.show'] || 'on';
   const buttonsIdle = settings['buttons.idle'] || brought['buttons.idle'] || chosen['buttons.idle'] || builtIn['buttons.idle'] || 'stay';
+  // What the More sheet's arrows step, as the face reads the word through
+  // the same layers: the meters of the theme on show unless it says the themes.
+  const arrows = String(settings['sheet.arrows'] || brought['sheet.arrows'] || chosen['sheet.arrows'] || builtIn['sheet.arrows'] || 'meters').trim().toLowerCase() === 'themes' ? 'themes' : 'meters';
   const picture = String(settings['idle.picture'] || '').trim();
   const pictureFound = !!(f.picture && f.picture.found);
   if (picture && !pictureFound) problems.push('picture-missing');
@@ -103,6 +106,9 @@ function evo(f) {
     picture: picture ? { name: picture, found: pictureFound } : null,
     slide: { on: !!(picture && slideOn), every: slideEvery, count: pictures },
     guard: { on: guardOn, px: guardPx, every: guardEvery },
+    arrows: arrows,
+    // How many meters the theme on show has, for the arrows to step through.
+    meters: typeof f.meters === 'number' ? f.meters : null,
     idleWait: String(settings['idle.wait'] || builtIn['idle.wait'] || 'none'),
     // The plugin's persist period, which "After the persist period" waits for.
     persistS: typeof f.persistS === 'number' ? f.persistS : null,

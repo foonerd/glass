@@ -21,6 +21,15 @@ const RETRY: Duration = Duration::from_secs(5);
 /// How often the status for the page is refreshed.
 const STATUS_EVERY: Duration = Duration::from_secs(1);
 
+/// The first release of the player that takes a meter stepped to by hand.
+const STEPS_FROM: &str = "0.11.48";
+
+/// Whether a player of this release takes the word of a stepped meter: its
+/// release is `STEPS_FROM` or later; one that names no release does not.
+fn takes_steps(release: &str) -> bool {
+    release == STEPS_FROM || super::upgrade::newer(release, STEPS_FROM)
+}
+
 /// What a session on a remote needs of its player.
 pub struct RemoteSession {
     pub app: Arc<RemoteApp>,
@@ -171,6 +180,13 @@ impl RemoteSession {
     /// Whether the settings changed since this session began.
     pub fn settings_changed(&self) -> bool {
         self.app.generation() != self.generation
+    }
+
+    /// Whether the player is one that takes the word of a meter stepped to
+    /// by hand (`meter`, from its 0.11.48): an older one would log the word
+    /// as a command it does not know, so it is not sent one.
+    pub fn player_takes_steps(&self) -> bool {
+        takes_steps(&self.beacon.release)
     }
 
     /// A command of the face's that is this remote's own (Play here's
@@ -1262,5 +1278,21 @@ pub fn remote_main(
                 continue;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod steps_tests {
+    use super::takes_steps;
+
+    #[test]
+    fn a_player_takes_a_stepped_meter_from_the_first_release_that_knows_the_word() {
+        assert!(takes_steps("0.11.48"));
+        assert!(takes_steps("0.12.0") && takes_steps("1.0.0"));
+        assert!(!takes_steps("0.11.47") && !takes_steps("0.9.99"));
+        assert!(
+            !takes_steps("") && !takes_steps("a release"),
+            "a player that names no release is not sent the word"
+        );
     }
 }

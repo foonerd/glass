@@ -781,11 +781,15 @@ class Manager {
     }));
 
     // A meter stepped to in a browser view: the player's own screen is
-    // asked to show it too. `told` says whether a screen was there to ask.
+    // asked to show it too, and where one meter is set that one is now
+    // this one. `told` says whether a screen was there to ask, `saved`
+    // whether the one meter moved.
     app.post('/api/face/meter', wrap(async function (req, res) {
       const meter = String((req.body || {}).meter || '');
       if (!meter || meter.length > 128 || /[\u0000-\u001f\[\]]/.test(meter)) return res.status(400).json({ error: 'bad-meter' });
-      res.json({ ok: true, meter, told: self.plugin.showMeter(meter) });
+      const stepped = self.plugin.meterStepped(meter, 'browser');
+      if (!stepped || stepped.ok !== true) return res.status(404).json({ error: (stepped && stepped.error) || 'unknown-meter' });
+      res.json({ ok: true, meter, told: stepped.told, saved: stepped.saved });
     }));
 
     // The forecast for the face: the place chosen and the unit, the reading
@@ -1547,6 +1551,7 @@ class Manager {
       return { settings: s.settings, builtIn: s.builtIn, looks: s.looks, themeLook: s.themeLook, files: own ? own.files : [], frostSuits: s.frostSuits };
     });
     read('persistS', () => plugin.persistSettings().seconds);
+    read('meters', () => plugin.meterSelection().available.length);
     read('themeSkies', () => {
       const theme = String(info && info.activeTheme || '');
       if (!theme || theme.indexOf('/') !== -1 || theme.indexOf('..') !== -1) return [];

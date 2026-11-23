@@ -4041,7 +4041,10 @@
             field('MANAGER_LOOK_SIZE', slider('measure.bar', 'size', 50, 250, 5, 'SMALL', 'LARGE'))],
             'MANAGER_LOOK_MORE_BUTTONS', finer('buttons', '')],
           ['lists', 'MANAGER_LOOK_LISTS', [
-            field('MANAGER_LOOK_LISTS_SHAPE', choice('lists.shape', LOOK.LIST_SHAPES, 'MANAGER_LOOK_LISTS_'), esc(t('MANAGER_LOOK_LISTS_HINT')))]]
+            field('MANAGER_LOOK_LISTS_SHAPE', choice('lists.shape', LOOK.LIST_SHAPES, 'MANAGER_LOOK_LISTS_'), esc(t('MANAGER_LOOK_LISTS_HINT')))]],
+          // The More sheet: what its two arrows step, the meters of the theme on show unless set to the installed themes.
+          ['sheet', 'MANAGER_LOOK_SHEET', [
+            field('MANAGER_LOOK_ARROWS', choice('sheet.arrows', LOOK.ARROWS, 'MANAGER_LOOK_ARROWS_'), esc(t('MANAGER_LOOK_ARROWS_HINT')))]]
         ];
         return sections.map(function (s) {
           return '<button class="acc" data-section="' + s[0] + '" aria-expanded="false"><b><span class="mark"></span> ' + esc(t(s[1])) + '</b><span class="sum"></span></button>' +
@@ -4215,7 +4218,7 @@
               b.classList.toggle('on', LOOK.GRID_ROWS[rc[0]] === at.down && LOOK.GRID_COLUMNS[rc[1]] === at.across);
             });
           }
-          else if (kind === 'choice') el.value = key === 'clock.face' ? LOOK.clockFace(v) : key === 'clock.dial' ? LOOK.dialStyle(v) : key === 'lists.shape' ? LOOK.listShape(v) : key === 'weather.span' ? LOOK.span(v) : (v[key] || '');
+          else if (kind === 'choice') el.value = key === 'clock.face' ? LOOK.clockFace(v) : key === 'clock.dial' ? LOOK.dialStyle(v) : key === 'lists.shape' ? LOOK.listShape(v) : key === 'sheet.arrows' ? LOOK.arrows(v) : key === 'weather.span' ? LOOK.span(v) : (v[key] || '');
         });
         // A row shows while it has something to say: a clock's rows while the
         // clock shows, a date's own background while the date stands at the top.
@@ -4253,6 +4256,7 @@
           clock: when.clock ? LOOK.strftime(v['clock.format'], LOOK.sample()) + (when.faces && clockFace !== 'type' ? ' · ' + t('MANAGER_LOOK_FACE_' + clockFace.toUpperCase()) : '') + ' · ' + t('MANAGER_LOOK_SIZE_' + LOOK.sizeWord('measure.clock', v['measure.clock'])) : t('MANAGER_LOOK_SUM_OFF'),
           date: when.date ? LOOK.strftime(v['date.format'], LOOK.sample()) + ' · ' + (LOOK.cells(v['date.place']) ? t('MANAGER_LOOK_DATE_GRID') : t('MANAGER_LOOK_DATE_' + place.toUpperCase())) : t('MANAGER_LOOK_SUM_OFF'),
           buttons: t('MANAGER_LOOK_SIZE_' + LOOK.sizeWord('measure.bar', v['measure.bar'])),
+          sheet: t('MANAGER_LOOK_ARROWS_' + LOOK.arrows(v).toUpperCase()),
           weather: weatherPlace && LOOK.isOn(v['weather.show']) ? weatherPlace.name : t('MANAGER_LOOK_SUM_OFF')
         };
         Array.prototype.forEach.call($('look-sections').querySelectorAll('[data-section]'), function (head) {
@@ -4736,7 +4740,8 @@
           ['MANAGER_FACE_SIZE', !e.faceSize ? '-' : t('MANAGER_FACE_SIZE_' + String(e.faceSize).toUpperCase())],
           ['MANAGER_ST_EVO_BUTTONS', typeof e.buttons !== 'boolean' ? '-' : t(e.buttons ? 'MANAGER_ST_EVO_BUTTONS_SHOWN' : 'MANAGER_ST_EVO_BUTTONS_HIDDEN') + (e.buttons && e.buttonsIdle === 'leave' ? ' · ' + t('MANAGER_ST_EVO_BUTTONS_IDLE_LEAVE') : '')],
           ['MANAGER_ST_EVO_FORECAST', !w.on ? t('MANAGER_ST_OFF') : (reveal ? w.place : t('MANAGER_ST_HIDDEN')) + ' · °' + w.unit + ' · ' + t(w.span === 'week' ? 'MANAGER_LOOK_SPAN_WEEK' : 'MANAGER_LOOK_SPAN_TODAY') + ' · ' + (w.readingAgeS === null ? t('MANAGER_ST_EVO_NO_READING') : t('MANAGER_ST_EVO_READING_AGO').replace('{age}', ago(w.readingAgeS)) + (w.source ? ' · ' + t('MANAGER_ST_EVO_FORECAST_FROM').replace('{source}', w.source) : '')) + (w.error ? ' · ' + t('MANAGER_RM_PROBLEM') + ' ' + w.error : '')],
-          ['MANAGER_LOOK_GUARD', e.guard && e.guard.on ? t('MANAGER_ST_EVO_GUARD').replace('{px}', e.guard.px).replace('{n}', e.guard.every) : t('MANAGER_ST_OFF')]
+          ['MANAGER_LOOK_GUARD', e.guard && e.guard.on ? t('MANAGER_ST_EVO_GUARD').replace('{px}', e.guard.px).replace('{n}', e.guard.every) : t('MANAGER_ST_OFF')],
+          ['MANAGER_LOOK_SHEET', !e.arrows ? '-' : t('MANAGER_LOOK_ARROWS') + ': ' + t(e.arrows === 'themes' ? 'MANAGER_LOOK_ARROWS_THEMES' : 'MANAGER_LOOK_ARROWS_METERS')]
         ];
       }
       function screenRows(sc) {
