@@ -2,6 +2,20 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.48] - 2026-11-23
+
+### Added
+
+- **What the More sheet's arrows of glass-evo step is a choice, the meters as it comes.** The Manager's How the screen looks has a new section, More sheet, with "The arrows step": the meters of the theme on show, one touch to the meter before or after the one on show by the rule below, or the installed themes, one touch to the theme before or after this one as the arrows did. The tiles' words follow the choice. In all eleven languages. The Status tab's glass-evo rows say which stands. Asked on the forum.
+
+### Changed
+
+- **A step by hand through a theme's meters follows one rule on every screen, and with one meter set it moves that one.** A theme's own `meter.next` and `meter.previous` buttons stepped differently on the player's screen and in a browser view: the screen showed another meter at random where all meters play at random and did nothing where one meter is set, while a browser view stepped the theme's order. Every screen now steps to the meter after or before the one on show, round at either end: in the list's order where a list of meters is set, in the order of the theme's `meters.txt` where all meters play at random (the rotation goes on from there at its next change) and where one meter is set. With one meter set the meter stepped to becomes that one, saved, and nothing starts again for it: the screen that stepped shows it already, and a remote that shows the player's meter takes the change and carries on. A step on a remote that shows the player's meter now moves the player's screen and every other view with it, as a step in the Face tab does; a remote that keeps a meter of its own steps for itself alone. A remote sends its step only to a player that knows the word, so an older player logs nothing new.
+
+### Diagnostics
+
+The Status tab's glass-evo rows carry what the arrows step. Find a problem notes, under the touch, the face and the look, arrows that step the meters of a theme with one meter: nothing to step to, by design, with where the choice is. Troubleshooting has a line for arrows that show another meter where another theme was expected, and one for arrows that do nothing.
+
 ## [0.11.47] - 2026-11-12
 
 ### Fixed
