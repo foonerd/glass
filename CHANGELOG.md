@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.49] - 2026-11-24
+
+### Changed
+
+- **A download carries on from where it broke.** A download whose connection broke was made again from its first byte, up to three times, and the movie's decoder had one try alone, so on a slow or brittle link to GitHub a file could reach nine tenths and start over, time after time. Now what has arrived is kept and the rest asked for: when the connection breaks, stands silent for a minute or the server fails, after 2, 4 and 8 seconds for tries in a row that brought next to nothing. When those run out the failure is reported and what had arrived stays, so the next try, by the button or by itself, carries on from there. The whole is held to its digest before anything is installed, as before; a kept part that turns out not to be of the file is dropped and the file brought down once more. One rule for the Glass zip, the glass-evo component, the movie's decoder and a theme from the catalog. Asked on the forum.
+
+### Diagnostics
+
+Each carrying on is a line in the player's log, with where the download stood and why it broke, and so is a download that carried on from what an earlier try had left. Troubleshooting's line for a download that fails says that pressing again carries on. Find a problem and the Status sheet are as they were: a job's own words say why it failed.
+
 ## [0.11.48] - 2026-11-23
 
 ### Added
