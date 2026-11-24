@@ -2,6 +2,16 @@
 
 All notable changes to Glass are recorded here. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.11.50] - 2026-11-24
+
+### Added
+
+- **The movie's decoder from a file.** Install from a file took the Glass and glass-evo zips and kept the remotes' archives, while the player's own decoder for the picture of a video file could come only from GitHub, fetched by the player itself: a player that could not reach GitHub, or reached it too slowly, had no way to it. The System tab's Install from a file now has "Choose the decoder's archive" and "Install the decoder". One file is taken: the decoder's release archive for the player's architecture, of the version this Glass names, as GitHub publishes it; the box names the file and its address. The player holds it to the signature it carries inside, with no network, and puts it in place as a fetch does. Any other file is refused with the right file's name and nothing is touched: an archive for another architecture or of another version, a remote's archive, a zip, the decoder's sources. One download serves every player of the same architecture. The Video tab says which file the decoder is and that the player itself downloads it, the browser taking no part, while the decoder is not in place. In all eleven languages. Asked on the forum.
+
+### Diagnostics
+
+Find a problem's finding for a movie without a decoder names the file and the way in from a file. Troubleshooting says the same under "No decoder on the player" and has a line for a file the player does not take. The Status tab's Movie row says what stands, as before.
+
 ## [0.11.49] - 2026-11-24
 
 ### Changed
