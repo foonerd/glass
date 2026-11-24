@@ -24,7 +24,8 @@ function digest(data) {
 // archive, and SHA256SUMS.sig; served by a fetch of the test's own.
 function release(key, options) {
   options = options || {};
-  const top = 'evovpeg-0.1.0-arm/';
+  // The folder the archive unpacks to says what it is: name, version, architecture.
+  const top = (options.top || 'evovpeg-0.1.0-arm') + '/';
   const files = [
     { name: top + 'bin/evovpeg', data: Buffer.from('#!/bin/sh\necho decoder\n') },
     { name: top + 'bin/evovprobe', data: Buffer.from('#!/bin/sh\necho prober\n') },
@@ -33,7 +34,10 @@ function release(key, options) {
     { name: top + 'licenses/NOTICE', data: 'notice' }
   ];
   if (options.noProber) files.splice(1, 1);
-  const manifest = Buffer.from(files.map(function (f) { return digest(Buffer.isBuffer(f.data) ? f.data : Buffer.from(f.data)) + '  ' + f.name; }).join('\n') + '\n');
+  // A file changed after the manifest was made: the archive is not the release as published.
+  const listed = files.map(function (f) { return { name: f.name, data: f.data }; });
+  if (options.tampered) files[0] = { name: files[0].name, data: Buffer.from('#!/bin/sh\necho other\n') };
+  const manifest = Buffer.from(listed.map(function (f) { return digest(Buffer.isBuffer(f.data) ? f.data : Buffer.from(f.data)) + '  ' + f.name; }).join('\n') + '\n');
   const entries = [{ name: 'MANIFEST', data: manifest }, { name: 'MANIFEST.sig', data: crypto.sign(null, manifest, (options.manifestKey || key).priv) }].concat(files);
   const archive = buildTarGz(entries);
   const sums = Buffer.from(digest(options.wrongSum ? Buffer.from('other') : archive) + '  evovpeg-0.1.0-arm.tar.gz\n');
@@ -169,6 +173,84 @@ test('a download that broke for good leaves its part, and the next fetch carries
   assert.deepEqual(fs.readdirSync(dir + '.download'), ['evovpeg-0.1.0-arm.tar.gz.part']);
   await d.remove();
   assert.ok(!fs.existsSync(dir + '.download') && !fs.existsSync(dir));
+});
+
+test('the release\'s archive brought by hand goes in when it is the one file this player takes, and no other does', async () => {
+  const key = pair();
+  const other = pair();
+  const dir = fresh();
+  const files = fs.mkdtempSync(path.join(os.tmpdir(), 'glass-decoder-files-'));
+  const put = function (name, bytes) { const f = path.join(files, name); fs.writeFileSync(f, bytes); return f; };
+  const lines = [];
+  const none = async function () { const e = new Error('no network in this test'); e.code = 'network'; throw e; };
+  const d = new Decoder({ dir: dir, lock: LOCK, arch: () => 'arm', fetch: none, pem: key.pub, log: (l) => lines.push(l) });
+  // The facts name the one file, and where the release publishes it.
+  assert.deepEqual(d.facts().file, {
+    name: 'evovpeg-0.1.0-arm.tar.gz', arch: 'arm',
+    url: 'https://github.com/foonerd/evovpeg/releases/download/v0.1.0/evovpeg-0.1.0-arm.tar.gz',
+    page: 'https://github.com/foonerd/evovpeg/releases/tag/v0.1.0'
+  });
+  assert.equal(new Decoder({ dir: dir, lock: LOCK, arch: () => '', pem: key.pub }).facts().file, null, 'no file named while the architecture is not known');
+
+  // Every file that is not the one: refused with why, the right file named, and nothing touched.
+  const refused = async function (file, code) {
+    const job = await d.installFile(file);
+    assert.equal(job.state, 'failed', file);
+    assert.equal(job.error.code, code, job.error.message);
+    if (code !== 'signature' && code !== 'no-program') assert.match(job.error.message, /this player takes evovpeg-0\.1\.0-arm\.tar\.gz$/);
+    assert.ok(!fs.existsSync(dir) && !fs.existsSync(dir + '.new'), 'nothing put in place by ' + code);
+    assert.equal(d.facts().state, 'missing');
+  };
+  await refused(put('a.zip', Buffer.from('PK\x03\x04 not a gzipped tar')), 'not-archive');
+  await refused(put('sources.tar.xz', crypto.randomBytes(4096)), 'not-archive');
+  await refused(put('remote.tar.gz', release(key, { top: 'glass-0.11.49-arm' }).archive), 'not-decoder');
+  await refused(put('flat.tar.gz', buildTarGz([{ name: 'evovpeg', data: Buffer.from('x') }])), 'not-decoder');
+  await refused(put('other-key.tar.gz', release(key, { manifestKey: other }).archive), 'signature');
+  await refused(put('tampered.tar.gz', release(key, { tampered: true }).archive), 'signature');
+  await refused(put('armv8.tar.gz', release(key, { top: 'evovpeg-0.1.0-armv8' }).archive), 'other-arch');
+  await refused(put('older.tar.gz', release(key, { top: 'evovpeg-0.0.9-arm' }).archive), 'other-version');
+  await refused(put('newer.tar.gz', release(key, { top: 'evovpeg-0.2.0-arm' }).archive), 'other-version');
+  await refused(put('no-prober.tar.gz', release(key, { noProber: true }).archive), 'no-program');
+  assert.equal(lines.filter((l) => /a file refused: /.test(l)).length, 10);
+
+  // The one file: held to the manifest it carries, put in place, a part the network had left gone with its folder.
+  fs.mkdirSync(dir + '.download');
+  fs.writeFileSync(path.join(dir + '.download', 'evovpeg-0.1.0-arm.tar.gz.part'), 'half');
+  const right = put('evovpeg-0.1.0-arm.tar.gz', release(key).archive);
+  let job = await d.installFile(right);
+  assert.equal(job.state, 'installed', JSON.stringify(job.error));
+  assert.equal(fs.readFileSync(path.join(dir, 'bin', 'evovpeg'), 'utf8'), '#!/bin/sh\necho decoder\n');
+  assert.equal(fs.statSync(path.join(dir, 'bin', 'evovprobe')).mode & 0o111, 0o111);
+  assert.equal(fs.readFileSync(path.join(dir, 'VERSION'), 'utf8').trim(), '0.1.0');
+  assert.ok(fs.existsSync(path.join(dir, 'licenses', 'NOTICE')) && fs.existsSync(path.join(dir, 'build.json')));
+  assert.ok(!fs.existsSync(dir + '.download') && !fs.existsSync(dir + '.new') && !fs.existsSync(dir + '.prev'));
+  const facts = d.facts();
+  assert.deepEqual([facts.state, facts.source, facts.installed.version], ['installed', 'component', '0.1.0']);
+  assert.ok(lines.some((l) => /evovpeg 0\.1\.0 for arm in place, from a file$/.test(l)));
+
+  // Over one that is installed: the same file again is a reinstall; a file refused leaves the installed one as it is.
+  job = await d.installFile(right);
+  assert.equal(job.state, 'installed');
+  job = await d.installFile(put('armv8.tar.gz', release(key, { top: 'evovpeg-0.1.0-armv8' }).archive));
+  assert.equal(job.error.code, 'other-arch');
+  assert.equal(d.facts().state, 'installed', 'the installed decoder stands');
+  assert.equal(fs.readFileSync(path.join(dir, 'bin', 'evovpeg'), 'utf8'), '#!/bin/sh\necho decoder\n');
+
+  // An older one installed (the lock moved on): the lock's file brings it level.
+  fs.writeFileSync(path.join(dir, 'VERSION'), '0.0.9\n');
+  assert.equal(d.facts().state, 'older');
+  job = await d.installFile(right);
+  assert.deepEqual([job.state, d.facts().state], ['installed', 'installed']);
+
+  // While a fetch runs a file is refused, and the fetch is not disturbed.
+  let release_ = null;
+  const held = new Decoder({ dir: fresh(), lock: LOCK, arch: () => 'arm', pem: key.pub, fetch: function () { return new Promise(function (resolve, reject) { release_ = reject; }); } });
+  const running = held.install();
+  await new Promise((resolve) => setImmediate(resolve));
+  await assert.rejects(held.installFile(right), (e) => e instanceof DecoderError && e.code === 'busy');
+  release_(Object.assign(new Error('stopped'), { code: 'http-404' }));
+  assert.equal((await running).state, 'failed');
+  fs.rmSync(files, { recursive: true, force: true });
 });
 
 test('a release not signed with the key, an archive the sums do not name, or one without the prober is refused and nothing is put in place', async () => {

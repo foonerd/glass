@@ -645,6 +645,10 @@ test('the movie: the switch, the profile, the decoder, the box, the display\'s w
   assert.strictEqual(one(diagnose('movie', f), 'movie').key, 'DIAG_MOVIE_HELD');
   f.status.movie = { on: true, allowed: true, decoder: false, box: null, report: null };
   assert.strictEqual(one(diagnose('movie', f), 'movie').key, 'DIAG_MOVIE_NO_DECODER');
+  // Where the player says which file its decoder is, the words name it and the way in from a file.
+  f.status.movie = { on: true, allowed: true, decoder: false, decoderWanted: '0.3.2', decoderFile: 'evovpeg-0.3.2-arm.tar.gz', box: null, report: null };
+  assert.strictEqual(one(diagnose('movie', f), 'movie').key, 'DIAG_MOVIE_NO_DECODER_FILE');
+  assert.deepStrictEqual(one(diagnose('movie', f), 'movie').with, { version: '0.3.2', file: 'evovpeg-0.3.2-arm.tar.gz' });
   f.status.movie = { on: true, allowed: true, decoder: true, box: false, report: null };
   assert.strictEqual(one(diagnose('movie', f), 'movie').key, 'DIAG_MOVIE_NO_BOX');
   f.status.movie = { on: true, allowed: true, decoder: true, decoderSource: 'component', decoderWanted: '0.1.0', box: { x: 0, y: 0, w: 1920, h: 1080 }, report: { state: 'showing', width: 1920, height: 1080, fps: 30, delay: 532, measured: 0.8, at: f.now } };

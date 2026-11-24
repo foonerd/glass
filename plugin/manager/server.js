@@ -65,6 +65,8 @@ const DEFAULT_PORT = 5582;
 const KEPT_SYSTEM_LOG = '/var/tmp/logondemand';
 const MAX_TRACK_FILE_BYTES = 32 * 1024 * 1024;
 const MAX_UPLOAD_BYTES = 512 * 1024 * 1024;
+// The decoder's archive for one architecture is nine to twelve megabytes.
+const MAX_DECODER_BYTES = 64 * 1024 * 1024;
 const CATALOG_INDEX_MAX_AGE_MS = 10 * 60 * 1000;
 const JOBS_KEPT = 50;
 const METER_NAME = /^[^/\\\0]{1,128}$/;
@@ -1441,6 +1443,40 @@ class Manager {
       if (both) job.target = self.held.get('glass').version;
       self.runComponentFile(job, file, zip);
       res.status(202).json({ ok: true, job: job });
+    }));
+
+    // The movie's decoder as the request body: the release's own archive
+    // for this player's architecture, of the version this Glass names,
+    // held to the signature it carries inside with no network, then put in
+    // place as a fetch puts it. Answers the decoder's facts once it is in;
+    // a file that is not the one this player takes is refused with why
+    // and with the file's name (`wanted`). Refused while the switch is off.
+    app.post('/api/movie/decoder/upload', wrap(async function (req, res) {
+      if (!uploadOn()) return res.status(403).json({ error: 'switch-off', message: 'install from a file is off on this player' });
+      const now = self.plugin.movieDecoder();
+      if (now.job && now.job.state !== 'installed' && now.job.state !== 'failed') return res.status(409).json({ error: 'busy' });
+      await fsp.mkdir(self.component.stateDir, { recursive: true });
+      const file = path.join(self.component.stateDir, 'decoder-upload-' + Date.now() + '.tar.gz');
+      try {
+        try {
+          await self.receive(req, file, MAX_DECODER_BYTES);
+        } catch (e) {
+          return res.status(e.code === 'too-large' ? 413 : 400).json(failure(e));
+        }
+        let job;
+        try {
+          job = await self.plugin.installMovieDecoderFile(file);
+        } catch (e) {
+          return res.status(e && e.code === 'busy' ? 409 : 500).json({ error: e && e.code ? e.code : 'failed', message: e && e.message ? e.message : String(e) });
+        }
+        if (job.state !== 'installed') {
+          return res.status(400).json({ error: 'decoder-' + job.error.code, message: job.error.message, wanted: now.file ? now.file.name : null });
+        }
+        res.json(Object.assign({ ok: true }, self.plugin.movieDecoder()));
+      } finally {
+        await fsp.rm(file, { force: true });
+        await fsp.rm(file + '.tar', { force: true });
+      }
     }));
 
     // Removed only while the kiosk owns the screen: the face is not taken

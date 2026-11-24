@@ -8,7 +8,10 @@
 // under the player's own folder, and the one before is gone. Until the
 // component is here, the display runs the distribution's ffmpeg and
 // ffprobe by name where the image has them. The fetching is the caller's
-// to start; nothing is fetched by itself.
+// to start; nothing is fetched by itself. The same archive brought by hand
+// (`installFile`) goes in the same way, held to the manifest it carries
+// and to being the one file this player takes: the lock's name and
+// version for the player's architecture.
 
 const fs = require('fs');
 const fsp = require('fs/promises');
@@ -86,6 +89,21 @@ class Decoder {
     return path.join(this.dir, 'bin', this.lock.programs[index]);
   }
 
+  // The one file this player takes, as the release publishes it, and
+  // where: null while the architecture is not known.
+  wantedFile() {
+    const arch = this.archOf();
+    if (!/^(arm|armv7|armv8|x64)$/.test(arch)) return null;
+    const lock = this.lock;
+    const name = lock.name + '-' + lock.version + '-' + arch + '.tar.gz';
+    return {
+      name: name,
+      arch: arch,
+      url: 'https://github.com/' + lock.repository + '/releases/download/v' + lock.version + '/' + name,
+      page: 'https://github.com/' + lock.repository + '/releases/tag/v' + lock.version
+    };
+  }
+
   // The component as installed: its version and when, or null.
   installed() {
     try {
@@ -128,6 +146,7 @@ class Decoder {
       state: state,
       source: source,
       programs: programs,
+      file: this.wantedFile(),
       job: this.job ? { state: this.job.state, progress: this.job.progress, error: this.job.error } : null
     };
   }
@@ -231,6 +250,17 @@ class Decoder {
       // The archive held to the manifest it carries, every file of it.
       const held = await verifyArchive(tar, this.pem);
       if (!held) throw new DecoderError('signature', asset + ' carries no signed manifest');
+      await this.place(job, tar, asset, arch);
+    } finally {
+      await tar.close();
+    }
+  }
+
+  // An open, verified archive's programs, licences and facts put in place
+  // of the component: staged beside it, swapped in, the one before gone.
+  async place(job, tar, asset, arch) {
+    const lock = this.lock;
+    try {
       const top = lock.name + '-' + lock.version + '-' + arch + '/';
       const entry = function (name) { return tar.entries.find(function (e) { return e.isRegular && e.name === top + name; }); };
       const staging = this.dir + '.new';
@@ -262,9 +292,66 @@ class Decoder {
       // Nothing half-written left: the staging folder goes with the fault.
       await fsp.rm(this.dir + '.new', { recursive: true, force: true });
       throw e;
+    }
+  }
+
+  // The component from a file brought by hand, for a player that cannot
+  // fetch it: one job at a time, as a fetch, and refused while one runs.
+  // The job is the answer: `installed`, or `failed` with why.
+  async installFile(file) {
+    if (this.job && !this.job.done) throw new DecoderError('busy', 'a fetch is under way');
+    const job = { state: 'verifying', progress: null, error: null, done: false };
+    this.job = job;
+    try {
+      await this.runFile(job, file);
+      job.state = 'installed';
+    } catch (e) {
+      job.state = 'failed';
+      job.error = { code: e.code || 'failed', message: e.message || String(e) };
+      this.log('movie decoder: a file refused: ' + job.error.code + ': ' + job.error.message);
+    } finally {
+      job.done = true;
+    }
+    return job;
+  }
+
+  // The file told from every other, in this order: a gzipped tar at all;
+  // this component's by the top folder it unpacks to (name, version,
+  // architecture); the release as published by the manifest and the
+  // signature it carries, with no network; for this player's
+  // architecture; of the version this Glass names. Only then is anything
+  // put in place. Each refusal names the file the player takes.
+  async runFile(job, file) {
+    const lock = this.lock;
+    const wanted = this.wantedFile();
+    if (!wanted) throw new DecoderError('arch', 'the player\'s architecture is not known: ' + JSON.stringify(this.archOf()));
+    const takes = '; this player takes ' + wanted.name;
+    let tar;
+    try {
+      tar = await TarGz.open(file);
+    } catch (e) {
+      throw new DecoderError('not-archive', 'the file is not a gzipped tar archive' + takes);
+    }
+    try {
+      const tops = new Set(tar.entries.filter(function (e) { return e.name.indexOf('/') !== -1; }).map(function (e) { return e.name.slice(0, e.name.indexOf('/')); }));
+      const said = tops.size === 1 ? /^([a-z][a-z0-9]*)-(\d+\.\d+\.\d+)-([a-z0-9][a-z0-9-]*)$/.exec(Array.from(tops)[0]) : null;
+      if (!said || said[1] !== lock.name) throw new DecoderError('not-decoder', 'the file is not an archive of ' + lock.name + takes);
+      let held;
+      try {
+        held = await verifyArchive(tar, this.pem);
+      } catch (e) {
+        throw new DecoderError('signature', (e && e.message ? e.message : 'the archive\'s signature does not hold') + '; nothing was installed');
+      }
+      if (!held) throw new DecoderError('signature', 'the archive carries no signed manifest; it is not the release as published');
+      if (said[3] !== wanted.arch) throw new DecoderError('other-arch', 'the file is ' + lock.name + ' for ' + said[3] + takes);
+      if (said[2] !== lock.version) throw new DecoderError('other-version', 'the file is ' + lock.name + ' ' + said[2] + takes);
+      await this.place(job, tar, wanted.name, wanted.arch);
     } finally {
       await tar.close();
     }
+    // A part of the same archive the network left is moot now.
+    await fsp.rm(this.dir + '.download', { recursive: true, force: true });
+    this.log('movie decoder: ' + lock.name + ' ' + lock.version + ' for ' + wanted.arch + ' in place, from a file');
   }
 
   // The component gone; the distribution's programs serve again, where

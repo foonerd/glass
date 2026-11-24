@@ -704,7 +704,7 @@ const CHECKS = [
       if (!m) return null;
       if (!m.on) return cause('movie', 'DIAG_MOVIE_OFF', {}, 'video');
       if (m.allowed === false) return cause('movie', 'DIAG_MOVIE_HELD', {}, 'system');
-      if (m.decoder === false) return cause('movie', 'DIAG_MOVIE_NO_DECODER', { version: m.decoderWanted || '' }, 'video');
+      if (m.decoder === false) return cause('movie', m.decoderFile ? 'DIAG_MOVIE_NO_DECODER_FILE' : 'DIAG_MOVIE_NO_DECODER', { version: m.decoderWanted || '', file: m.decoderFile || '' }, 'video');
       if (m.box === false) return cause('movie', 'DIAG_MOVIE_NO_BOX', {}, 'themes');
       const r = m.report;
       const playing = !!(f.status.channel && f.status.channel.status === 'play');

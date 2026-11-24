@@ -1320,7 +1320,7 @@ Glass.prototype.movieDecoder = function () {
     var facts;
     try { facts = self.movieDecoderComponent().facts(); } catch (e) {
         self.logger.warn(id + 'movie decoder: ' + (e && e.message ? e.message : e));
-        return { available: false, name: 'none', source: 'none', state: 'missing', version: null, wanted: null, programs: null, job: null };
+        return { available: false, name: 'none', source: 'none', state: 'missing', version: null, wanted: null, programs: null, file: null, fromFile: false, job: null };
     }
     return {
         available: !!facts.programs,
@@ -1330,6 +1330,10 @@ Glass.prototype.movieDecoder = function () {
         version: facts.installed ? facts.installed.version : null,
         wanted: facts.wanted.version,
         programs: facts.programs,
+        // The one file this player takes, as the release publishes it, and
+        // whether it can be given by hand (Install from a file, on).
+        file: facts.file ? { name: facts.file.name, url: facts.file.url, page: facts.file.page } : null,
+        fromFile: self.uploadInstall() === true,
         job: facts.job
     };
 };
@@ -1357,6 +1361,18 @@ Glass.prototype.fetchMovieDecoder = function () {
     var d = self.movieDecoderComponent();
     if (d.job && !d.job.done) { return Promise.resolve(d.job); }
     return d.install().then(function (job) {
+        if (job.state === 'installed') { self.relaunchDisplay(); }
+        return job;
+    });
+};
+// The decoder from its release archive brought by hand, for a player that
+// cannot fetch it: held to the signature the archive carries and to being
+// the one file this player takes; the display started again when it is in.
+// Resolves with the job (`installed`, or `failed` with why); rejects
+// `busy` while a fetch runs.
+Glass.prototype.installMovieDecoderFile = function (file) {
+    var self = this;
+    return self.movieDecoderComponent().installFile(file).then(function (job) {
         if (job.state === 'installed') { self.relaunchDisplay(); }
         return job;
     });
@@ -1508,6 +1524,8 @@ Glass.prototype.movieFact = function () {
         decoderSource: decoder.source,
         decoderVersion: decoder.version,
         decoderWanted: decoder.wanted,
+        // The one file the player takes for its decoder, for the words that name it.
+        decoderFile: decoder.file ? decoder.file.name : null,
         decoderState: decoder.state,
         decoderJob: decoder.job,
         delay: movieDelayMs(current),

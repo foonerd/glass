@@ -1654,6 +1654,7 @@
             <div class="help" id="disp-movie-help"></div>
             <div class="help" id="disp-movie-decoder"></div>
             <div class="row" id="disp-movie-decoder-row"><button type="button" id="btn-movie-decoder"></button><span class="help" id="disp-movie-decoder-job"></span></div>
+            <div class="help" id="disp-movie-decoder-file"></div>
           </div>
           <div>
             <label id="disp-movie-delay-label"></label>
@@ -1716,6 +1717,14 @@
             <div class="row" style="margin-top:8px"><button class="primary" id="btn-upd-files"></button></div>
             <div class="help" id="upd-upload-note"></div>
             <div id="upd-held" class="hidden" style="margin-top:8px"></div>
+            <div id="upd-decoder-box" style="margin-top:14px">
+              <div><b id="upd-decoder-title"></b></div>
+              <div class="help" id="upd-decoder-help"></div>
+              <input type="file" id="upd-file-decoder" accept=".gz,.tgz,application/gzip" class="hidden">
+              <div class="row" style="margin-top:6px"><button class="small" id="btn-upd-pick-decoder"></button><span
+                  class="muted" id="upd-file-decoder-name"></span></div>
+              <div class="row" style="margin-top:6px"><button class="primary" id="btn-upd-decoder"></button></div>
+            </div>
             <div id="shelf-box" style="margin-top:14px">
               <div><b id="shelf-title"></b></div>
               <div class="help" id="shelf-help"></div>
@@ -2292,6 +2301,8 @@
         $('btn-upd-pick-glass').textContent = t('MANAGER_UPD_FILE_GLASS'); $('btn-upd-pick-evo').textContent = t('MANAGER_UPD_FILE_EVO');
         $('upd-file-glass-name').textContent = t('MANAGER_UPD_NO_FILE'); $('upd-file-evo-name').textContent = t('MANAGER_UPD_NO_FILE');
         $('btn-upd-files').textContent = t('MANAGER_UPD_FILES_GO'); $('upd-upload-note').textContent = t('MANAGER_UPD_UPLOAD_NOTE');
+        $('upd-decoder-title').textContent = t('MANAGER_UPD_DECODER_TITLE'); $('btn-upd-pick-decoder').textContent = t('MANAGER_UPD_FILE_DECODER');
+        $('upd-file-decoder-name').textContent = t('MANAGER_UPD_NO_FILE'); $('btn-upd-decoder').textContent = t('MANAGER_UPD_DECODER_GO');
         $('shelf-title').textContent = t('MANAGER_SHELF_TITLE'); $('shelf-help').textContent = t('MANAGER_SHELF_HELP');
         $('shelf-ceiling-label').textContent = t('MANAGER_SHELF_CEILING'); $('btn-shelf-ceiling').textContent = t('MANAGER_SAVE');
         $('btn-shelf-pick').textContent = t('MANAGER_SHELF_PICK'); $('shelf-file-name').textContent = t('MANAGER_UPD_NO_FILE'); $('btn-shelf-add').textContent = t('MANAGER_SHELF_ADD');
@@ -3107,7 +3118,48 @@
         } else {
           job.textContent = '';
         }
+        // Which file, and that the player itself downloads it: said unless
+        // the decoder this Glass names is in place.
+        var inPlace = c.source === 'component' && c.state === 'installed';
+        $('disp-movie-decoder-file').textContent = c.file && !inPlace ? t('MANAGER_DISPLAY_MOVIE_DECODER_FILE').replace('{file}', c.file.name) : '';
+        paintDecoderBox(c);
       }
+      // The decoder's row in the System tab's Install from a file: the one
+      // file this player takes and where GitHub publishes it, and what
+      // stands on the player now.
+      function paintDecoderBox(c) {
+        c = c || {};
+        var words = c.file ? t('MANAGER_UPD_DECODER_HELP').replace('{file}', c.file.name).replace('{page}', c.file.page) : '';
+        var stands = decoderWords(c);
+        $('upd-decoder-help').textContent = [words, stands].filter(Boolean).join(' ');
+        $('upd-decoder-box').classList.toggle('hidden', !c.file);
+      }
+      $('btn-upd-pick-decoder').onclick = function () { $('upd-file-decoder').click(); };
+      $('upd-file-decoder').onchange = function () {
+        var file = $('upd-file-decoder').files[0];
+        $('upd-file-decoder-name').textContent = file ? file.name + ' (' + fmtBytes(file.size) + ')' : t('MANAGER_UPD_NO_FILE');
+      };
+      // The archive chosen goes to the player, which holds it to the
+      // signature it carries and to being the one file it takes; a refusal
+      // says which file that is.
+      $('btn-upd-decoder').onclick = function () {
+        var file = $('upd-file-decoder').files[0] || null;
+        if (!file) { toast(t('MANAGER_UPD_FILE_NONE'), 'error'); return; }
+        $('btn-upd-decoder').disabled = true;
+        api('POST', '/api/movie/decoder/upload', file, 'application/gzip').then(function (c) {
+          toast(t('MANAGER_UPD_DECODER_DONE').replace('{name}', c.name).replace('{version}', c.version || ''));
+          showMovieDecoder(c);
+        }).catch(function (e) {
+          var code = e && e.code ? e.code : '';
+          var wanted = e && e.data && e.data.wanted ? e.data.wanted : '';
+          if (code === 'decoder-signature') toast(t('MANAGER_UPD_DECODER_UNSIGNED'), 'error');
+          else if (/^decoder-(not-archive|not-decoder|other-arch|other-version)$/.test(code) && wanted) toast(t('MANAGER_UPD_DECODER_WRONG').replace('{file}', wanted), 'error');
+          else toast(errorText(e), 'error');
+        }).then(function () {
+          $('btn-upd-decoder').disabled = false;
+          $('upd-file-decoder').value = ''; $('upd-file-decoder-name').textContent = t('MANAGER_UPD_NO_FILE');
+        });
+      };
       $('btn-movie-decoder').onclick = function () {
         var action = $('btn-movie-decoder').dataset.action;
         var call = action === 'remove' ? api('DELETE', '/api/movie/decoder') : api('POST', '/api/movie/decoder');
@@ -4943,6 +4995,7 @@
       // ---- upgrading Glass ---------------------------------------------------
       function loadUpdate(force) {
         loadPlayHere();
+        api('GET', '/api/movie/decoder').then(paintDecoderBox).catch(function () {});
         var call = force ? api('POST', '/api/update/check') : api('GET', '/api/update');
         $('upd-body').textContent = t('MANAGER_LOADING');
         return call.then(renderUpdate).catch(function (e) {
