@@ -121,6 +121,56 @@ test('the release is fetched, held to its signatures and put in place; the facts
   assert.ok(!fs.existsSync(dir));
 });
 
+test('a download that broke for good leaves its part, and the next fetch carries it on', async () => {
+  const dir = fresh();
+  const key = pair();
+  const r = release(key);
+  const url = 'https://github.com/foonerd/evovpeg/releases/download/v0.1.0/evovpeg-0.1.0-arm.tar.gz';
+  const half = Math.floor(r.archive.length / 2);
+  const ranges = [];
+  let broken = true;
+  // The archive's connection breaks after half while `broken`; after that a range is answered with the rest.
+  const fetch = async function (target, opts) {
+    if (target !== url) return r.fetch(target, opts);
+    ranges.push(opts.range || 0);
+    if (broken) {
+      opts.onResponse(200, { 'content-length': String(r.archive.length) });
+      opts.sink(r.archive.subarray(0, half), half, r.archive.length);
+      const e = new (require('../catalog').CatalogError)('network', 'socket hang up');
+      throw e;
+    }
+    const from = opts.range || 0;
+    opts.onResponse(from ? 206 : 200, from ? { 'content-range': 'bytes ' + from + '-' + (r.archive.length - 1) + '/' + r.archive.length, 'content-length': String(r.archive.length - from) } : { 'content-length': String(r.archive.length) });
+    opts.sink(r.archive.subarray(from), r.archive.length - from, r.archive.length - from);
+    return { status: from ? 206 : 200, body: null };
+  };
+  const lines = [];
+  const d = new Decoder({ dir: dir, lock: LOCK, arch: () => 'arm', fetch: fetch, pem: key.pub, log: (l) => lines.push(l), waits: [1, 1], sleep: async () => {} });
+  let job = await d.install();
+  assert.equal(job.state, 'failed');
+  assert.equal(job.error.code, 'network');
+  assert.deepEqual(ranges, [0, half, half], 'the first try and one for each wait, each asking for the rest');
+  assert.equal(fs.statSync(path.join(dir + '.download', 'evovpeg-0.1.0-arm.tar.gz.part')).size, half, 'the part stays');
+  assert.ok(!fs.existsSync(dir), 'nothing put in place');
+  assert.equal(lines.filter((l) => /broke at \d+ bytes .* carried on/.test(l)).length, 2);
+  // The next fetch: from where the part stood, the archive held to the signed sums, the component in place, the folder gone.
+  broken = false; ranges.length = 0;
+  job = await d.install();
+  assert.equal(job.state, 'installed', JSON.stringify(job.error));
+  assert.deepEqual(ranges, [half]);
+  assert.deepEqual(job.progress, { done: r.archive.length, total: r.archive.length });
+  assert.equal(d.facts().state, 'installed');
+  assert.ok(!fs.existsSync(dir + '.download'), 'the download folder is gone');
+  // A part of another archive in the folder goes before a fetch; the component removed takes the folder with it.
+  fs.mkdirSync(dir + '.download');
+  fs.writeFileSync(path.join(dir + '.download', 'evovpeg-0.0.9-arm.tar.gz.part'), 'old');
+  broken = true;
+  job = await d.install();
+  assert.deepEqual(fs.readdirSync(dir + '.download'), ['evovpeg-0.1.0-arm.tar.gz.part']);
+  await d.remove();
+  assert.ok(!fs.existsSync(dir + '.download') && !fs.existsSync(dir));
+});
+
 test('a release not signed with the key, an archive the sums do not name, or one without the prober is refused and nothing is put in place', async () => {
   const key = pair();
   const other = pair();

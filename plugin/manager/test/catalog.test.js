@@ -6,7 +6,7 @@ const fsp = require('fs/promises');
 const http = require('http');
 const os = require('os');
 const path = require('path');
-const { Catalog } = require('../catalog');
+const { Catalog, download, downloadChecked } = require('../catalog');
 
 // A catalog server: an index and one zip, both replaceable while it runs.
 function serve() {
@@ -135,5 +135,97 @@ test('the downloads folder is cleared at the start, folders with what they hold'
   const catalog = new Catalog({ dir: dir, logger: { info() {}, warn() {}, error() {} } });
   await catalog.init();
   assert.deepEqual(await fsp.readdir(downloads), [], 'nothing left, whatever came before or after a folder');
+  await fsp.rm(dir, { recursive: true, force: true });
+});
+
+// A server of one file for the download rule's edges: `mode` says how it
+// answers the next request (and falls back to `whole` after it).
+function fileServer(bytes) {
+  const state = { mode: 'whole', asked: [], held: [] };
+  const server = http.createServer(function (req, res) {
+    const mode = state.mode;
+    state.mode = 'whole';
+    state.asked.push(req.headers.range || '');
+    const m = /^bytes=(\d+)-$/.exec(req.headers.range || '');
+    const from = m ? parseInt(m[1], 10) : 0;
+    if (m && from >= bytes.length) { res.writeHead(416, { 'content-range': 'bytes */' + bytes.length }); return res.end(); }
+    const body = bytes.subarray(from);
+    const head = m
+      ? [206, { 'content-length': body.length, 'content-range': 'bytes ' + (mode === 'other-range' ? from + 7 : from) + '-' + (bytes.length - 1) + '/' + bytes.length }]
+      : [200, { 'content-length': body.length }];
+    res.writeHead(head[0], head[1]);
+    // Half of what was asked for, then silence on an open connection.
+    if (mode === 'stall') { state.held.push(res); return res.write(body.subarray(0, Math.floor(body.length / 2))); }
+    res.end(body);
+  });
+  return new Promise(function (resolve) {
+    server.listen(0, '127.0.0.1', function () {
+      resolve({ state: state, url: 'http://127.0.0.1:' + server.address().port + '/f', close: function () { state.held.forEach(function (r) { r.destroy(); }); server.close(); } });
+    });
+  });
+}
+
+test('a download carries on over a silent connection, drops a part that is not the file\'s, and leaves a part alone when nothing answers', async function (t) {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glass-download-'));
+  const bytes = crypto.randomBytes(300000);
+  const sha = crypto.createHash('sha256').update(bytes).digest('hex');
+  const s = await fileServer(bytes);
+  t.after(function () { s.close(); });
+  const file = path.join(dir, 'f.bin');
+  const quick = { waits: [5, 5, 5], timeout: 200 };
+  const told = [];
+  const options = Object.assign({ told: function (e, said) { told.push(e.code + '@' + said.at); } }, quick);
+
+  // Half, then silence: the silence counts as a break and the rest is asked for.
+  s.state.mode = 'stall';
+  let got = await download(s.url, file, options);
+  assert.deepEqual(s.state.asked, ['', 'bytes=150000-']);
+  assert.deepEqual(told, ['timeout@150000']);
+  assert.deepEqual([got.bytes, got.resumed, got.from], [300000, 1, 0]);
+  assert.ok((await fsp.readFile(file + '.part')).equals(bytes));
+  await fsp.rm(file + '.part');
+
+  // A part longer than the file, the size not known beforehand: the server refuses the range, the part goes, the file comes whole.
+  s.state.asked = []; told.length = 0;
+  await fsp.writeFile(file + '.part', Buffer.alloc(300001));
+  got = await downloadChecked(s.url, file, Object.assign({ sha256: sha }, options));
+  assert.deepEqual(s.state.asked, ['bytes=300001-', '']);
+  assert.deepEqual(told, ['http-416@0']);
+  assert.equal(got.from, 300001);
+  assert.ok((await fsp.readFile(file)).equals(bytes));
+  await fsp.rm(file);
+
+  // A part longer than the size known: it is not asked about at all.
+  s.state.asked = [];
+  await fsp.writeFile(file + '.part', Buffer.alloc(300001));
+  await downloadChecked(s.url, file, Object.assign({ sha256: sha, bytes: 300000 }, options));
+  assert.deepEqual(s.state.asked, ['']);
+  await fsp.rm(file);
+
+  // The whole file kept as a part already: nothing is asked, the digest decides.
+  s.state.asked = [];
+  await fsp.writeFile(file + '.part', bytes);
+  got = await downloadChecked(s.url, file, Object.assign({ sha256: sha, bytes: 300000 }, options));
+  assert.deepEqual(s.state.asked, []);
+  assert.deepEqual([got.resumed, got.from], [0, 300000]);
+  await fsp.rm(file);
+
+  // The server answers another part than the one asked for: the part goes and the file comes whole.
+  s.state.asked = []; told.length = 0;
+  await fsp.writeFile(file + '.part', bytes.subarray(0, 1000));
+  s.state.mode = 'other-range';
+  got = await downloadChecked(s.url, file, Object.assign({ sha256: sha }, options));
+  assert.deepEqual(s.state.asked, ['bytes=1000-', '']);
+  assert.deepEqual(told, ['range@0']);
+  assert.ok((await fsp.readFile(file)).equals(bytes));
+  await fsp.rm(file);
+
+  // Nothing answers at all: the error stands after the waits, and the part is as it was.
+  await fsp.writeFile(file + '.part', bytes.subarray(0, 1000));
+  const waited = [];
+  await assert.rejects(download('http://127.0.0.1:1/f', file, { waits: [5, 5], sleep: async function (ms) { waited.push(ms); } }), function (e) { return e.code === 'network'; });
+  assert.deepEqual(waited, [5, 5]);
+  assert.equal((await fsp.stat(file + '.part')).size, 1000);
+
   await fsp.rm(dir, { recursive: true, force: true });
 });

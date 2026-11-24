@@ -163,17 +163,25 @@ test('the stable release is the latest that is no test release, whatever the pla
 });
 
 // A server of one zip that breaks the connection part way through the body
-// for its first `breaks` requests, and answers `status` when one is set.
+// for its first `breaks` requests (after `step` bytes of what it was asked
+// for), answers a range with the rest where `ranges` is on, and answers
+// `status` when one is set. What each request asked for is kept in `asked`.
 function brittle(zip) {
-  const state = { hits: 0, breaks: 0, status: 0 };
+  const state = { hits: 0, breaks: 0, status: 0, ranges: true, step: 4096, asked: [] };
   const server = http.createServer(function (req, res) {
     state.hits += 1;
+    state.asked.push(req.headers.range || '');
     if (state.status) { res.writeHead(state.status); return res.end(); }
-    res.writeHead(200, { 'content-type': 'application/zip', 'content-length': zip.length });
+    const m = state.ranges ? /^bytes=(\d+)-$/.exec(req.headers.range || '') : null;
+    const from = m ? parseInt(m[1], 10) : 0;
+    if (m && from >= zip.length) { res.writeHead(416, { 'content-range': 'bytes */' + zip.length }); return res.end(); }
+    const body = zip.subarray(from);
+    if (m) res.writeHead(206, { 'content-type': 'application/zip', 'content-length': body.length, 'content-range': 'bytes ' + from + '-' + (zip.length - 1) + '/' + zip.length });
+    else res.writeHead(200, { 'content-type': 'application/zip', 'content-length': body.length });
     if (state.hits <= state.breaks) {
-      return res.write(zip.subarray(0, 4096), function () { res.destroy(); });
+      return res.write(body.subarray(0, state.step), function () { res.destroy(); });
     }
-    res.end(zip);
+    res.end(body);
   });
   return new Promise(function (resolve) {
     server.listen(0, '127.0.0.1', function () {
@@ -182,7 +190,7 @@ function brittle(zip) {
   });
 }
 
-test('a download whose connection breaks is made again from its first byte, and only such a one', async function (t) {
+test('a download whose connection breaks is carried on from where it stood, and only such a one', async function (t) {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'glass-upd-retry-'));
   const zipBytes = crypto.randomBytes(200000);
   const s = await brittle(zipBytes);
@@ -196,37 +204,82 @@ test('a download whose connection breaks is made again from its first byte, and 
     logger: { info: function (line) { said.push(line); } }
   };
   const job = { state: 'queued', progress: null };
+  const fresh = function () { s.state.hits = 0; s.state.asked = []; waited.length = 0; said.length = 0; };
   t.after(function () { s.close(); });
 
-  // Twice broken, then whole: the file is the zip, nothing of the broken tries in it.
+  // Twice broken, then whole: each new connection asks for the rest, the file is the zip.
   s.state.breaks = 2;
   await fetchChecked(release, file, job, options);
   assert.equal(s.state.hits, 3);
+  assert.deepEqual(s.state.asked, ['', 'bytes=4096-', 'bytes=8192-'], 'the rest is asked for, never the whole again');
   assert.deepEqual(waited, [10, 20]);
   assert.equal(said.length, 2);
-  assert.match(said[0], /glass\.zip broke .* attempt 2$/);
+  assert.match(said[0], /glass\.zip broke at 4096 of 200000 bytes .* carried on in 0\.01 s, attempt 2$/);
   assert.ok((await fsp.readFile(file)).equals(zipBytes), 'the file is the whole zip');
   assert.deepEqual(job.progress, { done: zipBytes.length, total: zipBytes.length });
+  assert.equal(job.state, 'verifying');
   assert.deepEqual(await fsp.readdir(dir), ['glass.zip'], 'no part file is left');
 
-  // Broken every time: the waits run out, the error stands, no file is left.
-  await fsp.rm(file);
-  s.state.hits = 0; s.state.breaks = 99; waited.length = 0;
+  // A server that knows no ranges sends the whole again: the part starts over, the file is the zip.
+  await fsp.rm(file); fresh(); s.state.breaks = 1; s.state.ranges = false;
+  await fetchChecked(release, file, job, options);
+  assert.equal(s.state.hits, 2);
+  assert.ok((await fsp.readFile(file)).equals(zipBytes), 'the whole zip, nothing of the broken try twice in it');
+  s.state.ranges = true;
+
+  // Broken every time with next to nothing gained: the waits run out, the error stands, and the part stays for the next try.
+  await fsp.rm(file); fresh(); s.state.breaks = 99;
   await assert.rejects(fetchChecked(release, file, job, options), function (e) { return e.code === 'network'; });
   assert.equal(s.state.hits, 4, 'the first try and one for each wait');
   assert.deepEqual(waited, [10, 20, 30]);
-  assert.deepEqual(await fsp.readdir(dir), []);
+  assert.deepEqual(await fsp.readdir(dir), ['glass.zip.part'], 'what came is kept');
+  assert.equal((await fsp.stat(file + '.part')).size, 4 * 4096);
 
-  // A zip that is not the one the release names is not asked for again.
-  s.state.hits = 0; s.state.breaks = 0; waited.length = 0;
+  // The next try carries the kept part on, and a part of another version beside it goes.
+  await fsp.writeFile(path.join(dir, 'glass-0.0.1.zip.part'), 'older');
+  const named = path.join(dir, 'glass-0.0.2.zip');
+  await fsp.rename(file + '.part', named + '.part');
+  fresh(); s.state.breaks = 0;
+  await fetchChecked(release, named, job, options);
+  assert.deepEqual(s.state.asked, ['bytes=16384-'], 'from where the part stood');
+  assert.ok((await fsp.readFile(named)).equals(zipBytes));
+  assert.deepEqual(await fsp.readdir(dir), ['glass-0.0.2.zip'], 'the other version\'s part is gone');
+  await fsp.rm(named);
+
+  // Broken often, each time with a good piece gained: carried on past the waits to the end.
+  fresh(); s.state.breaks = 2; s.state.step = 70000;
+  await fetchChecked(release, file, job, Object.assign({}, options, { waits: [10] }));
+  assert.equal(s.state.hits, 3, 'two breaks with one wait to spend: neither counted against it');
+  assert.deepEqual(waited, [10, 10]);
+  assert.ok((await fsp.readFile(file)).equals(zipBytes));
+  s.state.step = 4096;
+
+  // A zip that is not the one the release names is not asked for again, and nothing of it stays.
+  await fsp.rm(file); fresh(); s.state.breaks = 0;
   await assert.rejects(fetchChecked(Object.assign({}, release, { sha256: 'f'.repeat(64) }), file, job, options), function (e) { return e.code === 'checksum'; });
   assert.equal(s.state.hits, 1);
+  assert.deepEqual(await fsp.readdir(dir), []);
 
-  // Nor is an answer that says the zip is not there; a failing server is.
-  s.state.hits = 0; s.state.status = 404;
+  // A part kept from before that turns out to be of another file: it goes and the zip comes down once more, whole.
+  await fsp.writeFile(file + '.part', crypto.randomBytes(5000));
+  fresh();
+  await fetchChecked(release, file, job, options);
+  assert.deepEqual(s.state.asked, ['bytes=5000-', ''], 'carried on, found wrong, begun again');
+  assert.equal(said.filter(function (line) { return /the 5000 bytes an earlier try had left of glass\.zip were not of this file/.test(line); }).length, 1);
+  assert.ok((await fsp.readFile(file)).equals(zipBytes));
+  await fsp.rm(file);
+
+  // A zip of another size than the release states is refused at once.
+  fresh();
+  await assert.rejects(fetchChecked(Object.assign({}, release, { bytes: zipBytes.length + 1 }), file, job, options), function (e) { return e.code === 'size'; });
+  assert.equal(s.state.hits, 1);
+  assert.deepEqual(await fsp.readdir(dir), []);
+
+  // Nor is an answer that says the zip is not there asked for again; a failing server is.
+  fresh(); s.state.status = 404;
   await assert.rejects(fetchChecked(release, file, job, options), function (e) { return e.code === 'http-404'; });
   assert.equal(s.state.hits, 1);
-  s.state.hits = 0; s.state.status = 503;
+  fresh(); s.state.status = 503;
   await assert.rejects(fetchChecked(release, file, job, options), function (e) { return e.code === 'http-503'; });
   assert.equal(s.state.hits, 4);
   assert.deepEqual(await fsp.readdir(dir), []);

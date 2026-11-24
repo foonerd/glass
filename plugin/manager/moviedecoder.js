@@ -13,14 +13,12 @@
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
-const crypto = require('crypto');
-const { get } = require('./catalog');
+const { get, downloadChecked, CatalogError } = require('./catalog');
 const { TarGz } = require('./tarball');
 const { verifySums, digestInSums, verifyArchive, SUMS_NAME, SIG_NAME, MAX_SUMS_BYTES, MAX_SIG_BYTES } = require('./signing');
 
 const MAX_ARCHIVE_BYTES = 64 * 1024 * 1024;
 const MAX_TEXT_BYTES = 256 * 1024;
-const DOWNLOAD_TIMEOUT_MS = 10 * 60 * 1000;
 // What is kept from the archive beside the programs: the licences and the
 // build's facts, as the release carries them.
 const KEPT = /^(LICENSE|README\.md|build\.json|licenses\/[^/]+)$/;
@@ -69,7 +67,8 @@ class Decoder {
   // options: dir (the component's folder), lock (the lock's text or its
   // parsed form), arch (a function naming the player's architecture),
   // fetch (the HTTP get, the Manager's unless a test gives one), pem (the
-  // key, ours unless given), log (a function taking a line).
+  // key, ours unless given), log (a function taking a line); waits and
+  // sleep stand in for a broken download's waits in tests.
   constructor(options) {
     options = options || {};
     this.dir = options.dir;
@@ -78,6 +77,8 @@ class Decoder {
     this.fetch = options.fetch || get;
     this.pem = options.pem;
     this.log = options.log || function () {};
+    this.waits = options.waits;
+    this.sleep = options.sleep;
     this.job = null;
   }
 
@@ -169,14 +170,26 @@ class Decoder {
     if (!verifySums(sums, sig, this.pem)) throw new DecoderError('signature', 'the release\'s sums are not signed with the evo release key');
     const stated = digestInSums(sums, asset);
     if (!stated) throw new DecoderError('no-asset', 'the release names no ' + asset);
+    // The folder the archive comes down into is kept between tries, so a
+    // download that broke for good is carried on by the next one; it holds
+    // the part of the archive wanted now and nothing else, and goes once
+    // the component is in place.
     const download = this.dir + '.download';
-    await fsp.rm(download, { recursive: true, force: true });
     await fsp.mkdir(download, { recursive: true });
+    for (const name of await fsp.readdir(download)) {
+      if (name !== asset + '.part') await fsp.rm(path.join(download, name), { recursive: true, force: true });
+    }
     try {
       await this.take(job, base, asset, stated, arch, download);
-    } finally {
-      await fsp.rm(download, { recursive: true, force: true });
+    } catch (e) {
+      // A part the network left stays for the next try; an archive that
+      // came whole and was refused goes, and the folder with it when
+      // nothing is left in it.
+      await fsp.rm(path.join(download, asset), { force: true });
+      try { await fsp.rmdir(download); } catch (x) { /* the part stays */ }
+      throw e;
     }
+    await fsp.rm(download, { recursive: true, force: true });
     this.log('movie decoder: ' + lock.name + ' ' + lock.version + ' for ' + arch + ' in place');
   }
 
@@ -185,26 +198,34 @@ class Decoder {
   async take(job, base, asset, stated, arch, download) {
     const lock = this.lock;
     const file = path.join(download, asset);
-    const hash = crypto.createHash('sha256');
-    const out = fs.createWriteStream(file);
-    let received = 0;
+    const log = this.log;
     job.state = 'downloading';
     job.progress = { done: 0, total: 0 };
-    await new Promise(function (resolve, reject) {
-      out.on('error', reject);
-      this.fetch(base + asset, {
-        timeout: DOWNLOAD_TIMEOUT_MS,
+    try {
+      // Carried on from where it stood when the connection breaks, and
+      // from the part an earlier try left; held to the digest the signed
+      // sums state before anything is read from it.
+      const got = await downloadChecked(base + asset, file, {
+        fetch: this.fetch,
+        sha256: stated,
         limit: MAX_ARCHIVE_BYTES,
-        sink: function (chunk, total, length) {
-          hash.update(chunk);
-          received = total;
-          out.write(chunk);
-          job.progress = { done: received, total: length || 0 };
+        waits: this.waits,
+        sleep: this.sleep,
+        onProgress: function (done, total) { job.progress = { done: done, total: total || 0 }; },
+        onVerify: function () { job.state = 'verifying'; },
+        told: function (e, said) {
+          log('movie decoder: the download of ' + asset + ' broke at ' + said.at + ' bytes (' + e.message + '); carried on in ' + (said.wait / 1000) + ' s, attempt ' + said.attempt);
+        },
+        dropped: function (bytes) {
+          log('movie decoder: the ' + bytes + ' bytes an earlier try had left of ' + asset + ' were not of this file: dropped, and the archive brought down again');
         }
-      }).then(function () { out.end(resolve); }, function (e) { out.destroy(); reject(e); });
-    }.bind(this));
+      });
+      if (got.from > 0) log('movie decoder: ' + asset + ' carried on from the ' + got.from + ' bytes an earlier try had left');
+    } catch (e) {
+      if (e instanceof CatalogError && e.code === 'checksum') throw new DecoderError('checksum', asset + ' is not the file the signed sums name');
+      throw e;
+    }
     job.state = 'verifying';
-    if (hash.digest('hex') !== stated) throw new DecoderError('checksum', asset + ' is not the file the signed sums name');
     const tar = await TarGz.open(file);
     try {
       // The archive held to the manifest it carries, every file of it.

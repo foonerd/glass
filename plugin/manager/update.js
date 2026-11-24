@@ -9,7 +9,7 @@
 const fs = require('fs');
 const fsp = require('fs/promises');
 const path = require('path');
-const { get, persisting, CatalogError } = require('./catalog');
+const { get, downloadChecked, forgetOtherParts, sha256Of, CatalogError } = require('./catalog');
 const { zipDirectory } = require('./zipwrite');
 const { Zip } = require('./zip');
 const signing = require('./signing');
@@ -19,7 +19,6 @@ const STAGING_DIR = '/tmp/plugins';
 const CHECK_TTL_MS = 24 * 60 * 60 * 1000;
 const MAX_RELEASE_BYTES = 1024 * 1024;
 const MAX_ZIP_BYTES = 256 * 1024 * 1024;
-const DOWNLOAD_TIMEOUT_MS = 15 * 60 * 1000;
 const ASSET = /^glass-(\d+\.\d+\.\d+)\.zip$/;
 const enginefiles = require('./enginefiles');
 // The automatic settings backups kept: the newest five.
@@ -194,13 +193,8 @@ async function verifyArchiveFile(file, pem) {
   }
 }
 
-// A file's SHA-256, streamed.
-function digestOf(file) {
-  return new Promise(function (resolve, reject) {
-    const hash = require('crypto').createHash('sha256');
-    fs.createReadStream(file).on('data', function (c) { hash.update(c); }).on('error', reject).on('end', function () { resolve(hash.digest('hex')); });
-  });
-}
+// A file's SHA-256, streamed: the fetch module's, the one every download is held by.
+const digestOf = sha256Of;
 
 // A file brought by hand held to the release of its version: the release
 // looked up by its tag, the file's size and digest as the release states
@@ -223,53 +217,45 @@ async function verifyAgainstRelease(fetch, latestUrl, version, file, pattern, jo
   return release;
 }
 
-// A release's zip fetched to a file and checked: its size and its digest
-// as the release states them. The file is there only when both hold. A
-// connection that breaks has the download made again from its first byte.
+// A release's zip downloaded to `file` and held to the release's digest
+// and, where the release is signed, to its signature. A connection that
+// breaks has the download carried on from where it stood, and a download
+// that gave up leaves its part for the next try to carry on (one part of a
+// kind at most: a part of another version goes first).
 // options: `fetch` in place of the manager's own, `logger`, and for tests
 // `waits` and `sleep`.
 async function fetchChecked(release, file, job, options) {
   options = options || {};
-  const tmp = file + '.part';
-  const crypto = require('crypto');
-  const once = async function () {
-    const hash = crypto.createHash('sha256');
-    const out = fs.createWriteStream(tmp);
-    let received = 0;
-    job.state = 'downloading';
-    job.progress = { done: 0, total: release.bytes };
-    await new Promise(function (resolve, reject) {
-      out.on('error', reject);
-      (options.fetch || get)(release.url, {
-        timeout: DOWNLOAD_TIMEOUT_MS,
-        limit: release.bytes,
-        sink: function (chunk, total) {
-          hash.update(chunk);
-          received = total;
-          out.write(chunk);
-          job.progress = { done: received, total: release.bytes };
-        }
-      }).then(function () { out.end(resolve); }, function (e) { out.destroy(); reject(e); });
-    });
-    job.state = 'verifying';
-    if (received !== release.bytes) throw new UpdateError('size', 'downloaded ' + received + ' bytes, expected ' + release.bytes);
-    const digest = hash.digest('hex');
-    if (digest !== release.sha256) throw new UpdateError('checksum', 'the download does not match the release digest');
-    // A signed release is held to its signature too; an unsigned one is as before.
-    release.signature = await verifySigned(release, digest, options.fetch || get, job);
-  };
+  const fetch = options.fetch || get;
+  job.state = 'downloading';
+  job.progress = { done: 0, total: release.bytes };
   try {
-    await persisting(once, {
+    await forgetOtherParts(file);
+    const got = await downloadChecked(release.url, file, {
+      fetch: fetch,
+      sha256: release.sha256,
+      bytes: release.bytes,
+      limit: release.bytes,
       waits: options.waits,
       sleep: options.sleep,
-      told: function (e, n, wait) {
-        (options.logger || console).info('glass: manager: the download of ' + path.basename(file) + ' broke (' + e.message + '); made again in ' + (wait / 1000) + ' s, attempt ' + (n + 1));
+      onProgress: function (done) { job.progress = { done: done, total: release.bytes }; },
+      onVerify: function () { job.state = 'verifying'; },
+      told: function (e, said) {
+        (options.logger || console).info('glass: manager: the download of ' + path.basename(file) + ' broke at ' + said.at + ' of ' + release.bytes + ' bytes (' + e.message + '); carried on in ' + (said.wait / 1000) + ' s, attempt ' + said.attempt);
+      },
+      dropped: function (bytes) {
+        (options.logger || console).info('glass: manager: the ' + bytes + ' bytes an earlier try had left of ' + path.basename(file) + ' were not of this file: dropped, and the file brought down again');
       }
     });
-    await fsp.rename(tmp, file);
+    job.progress = { done: got.bytes, total: release.bytes };
+    if (got.from > 0) (options.logger || console).info('glass: manager: ' + path.basename(file) + ' carried on from the ' + got.from + ' bytes an earlier try had left');
+    // A signed release is held to its signature too; an unsigned one is as before.
+    release.signature = await verifySigned(release, got.sha256, fetch, job);
   } catch (e) {
-    await fsp.rm(tmp, { force: true });
+    // A file that is not the release's goes; a part the network left stays.
     await fsp.rm(file, { force: true });
+    if (e instanceof CatalogError && e.code === 'checksum') throw new UpdateError('checksum', 'the download does not match the release digest');
+    if (e instanceof CatalogError && e.code === 'size') throw new UpdateError('size', e.message);
     throw e instanceof UpdateError || e instanceof CatalogError ? e : new UpdateError('network', e.message);
   }
   if (release.signature === 'signed') (options.logger || console).info('glass: manager: ' + path.basename(file) + ' verified against the release\'s signature');
